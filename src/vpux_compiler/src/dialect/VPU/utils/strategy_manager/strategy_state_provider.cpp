@@ -272,8 +272,9 @@ bool DefaultStateProvider::canStayInCMX(const OperationStrategy& parentState,
     }
 
     auto clusteredOp = mlir::dyn_cast<VPU::ClusteredOpInterface>(parentState.first);
+    auto siblingsAnalysis = SiblingOpsAnalysis(clusteredOp);
     if (!mlir::isa_and_nonnull<VPU::TilingBuilderOpInterface>(parentState.first) && clusteredOp != nullptr &&
-        !clusteredOp.doesLayerFitIntoCMX(parentState.second.getMCStrategy(), Byte(0))) {
+        !clusteredOp.doesLayerFitIntoCMX(parentState.second.getMCStrategy(), siblingsAnalysis, Byte(0))) {
         return false;
     }
 

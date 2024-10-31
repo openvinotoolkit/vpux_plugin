@@ -23,15 +23,12 @@ class GatherElementsLayerTestCommon : public GatherElementsLayerTest, virtual pu
     }
 };
 
-class GatherElementsLayerTest_NPU3720 : public GatherElementsLayerTestCommon {};
-class GatherElementsLayerTest_NPU4000 : public GatherElementsLayerTestCommon {};
-
-TEST_P(GatherElementsLayerTest_NPU3720, HW) {
+TEST_P(GatherElementsLayerTestCommon, NPU3720_HW) {
     setDefaultHardwareMode();
     run(Platform::NPU3720);
 }
 
-TEST_P(GatherElementsLayerTest_NPU4000, HW) {
+TEST_P(GatherElementsLayerTestCommon, NPU4000_HW) {
     setDefaultHardwareMode();
     run(Platform::NPU4000);
 }
@@ -53,7 +50,6 @@ const std::vector<int> axes_set3 = {0};
 
 const std::vector<std::vector<ov::Shape>> iShapes = {{{2, 2}}, {{5, 7, 9, 1}}, {{2, 2, 1}}};
 
-// ------ NPU3720/4000 ------
 const auto GatherElements_PRECOMMIT_set1 =
         ::testing::Combine(testing::ValuesIn({static_shapes_to_test_representation(iShapes[0])}),
                            testing::Values(ov::Shape{2, 2}), testing::ValuesIn(axes_set1),
@@ -69,24 +65,13 @@ const auto GatherElements_PRECOMMIT_set3 = ::testing::Combine(
         ::testing::ValuesIn(axes_set3), ::testing::ValuesIn(dPrecisions), ::testing::ValuesIn(iPrecisions),
         ::testing::Values(DEVICE_NPU));
 
-// ------ NPU3720 ------
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_GatherElements_set1, GatherElementsLayerTest_NPU3720,
-                         GatherElements_PRECOMMIT_set1, GatherElementsLayerTest_NPU3720::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_GatherElements_set1, GatherElementsLayerTestCommon,
+                         GatherElements_PRECOMMIT_set1, GatherElementsLayerTestCommon::getTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_GatherElements_set2, GatherElementsLayerTest_NPU3720,
-                         GatherElements_PRECOMMIT_set2, GatherElementsLayerTest_NPU3720::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_GatherElements_set2, GatherElementsLayerTestCommon,
+                         GatherElements_PRECOMMIT_set2, GatherElementsLayerTestCommon::getTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_GatherElements_set3, GatherElementsLayerTest_NPU3720,
-                         GatherElements_PRECOMMIT_set3, GatherElementsLayerTest_NPU3720::getTestCaseName);
-
-// ------ NPU4000 ------
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_GatherElements_set1, GatherElementsLayerTest_NPU4000,
-                         GatherElements_PRECOMMIT_set1, GatherElementsLayerTest_NPU4000::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_GatherElements_set2, GatherElementsLayerTest_NPU4000,
-                         GatherElements_PRECOMMIT_set2, GatherElementsLayerTest_NPU4000::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_GatherElements_set3, GatherElementsLayerTest_NPU4000,
-                         GatherElements_PRECOMMIT_set3, GatherElementsLayerTest_NPU4000::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_GatherElements_set3, GatherElementsLayerTestCommon,
+                         GatherElements_PRECOMMIT_set3, GatherElementsLayerTestCommon::getTestCaseName);
 
 }  // namespace

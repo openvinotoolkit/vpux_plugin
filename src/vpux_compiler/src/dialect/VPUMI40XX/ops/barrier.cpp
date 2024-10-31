@@ -33,10 +33,15 @@ void ConfigureBarrierOp::build(mlir::OpBuilder& odsBuilder, mlir::OperationState
 }
 
 mlir::LogicalResult ConfigureBarrierOp::verify() {
+    // Skip checks if architecture is unknown since all of them depend on the architecture used
+    if (VPU::getArch(getOperation()) == VPU::ArchKind::UNKNOWN) {
+        return mlir::success();
+    }
+
     const auto id = getId();
     const auto noOfAvailableBarriers = VPUIP::getNumAvailableBarriers(getOperation());
     if (id >= noOfAvailableBarriers) {
-        return errorAt(getLoc(), "Operation {0}: barrier id {0} value is higher than available barriers {1}",
+        return errorAt(getLoc(), "Operation {0}: barrier id {1} value is higher than available barriers {2}",
                        getOperationName(), id, noOfAvailableBarriers);
     }
 

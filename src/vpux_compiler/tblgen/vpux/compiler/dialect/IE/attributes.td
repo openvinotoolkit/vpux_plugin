@@ -657,6 +657,27 @@ def IE_UpsamplingPadAttr : IE_Attr<"UpsamplingPad"> {
 }
 
 //
+// ScatterElementsUpdateReductionType
+//
+
+def IE_ScatterElementsUpdateReductionType :
+        IE_I64EnumAttr<
+            "ScatterElementsUpdateReductionType",
+            "ScatterElementsUpdateReductionType that the InferenceEngine supports",
+            [
+                I64EnumAttrCase<"NONE", 0>,
+                I64EnumAttrCase<"SUM", 1>,
+                I64EnumAttrCase<"PROD", 2>,
+                I64EnumAttrCase<"MIN", 3>,
+                I64EnumAttrCase<"MAX", 4>,
+                I64EnumAttrCase<"MEAN", 5>
+            ]
+        > {
+}
+
+def IE_ScatterElementsUpdateReductionTypeAttr : IE_EnumAttr<IE_ScatterElementsUpdateReductionType, "scatter_elements_update_reduction_type">;
+
+//
 // PortMapAttr
 //
 
@@ -665,7 +686,7 @@ def IE_SliceInputPortMapAttr : IE_Attr<"SliceInputPortMap"> {
     This is the port map attribute for tensor iterator op.
         external_port_id represents I/O layers'id ousides of tensor iterator op.
         internal_layer_id represents I/O layers'id insides of tensor iterator body.
-        axis, start, stride, end, part_size are valid only for cases where input needs slicing or output need concating.
+        axis, start, stride, end, part_size are valid only for cases where input needs slicing.
     }];
 
     let parameters = (ins
@@ -712,7 +733,7 @@ def IE_ConcatOutputPortMapAttr : IE_Attr<"ConcatOutputPortMap"> {
     This is the port map attribute for tensor iterator op.
         external_port_id represents I/O layers'id ousides of tensor iterator op.
         internal_layer_id represents I/O layers'id insides of tensor iterator body.
-        axis, start, stride, end, part_size are valid only for cases where input needs slicing or output need concating.
+        axis, start, stride, end, part_size are valid only for cases where output need concating.
     }];
 
     let parameters = (ins
@@ -731,11 +752,13 @@ def IE_InvariantOutputPortMapAttr : IE_Attr<"InvariantOutputPortMap"> {
     This is the port map attribute for tensor iterator op.
         external_port_id represents I/O layers'id ousides of tensor iterator op.
         internal_layer_id represents I/O layers'id insides of tensor iterator body.
+        iterations has default value -1 means pick the last iteration result, or iterations = i it will pick the i-th result.
     }];
 
     let parameters = (ins
         "mlir::IntegerAttr":$external_port_id,
-        "mlir::IntegerAttr":$internal_layer_id
+        "mlir::IntegerAttr":$internal_layer_id,
+        "mlir::IntegerAttr":$iterations
     );
 }
 

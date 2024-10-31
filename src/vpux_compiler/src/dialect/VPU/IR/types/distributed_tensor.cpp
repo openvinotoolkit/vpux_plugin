@@ -105,7 +105,7 @@ mlir::Type VPU::DistributedTensorType::parse(mlir::AsmParser& parser) {
         return Type();
     }
 
-    // DistributedTensorAttr
+    // DistributionInfoAttr
 
     if (parser.parseLBrace()) {
         return Type();
@@ -214,9 +214,9 @@ mlir::Type VPU::DistributedTensorType::parse(mlir::AsmParser& parser) {
         return Type();
     }
     auto distributedAttr =
-            VPU::DistributedTensorAttr::get(parser.getContext(), distributionModeAttr, numTiles, kernel, pads, strides,
-                                            numClusters, alignment, uniformDistributedSegments, computeShapes,
-                                            computeOffsets, memoryShapes, memoryOffsets, equalComputeAndMemoryView);
+            VPU::DistributionInfoAttr::get(parser.getContext(), distributionModeAttr, numTiles, kernel, pads, strides,
+                                           numClusters, alignment, uniformDistributedSegments, computeShapes,
+                                           computeOffsets, memoryShapes, memoryOffsets, equalComputeAndMemoryView);
     return static_cast<mlir::Type>(
             get(parser.getContext(), ArrayRef(shape), elemType, order, memSpace, distributedAttr));
 }
@@ -228,7 +228,7 @@ mlir::Type VPU::DistributedTensorType::parse(mlir::AsmParser& parser) {
 mlir::LogicalResult VPU::DistributedTensorType::verify(FuncRef<mlir::InFlightDiagnostic()> emitError,
                                                        ::llvm::ArrayRef<int64_t> shape, mlir::Type /*elementType*/,
                                                        mlir::AffineMapAttr /*order*/, IndexedSymbolAttr /*memSpace*/,
-                                                       DistributedTensorAttr distribution) {
+                                                       DistributionInfoAttr distribution) {
     return VPU::verify(emitError, distribution, shape);
 }
 
@@ -393,7 +393,7 @@ StridedShape VPU::DistributedTensorType::getStridedShape(int64_t tileInd) const 
 // them. This method creates DistributedType with requested shape and DistributedAttr with
 // memory_shapes/memory_offsets/computes_shapes/compute_offsets adjusted for the new shape.
 NDTypeInterface VPU::DistributedTensorType::changeShapeForExplicitDistribution(
-        ShapeRef shape, VPU::DistributedTensorAttr distributedAttr) const {
+        ShapeRef shape, VPU::DistributionInfoAttr distributedAttr) const {
     const auto typeComponents = TypeComponents().setShape(shape);
     return changeTypeComponentsForExplicitDistribution(typeComponents, distributedAttr);
 }
@@ -402,7 +402,7 @@ NDTypeInterface VPU::DistributedTensorType::changeShapeForExplicitDistribution(
 // them. This method creates DistributedType with requested shape and element type and DistributedAttr with
 // memory_shapes/memory_offsets/computes_shapes/compute_offsets adjusted for the new shape.
 NDTypeInterface VPU::DistributedTensorType::changeShapeElemTypeForExplicitDistribution(
-        ShapeRef shape, mlir::Type elemType, VPU::DistributedTensorAttr distributedAttr) const {
+        ShapeRef shape, mlir::Type elemType, VPU::DistributionInfoAttr distributedAttr) const {
     const auto typeComponents = TypeComponents().setShape(shape).setElementType(elemType);
     return changeTypeComponentsForExplicitDistribution(typeComponents, distributedAttr);
 }
@@ -412,7 +412,7 @@ NDTypeInterface VPU::DistributedTensorType::changeShapeElemTypeForExplicitDistri
 // components, it will also update the DistributedAttr with memory_shapes/memory_offsets/computes_shapes/compute_offsets
 // adjusted for the new shape. Otherwise, it leaves the DistributedAttr untouched.
 NDTypeInterface VPU::DistributedTensorType::changeTypeComponentsForExplicitDistribution(
-        const TypeComponents& typeComponents, VPU::DistributedTensorAttr distributedAttr) const {
+        const TypeComponents& typeComponents, VPU::DistributionInfoAttr distributedAttr) const {
     if (distributedAttr == nullptr) {
         return changeTypeComponents(typeComponents);
     }
@@ -446,7 +446,7 @@ NDTypeInterface VPU::DistributedTensorType::changeTypeComponentsForExplicitDistr
 // It will also update the DistributedAttr with memory_shapes/memory_offsets/computes_shapes/compute_offsets
 // adjusted for the resulting dense tile.
 NDTypeInterface VPU::DistributedTensorType::extractDenseTileForExplicitDistribution(
-        vpux::ShapeRef tileOffsets, vpux::ShapeRef tileShape, VPU::DistributedTensorAttr distributedAttr) const {
+        vpux::ShapeRef tileOffsets, vpux::ShapeRef tileShape, VPU::DistributionInfoAttr distributedAttr) const {
     if (distributedAttr == nullptr) {
         return extractDenseTile(tileOffsets, tileShape);
     }
@@ -462,7 +462,7 @@ NDTypeInterface VPU::DistributedTensorType::extractDenseTileForExplicitDistribut
 
 NDTypeInterface VPU::DistributedTensorType::extractViewTileForExplicitDistribution(
         vpux::ShapeRef /*tileOffsets*/, vpux::ShapeRef /*tileShape*/, vpux::ShapeRef /*tileElemStrides*/,
-        VPU::DistributedTensorAttr /*distributedAttr*/) const {
+        VPU::DistributionInfoAttr /*distributedAttr*/) const {
     VPUX_THROW("DistributedTensorType only supports compact strides");
 }
 

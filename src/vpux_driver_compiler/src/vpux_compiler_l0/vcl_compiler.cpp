@@ -57,47 +57,53 @@ std::string rankToLegacyLayoutString(const size_t rank) {
  * these values may be either the metadata stored by the user application in a legacy "InferenceEngine::CNNNetwork"
  * object, or the values found within the "ov::Model" one, which could have been altered as a result of the
  * serialization process.
+ *
  * @param model The model representation corresponding to the 2.0 API, this is the target object.
  * @param inputPrecisions The reference input precision values.
  * @param outputPrecisions The reference output precision values.
  * @param inputLayouts The reference input layout values.
  * @param outputLayouts The reference output layout values.
+ * @param useIndices Indicates whether the rest of the map arguments use indices (converted to strings) or names as
+ * keys.
+ * @returns The model altered as to comply with the given precisions/layouts.
  */
 std::shared_ptr<ov::Model> preprocessModel(const std::shared_ptr<ov::Model>& model,
                                            const std::unordered_map<std::string, ov::element::Type_t>& inputPrecisions,
                                            const std::unordered_map<std::string, ov::element::Type_t>& outputPrecisions,
                                            const std::unordered_map<std::string, std::string>& inputLayouts,
-                                           const std::unordered_map<std::string, std::string>& outputLayouts) {
+                                           const std::unordered_map<std::string, std::string>& outputLayouts,
+                                           const bool useIndices) {
     auto preprocessor = ov::preprocess::PrePostProcessor(model);
     const ov::ParameterVector& parameters = model->get_parameters();
     const ov::ResultVector& results = model->get_results();
 
     for (size_t parameterIndex = 0; parameterIndex < parameters.size(); ++parameterIndex) {
         const std::shared_ptr<ov::op::v0::Parameter>& parameter = parameters[parameterIndex];
-        const std::string& inputName = parameter->get_friendly_name();
+        const std::string inputID = useIndices ? std::to_string(parameterIndex) : parameter->get_friendly_name();
 
-        const ov::Layout tensorLayout(inputLayouts.at(inputName));
+        const ov::Layout tensorLayout(inputLayouts.at(inputID));
         const size_t rank = parameter->get_shape().size();
         const ov::Layout modelLayout(rankToLegacyLayoutString(rank));
 
         ov::preprocess::InputInfo& inputInfo = preprocessor.input(parameterIndex);
         inputInfo.tensor().set_layout(tensorLayout);
         inputInfo.model().set_layout(modelLayout);
-        inputInfo.tensor().set_element_type(inputPrecisions.at(inputName));
+        inputInfo.tensor().set_element_type(inputPrecisions.at(inputID));
     }
 
     for (size_t resultIndex = 0; resultIndex < results.size(); ++resultIndex) {
         const std::shared_ptr<ov::op::v0::Result>& result = results[resultIndex];
-        const std::string& outputName = ov::op::util::get_ie_output_name(result->input_value(0));
+        const std::string outputID =
+                useIndices ? std::to_string(resultIndex) : ov::op::util::get_ie_output_name(result->input_value(0));
 
-        const ov::Layout tensorLayout(outputLayouts.at(outputName));
+        const ov::Layout tensorLayout(outputLayouts.at(outputID));
         const size_t rank = result->get_shape().size();
         const ov::Layout modelLayout(rankToLegacyLayoutString(rank));
 
         ov::preprocess::OutputInfo& outputInfo = preprocessor.output(resultIndex);
         outputInfo.tensor().set_layout(tensorLayout);
         outputInfo.model().set_layout(modelLayout);
-        outputInfo.tensor().set_element_type(outputPrecisions.at(outputName));
+        outputInfo.tensor().set_element_type(outputPrecisions.at(outputID));
     }
 
     return preprocessor.build();
@@ -149,6 +155,7 @@ std::pair<VPUXExecutableL0*, vcl_result_t> VPUXCompilerL0::importNetwork(BuildIn
     try {
         bool isNewAPI = false;
         int64_t irVersion = OLDEST_IR_VERSION_SUPPORTED;
+        bool useIndices = false;
 
         ov::RTMap& runtimeInfoMap = model->get_rt_info();
         const auto& isNewAPIMatch = runtimeInfoMap.find("is_new_api");
@@ -161,9 +168,14 @@ std::pair<VPUXExecutableL0*, vcl_result_t> VPUXCompilerL0::importNetwork(BuildIn
             irVersion = irVersionMatch->second.as<int64_t>();
         }
 
+        const auto& useIndicesMatch = runtimeInfoMap.find("use_indices_for_io_metadata");
+        if (useIndicesMatch != runtimeInfoMap.end()) {
+            useIndices = useIndicesMatch->second.as<bool>();
+        }
+
         if (!isNewAPI || irVersion < 11) {
             model = preprocessModel(model, buildInfo.inputPrecisions, buildInfo.outputPrecisions,
-                                    buildInfo.inputLayouts, buildInfo.outputLayouts);
+                                    buildInfo.inputLayouts, buildInfo.outputLayouts, useIndices);
         }
 
         // Call compiler to compile the model and create blob
@@ -187,6 +199,67 @@ std::pair<VPUXExecutableL0*, vcl_result_t> VPUXCompilerL0::importNetwork(BuildIn
     }
 
     return std::pair<VPUXExecutableL0*, vcl_result_t>(exe, VCL_RESULT_SUCCESS);
+}
+
+namespace {
+
+class VCLBlobAllocator : public BlobAllocator {
+public:
+    explicit VCLBlobAllocator(const vcl_allocator_t* driverAllocator): allocator(driverAllocator) {
+    }
+    uint8_t* allocate(Byte size) override {
+        return allocator->allocate(static_cast<uint64_t>(size.count()));
+    }
+    void deallocate(uint8_t* ptr) override {
+        allocator->deallocate(ptr);
+    }
+
+private:
+    const vcl_allocator_t* allocator;
+};
+
+}  // namespace
+
+NetworkDescriptionView VPUXCompilerL0::importNetwork(BuildInfo& buildInfo, const vcl_allocator_t* allocator) {
+    StopWatch stopWatch;
+    if (buildInfo.enableProfiling) {
+        // Output time cost on vcl level
+        stopWatch.start();
+    }
+
+    auto scoped = Scoped{[&stopWatch, &buildInfo, this]() {
+        if (buildInfo.enableProfiling) {
+            stopWatch.stop();
+            _logger->info("Compile net time: {0} ms", stopWatch.delta_ms());
+        }
+    }};
+
+    auto model = buildInfo.model;
+    auto& runtimeInfoMap = model->get_rt_info();
+
+    bool isNewAPI = false;
+    if (const auto isNewAPIMatch = runtimeInfoMap.find("is_new_api"); isNewAPIMatch != runtimeInfoMap.end()) {
+        isNewAPI = isNewAPIMatch->second.as<bool>();
+    }
+
+    int64_t irVersion = OLDEST_IR_VERSION_SUPPORTED;
+    if (const auto irVersionMatch = runtimeInfoMap.find("version"); irVersionMatch != runtimeInfoMap.end()) {
+        irVersion = irVersionMatch->second.as<int64_t>();
+    }
+
+    bool useIndices = false;
+    if (const auto useIndicesMatch = runtimeInfoMap.find("use_indices_for_io_metadata");
+        useIndicesMatch != runtimeInfoMap.end()) {
+        useIndices = useIndicesMatch->second.as<bool>();
+    }
+
+    if (!isNewAPI || irVersion < 11) {
+        model = preprocessModel(model, buildInfo.inputPrecisions, buildInfo.outputPrecisions, buildInfo.inputLayouts,
+                                buildInfo.outputLayouts, useIndices);
+    }
+
+    auto vclAllocator = VCLBlobAllocator{allocator};
+    return _compiler->compile(model, buildInfo.parsedConfig, vclAllocator);
 }
 
 vcl_result_t VPUXCompilerL0::queryNetwork(const BuildInfo& buildInfo, VPUXQueryNetworkL0* pQueryNetwork) {

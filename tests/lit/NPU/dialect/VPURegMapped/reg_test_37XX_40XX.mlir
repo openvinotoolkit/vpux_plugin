@@ -42,3 +42,18 @@
   }
 
 // CHECK:      VPURegMapped.RegisterWrapper regAttr(<regForTest offset 12 size 32 allowOverlap = UINT 0>)
+
+// -----
+
+  func.func private @MLIR_VPURegMapped_CreateDpuVariantRegisterRequiresVersion() {
+    VPURegMapped.RegisterWrapper regAttr(<regForTest offset 12 size 32 {
+      UINT test_1 at 0 size 8 = 0xFF requires 1:2:3,
+      SINT test_2 at 8 size 8 = 0xFF
+    }>)
+    return
+  }
+
+// CHECK:      VPURegMapped.RegisterWrapper regAttr(<regForTest offset 12 size 32 {
+// CHECK-NEXT:   UINT test_1 at 0 size 8 = 0xFF requires 1:2:3,
+// CHECK-NEXT:   SINT test_2 at 8 size 8 = 0xFF
+// CHECK-NEXT: }>)

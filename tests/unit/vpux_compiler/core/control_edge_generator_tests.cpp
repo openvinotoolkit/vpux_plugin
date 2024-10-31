@@ -6,6 +6,7 @@
 #include "vpux/compiler/core/control_edge_generator.hpp"
 #include "vpux/compiler/core/feasible_scheduler_utils.hpp"
 
+#include "vpux/compiler/dialect/VPUIP/IR/dialect.hpp"
 #include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPUIP/IR/types.hpp"
 #include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
@@ -190,9 +191,7 @@ TEST_F(MLIR_ControlEdgeGenerator, TestMemOverlapEdgesWithSubViewTest4) {
 }
 
 TEST_F(MLIR_ControlEdgeGenerator, TestMemOverlapEdgesWithSubViewTest5) {
-    // mlir::DialectRegistry registry;
-    // vpux::registerDialects(registry);
-    // vpux::registerCommonInterfaces(registry);
+    // auto registry = createDialectRegistry();
     // mlir::MLIRContext ctx(registry);
     // ctx.loadDialect<mlir::quant::QuantizationDialect>();
     // ctx.loadDialect<Const::ConstDialect>();

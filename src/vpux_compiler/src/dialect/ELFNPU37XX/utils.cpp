@@ -10,7 +10,7 @@
 
 std::pair<const uint8_t*, size_t> vpux::ELFNPU37XX::getDataAndSizeOfElfSection(
         llvm::ArrayRef<uint8_t> elfBlob, const std::vector<std::string> possibleSecNames) {
-    auto accessor = elf::ElfDDRAccessManager(elfBlob.data(), elfBlob.size());
+    auto accessor = elf::DDRAccessManager<elf::DDRAlwaysEmplace>(elfBlob.data(), elfBlob.size());
     auto elf_reader = elf::Reader<elf::ELF_Bitness::Elf32>(&accessor);
 
     const uint8_t* secData = nullptr;

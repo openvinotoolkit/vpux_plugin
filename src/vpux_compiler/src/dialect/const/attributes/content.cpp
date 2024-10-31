@@ -8,6 +8,8 @@
 
 #include "vpux/compiler/dialect/const/ops.hpp"
 #include "vpux/compiler/dialect/const/utils/constant_folding_cache.hpp"
+#include "vpux/compiler/dialect/const/utils/sub_byte.hpp"
+#include "vpux/compiler/dialect/const/utils/transformations.hpp"
 #include "vpux/compiler/utils/types.hpp"
 
 #include "vpux/utils/core/format.hpp"
@@ -79,6 +81,7 @@ void vpux::Const::ConstDialect::initialize() {
             >();
 
     addInterfaces<ConstInlinerInterface>();
+    addInterfaces<Const::ConstDataManagerInterface>();
 }
 
 //
@@ -87,11 +90,7 @@ void vpux::Const::ConstDialect::initialize() {
 
 mlir::LogicalResult vpux::Const::ContentAttr::verify(FuncRef<mlir::InFlightDiagnostic()> emitError,
                                                      mlir::ElementsAttr baseContent,
-                                                     vpux::Const::TransformAttrInterfaceArrayAttr transformations,
-                                                     vpux::NDTypeInterface finalType, mlir::UnitAttr isSplat) {
-    std::ignore = finalType;  // automatically inferred
-    std::ignore = isSplat;    // automatically inferred
-
+                                                     ArrayRef<vpux::Const::TransformAttrInterface> transformations) {
     if (baseContent == nullptr) {
         return printTo(emitError(), "Got NULL 'baseContent' in 'ContentAttr'");
     }
@@ -106,11 +105,24 @@ mlir::LogicalResult vpux::Const::ContentAttr::verify(FuncRef<mlir::InFlightDiagn
     } else if (const auto denseResource = baseContent.dyn_cast<mlir::DenseResourceElementsAttr>()) {
         // Note: manual checks required since dense resource blob is opaque and does not perform much validation itself
         const auto bytes = denseResource.getRawHandle().getBlob()->getData();
-        bool ignored = false;
-        if (!mlir::DenseElementsAttr::isValidRawBuffer(baseContent.getShapedType(), bytes, ignored)) {
-            return printTo(emitError(),
-                           "Size of dense resource buffer '{0}' in 'baseContent' doesn't match its type '{1}'",
-                           bytes.size(), denseResource.getShapedType());
+
+        auto bitWidth = vpux::getElemTypeSize(baseContent.getShapedType().getElementType()).count();
+        if (vpux::Const::isSubByte(bitWidth)) {
+            auto bufferSize = checked_cast<size_t>(bytes.size());
+            auto numElems = baseContent.getShapedType().getNumElements();
+            auto numBytes = checked_cast<size_t>(Bit(numElems * bitWidth).to<Byte>().count());
+            if (bufferSize != numBytes) {
+                return printTo(emitError(),
+                               "Size of dense resource buffer '{0}' in 'baseContent' doesn't match its type '{1}'",
+                               bytes.size(), denseResource.getShapedType());
+            }
+        } else {
+            bool ignored = false;
+            if (!mlir::DenseElementsAttr::isValidRawBuffer(baseContent.getShapedType(), bytes, ignored)) {
+                return printTo(emitError(),
+                               "Size of dense resource buffer '{0}' in 'baseContent' doesn't match its type '{1}'",
+                               bytes.size(), denseResource.getShapedType());
+            }
         }
     } else if (auto symElementsAttr = baseContent.dyn_cast<Const::SymElementsAttr>()) {
         // OK
@@ -121,7 +133,7 @@ mlir::LogicalResult vpux::Const::ContentAttr::verify(FuncRef<mlir::InFlightDiagn
     const auto isValid = [](const vpux::Const::TransformAttrInterface& value) -> bool {
         return value != nullptr;
     };
-    if (transformations && !llvm::all_of(transformations.getValue(), isValid)) {
+    if (!llvm::all_of(transformations, isValid)) {
         return printTo(emitError(), "Got invalid transformations attribute in 'ContentAttr'");
     }
 
@@ -130,21 +142,55 @@ mlir::LogicalResult vpux::Const::ContentAttr::verify(FuncRef<mlir::InFlightDiagn
 
 namespace {
 
-std::pair<mlir::ArrayRef<char>, bool> detectSplatElementWise(mlir::ArrayRef<char> data, size_t elementSize) {
-    VPUX_THROW_WHEN((data.size() < elementSize), "The data must contain at least one element");
-    VPUX_THROW_WHEN(((data.size() % elementSize) != 0), "The data array has unexpected length");
-    if (data.size() == elementSize) {
+std::pair<mlir::ArrayRef<char>, bool> detectSplatElementWise(mlir::ArrayRef<char> data, size_t bitWidth) {
+    const auto elemIsSplat = [&](size_t offset) {
+        const char* firstElemAddr = data.data();
+        for (size_t i = offset; i < data.size(); i += offset) {
+            if (std::memcmp(firstElemAddr + i, firstElemAddr, offset) != 0) {
+                return false;
+            }
+        }
+
+        return true;
+    };
+
+    if (vpux::Const::isSubByte(bitWidth)) {
+        const char firstByte = *data.data();
+
+        const auto elemPerByte = CHAR_BIT / bitWidth;
+        VPUX_THROW_UNLESS(vpux::isPowerOfTwo(elemPerByte), "Invalid number of elements per byte '{0}'", elemPerByte);
+        const size_t mask = checked_cast<uint8_t>(checked_cast<uint16_t>(std::pow(2, bitWidth)) - 1);
+        size_t shift = 0;
+        // Compare first byte.
+        for (size_t i = 0; i < elemPerByte - 1; i += 1) {
+            uint8_t preVal = (firstByte >> shift) & mask;
+            shift += bitWidth;
+            uint8_t nextVal = (firstByte >> shift) & mask;
+            if (preVal != nextVal) {
+                return {data, false};
+            }
+        }
+
+        if (!elemIsSplat(1)) {
+            return {data, false};
+        }
+
+        return {data.take_front(1), true};
+    }
+
+    auto elementSizeBytes = bitWidth / CHAR_BIT;
+    VPUX_THROW_WHEN((data.size() < elementSizeBytes), "The data must contain at least one element");
+    VPUX_THROW_WHEN(((data.size() % elementSizeBytes) != 0), "The data array has unexpected length");
+
+    if (data.size() == elementSizeBytes) {
         return {data, true};
     }
 
-    const char* firstElement = data.data();
-    for (size_t i = elementSize; i < data.size(); i += elementSize) {
-        if (std::memcmp(data.data() + i, firstElement, elementSize) != 0) {
-            return {data, false};
-        }
+    if (!elemIsSplat(elementSizeBytes)) {
+        return {data, false};
     }
 
-    return {data.take_front(elementSize), true};
+    return {data.take_front(elementSizeBytes), true};
 }
 
 // Returns whether the data is a splat, correcting the data array when it is.
@@ -153,17 +199,22 @@ std::pair<mlir::ArrayRef<char>, bool> detectSplatManually(mlir::ShapedType type,
         return {data, false};  // empty data is not a splat
     }
 
-    // use isValidRawBuffer() for the side effects to detect whether a buffer is a splat
+    const auto bitWidth = vpux::getElemTypeSize(type).count();
+
+    // Use isValidRawBuffer() for the side effects to detect whether a buffer is a splat.
+    // Because of the limitation of MLIR, we shouldn't use isValidRawBuffer() for sub byte type except i1.
+    // For example, 0x12 will return true but the byte actually contains two different I4 elements.
     bool isSplat = false;
-    std::ignore = mlir::DenseElementsAttr::isValidRawBuffer(type, data, isSplat);
-    if (isSplat) {
-        return {data, true};
+    if (!vpux::Const::isSubByte(bitWidth)) {
+        std::ignore = mlir::DenseElementsAttr::isValidRawBuffer(type, data, isSplat);
+        if (isSplat) {
+            return {data, true};
+        }
     }
 
     // isValidRawBuffer() only checks single-element splats but if the data
     // array has identical elements, a manual check is required
-    const vpux::Byte elemTypeSize = vpux::getElemTypeSize(type);
-    return detectSplatElementWise(data, static_cast<size_t>(elemTypeSize.count()));
+    return detectSplatElementWise(data, static_cast<size_t>(bitWidth));
 }
 
 /// Returns pointer to baseContent's data and whether the data is splat.
@@ -212,6 +263,24 @@ bool canAddQuantCast(Const::TransformAttrInterface* begin, Const::TransformAttrI
 
 }  // namespace
 
+// FIXME: should we do ::verify() always - even in ::get()?
+Const::ContentAttr Const::ContentAttr::get(mlir::ElementsAttr base, ArrayRef<TransformAttrInterface> transformations) {
+    Const::ContentAttr content;
+    content._baseContent = base;
+    content._transformations = Const::TransformAttrInterfaceArrayAttr::get(base.getContext(), transformations);
+    std::tie(content._finalType, content._isSplat) = inferFinalTypeAndSplat(base, transformations);
+    return content;
+}
+
+Const::ContentAttr Const::ContentAttr::getChecked(FuncRef<mlir::InFlightDiagnostic()> emitError,
+                                                  mlir::ElementsAttr base,
+                                                  ArrayRef<TransformAttrInterface> transformations) {
+    if (mlir::failed(Const::ContentAttr::verify(emitError, base, transformations))) {
+        return {};
+    }
+    return get(base, transformations);
+}
+
 //
 // ContentAttr::fold
 //
@@ -227,7 +296,7 @@ Const::Content vpux::Const::ContentAttr::fold(bool bypassCache) const {
             auto& cache = cacheManager.get(ctx);
             auto content = cache.getContent(*this);
             if (content.has_value()) {
-                return content.value();
+                return std::move(content.value());
             }
         }
     }
@@ -238,46 +307,10 @@ Const::Content vpux::Const::ContentAttr::fold(bool bypassCache) const {
     auto res = wrapBaseContent(baseContent);
 
     for (const auto& attr : getTransformations()) {
-        const auto storageElemTypeSize = vpux::getElemTypeSize(res.getStorageElemType()).count();
-        VPUX_THROW_WHEN(storageElemTypeSize < CHAR_BIT && !attr.supportsSubByteStorageType(),
-                        "Unsupported storage type of size '{0}' bits.", storageElemTypeSize);
-        Const::logger().trace("Applying transformation: {0}", attr);
         res = attr.transform(res);
     }
 
     return res;
-}
-
-//
-// ContentAttr::getBaseContent
-//
-
-mlir::ElementsAttr vpux::Const::ContentAttr::getBaseContent() const {
-    return getImpl()->baseContent;
-}
-
-//
-// ContentAttr::getTransformations
-//
-
-mlir::ArrayRef<Const::TransformAttrInterface> vpux::Const::ContentAttr::getTransformations() const {
-    if (const auto transformations = getImpl()->transformations) {
-        return transformations.getValue();
-    }
-
-    return {};
-}
-
-//
-// ContentAttr::getType
-//
-
-vpux::NDTypeInterface vpux::Const::ContentAttr::getType() const {
-    return getImpl()->finalType;
-}
-
-bool vpux::Const::ContentAttr::isSplat() const {
-    return getImpl()->isSplat != nullptr;
 }
 
 //
@@ -301,7 +334,7 @@ void vpux::Const::ContentAttr::print(mlir::AsmPrinter& printer) const {
 // ContentAttr::parse
 //
 
-mlir::Attribute vpux::Const::ContentAttr::parse(mlir::AsmParser& parser, mlir::Type) {
+mlir::FailureOr<vpux::Const::ContentAttr> vpux::Const::ContentAttr::parse(mlir::AsmParser& parser) {
     // What we are trying to parse:
     // ( ref<@symbol> : type | dense<...> : type | dense_resource<...> : type ) [, list_of_transformations]
 
@@ -312,19 +345,19 @@ mlir::Attribute vpux::Const::ContentAttr::parse(mlir::AsmParser& parser, mlir::T
         auto parseResult = mlir::FieldParser<Const::SymElementsAttr>::parse(parser);
 
         if (mlir::failed(parseResult)) {
-            return {};
+            return mlir::failure();
         }
 
         baseContent = parseResult.value();
     } else if (mlir::failed(parser.parseAttribute(baseContent))) {
-        return nullptr;
+        return mlir::failure();
     }
 
     // parse list of transformations
     if (mlir::succeeded(parser.parseOptionalComma())) {
         mlir::ArrayAttr arrayAttr;
         if (mlir::failed(parser.parseAttribute(arrayAttr))) {
-            return nullptr;
+            return mlir::failure();
         }
 
         mlir::SmallVector<vpux::Const::TransformAttrInterface> transformations;
@@ -341,124 +374,67 @@ mlir::Attribute vpux::Const::ContentAttr::parse(mlir::AsmParser& parser, mlir::T
     return parser.getChecked<Const::ContentAttr>(baseContent);
 }
 
-// The list of transformations can have the following position requirements if all types are present:
-//   [NONE]* -> [PREFERRED_LAST]* -> [LAST]
-// No two transformations with the LAST requirement can exist.
-// The order of elements with the same requirement is stable.
-Const::TransformAttrInterface* getInsertionPosition(SmallVector<Const::TransformAttrInterface>& transformations,
-                                                    Const::TransformAttrInterface newTransformation) {
-    auto endPosition = transformations.end();
-    if (transformations.empty()) {
-        return endPosition;
+mlir::ParseResult vpux::Const::parseContentAttr(mlir::AsmParser& parser, ContentAttr& content) {
+    auto result = ContentAttr::parse(parser);
+    if (mlir::failed(result)) {
+        return mlir::failure();
     }
-
-    const auto lastTransformation = transformations.back();
-
-    const auto newTransformationReq = newTransformation.getPositionRequirement();
-    const auto lastTransformationReq = lastTransformation.getPositionRequirement();
-
-    const auto newTransformationReqLast = newTransformationReq == vpux::Const::details::PositionRequirement::LAST;
-    const auto lastTransformationReqLast = lastTransformationReq == vpux::Const::details::PositionRequirement::LAST;
-    VPUX_THROW_WHEN(newTransformationReqLast && lastTransformationReqLast,
-                    "Existing transformation with LAST position requirement");
-
-    if (newTransformationReqLast) {
-        return endPosition;
-    }
-
-    auto it = transformations.end();
-    for (; it > transformations.begin(); --it) {
-        const auto transformationReq = (it - 1)->getPositionRequirement();
-        if (transformationReq == vpux::Const::details::PositionRequirement::NONE ||
-            (transformationReq == vpux::Const::details::PositionRequirement::PREFERRED_LAST &&
-             newTransformationReq == vpux::Const::details::PositionRequirement::PREFERRED_LAST)) {
-            return it;
-        }
-    }
-    return it;
+    content = std::move(*result);
+    return mlir::success();
 }
 
-//
-// ContentAttr::addTransformation
-//
-
-Const::ContentAttr Const::ContentAttr::addTransformation(Const::ContentAttr input,
-                                                         Const::TransformAttrInterface newTransformation) {
-    auto transformations = to_small_vector(input.getTransformations());
-    auto insertionPosition = getInsertionPosition(transformations, newTransformation);
-
-    // Check to ensure we won't break constant content
-    const bool hasInvalidQuantizationTransforms = mlir::isa<Const::QuantCastAttr>(newTransformation) &&
-                                                  !canAddQuantCast(transformations.begin(), insertionPosition);
-    VPUX_THROW_WHEN(hasInvalidQuantizationTransforms, "Can't add QuantCast to explicitly dequantized constant");
-
-    insertionPosition = transformations.insert(insertionPosition, newTransformation);
-
-    // Update all transformations attributes starting from inserted transformation
-    auto baseContent = input.getBaseContent();
-    for (auto it = insertionPosition; it != transformations.end(); it++) {
-        SmallVector<mlir::Attribute> prevTransformations(transformations.begin(), it + 1);
-        auto updatedTransformation = it->updateAttributes(baseContent, prevTransformations);
-        if (updatedTransformation != nullptr) {
-            *it = updatedTransformation;
-        }
-    }
-
-    auto newContentAttr = Const::ContentAttr::get(baseContent, ArrayRef(transformations));
-
-#ifdef BACKGROUND_FOLDING_ENABLED
-    auto& cacheManager = Const::ConstantFoldingCacheManager::getInstance();
-    auto ctx = newContentAttr.getContext();
-    if (cacheManager.contains(ctx)) {
-        auto& cache = cacheManager.get(ctx);
-        cache.enqueueRequest(Const::FoldingRequest{newContentAttr, newTransformation});
-    }
-#endif
-
-    return newContentAttr;
+void vpux::Const::printContentAttr(mlir::AsmPrinter& printer, const ContentAttr& content) {
+    content.print(printer);
 }
 
-// Returns a ContentAttr containing a subset of the transformations from the original ContentAttr. The subset is
-// determined by the transformation given as a parameter to the function, so that all the transformations from the list
-// are included up to the one given as a parameter.
-//
-// For example:
-// Original ContentAttr: [Transformation1, Transformation2, Transformation3, Transformation4]
-// If Transformation3 is given as a parameter, a ContentAttr containing [Transformation1, Transformation2] is returned
-// Note: in case there are multiple instances of Transformation3 in the list, which have the same underlying
-// parameters, the rightmost one will be used
-Const::ContentAttr Const::ContentAttr::stripTransformationsFrom(Const::TransformAttrInterface transformation) {
-    const auto transformations = getTransformations();
-    const auto rIt = std::find(transformations.rbegin(), transformations.rend(), transformation);
-    if (rIt == transformations.rend()) {
-        return nullptr;
-    }
-    auto it = (rIt + 1).base();
-    const auto headTransformations = SmallVector<Const::TransformAttrInterface>(transformations.begin(), it);
-    return Const::ContentAttr::get(getBaseContent(), ArrayRef(headTransformations));
+mlir::LogicalResult vpux::Const::convertFromAttribute(Const::ContentAttr&, mlir::Attribute,
+                                                      llvm::function_ref<mlir::InFlightDiagnostic()>) {
+    VPUX_THROW("Conversion from attribute is not supported");
+    return mlir::success();
 }
 
-// Returns the list of transformations of the ContentAttr starting from the transformation given as a parameter.
-//
-// For example:
-// ContentAttr: [Transformation1, Transformation2, Transformation3, Transformation4]
-// If Transformation3 is given as a parameter, a list containing [Transformation3, Transformation4] is returned
-// Note: in case there are multiple instances of NewTransformation in the list, which have the same underlying
-// parameters, the rightmost one will be used
-SmallVector<Const::TransformAttrInterface> Const::ContentAttr::getLastTransformationsFrom(
-        Const::TransformAttrInterface transformation) {
-    const auto transformations = getTransformations();
-    const auto rIt = std::find(transformations.rbegin(), transformations.rend(), transformation);
-    if (rIt == transformations.rend()) {
-        return {};
+mlir::Attribute vpux::Const::convertToAttribute(mlir::MLIRContext* ctx, const ContentAttr& content) {
+    // Note: we *have* to support this because MLIR's AsmPrinter depends on
+    // this: if there's an issue in IR (i.e. some verifier produces an error),
+    // printing is done using fallback mechanism that converts all op's
+    // properties to attributes (the motivation is that it is *safer* than doing
+    // user-specified custom printing since verify error == violated
+    // preconditions, so printing could result in UB). As a downside, this
+    // fallback could be used even when our Const::DeclareOp is valid but some
+    // other op is not (e.g. when we attempt to print the whole main func).
+    return vpux::Const::EphemeralContentAttr::get(
+            ctx, content.getBaseContent(),
+            vpux::Const::TransformAttrInterfaceArrayAttr::get(ctx, content.getTransformations()));
+}
+
+mlir::LogicalResult vpux::Const::readFromMlirBytecode(mlir::DialectBytecodeReader&, ContentAttr&) {
+    VPUX_THROW("MLIR bytecode is not supported for ContentAttr");
+    return mlir::failure();
+}
+
+void vpux::Const::writeToMlirBytecode(mlir::DialectBytecodeWriter&, const ContentAttr&) {
+    VPUX_THROW("MLIR bytecode is not supported for ContentAttr");
+    return;
+}
+
+void vpux::Const::EphemeralContentAttr::print(mlir::AsmPrinter& printer) const {
+    // Note: this is supported due to "generic op printing" (see
+    // Const::convertToAttribute() note for details).
+    printContentAttr(printer, static_cast<vpux::Const::ContentAttr>(*this));
+}
+
+vpux::NDTypeInterface vpux::Const::inferFinalType(vpux::NDTypeInterface contentType,
+                                                  mlir::ArrayRef<TransformAttrInterface> transformations) {
+    auto inferredType = contentType;
+    for (const auto& attr : transformations) {
+        inferredType = attr.inferOutputType(inferredType);
     }
-    auto it = (rIt + 1).base();
-    return SmallVector<Const::TransformAttrInterface>(it, transformations.end());
+    return inferredType;
 }
 
 // Returns the output type and splatness of the content with transformations "as
 // if" applied to this content.
-std::pair<vpux::NDTypeInterface, mlir::UnitAttr> vpux::Const::ContentAttr::inferFinalTypeAndSplat(
+std::pair<vpux::NDTypeInterface, bool> vpux::Const::inferFinalTypeAndSplat(
         mlir::ElementsAttr content, mlir::ArrayRef<vpux::Const::TransformAttrInterface> transformations) {
     bool inferredSplat = getRawDataAndSplatness(content).second;
     auto inferredType = mlir::cast<vpux::NDTypeInterface>(content.getType());
@@ -466,5 +442,67 @@ std::pair<vpux::NDTypeInterface, mlir::UnitAttr> vpux::Const::ContentAttr::infer
         inferredSplat = attr.inferOutputSplat(inferredSplat, inferredType);
         inferredType = attr.inferOutputType(inferredType);
     }
-    return {inferredType, inferredSplat ? mlir::UnitAttr::get(content.getContext()) : nullptr};
+    return {inferredType, inferredSplat};
+}
+
+vpux::Const::ContentSetup vpux::Const::ContentSetup::addTransformation(TransformAttrInterface newTransformation) {
+    checkInvalidated();
+
+    auto comp = [](const vpux::Const::TransformAttrInterface& a, const vpux::Const::TransformAttrInterface& b) {
+        return a.getPositionRequirement() < b.getPositionRequirement();
+    };
+
+    // Get an iterator to the FIRST element that is ordered AFTER newTransformation.
+    // Examples:
+    //   1) When inserting NONE, the first PREFERRED_LAST is returned.
+    //   2) When inserting PREFERRED_LAST, the first LAST is returned.
+    //   3) When inserting LAST, the last LAST is returned.
+    // This ensures the following order of elements in _transformations and preserves insertion order:
+    // [NONE, ..., NONE, PREFERRED_LAST, ..., PREFERRED_LAST, LAST, ..., LAST]
+    auto insertionPosition = llvm::upper_bound(_transformations, newTransformation, comp);
+    insertionPosition = _transformations.insert(insertionPosition, newTransformation);
+
+    using OptimizationFunc = FuncRef<std::pair<details::optimization::TransformAttrPos, bool>(
+            SmallVector<Const::TransformAttrInterface>&, details::optimization::TransformAttrPos&)>;
+
+    auto baseType = _baseContent.getType().cast<NDTypeInterface>();
+    auto moveSubViewBefore = [=](SmallVector<Const::TransformAttrInterface>& transformations,
+                                 details::optimization::TransformAttrPos& currPos) {
+        return details::moveSubViewBefore(transformations, currPos, baseType);
+    };
+    auto moveReshapeBefore = [=](SmallVector<Const::TransformAttrInterface>& transformations,
+                                 details::optimization::TransformAttrPos& currPos) {
+        return details::moveReshapeBefore(transformations, currPos, baseType);
+    };
+    SmallVector<OptimizationFunc> optimizations{details::fuseConsecutiveTransformations,
+                                                details::convertQuantCastToCastElemType, moveSubViewBefore,
+                                                moveReshapeBefore, details::moveTransformationIntoFuse};
+
+    bool optimized = true;
+    auto currentPos = insertionPosition;
+    while (optimized) {
+        for (auto& optimize : optimizations) {
+            std::tie(insertionPosition, optimized) = optimize(_transformations, currentPos);
+            if (optimized) {
+                currentPos = insertionPosition;
+                break;
+            }
+        }
+    }
+
+    // end position means that transformation was folded
+    if (insertionPosition != _transformations.end()) {
+        // Check to ensure we won't break constant content
+        const bool hasInvalidQuantizationTransforms = mlir::isa<Const::QuantCastAttr>(newTransformation) &&
+                                                      !canAddQuantCast(_transformations.begin(), insertionPosition);
+        VPUX_THROW_WHEN(hasInvalidQuantizationTransforms, "Can't add QuantCast to explicitly dequantized constant");
+    }
+
+    // check single LAST requirement
+    bool lastRequirementViolated =
+            _transformations.size() >= 2 &&
+            (_transformations.end() - 2)->getPositionRequirement() == details::PositionRequirement::LAST;
+    VPUX_THROW_WHEN(lastRequirementViolated, "At most 1 attribute with LAST requirement allowed!");
+
+    return ContentSetup(std::move(*this));
 }

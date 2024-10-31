@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -254,14 +254,13 @@ Scales vpux::exractWeightsScales(mlir::Type weightsElemType) {
     return extractScalesAndZeroPoints(weightsElemType).first;
 }
 
-vpux::QuantizationApproximation::QuantizationApproximation(VPU::ArchKind architecture, double target)
-        : _mult(0), _shift(0), _postShift(0) {
+vpux::QuantizationApproximation::QuantizationApproximation(double target): _mult(0), _shift(0), _postShift(0) {
     std::tie(_mult, _shift, _postShift) = approximate<decltype(_mult)>(15, target);
 
     VPUX_THROW_WHEN(_postShift != 0,
-                    "Encountered an attempt to approximate {0} as mult = {1}, shift = {2}, postShift = {3} on {4}, "
+                    "Encountered an attempt to approximate {0} as mult = {1}, shift = {2}, postShift = {3}, "
                     "but postShift is not supported",
-                    target, mult(), shift(), postShift(), architecture);
+                    target, mult(), shift(), postShift());
 }
 
 int64_t vpux::QuantizationApproximation::mult() const {
@@ -284,12 +283,9 @@ void vpux::QuantizationApproximation::setShift(uint8_t shift) {
     _shift = shift;
 }
 
-vpux::EltwiseQuantizationApproximation::EltwiseQuantizationApproximation(VPU::ArchKind architecture,
-                                                                         double input1Target, double input2Target,
+vpux::EltwiseQuantizationApproximation::EltwiseQuantizationApproximation(double input1Target, double input2Target,
                                                                          double outputTarget)
-        : _input1(architecture, input1Target),
-          _input2(architecture, input2Target),
-          _output(architecture, 1 / outputTarget) {
+        : _input1(input1Target), _input2(input2Target), _output(1 / outputTarget) {
     // We align shifts to the smaller one by dividing input MULT with 2^diff, inputs shift will be set to 0 in
     // nce_cluster_task.cpp and added to the output shift .
     //
@@ -342,16 +338,16 @@ QuantizationApproximation vpux::EltwiseQuantizationApproximation::output() const
     return _output;
 }
 
-vpux::PReLUApproximation::PReLUApproximation(VPU::ArchKind architecture, double target): _mult(0), _shift(0) {
+vpux::PReLUApproximation::PReLUApproximation(double target): _mult(0), _shift(0) {
     // TODO return logic for 11 bits for quantized case NPU37XX back as soon as it works.
     const auto bits = 11;
     int8_t postShift = 0;
     std::tie(_mult, _shift, postShift) = approximate<decltype(_mult)>(bits, target);
 
     VPUX_THROW_UNLESS(postShift == 0,
-                      "Encountered an attempt to approximate {0} as mult = {1}, shift = {2}, postShift = {3} on {4}, "
+                      "Encountered an attempt to approximate {0} as mult = {1}, shift = {2}, postShift = {3}, "
                       "but postShift is not supported",
-                      target, mult(), shift(), int64_t(postShift), architecture);
+                      target, mult(), shift(), int64_t(postShift));
 }
 
 int64_t vpux::PReLUApproximation::mult() const {
@@ -362,9 +358,29 @@ int64_t vpux::PReLUApproximation::shift() const {
     return _shift;
 }
 
-std::pair<int64_t, int64_t> vpux::getClampValuesForQuantizedOps(std::pair<double, double> realMinMax,
-                                                                mlir::quant::QuantizedType outElemQType,
-                                                                mlir::Type outElemType) {
+mlir::FailureOr<int64_t> vpux::extractScalarOrUniformZP(mlir::quant::QuantizedType quantizedType) {
+    // Returns the single ZP of a quantized type. If the type has more than one distinct ZP, the function fails.
+    // Useful for signaling ignored ZP's in areas which only support a single ZP.
+    const auto zps = extractScalesAndZeroPoints(quantizedType).second;
+    const auto firstZP = zps.front();
+
+    const auto hasNonUniformZp = llvm::any_of(zps, [&firstZP](const auto zp) {
+        return zp != firstZP;
+    });
+    if (hasNonUniformZp == false) {
+        return firstZP;
+    }
+
+    return mlir::failure();
+}
+
+bool vpux::hasScalarOrUniformZP(mlir::quant::QuantizedType quantizedType) {
+    return mlir::succeeded(extractScalarOrUniformZP(quantizedType));
+}
+
+std::pair<int64_t, int64_t> vpux::getIntClampValuesForQuantizedOps(std::pair<double, double> realMinMax,
+                                                                   mlir::quant::QuantizedType outElemQType,
+                                                                   mlir::Type outElemType) {
     const auto scalesAndZp = extractScalesAndZeroPoints(outElemType);
     const auto scale = scalesAndZp.first.front();
     const auto zp = scalesAndZp.second.front();
@@ -374,6 +390,24 @@ std::pair<int64_t, int64_t> vpux::getClampValuesForQuantizedOps(std::pair<double
 
     auto qMin = checked_cast<int64_t>(std::round(realMinMax.first / scale));
     auto qMax = checked_cast<int64_t>(std::round(realMinMax.second / scale));
+
+    auto clampLow = std::max(clampLowStorageMin, qMin);
+    auto clampHigh = std::min(clampHighStorageMax, qMax);
+    return {clampLow, clampHigh};
+}
+
+std::pair<double, double> vpux::getFpClampValuesForQuantizedOps(std::pair<double, double> realMinMax,
+                                                                mlir::quant::QuantizedType outElemQType,
+                                                                mlir::Type outElemType) {
+    const auto scalesAndZp = extractScalesAndZeroPoints(outElemType);
+    const auto scale = scalesAndZp.first.front();
+    const auto zp = scalesAndZp.second.front();
+
+    auto clampLowStorageMin = checked_cast<double>(outElemQType.getStorageTypeMin() - zp);
+    auto clampHighStorageMax = checked_cast<double>(outElemQType.getStorageTypeMax() - zp);
+
+    auto qMin = realMinMax.first / scale;
+    auto qMax = realMinMax.second / scale;
 
     auto clampLow = std::max(clampLowStorageMin, qMin);
     auto clampHigh = std::min(clampHighStorageMax, qMax);
@@ -508,19 +542,13 @@ mlir::FailureOr<std::tuple<float, float>> vpux::getFp8Range(mlir::Type lowFpType
     return mlir::failure();
 }
 
-mlir::quant::QuantizedType vpux::getQuantizedType(mlir::Attribute lowConstAttr, mlir::Attribute highConstAttr,
-                                                  std::optional<int64_t> levels, std::optional<mlir::Type> lowFpType,
-                                                  mlir::FloatType realType, bool isSigned, mlir::Location loc,
-                                                  IE::AutoBroadcastType broadcast, bool ignoreZPCheck,
-                                                  const Logger& log) {
+mlir::quant::QuantizedType vpux::getQuantizedType(const Const::ContentAttr& lowConst,
+                                                  const Const::ContentAttr& highConst, std::optional<int64_t> levels,
+                                                  std::optional<mlir::Type> lowFpType, mlir::FloatType realType,
+                                                  bool isSigned, mlir::Location loc, IE::AutoBroadcastType broadcast,
+                                                  bool ignoreZPCheck, const Logger& log) {
     const auto innerLog = log.nest("getQuantizedType");
 
-    const auto lowConst = lowConstAttr.dyn_cast_or_null<Const::ContentAttr>();
-    const auto highConst = highConstAttr.dyn_cast_or_null<Const::ContentAttr>();
-    if (lowConst == nullptr || highConst == nullptr) {
-        (void)errorAt(loc, "Got non constant quantization parameters (low and high values)");
-        return nullptr;
-    }
     // If levels is greater then MAX_LEVELS then the quantization cannot be done on HW so FakeQuantize should not be
     // split in Quantize->Dequantize
     if (levels.has_value() && *levels > MAX_LEVELS) {

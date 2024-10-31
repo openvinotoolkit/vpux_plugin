@@ -101,7 +101,9 @@ vpux::NDTypeInterface compressType(vpux::NDTypeInterface inputType, ArrayRef<int
 }
 
 vpux::NDTypeInterface vpux::Const::SparsifyAttr::inferOutputType(vpux::NDTypeInterface inputType) const {
-    if (getCompressOutputType().getValue() != false) {
+    // Note: type inference optionally returns compressed type - see
+    // ::transfom() for details.
+    if (const bool returnCompressed = getCompressOutputType().getValue(); returnCompressed) {
         VPUX_THROW_WHEN(getNumActualElements() == nullptr, "Missing number of actual elements");
         const auto numElemsPerOC = to_small_vector(getNumActualElements().getValues<int64_t>());
         return compressType(inputType, numElemsPerOC);
@@ -170,7 +172,14 @@ Const::Content Const::SparsifyAttr::transform(Const::Content& input) const {
     const auto numElemsPerOC = (getNumActualElements() != nullptr)
                                        ? to_small_vector(getNumActualElements().getValues<int64_t>())
                                        : vpux::countNonSparseElementsPerOC(input, inputType.getElementType());
-    auto outputType = compressType(inputType, numElemsPerOC);
+    // Note: sparsify transformation is special, that is, the internal data
+    // shape is NOT what SparsifyAttr::inferOutputType() returns. the real
+    // content is always "compressed", but for the sake of the users of the
+    // constant (e.g. tiling) we *sometimes* pretend that the output type is not
+    // compressed. for instance,
+    // * sparsify(false) -> ContentAttr's type is NOT compressed
+    // * sparsify(true, ...) -> ContentAttr's type is compressed
+    const auto outputType = compressType(inputType, numElemsPerOC);
 
     auto inputElementType = inputType.getElementType();
     int64_t sparsifyValue = getSparsifyValue(inputElementType);
@@ -201,12 +210,7 @@ Const::details::PositionRequirement Const::SparsifyAttr::getPositionRequirement(
     return Const::details::PositionRequirement::PREFERRED_LAST;
 }
 
-//
-// ContentAttr::sparsify
-//
-
-Const::ContentAttr vpux::Const::ContentAttr::sparsify(bool compressOutputType,
-                                                      mlir::ElementsAttr numActualElements) const {
-    return ContentAttr::addTransformation(
-            *this, Const::SparsifyAttr::get(mlir::BoolAttr::get(getContext(), compressOutputType), numActualElements));
+Const::ContentSetup vpux::Const::ContentSetup::sparsify(bool compressOutputType, mlir::ElementsAttr numActualElements) {
+    return addTransformation(
+            Const::SparsifyAttr::get(mlir::BoolAttr::get(getContext(), compressOutputType), numActualElements));
 }

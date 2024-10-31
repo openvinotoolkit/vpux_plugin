@@ -19,7 +19,7 @@ using std::string_literals::operator""s;
 bitc::ArchType string_to_arch(const std::string& arch_type) {
     if (arch_type == "NPU27"s)
         return bitc::ArchType::NPU27;
-    else if (arch_type == "NPU4"s)
+    else
         return bitc::ArchType::NPU4;
 }
 

@@ -16,5 +16,6 @@ InputTiling DetectionOutputSortOpInputTilingOnShave(VPUIP::SwKernelOp swKernelOp
                                                     int tileId, int tileCount, Logger log);
 
 OutputTiling GRUSequenceOutputTiling(const vpux::TileInfo& firstOutputTile);
+OutputTiling lstmSequenceOutputTiling(const vpux::TileInfo& firstOutputTile);
 
 }  // namespace vpux::VPU

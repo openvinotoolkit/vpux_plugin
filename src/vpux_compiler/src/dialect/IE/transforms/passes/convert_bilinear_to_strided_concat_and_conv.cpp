@@ -6,6 +6,7 @@
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/IE/transforms/passes.hpp"
 #include "vpux/compiler/dialect/IE/utils/interpolate_utils.hpp"
+#include "vpux/compiler/dialect/IE/utils/quantization.hpp"
 #include "vpux/compiler/dialect/VPU/utils/const_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_invariant.hpp"
 #include "vpux/compiler/dialect/const/utils/utils.hpp"
@@ -53,26 +54,17 @@ mlir::Value createAverageConv(mlir::Value input, ShapeRef kernelShape, mlir::Loc
             getTensorAttr(rewriter.getContext(), weightOrder, nullptr, nullptr));
     auto weight = Const::buildWeightsConst(rewriter, input.getLoc(), weightType, ArrayRef(weights));
 
-    auto newLoc = appendLoc(loc, "_interpolate_Conv");
+    auto newLoc = appendLoc(loc, "interpolate_conv");
 
     const auto convInType = input.getType().cast<vpux::NDTypeInterface>();
     const auto convOutType = convInType.changeShape(outputShape);
 
     auto averageConv = rewriter.create<IE::ConvolutionOp>(
             newLoc, convOutType, input, weight, /*bias=*/nullptr, stridesAttr, padBeginAttr, padEndAttr, dilationsAttr,
-            /*post_opAttr=*/nullptr, /*clampAttr=*/nullptr, /*staticScaleAttr=*/nullptr);
+            /*post_opAttr=*/nullptr, /*clampAttr=*/nullptr,
+            /*staticScaleAttr=*/nullptr, /*output_channelsAttr=*/nullptr, /*input_channelsAttr=*/nullptr);
 
     return averageConv.getOutput();
-}
-
-auto createFQ(mlir::PatternRewriter& rewriter, mlir::Value input, IE::FakeQuantizeOp fq) {
-    const auto outputType = fq.getOutput().getType().cast<vpux::NDTypeInterface>();
-    const auto newOutputType = outputType.changeShape(getShape(input));
-    return rewriter
-            .create<IE::FakeQuantizeOp>(fq.getLoc(), newOutputType, input, fq.getInputLow(), fq.getInputHigh(),
-                                        fq.getOutputLow(), fq.getOutputHigh(), fq.getLevelsAttr(),
-                                        fq.getLowFpTypeAttr(), fq.getAutoBroadcastAttr())
-            .getOutput();
 }
 
 auto createAverageDWConv(mlir::Value input, ShapeRef kernelShape, mlir::Location loc, IE::FakeQuantizeOp inputFQ,
@@ -93,26 +85,17 @@ auto createAverageDWConv(mlir::Value input, ShapeRef kernelShape, mlir::Location
     const float weightRealVal = (inputFQ != nullptr) ? 1.0f : weightsScaleFactor;
     const auto dataStorageType = mlir::RankedTensorType::get(to_small_vector(weightShape), elemType);
     auto weights = Const::createFloatConst(rewriter, loc, dataStorageType, weightRealVal);
+
     // Add fakeQuan after kernel if needed
     if (inputFQ != nullptr) {
-        const auto fqArgType = mlir::RankedTensorType::get({}, elemType);
-
-        auto fqLevelsVal = getIntAttr(rewriter, 255);
-        auto fqLowVal = Const::createFloatConst(rewriter, loc, fqArgType, 0.0f);
-        auto fqInHighVal = Const::createFloatConst(rewriter, loc, fqArgType, 254.0f);
-        auto fqOutHighVal = Const::createFloatConst(rewriter, loc, fqArgType, 254.0f * weightsScaleFactor);
-
-        // lowFpType is ignored (nullptr), only levels are given
-        auto quantizationForWeights =
-                rewriter.create<IE::FakeQuantizeOp>(loc, dataStorageType, weights, fqLowVal, fqInHighVal, fqLowVal,
-                                                    fqOutHighVal, fqLevelsVal, nullptr, inputFQ.getAutoBroadcastAttr());
-        weights = quantizationForWeights.getOutput();
+        weights = vpux::IE::createFQScaling(loc, weights, weightsScaleFactor, elemType, inputFQ.getLevels(),
+                                            inputFQ.getLowFpType(), inputFQ.getAutoBroadcastAttr(), rewriter);
     }
 
     auto newLoc = appendLoc(loc, "_interpolate_GroupConv_{0}_{1}", kernelShape[Dim(0)], kernelShape[Dim(1)]);
-    auto averageDWConv = rewriter.create<IE::GroupConvolutionOp>(newLoc, input, weights, /*bias=*/nullptr, stridesAttr,
-                                                                 padBeginAttr, padEndAttr, dilationsAttr, groupAttr,
-                                                                 /*post_opAttr=*/nullptr, /*clampAttr=*/nullptr);
+    auto averageDWConv = rewriter.create<IE::GroupConvolutionOp>(
+            newLoc, input, weights, /*bias=*/nullptr, stridesAttr, padBeginAttr, padEndAttr, dilationsAttr, groupAttr,
+            /*post_opAttr=*/nullptr, /*clampAttr=*/nullptr, /*outputChannels=*/nullptr, /*inputChannels=*/nullptr);
 
     return averageDWConv.getOutput();
 }
@@ -128,7 +111,7 @@ mlir::Value createMaxPool(mlir::Value input, mlir::Location loc, mlir::PatternRe
             .create<IE::MaxPoolOp>(loc, input, getIntArrayAttr(rewriter, maxPoolKernels),
                                    getIntArrayAttr(rewriter, maxPoolStrides), padsAttr, padsAttr,
                                    vpux::IE::RoundingTypeAttr::get(ctx, vpux::IE::RoundingType::FLOOR), nullptr,
-                                   nullptr)
+                                   nullptr, nullptr, nullptr)
             .getOutput();
 }
 
@@ -297,25 +280,25 @@ mlir::LogicalResult ConvertBilinearToStridedConcatAndConvPass::BilinearInterpola
     const auto inputFQ = origOp.getInput().getDefiningOp<IE::FakeQuantizeOp>();
 
     SmallVector<mlir::Value> widthSlices(upSampleW, origOp.getInput());
-    auto newOp = widthSlices.size() != 1
-                         ? rewriter.create<IE::ConcatOp>(origOp->getLoc(), widthSlices, Dims4D::Act::W, 1, upSampleW)
-                                   .getOutput()
-                         : widthSlices.front();
+    auto newOp = widthSlices.size() != 1 ? rewriter.create<IE::ConcatOp>(takeOpLoc(origOp, "wslices_concat"),
+                                                                         widthSlices, Dims4D::Act::W, 1, upSampleW)
+                                                   .getOutput()
+                                         : widthSlices.front();
 
     SmallVector<mlir::Value> heightSlices(upSampleH, newOp);
-    auto nearestInterpolateOut =
-            heightSlices.size() != 1
-                    ? rewriter.create<IE::ConcatOp>(origOp->getLoc(), heightSlices, Dims4D::Act::H, 1, upSampleH)
-                              .getOutput()
-                    : heightSlices.front();
+    auto nearestInterpolateOut = heightSlices.size() != 1
+                                         ? rewriter.create<IE::ConcatOp>(takeOpLoc(origOp, "hslices_concat"),
+                                                                         heightSlices, Dims4D::Act::H, 1, upSampleH)
+                                                   .getOutput()
+                                         : heightSlices.front();
 
     auto tensorPadded = nearestInterpolateOut;
     if (!isAlignCorners) {
         auto tensorPaddedWidth = (scaleW - 1 > 0) ? IE::createPadding(rewriter, origOp, nearestInterpolateOut,
-                                                                      Dims4D::Act::W, forwardPadW, backPadW)
+                                                                      Dims4D::Act::W, forwardPadW, backPadW, "pad_w")
                                                   : nearestInterpolateOut;
         tensorPadded = (scaleH - 1 > 0) ? IE::createPadding(rewriter, origOp, tensorPaddedWidth, Dims4D::Act::H,
-                                                            forwardPadH, backPadH)
+                                                            forwardPadH, backPadH, "pad_wh")
                                         : tensorPaddedWidth;
     }
 
@@ -365,10 +348,10 @@ mlir::LogicalResult ConvertBilinearToStridedConcatAndConvPass::BilinearInterpola
     int32_t forwardPad = 0;
 
     // Right slice and padding
-    auto concatW = IE::createPadding(rewriter, origOp, input, Dims4D::Act::W, forwardPad, scaleW - 1);
+    auto concatW = IE::createPadding(rewriter, origOp, input, Dims4D::Act::W, forwardPad, scaleW - 1, "concat_width");
 
     // Bottom slice and padding
-    auto concatWH = IE::createPadding(rewriter, origOp, concatW, Dims4D::Act::H, forwardPad, scaleH - 1);
+    auto concatWH = IE::createPadding(rewriter, origOp, concatW, Dims4D::Act::H, forwardPad, scaleH - 1, "concat_wh");
 
     // Left slice
     auto concatWHShape = getShape(concatWH);
@@ -378,15 +361,16 @@ mlir::LogicalResult ConvertBilinearToStridedConcatAndConvPass::BilinearInterpola
         return mlir::failure();
     }
     sizes[Dims4D::Act::W.ind()] -= 1;
-    mlir::Value leftSlice =
-            rewriter.create<IE::SliceOp>(location, concatWH, getIntArrayAttr(origOp.getContext(), offsets),
-                                         getIntArrayAttr(origOp.getContext(), sizes));
+    mlir::Value leftSlice = rewriter.create<IE::SliceOp>(appendLoc(location, "left_slice"), concatWH,
+                                                         getIntArrayAttr(origOp.getContext(), offsets),
+                                                         getIntArrayAttr(origOp.getContext(), sizes));
     int32_t convStrideH = 1, convStrideW = 1;
-    auto getAverageDWConv = [&](auto input, ShapeRef kernelShape) {
-        auto DWConv =
-                createAverageDWConv(input, kernelShape, location, inputFQ, convStrideH, convStrideW, rewriter, _log);
+    auto getAverageDWConv = [&](auto input, ShapeRef kernelShape, StringRef locSuffix) {
+        auto DWConv = createAverageDWConv(input, kernelShape, appendLoc(location, locSuffix), inputFQ, convStrideH,
+                                          convStrideW, rewriter, _log);
         if (outputFQ != nullptr) {
-            DWConv = createFQ(rewriter, DWConv, outputFQ);
+            DWConv = vpux::IE::createFQ(rewriter, DWConv, outputFQ,
+                                        takeOpLoc(outputFQ, StringLiteral("fq_{0}_out"), locSuffix));
         }
         return DWConv;
     };
@@ -424,37 +408,41 @@ mlir::LogicalResult ConvertBilinearToStridedConcatAndConvPass::BilinearInterpola
     // all dpu tasks before and after concat are of the same type and size,which can ensure that they
     // are assigned the same attributes and that concat can be converted to cmxconcat.
 
-    auto originCopy = canUseCmxConcat() ? getAverageDWConv(input, {1, 1}) : createMaxPool(input, location, rewriter);
+    auto originCopy = canUseCmxConcat() ? getAverageDWConv(input, {1, 1}, "center")
+                                        : createMaxPool(input, appendLoc(location, "as_maxpool"), rewriter);
 
     // Average over concatW, kernel_h = 1, kernel_w = 2
-    auto averagePoolOverW = getAverageDWConv(concatW, {1, 2});
+    auto averagePoolOverW = getAverageDWConv(concatW, {1, 2}, "over_w");
 
     // Average over leftSlice, kernel_h = 2, kernel_w = 1
-    auto averagePoolOverH = getAverageDWConv(leftSlice, {2, 1});
+    auto averagePoolOverH = getAverageDWConv(leftSlice, {2, 1}, "over_h");
 
     // Average over concatWH, kernel_h = 2, kernel_w = 2
-    auto averagePoolOverWH = getAverageDWConv(concatWH, {2, 2});
+    auto averagePoolOverWH = getAverageDWConv(concatWH, {2, 2}, "over_wh");
 
     // Join over W
     SmallVector<mlir::Value> widthSlices{originCopy, averagePoolOverW};
-    auto joinOverW0 = rewriter.create<IE::ConcatOp>(location, widthSlices, Dims4D::Act::W, 1, 2).getOutput();
+    auto joinOverW0 = rewriter.create<IE::ConcatOp>(appendLoc(location, "concat_w0"), widthSlices, Dims4D::Act::W, 1, 2)
+                              .getOutput();
 
     widthSlices.clear();
     widthSlices = {averagePoolOverH, averagePoolOverWH};
-    auto joinOverW1 = rewriter.create<IE::ConcatOp>(location, widthSlices, Dims4D::Act::W, 1, 2).getOutput();
+    auto joinOverW1 = rewriter.create<IE::ConcatOp>(appendLoc(location, "concat_w1"), widthSlices, Dims4D::Act::W, 1, 2)
+                              .getOutput();
 
     if (canUseCmxConcat()) {
-        joinOverW0 = getAverageDWConv(joinOverW0, {1, 1});
-        joinOverW1 = getAverageDWConv(joinOverW1, {1, 1});
+        joinOverW0 = getAverageDWConv(joinOverW0, {1, 1}, "over_w0");
+        joinOverW1 = getAverageDWConv(joinOverW1, {1, 1}, "over_w1");
         if (outputFQ != nullptr) {
-            joinOverW1 = createFQ(rewriter, joinOverW1, outputFQ);
-            joinOverW0 = createFQ(rewriter, joinOverW0, outputFQ);
+            joinOverW1 = vpux::IE::createFQ(rewriter, joinOverW1, outputFQ, takeOpLoc(outputFQ, "fq_w1")).getOutput();
+            joinOverW0 = vpux::IE::createFQ(rewriter, joinOverW0, outputFQ, takeOpLoc(outputFQ, "fq_w0")).getOutput();
         }
     }
 
     // Join over H
     SmallVector<mlir::Value> heightSlices{joinOverW0, joinOverW1};
-    auto joinOverH = rewriter.create<IE::ConcatOp>(location, heightSlices, Dims4D::Act::H, 1, 2).getOutput();
+    auto joinOverH = rewriter.create<IE::ConcatOp>(appendLoc(location, "concat_h"), heightSlices, Dims4D::Act::H, 1, 2)
+                             .getOutput();
 
     rewriter.replaceOp(origOp, joinOverH);
 
@@ -567,38 +555,45 @@ ConvertBilinearToStridedConcatAndConvPass::SmallChannelPytorchHalfPixelBilinearI
     convKernelShapeH = kernelParamsH;
     convStrideH = strideParamsH;
 
-    auto createSliceConcatConv = [&](mlir::Value intput) {
+    auto createSliceConcatConv = [&](mlir::Value intput, StringRef locSuffix) {
         SmallVector<mlir::Value> heightSlices(upSampleH, intput);
 
         auto nearestInterpolateOut =
                 heightSlices.size() != 1
-                        ? rewriter.create<IE::ConcatOp>(origOp->getLoc(), heightSlices, Dims4D::Act::H, 1, upSampleH)
+                        ? rewriter.create<IE::ConcatOp>(
+                                          takeOpLoc(origOp, StringLiteral("{0}_slices_concat"), locSuffix),
+                                          heightSlices, Dims4D::Act::H, 1, upSampleH)
                                   .getOutput()
                         : heightSlices.front();
 
-        auto tensorPadded =
-                IE::createPadding(rewriter, origOp, nearestInterpolateOut, Dims4D::Act::H, forwardPadH, backPadH);
+        auto tensorPadded = IE::createPadding(rewriter, origOp, nearestInterpolateOut, Dims4D::Act::H, forwardPadH,
+                                              backPadH, "pad_h_" + locSuffix.str());
 
         const auto inputShape = getShape(intput);
         const Shape outputShapeOnH = {inputShape[vpux::Dims4D::Act::N], inputShape[vpux::Dims4D::Act::C],
                                       inputShape[vpux::Dims4D::Act::H] * scaleH, inputShape[vpux::Dims4D::Act::W]};
 
-        return createAverageConv(tensorPadded, {convKernelShapeH, 1}, origOp.getLoc(), convStrideH, outputShapeOnH,
-                                 rewriter, _log);
+        return createAverageConv(tensorPadded, {convKernelShapeH, 1},
+                                 takeOpLoc(origOp, StringLiteral("{0}_avgconv"), locSuffix), convStrideH,
+                                 outputShapeOnH, rewriter, _log);
     };
 
     auto dstOrder = DimsOrder::NHWC.toAffineMap(getContext());
     auto memPermAttr = getPermutationFromOrders(DimsOrder::NHWC, DimsOrder::NWHC, origOp->getContext());
 
-    auto inputReorder = rewriter.create<IE::ReorderOp>(origOp->getLoc(), origOp.getInput(), dstOrder);
+    auto inputReorder =
+            rewriter.create<IE::ReorderOp>(takeOpLoc(origOp, "reorder_in_to_NWHC"), origOp.getInput(), dstOrder);
 
-    auto interpolateH1 = createSliceConcatConv(inputReorder.getOutput());
-    auto memPermute1 = rewriter.create<IE::MemPermuteOp>(origOp.getLoc(), interpolateH1, dstOrder, memPermAttr);
-    auto interpolateH2 = createSliceConcatConv(memPermute1.getOutput());
-    auto memPermute2 = rewriter.create<IE::MemPermuteOp>(origOp.getLoc(), interpolateH2, dstOrder, memPermAttr);
+    auto interpolateH1 = createSliceConcatConv(inputReorder.getOutput(), "H1");
+    auto memPermute1 =
+            rewriter.create<IE::MemPermuteOp>(takeOpLoc(origOp, "mem_perm_H1"), interpolateH1, dstOrder, memPermAttr);
+    auto interpolateH2 = createSliceConcatConv(memPermute1.getOutput(), "H2");
+    auto memPermute2 =
+            rewriter.create<IE::MemPermuteOp>(takeOpLoc(origOp, "mem_perm_H2"), interpolateH2, dstOrder, memPermAttr);
 
-    auto outputReorder = rewriter.create<IE::ReorderOp>(origOp->getLoc(), memPermute2.getOutput(),
-                                                        DimsOrder::NCHW.toAffineMap(getContext()));
+    auto outputReorder =
+            rewriter.create<IE::ReorderOp>(takeOpLoc(origOp, "reorder_out_to_NCHW"), memPermute2.getOutput(),
+                                           DimsOrder::NCHW.toAffineMap(getContext()));
 
     rewriter.replaceOp(origOp, outputReorder.getOutput());
     _log.trace("Split {0} successful", origOp->getName());
@@ -649,7 +644,7 @@ void ConvertBilinearToStridedConcatAndConvPass::safeRunOnFunc() {
         }
 
         // Small-channel models WA: when the channel size is smaller than the channel alignment
-        // The alignment causes worse performance than UPA interpolation
+        // The alignment causes worse performance than SHAVE interpolation
         // For channel size is smaller than channel alignement, it's partially resolved by
         // SmallChannelPytorchHalfPixelBilinearInterpolateOpConverter.
         const auto elemType = op.getOutput().getType().cast<vpux::NDTypeInterface>().getElementType();
@@ -694,10 +689,10 @@ void ConvertBilinearToStridedConcatAndConvPass::safeRunOnFunc() {
                 scaleW = outShape[Dims4D::Act::W] / inputShape[Dims4D::Act::W];
                 scaleH = outShape[Dims4D::Act::H] / inputShape[Dims4D::Act::H];
                 if (coordMode == IE::InterpolateCoordMode::ASYMMETRIC) {
-                    // Deeplab-v3 WA: UPA implementation may be better for some big bilinear interpolates
+                    // Deeplab-v3 WA: SHAVE implementation may be better for some big bilinear interpolates
                     // Current solution will produce some extra DMAs as we need do padding by slice-concat, which may
                     // cause some performance loss especially for big interpolates. In future, SEP may help to solve
-                    // this issue. Details see ticket: E43217 The scaleW 4 and scaleH 4 is more efficient on NPU37XX.
+                    // this issue. Details see ticket: E43217 The scaleW 4 and scaleH 4 is more efficient on NPU37XX
                     // Details see ticket: E56905
                     return (scaleW > 4 && scaleH > 4);
                 } else if ((coordMode == IE::InterpolateCoordMode::PYTORCH_HALF_PIXEL) ||

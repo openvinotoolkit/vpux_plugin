@@ -7,6 +7,7 @@
 
 #include <fstream>
 #include <regex>
+#include <sstream>
 
 namespace vpux {
 
@@ -23,7 +24,7 @@ vpux::KB getPeakMemoryUsage() {
             iss >> peakMemUsageKB;
         }
     }
-    return vpux::KB(peakMemUsageKB);
+    return vpux::KB(static_cast<int64_t>(peakMemUsageKB));
 }
 
 }  // namespace vpux

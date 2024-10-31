@@ -24,9 +24,9 @@ private:
     void safeRunOnFunc() final;
 };
 
-VPU::DistributedTensorAttr updateExplicitDistributedAttrWithSpecificDim(VPU::DistributedTensorAttr dataDistributedAttr,
-                                                                        VPU::DistributedTensorAttr seDistributedAttr,
-                                                                        Dim dim, mlir::MLIRContext* ctx) {
+VPU::DistributionInfoAttr updateExplicitDistributedAttrWithSpecificDim(VPU::DistributionInfoAttr dataDistributedAttr,
+                                                                       VPU::DistributionInfoAttr seDistributedAttr,
+                                                                       Dim dim, mlir::MLIRContext* ctx) {
     auto updateShapes = [&](mlir::ArrayAttr origShapesAttr, mlir::ArrayAttr targetShapesAttr) {
         auto origShapes = parseIntArrayOfArrayAttr<int64_t>(origShapesAttr);
         auto targetShapes = parseIntArrayOfArrayAttr<int64_t>(targetShapesAttr);
@@ -49,7 +49,7 @@ VPU::DistributedTensorAttr updateExplicitDistributedAttrWithSpecificDim(VPU::Dis
     const auto newMemoryOffsets =
             updateShapes(dataDistributedAttr.getMemoryOffsets(), seDistributedAttr.getMemoryOffsets());
 
-    return VPU::DistributedTensorAttr::get(
+    return VPU::DistributionInfoAttr::get(
             ctx, dataDistributedAttr.getMode(), dataDistributedAttr.getNumTiles(), nullptr, nullptr, nullptr,
             dataDistributedAttr.getNumClusters(), dataDistributedAttr.getAlignment(),
             dataDistributedAttr.getUniformDistributedSegments(), getIntArrayOfArray(ctx, newComputeShapes),

@@ -39,10 +39,6 @@ uint32_t getProfilingSectionEncoding(const uint8_t* data, size_t size);
 // +----------------------------+---------------------+------------
 std::vector<uint8_t> constructProfilingSectionWithHeader(flatbuffers::DetachedBuffer rawMetadataFb);
 
-bool isElfBinary(const uint8_t* data, size_t size);
-
-const MVCNN::GraphFile* getGraphFileVerified(const uint8_t* buffer, size_t size);
-
 const ProfilingFB::ProfilingMeta* getProfilingSectionMeta(const uint8_t* blobData, size_t blobSize);
 
 const uint8_t* getProfilingSectionPtr(const uint8_t* blobData, size_t blobSize);

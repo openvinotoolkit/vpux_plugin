@@ -48,8 +48,8 @@ mlir::OpFoldResult vpux::IERT::GenericReshapeOp::fold(FoldAdaptor adaptor) {
         return getOutput();
     }
 
-    if (const auto cst = operands[0].dyn_cast_or_null<Const::ContentAttr>()) {
-        return cst.reshape(getShape(getOutput()));
+    if (const auto cst = operands[0].dyn_cast_or_null<Const::EphemeralContentAttr>()) {
+        return static_cast<Const::ContentAttr>(cst).transform().reshape(getShape(getOutput())).get();
     }
 
     return nullptr;

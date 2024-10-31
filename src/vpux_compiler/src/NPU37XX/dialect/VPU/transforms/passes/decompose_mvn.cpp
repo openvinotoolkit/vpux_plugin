@@ -8,6 +8,7 @@
 #include "vpux/compiler/dialect/IE/utils/resources.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
+#include "vpux/compiler/utils/analysis.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 #include "vpux/compiler/utils/types.hpp"
@@ -33,140 +34,18 @@ SmallVector<vpux::NDTypeInterface> getTiledBuffers(vpux::NDTypeInterface input, 
                                               output.changeShape(ShapeRef(outputShape))};
 }
 
-mlir::FailureOr<OutputTiling> findNumOfTiles(VPU::MVNOp op, mlir::PatternRewriter& rewriter) {
-    const auto input = op.getInput().getType().cast<vpux::NDTypeInterface>();
-
-    const auto inputShape = to_small_vector(input.getShape());
-    auto module = op.getOperation()->getParentOfType<mlir::ModuleOp>();
-    auto inputDimOrder = input.getDimsOrder();
-    auto numClusters = inputDimOrder == DimsOrder::NCHW || inputDimOrder == DimsOrder::NCWH
-                               ? 1
-                               : IE::getTileExecutor(module).getCount();
-
-    // Restrict max-search to {W, H}, since with 'internal_reshape' feature,
-    // 1x32x1048576x1 turns into 1x512x256x256 with C being maxDim
-    const auto maxDim = std::distance(inputShape.begin(), std::max_element(inputShape.begin() + 2, inputShape.end()));
-
-    int64_t tilesNum = 1;
-    auto newInputShape = to_small_vector(input.getShape());
-    auto outputC = op.getAcrossChannels() ? 1 : inputShape[Dims4D::Act::C.ind()];
-    auto outputW = op.getNormalizeVariance() ? 2 : 1;
-    SmallVector<int64_t> newOutputShape{inputShape[Dims4D::Act::N.ind()], outputC, 1, outputW};
-    const auto newOutType = vpux::getTensorType(ShapeRef(newOutputShape), mlir::Float32Type::get(input.getContext()),
-                                                DimsOrder::NHWC, input.getMemSpace());
-    newInputShape[maxDim] = inputShape[maxDim] / numClusters / tilesNum;
-
-    // dummy 'fitIntoCMX' evaluator op
-    VPU::MVN1SumOp eval = rewriter.create<VPU::MVN1SumOp>(op.getLoc(), op.getInput(), op.getAcrossChannels(),
-                                                          op.getNormalizeVariance(), 1);
-
-    while (!eval.fitIntoCMX(SmallVector<vpux::NDTypeInterface>{input.changeShape(ShapeRef(newInputShape)),
-                                                               newOutType.cast<vpux::NDTypeInterface>()})) {
-        tilesNum++;
-        if (tilesNum > inputShape[maxDim]) {
-            return errorAt(op.getLoc(), "Can't tile MVN1SumOp over one dimension.");
-        }
-
-        newInputShape[maxDim] = divUp(inputShape[maxDim], tilesNum * numClusters);
-    }
-    rewriter.eraseOp(eval);
-
-    SmallVector<int64_t> divisors(newInputShape.size(), 1);
-    divisors[maxDim] = tilesNum;
-
-    return fillDividedTiles(op, ShapeRef(divisors), input.getShape());
-}
-
-mlir::ArrayAttr getIdentityDimPermutation(mlir::MLIRContext* ctx) {
-    SmallVector<SmallVector<int64_t>> permutation = {{0}, {1}, {2}, {3}};
-    return getIntArrayOfArray(ctx, permutation);
-}
-
 bool checkInsertReshapeDimOrder(DimsOrder dimOrder, bool acrossChannel) {
-    return ((dimOrder != DimsOrder::NHCW && dimOrder != DimsOrder::NWCH && dimOrder != DimsOrder::WCHN) ||
-            acrossChannel) &&
-           dimOrder != DimsOrder::HCNW && dimOrder != DimsOrder::HNWC && dimOrder != DimsOrder::CWNH;
-}
-
-mlir::Value reifyTileDecomposedMVN(VPU::MVNOp MVNOp, const TileInfo& inputTile, int64_t numClusters,
-                                   mlir::OpBuilder& builder, Logger log) {
-    log.trace("{0}", inputTile);
-
-    const auto& ctx = MVNOp.getContext();
-    const auto valInputName = printToString("input");
-
-    auto inputType = MVNOp.getInput().getType().cast<vpux::NDTypeInterface>();
-    auto inputDimOrder = inputType.getDimsOrder();
-
-    const auto tiledSliceInput =
-            vpux::VPU::makeTile(builder, MVNOp.getLoc(), MVNOp.getInput(), inputTile, valInputName);
-
-    const auto inputShape = inputTile.shape;
-    const Shape newShape{inputShape[Dims4D::Act::N], inputShape[Dims4D::Act::C],
-                         inputShape[Dims4D::Act::H] * inputShape[Dims4D::Act::W], 1};
-
-    mlir::Value lastOp = tiledSliceInput;
-    if (checkInsertReshapeDimOrder(inputDimOrder, MVNOp.getAcrossChannels())) {
-        lastOp = builder.create<VPU::AffineReshapeOp>(MVNOp.getLoc(), inputType.changeShape(newShape), tiledSliceInput,
-                                                      getIdentityDimPermutation(ctx), getIntArrayAttr(ctx, newShape));
-    }
-    auto tileMVN1SumOp = builder.create<VPU::MVN1SumOp>(MVNOp.getLoc(), lastOp, MVNOp.getAcrossChannels(),
-                                                        MVNOp.getNormalizeVariance(), numClusters);
-
-    return tileMVN1SumOp.getResult();
-}
-
-//
-// applyTileStrategyDecomposedMVN
-//
-
-mlir::LogicalResult applyTileStrategyDecomposedMVN(VPU::MVNOp MVNOp, const OutputTiling& tiles,
-                                                   mlir::PatternRewriter& rewriter, Logger log) {
-    mlir::Operation* tileMVN1SumOp;
-    const auto& ctx = MVNOp.getContext();
-    auto module = MVNOp.getOperation()->getParentOfType<mlir::ModuleOp>();
-    auto inputType = MVNOp.getInput().getType().cast<vpux::NDTypeInterface>();
-    auto inputDimOrder = inputType.getDimsOrder();
-    auto numClusters = inputDimOrder == DimsOrder::NCHW || inputDimOrder == DimsOrder::NCWH
-                               ? 1
-                               : IE::getTileExecutor(module).getCount();
-    if (tiles.size() > 1) {
-        // apply the generated fake tiling strategy and convert MVN to Slice.
-        SmallVector<mlir::Value> resultTileVals;
-
-        for (const auto& inputTile : tiles) {
-            const auto tiledRes = reifyTileDecomposedMVN(MVNOp, inputTile, numClusters, rewriter, log);
-            resultTileVals.push_back(tiledRes);
-        }
-
-        tileMVN1SumOp = rewriter.create<VPU::ConcatOp>(MVNOp.getLoc(), mlir::ValueRange(resultTileVals), 3);
-    } else {
-        const auto inputShape = inputType.getShape();
-        const Shape newShape{inputShape[Dims4D::Act::N], inputShape[Dims4D::Act::C],
-                             inputShape[Dims4D::Act::H] * inputShape[Dims4D::Act::W], 1};
-
-        mlir::Value lastOp = MVNOp.getInput();
-        if (checkInsertReshapeDimOrder(inputDimOrder, MVNOp.getAcrossChannels())) {
-            lastOp = rewriter.create<VPU::AffineReshapeOp>(MVNOp.getLoc(), inputType.changeShape(newShape),
-                                                           MVNOp.getInput(), getIdentityDimPermutation(ctx),
-                                                           getIntArrayAttr(ctx, newShape));
-        }
-        tileMVN1SumOp = rewriter.create<VPU::MVN1SumOp>(MVNOp.getLoc(), lastOp, MVNOp.getAcrossChannels(),
-                                                        MVNOp.getNormalizeVariance(), numClusters);
+    if (dimOrder == DimsOrder::HCNW || dimOrder == DimsOrder::HNWC || dimOrder == DimsOrder::CWNH) {
+        return false;
     }
 
-    const auto outputType = MVNOp.getOutput().getType().cast<vpux::NDTypeInterface>();
+    if (acrossChannel == true) {
+        return true;
+    }
 
-    const auto internalReshape = MVNOp.getInternalReshape().has_value() ? MVNOp.getInternalReshape().value() : nullptr;
-    auto tileMVN1MeanVarOp = rewriter.create<VPU::MVN1MeanVarOp>(
-            MVNOp.getLoc(), tileMVN1SumOp->getResult(0), getIntArrayAttr(rewriter, outputType.getShape().raw()),
-            MVNOp.getAcrossChannels(), MVNOp.getNormalizeVariance(), MVNOp.getEps(), outputType.getElementType(),
-            internalReshape);
-
-    rewriter.replaceOpWithNewOp<VPU::MVN1NormalizeOp>(MVNOp, MVNOp.getInput(), tileMVN1MeanVarOp.getResult(),
-                                                      MVNOp.getAcrossChannelsAttr(), MVNOp.getNormalizeVarianceAttr());
-    return mlir::success();
+    return dimOrder != DimsOrder::NHCW && dimOrder != DimsOrder::NWCH && dimOrder != DimsOrder::WCHN;
 }
+
 //
 // DecomposeMVNPass
 //
@@ -203,13 +82,50 @@ private:
 mlir::LogicalResult DecomposeMVNPass::MVNConverter::matchAndRewrite(VPU::MVNOp origOp,
                                                                     mlir::PatternRewriter& rewriter) const {
     _log.trace("Got '{0}' at '{1}'", origOp->getName(), origOp->getLoc());
-    const auto tiles = findNumOfTiles(origOp, rewriter);
 
-    if (mlir::failed(tiles)) {
-        return mlir::failure();
+    const auto& ctx = origOp.getContext();
+    auto module = origOp.getOperation()->getParentOfType<mlir::ModuleOp>();
+    auto inputType = origOp.getInput().getType().cast<vpux::NDTypeInterface>();
+    auto inputDimOrder = inputType.getDimsOrder();
+    auto numClusters = IE::getTileExecutor(module).getCount();
+    const auto accrossChannels = origOp.getAcrossChannels();
+
+    mlir::Value lastOp = origOp.getInput();
+    if (checkInsertReshapeDimOrder(inputDimOrder, accrossChannels)) {
+        const auto inputShape = inputType.getShape();
+        const auto inputBatch = inputShape[Dims4D::Act::N];
+        const auto inputChannel = accrossChannels ? 1 : inputShape[Dims4D::Act::C];
+        const auto inputHeight =
+                accrossChannels ? inputShape[Dims4D::Act::H] * inputShape[Dims4D::Act::W] * inputShape[Dims4D::Act::C]
+                                : inputShape[Dims4D::Act::H] * inputShape[Dims4D::Act::W];
+
+        auto newShape = Shape{inputBatch, inputChannel, inputHeight, 1};
+
+        lastOp = rewriter.create<VPU::ShapeCastOp>(origOp.getLoc(), inputType.changeShape(newShape), origOp.getInput(),
+                                                   getIntArrayAttr(ctx, newShape));
     }
 
-    return applyTileStrategyDecomposedMVN(origOp, tiles.value(), rewriter, _log);
+    auto tileMVN1SumOp = rewriter.create<VPU::MVN1SumOp>(appendLoc(origOp.getLoc(), "mvn1Sum"), lastOp, accrossChannels,
+                                                         origOp.getNormalizeVariance(), numClusters);
+
+    const auto internalReshape =
+            origOp.getInternalReshape().has_value() ? origOp.getInternalReshape().value() : nullptr;
+    auto tileMVN1MeanVarOp = rewriter.create<VPU::MVN1MeanVarOp>(
+            appendLoc(origOp.getLoc(), "mvn1MeanVar"), tileMVN1SumOp->getResult(0),
+            getIntArrayAttr(rewriter, inputType.getShape().raw()), accrossChannels, origOp.getNormalizeVariance(),
+            origOp.getEps(), inputType.getElementType(), internalReshape);
+
+    auto tileMVN1NormalizeOp = rewriter.create<VPU::MVN1NormalizeOp>(
+            appendLoc(origOp.getLoc(), "mvn1Normalize"), lastOp, tileMVN1MeanVarOp.getResult(),
+            origOp.getAcrossChannelsAttr(), origOp.getNormalizeVarianceAttr());
+
+    auto origOpOutType = origOp.getOutput().getType().cast<NDTypeInterface>();
+    auto reshapeOutOp =
+            rewriter.createOrFold<VPU::ShapeCastOp>(origOp.getLoc(), origOpOutType, tileMVN1NormalizeOp.getOutput(),
+                                                    getIntArrayAttr(ctx, origOpOutType.getShape()));
+
+    rewriter.replaceOp(origOp, reshapeOutOp);
+    return mlir::success();
 }
 
 //
@@ -224,6 +140,10 @@ void DecomposeMVNPass::safeRunOnFunc() {
     target.addDynamicallyLegalOp<VPU::MVNOp>([&](VPU::MVNOp op) {
         const auto inputType = op.getInput().getType().cast<vpux::NDTypeInterface>();
         const auto outputType = op.getOutput().getType().cast<vpux::NDTypeInterface>();
+        if (inputType.getRank() != 4) {
+            _log.nest(1).trace("Support for decompose MVN is limited to 4D tensors only");
+            return true;
+        }
 
         if (op.getInternalReshape().has_value()) {
             _log.nest(1).trace("Real 'internal_reshape' does not fit into CMX");
@@ -238,12 +158,10 @@ void DecomposeMVNPass::safeRunOnFunc() {
         return true;
     });
 
-    target.addLegalOp<VPU::SliceOp>();
     target.addLegalOp<VPU::MVN1SumOp>();
     target.addLegalOp<VPU::MVN1MeanVarOp>();
     target.addLegalOp<VPU::MVN1NormalizeOp>();
-    target.addLegalOp<VPU::ConcatOp>();
-    target.addLegalOp<VPU::AffineReshapeOp>();
+    target.addLegalOp<VPU::ShapeCastOp>();
 
     mlir::RewritePatternSet patterns(&ctx);
     patterns.add<MVNConverter>(&ctx, _log);

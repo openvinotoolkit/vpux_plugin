@@ -8,6 +8,8 @@
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/IE/transforms/passes.hpp"
 
+#include "vpux/compiler/dialect/VPU/utils/auto_padding_utils.hpp"
+#include "vpux/utils/core/checked_cast.hpp"
 #include "vpux/utils/core/func_ref.hpp"
 #include "vpux/utils/core/numeric.hpp"
 namespace vpux {
@@ -119,7 +121,7 @@ mlir::LogicalResult EltwiseRewriter<ConcreteOp>::matchAndRewrite(ConcreteOp orig
         mlir::Value expandedInput2;
         if (origOp.getInput1() == origOp.getInput2()) {
             expandedInput2 = expandedInput1;
-        } else if (outChanPadEnd == 0) {
+        } else if (outChanPadEnd == 0 && !VPU::hasOnlyOutPadding(getModuleOp(origOp))) {
             expandedInput2 = origOp.getInput2();
         } else {
             _log.trace("Expand second input tensor");
@@ -141,10 +143,20 @@ mlir::LogicalResult EltwiseRewriter<ConcreteOp>::matchAndRewrite(ConcreteOp orig
         outPadAfter[Dims4D::Act::C] = outChanPadEnd;
 
         const auto ndType = origOp.getType().template cast<vpux::NDTypeInterface>();
+        auto outChanBeforeAttr = origOp.getOutputChannelsAttr();
+        auto inChanAutoPadAttr = origOp.getInputChannelsAttr();
+
+        if (VPU::hasOnlyOutPadding(getModuleOp(origOp))) {
+            outChanBeforeAttr = vpux::getIntAttr(origOp.getContext(), ndType.getShape()[Dims4D::Act::C]);
+        }
+        if (VPU::hasOnlyInPadding(getModuleOp(origOp))) {
+            inChanAutoPadAttr = vpux::getIntAttr(origOp.getContext(), getShape(origOp.getInput1())[Dims4D::Act::C]);
+        }
         const auto newOutputType = ndType.pad(outPadBefore, outPadAfter);
 
         return rewriter.create<ConcreteOp>(origOp.getLoc(), newOutputType, expandedInput1, expandedInput2,
-                                           origOp.getAutoBroadcast(), origOp.getPostOpAttr(), origOp.getClampAttr());
+                                           origOp.getAutoBroadcast(), origOp.getPostOpAttr(), origOp.getClampAttr(),
+                                           outChanBeforeAttr, inChanAutoPadAttr);
     };
 
     return generalRewrite(origOp, rewriter, opCreator, extractMeaningfulOutput, _log.nest());

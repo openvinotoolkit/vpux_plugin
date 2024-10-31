@@ -301,11 +301,11 @@ NDTypeInterface VPU::SparseTensorType::changeShapeElemType(ShapeRef shape, mlir:
     if (auto seAttr = getSeAttr()) {
         inputDataShape = seAttr.backInferInputShape(shape);
     }
-    VPU::DistributedTensorAttr possibleDistribution =
+    VPU::DistributionInfoAttr possibleDistribution =
             containsDistributedTypes()
                     ? getDistributedTypes().front().cast<VPU::DistributedTensorType>().getDistribution()
                     : nullptr;
-    auto newShape = [&](vpux::VPU::DistributedTensorAttr dist) {
+    auto newShape = [&](vpux::VPU::DistributionInfoAttr dist) {
         if (dist != nullptr) {
             if (VPU::isDistributedAttrWithExplicitShapesAndOffsets(dist)) {
                 auto newDistribution = VPU::getNonOverlappedDistributedAttr(
@@ -547,29 +547,29 @@ SmallVector<mlir::Type> VPU::SparseTensorType::getDistributedTypes() const {
     return distributedTypes;
 }
 
-// @brief Change the type's shapes when the DistributedType has an explicit DistributedTensorAttr.
-// Each type implementing this interface will decide the appropriate explicit DistributedTensorAttr
+// @brief Change the type's shapes when the DistributedType has an explicit DistributionInfoAttr.
+// Each type implementing this interface will decide the appropriate explicit DistributionInfoAttr
 // for its components, based on the one that was passed as an arg.
 NDTypeInterface VPU::SparseTensorType::changeShapeForExplicitDistribution(
-        ShapeRef shape, VPU::DistributedTensorAttr distributedAttr) const {
+        ShapeRef shape, VPU::DistributionInfoAttr distributedAttr) const {
     const auto typeComponents = TypeComponents().setShape(shape);
     return changeTypeComponentsForExplicitDistribution(typeComponents, distributedAttr);
 }
 
-// @brief Change the type's shapes and elem type when the DistributedType has an explicit DistributedTensorAttr.
-// Each type implementing this interface will decide the appropriate explicit DistributedTensorAttr
+// @brief Change the type's shapes and elem type when the DistributedType has an explicit DistributionInfoAttr.
+// Each type implementing this interface will decide the appropriate explicit DistributionInfoAttr
 // for its components, based on the one that was passed as an arg.
 NDTypeInterface VPU::SparseTensorType::changeShapeElemTypeForExplicitDistribution(
-        ShapeRef shape, mlir::Type elemType, VPU::DistributedTensorAttr distributedAttr) const {
+        ShapeRef shape, mlir::Type elemType, VPU::DistributionInfoAttr distributedAttr) const {
     const auto typeComponents = TypeComponents().setShape(shape).setElementType(elemType);
     return changeTypeComponentsForExplicitDistribution(typeComponents, distributedAttr);
 }
 
-// @brief Change the type's components when the DistributedType has an explicit DistributedTensorAttr.
-// Each type implementing this interface will decide the appropriate explicit DistributedTensorAttr
+// @brief Change the type's components when the DistributedType has an explicit DistributionInfoAttr.
+// Each type implementing this interface will decide the appropriate explicit DistributionInfoAttr
 // for its components, based on the one that was passed as an arg.
 NDTypeInterface VPU::SparseTensorType::changeTypeComponentsForExplicitDistribution(
-        const TypeComponents& typeComponents, VPU::DistributedTensorAttr distributedAttr) const {
+        const TypeComponents& typeComponents, VPU::DistributionInfoAttr distributedAttr) const {
     if (distributedAttr == nullptr) {
         return changeTypeComponents(typeComponents);
     }
@@ -638,11 +638,11 @@ NDTypeInterface VPU::SparseTensorType::changeTypeComponentsForExplicitDistributi
                                       getSparsityCompression(), getSeAttr());
 }
 
-// @brief Extract a dense tile from a DistributedType with an explicit DistributedTensorAttr.
-// Each type implementing this interface will decide the appropriate explicit DistributedTensorAttr
+// @brief Extract a dense tile from a DistributedType with an explicit DistributionInfoAttr.
+// Each type implementing this interface will decide the appropriate explicit DistributionInfoAttr
 // for its components, based on the one that was passed as an arg.
 NDTypeInterface VPU::SparseTensorType::extractDenseTileForExplicitDistribution(
-        vpux::ShapeRef tileOffsets, vpux::ShapeRef tileShape, VPU::DistributedTensorAttr distributedAttr) const {
+        vpux::ShapeRef tileOffsets, vpux::ShapeRef tileShape, VPU::DistributionInfoAttr distributedAttr) const {
     if (distributedAttr == nullptr) {
         return extractDenseTile(tileOffsets, tileShape);
     }
@@ -713,6 +713,6 @@ NDTypeInterface VPU::SparseTensorType::extractDenseTileForExplicitDistribution(
 
 NDTypeInterface VPU::SparseTensorType::extractViewTileForExplicitDistribution(
         vpux::ShapeRef /*tileOffsets*/, vpux::ShapeRef /*tileShape*/, vpux::ShapeRef /*tileElemStrides*/,
-        VPU::DistributedTensorAttr /*distributedAttr*/) const {
+        VPU::DistributionInfoAttr /*distributedAttr*/) const {
     VPUX_THROW("DistributedTensorType only supports compact strides");
 }

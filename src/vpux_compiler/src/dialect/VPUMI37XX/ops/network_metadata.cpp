@@ -35,13 +35,23 @@ void vpux::VPUMI37XX::NetworkMetadataOp::serialize(elf::writer::BinaryDataSectio
     binDataSection.appendData(&serializedMetadata[0], serializedMetadata.size());
 }
 
-void vpux::VPUMI37XX::NetworkMetadataOp::serialize(elf::writer::BinaryDataSection<uint8_t>& binDataSection) {
-    VPUX_UNUSED(binDataSection);
-    VPUX_THROW("ERROR");
+void vpux::VPUMI37XX::NetworkMetadataOp::serialize(elf::writer::BinaryDataSection<uint8_t>&) {
+    // TODO: E#80148 after interface refactoring should we not require serialization for NetworkMetadataOp
+#ifdef VPUX_DEVELOPER_BUILD
+    auto logger = Logger::global();
+    logger.warning("Serializing {0} op, which may mean invalid usage");
+#endif
 }
 
 size_t vpux::VPUMI37XX::NetworkMetadataOp::getBinarySize() {
-    return sizeof(elf::NetworkMetadata);
+    // calculate size based on serialized form, instead of just sizeof(NetworkMetadata)
+    // serialization uses metadata that also gets stored in the blob and must be accounted for
+    // also for non-POD types (e.g. have vector as member) account for all data to be serialized
+    // (data owned by vector, instead of just pointer)
+    auto metadataPtr =
+            vpux::ELFNPU37XX::constructMetadata(getOperation()->getParentOfType<mlir::ModuleOp>(), Logger::global());
+    auto& metadata = *metadataPtr.get();
+    return elf::MetadataSerialization::serialize(metadata).size();
 }
 
 size_t vpux::VPUMI37XX::NetworkMetadataOp::getAlignmentRequirements() {

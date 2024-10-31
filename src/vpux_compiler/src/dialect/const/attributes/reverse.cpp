@@ -79,12 +79,7 @@ Const::Content reverseImpl(Const::Content& input, NDTypeInterface outputType, in
     auto outBuf = output.getTempBuf<StorageType>();
 
     const auto inputValues = input.getValues<StorageType>();
-    const size_t inputSize = inputValues.end() - inputValues.begin();
-    for (size_t i = 0; i < inputSize; i++) {
-        auto it = inputValues.begin() + i; /* avoiding using ++ operators in implementation of base class iterator
-                                              which is slow in DEBUG mode compilations */
-        outBuf[i] = *it;
-    }
+    std::copy(inputValues.begin(), inputValues.end(), outBuf.begin());
 
     for (auto it = outBuf.begin(); it < outBuf.end(); it += spatialDims) {
         std::reverse(it, it + spatialDims);
@@ -121,11 +116,6 @@ Const::Content vpux::Const::ReverseAttr::transform(vpux::Const::Content& input) 
     VPUX_THROW("Unexpected data type: {0}", inputElementType);
 }
 
-//
-// ContentAttr::reverse
-//
-
-Const::ContentAttr vpux::Const::ContentAttr::reverse(Dim axis) const {
-    return ContentAttr::addTransformation(
-            *this, Const::ReverseAttr::get(getIntAttr(getContext(), axis.ind())).cast<Const::TransformAttrInterface>());
+Const::ContentSetup vpux::Const::ContentSetup::reverse(Dim axis) {
+    return addTransformation(Const::ReverseAttr::get(getIntAttr(getContext(), axis.ind())));
 }

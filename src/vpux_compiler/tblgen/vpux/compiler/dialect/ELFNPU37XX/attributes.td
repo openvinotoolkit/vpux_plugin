@@ -174,6 +174,9 @@ def ELFNPU37XX_RelocationType :
                 I64EnumAttrCase<"R_VPU_DISP28_MULTICAST_OFFSET",             9>,
                 I64EnumAttrCase<"R_VPU_DISP4_MULTICAST_OFFSET_CMP",         10>,
                 I64EnumAttrCase<"R_VPU_N_CONSECUTIVE_32",                   11>,
+                I64EnumAttrCase<"R_VPU_16_SUM",                           1011>,
+                I64EnumAttrCase<"R_VPU_64_MULT",                          1012>,
+                I64EnumAttrCase<"R_VPU_64_MULT_SUB",                      1013>
             ]
         > {
 }

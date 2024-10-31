@@ -14,8 +14,8 @@ using PermuteInferParams =
         std::tuple<vpux::DimsOrder::StorageType, vpux::DimsOrder::StorageType, vpux::DimsOrder::StorageType, int32_t>;
 using MLIR_IE_PermuteInfer = testing::TestWithParam<PermuteInferParams>;
 
-mlir::Value buildConstant(mlir::MLIRContext& ctx, const ShapeRef shape, const int32_t axis,
-                          const DimsOrder inputOrder) {
+Const::DeclareOp buildConstant(mlir::MLIRContext& ctx, const ShapeRef shape, const int32_t axis,
+                               const DimsOrder inputOrder) {
     std::vector<uint8_t> content(shape.totalSize(), 1);
     const auto dataType = mlir::RankedTensorType::get(shape.raw(), getUInt8Type(&ctx));
     const auto dataAttr = mlir::DenseElementsAttr::get(dataType, mlir::ArrayRef<uint8_t>(content));
@@ -28,17 +28,14 @@ mlir::Value buildConstant(mlir::MLIRContext& ctx, const ShapeRef shape, const in
     const auto quantType =
             mlir::quant::UniformQuantizedPerAxisType::get(0, getUInt8Type(&ctx), mlir::Float32Type::get(&ctx), scales,
                                                           zeroPoints, axis, storageTypeMin, storageTypeMax);
-    const auto contentAttr = baseContentAttr.reorder(inputOrder).quantCast(quantType);
+    auto contentAttr = baseContentAttr.transform().reorder(inputOrder).quantCast(quantType).get();
     const auto quantDataType = contentAttr.getType();
     mlir::OpBuilder builder(&ctx);
-    auto declareOp = builder.create<Const::DeclareOp>(mlir::UnknownLoc::get(&ctx), quantDataType, contentAttr);
-    return declareOp.getOutput();
+    return builder.create<Const::DeclareOp>(mlir::UnknownLoc::get(&ctx), quantDataType, std::move(contentAttr));
 }
 
 TEST_P(MLIR_IE_PermuteInfer, inferPermuteReturnTypeComponents) {
-    mlir::DialectRegistry registry;
-    vpux::registerDialects(registry);
-    vpux::registerCommonInterfaces(registry);
+    auto registry = vpux::createDialectRegistry();
     mlir::MLIRContext ctx(registry);
     ctx.loadDialect<mlir::quant::QuantizationDialect>();
     ctx.loadDialect<Const::ConstDialect>();
@@ -50,7 +47,8 @@ TEST_P(MLIR_IE_PermuteInfer, inferPermuteReturnTypeComponents) {
     const int32_t axis = std::get<3>(params);
 
     const Shape shape = {2, 4, 6, 8};
-    const auto inputVal = buildConstant(ctx, shape, axis, inputOrder);
+    auto declareOp = buildConstant(ctx, shape, axis, inputOrder);
+    const auto inputVal = declareOp.getOutput();
     const auto origAxisDimSize = shape[Dim(axis)];
 
     SmallVector<mlir::ShapedTypeComponents> inferredReturnShapes;
@@ -68,6 +66,8 @@ TEST_P(MLIR_IE_PermuteInfer, inferPermuteReturnTypeComponents) {
     const auto newAxis = perAxisQuantType.getQuantizedDimension();
     const auto newAxisDimSize = outDims[newAxis];
     ASSERT_EQ(newAxisDimSize, origAxisDimSize);
+
+    declareOp->erase();
 }
 
 const std::vector<int32_t> axes = {0, 1, 2, 3};

@@ -69,8 +69,7 @@ TEST_F(MLIR_SymbolTable, CheckGenerateNewRefAttr) {
 }
 
 TEST_F(MLIR_SymbolTable, ReplaceAllSymbolUses) {
-    mlir::DialectRegistry registry;
-    vpux::registerDialects(registry);
+    auto registry = vpux::createDialectRegistry();
     mlir::MLIRContext ctx(registry);
 
     constexpr llvm::StringLiteral inputIR = R"(

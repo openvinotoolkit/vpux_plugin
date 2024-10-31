@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -43,5 +43,6 @@ size_t getDPUTaskOpCost(VPUIP::DPUTaskOp dpuTaskOp, const std::shared_ptr<VPUNN:
                         VPU::ArchKind arch, vpux::Logger log);
 
 VPUNN::MemoryLocation getMemoryLocation(mlir::Type type);
+VPUNN::ActivationFunction getVPUNNActivationFunction(VPU::PPEAttr ppeOpaqueAttr);
 
 }  // namespace vpux

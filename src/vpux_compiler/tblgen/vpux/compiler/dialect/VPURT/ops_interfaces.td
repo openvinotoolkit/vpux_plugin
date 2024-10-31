@@ -16,13 +16,34 @@ def VPURT_SerializeInterface : OpInterface<"SerializeInterface"> {
     let description = "Interface for blob serialization";
 
     let cppNamespace = "vpux::VPURT";
+}
+
+//
+// BarrierOpInterface
+//
+
+def VPURT_BarrierOpInterface : OpInterface<"BarrierOpInterface"> {
+    let description = "Interface for accessing barrier type ops";
+
+    let cppNamespace = "vpux::VPURT";
 
     let methods = [
         InterfaceMethod<
-            "Serialize the Task to BLOB format",
-            "vpux::VPUIP::BlobWriter::SpecificTask",
-            "serialize", (ins "vpux::VPUIP::BlobWriter&":$writer)
+            "Get barrier produced by this op",
+            "mlir::Value", "getBarrier", (ins),
+            [{}],
+            [{
+                return $_op.getBarrier();
+            }]
         >,
+        InterfaceMethod<
+            "Check if barrier is a final barrier",
+            "bool", "getIsFinalBarrier", (ins),
+            [{}],
+            [{
+                return $_op.getIsFinalBarrier();
+            }]
+        >
     ];
 }
 

@@ -411,24 +411,27 @@ def FuseReordersPass : PassBase<"fuse-reorders", "vpux::FunctionPass"> {
     ];
 }
 
-def FuseMultiplyToConv : PassBase<"fuse-multiply-to-conv", "vpux::FunctionPass"> {
-    let summary = "Fuses suitable `IE.Multiply` with const operand to `IE.Convolution`";
+def FuseStaticScale : PassBase<"fuse-static-scale", "vpux::FunctionPass"> {
+    let summary = "Fuses suitable `IE.Multiply` with const operand to `IE.Convolution` or `IE.AvgPool`";
 
     let description = [{
         This transformation takes the following subgraph:
         ```
-                                        Const.Declare
-                                            |
-            IE.Convolution -> ... -> IE.Multiply
+            IE.Convolution / IE.AvgPool     Const.Declare
+                        \                       /
+                                IE.Multiply
         ```
-        and fuses the `IE.Multiply` into `IE.Convolution` (see `static_scale`
+        and fuses the `IE.Multiply` into `IE.Convolution` or `IE.AvgPool` (see `static_scale`
         attribute and weights table generation for details).
 
-        Fusing multiplication by a constant to a convolution makes the
+        Fusing multiplication by a constant to a Conv or Pooling makes the
         multiplication itself effectively no-op on several HW architectures.
+
+        Aplly the pass before ConvertToScaleShift and after ConvertDivideToMultiply to increase
+        the applicability.
     }];
 
-    let constructor = "vpux::IE::arch37xx::createFuseMultiplyToConvPass()";
+    let constructor = "vpux::IE::arch37xx::createFuseStaticScalePass()";
 
     let dependentDialects = [
         "vpux::IE::IEDialect"
@@ -516,6 +519,26 @@ def FuseOutstandingDequant: PassBase<"fuse-outstanding-dequant", "vpux::Function
     }];
 
     let constructor = "vpux::IE::arch37xx::createFuseOutstandingDequant()";
+
+    let dependentDialects = [
+        "vpux::IE::IEDialect"
+    ];
+}
+
+//
+// WeightsQuantFusedIntoTaskPass
+//
+
+def WeightsQuantFusedIntoTask: PassBase<"weights-quant-fused-into-task", "vpux::FunctionPass"> {
+    let summary = "Flag that weights quant is fused into task";
+
+    let description = [{
+        The pass is a part of `LowPrecision` pipeline.
+
+        Pass walks through weights constants and flag if it's fused into task
+    }];
+
+    let constructor = "vpux::IE::arch37xx::createWeightsQuantFusedIntoTaskPass()";
 
     let dependentDialects = [
         "vpux::IE::IEDialect"

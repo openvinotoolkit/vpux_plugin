@@ -52,37 +52,13 @@ bool vpux::VPU::AddOp::checkStrategyCompatibility(VPU::MultiClusterStrategy stra
            strategy == VPU::MultiClusterStrategy::SplitOverWidth;
 }
 
-vpux::VPU::DistributedTensorNative vpux::VPU::AddOp::getExplicitDistributedTensorAttr(
+vpux::VPU::DistributionInfo vpux::VPU::AddOp::getExplicitDistributionInfoAttr(
         vpux::ShapeRef shape, vpux::VPU::DistributionMode distributionMode, ArrayRef<int64_t> numTiles,
         const int64_t numClusters, ArrayRef<int64_t> alignment, const bool uniformDistributedSegments,
         const vpux::VPU::OverlapDistributionParams& overlapParams) {
-    return VPU::getSWExplicitDistributedTensorNative(mlir::cast<VPU::SWOpInterface>(getOperation()), shape,
-                                                     distributionMode, numTiles, numClusters, alignment,
-                                                     uniformDistributedSegments, overlapParams);
-}
-
-bool VPU::AddOp::doesLayerFitIntoCMX(VPU::MultiClusterStrategy strategy, Byte reservedMem) {
-    auto addOp = mlir::cast<VPU::AddOp>(getOperation());
-    const auto outputType = addOp->getResult(0).getType().cast<vpux::NDTypeInterface>();
-    auto numClusters = VPU::getOptimalNumClusters(addOp, outputType.getShape(), strategy);
-
-    SmallVector<Byte> buffersSize{
-            VPU::getTotalAllocSizeWithDistribution(
-                    getInput1().getType(),
-                    getActivationDistributionAttrFromOp(addOp, getInput1().getType(), numClusters.getInt(), strategy)),
-            VPU::getTotalAllocSizeWithDistribution(
-                    getInput2().getType(),
-                    getActivationDistributionAttrFromOp(addOp, getInput2().getType(), numClusters.getInt(), strategy)),
-            VPU::getTotalAllocSizeWithDistribution(
-                    getOutput().getType(),
-                    getOutputDistributionAttrFromOp(addOp, getOutput().getType(), numClusters.getInt(), strategy))};
-
-    auto totalAvailableCMXSize = reservedMem.count() == 0 ? getTotalCMXSize(getOperation()).count()
-                                                          : getTotalCMXFragmentationAwareSize(getOperation()).count();
-
-    return vpux::VPU::calculateAlignedBuffersMemoryRequirement(getArch(getOperation()), buffersSize).count() +
-                   reservedMem.count() <=
-           totalAvailableCMXSize;
+    return VPU::getSWExplicitDistributionInfo(mlir::cast<VPU::SWOpInterface>(getOperation()), shape, distributionMode,
+                                              numTiles, numClusters, alignment, uniformDistributedSegments,
+                                              overlapParams);
 }
 
 //
@@ -96,11 +72,11 @@ void vpux::VPU::AddOp::build(::mlir::OpBuilder& odsBuilder, ::mlir::OperationSta
 }
 
 bool vpux::VPU::AddOp::fitIntoCMX(llvm::ArrayRef<vpux::NDTypeInterface> buffers, Byte reservedMem) {
-    VPUX_THROW_UNLESS(buffers.size() == 5,
-                      "AccumulateOp requires 4 inputs and 1 output, but the number of buffers is {0}", buffers.size());
+    VPUX_THROW_UNLESS(buffers.size() == 3, "AddOp requires 2 input and 1 output, but the number of buffer is {0}",
+                      buffers.size());
 
     SmallVector<Byte> buffersSize;
-    llvm::transform(buffers, std::back_inserter(buffersSize), [](const auto buffer) {
+    std::transform(buffers.begin(), buffers.end(), std::back_inserter(buffersSize), [](const auto buffer) {
         return buffer.getTotalAllocSize();
     });
 

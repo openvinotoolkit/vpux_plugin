@@ -50,7 +50,7 @@ protected:
         auto convertI32 = std::make_shared<ov::op::v0::Convert>(nonZero, ov::element::i32);
 
         auto results = ov::ResultVector();
-        for (size_t i = 0; i < nonZero->get_output_size(); i++) {
+        for (size_t i = 0; i < convertI32->get_output_size(); i++) {
             results.push_back(std::make_shared<ov::opset10::Result>(convertI32->output(i)));
         }
 
@@ -60,6 +60,7 @@ protected:
 
 TEST_P(NonZeroLayerTest, NPU3720_HW) {
     abs_threshold = 0.0f;
+    setMLIRCompilerType();
     setDefaultHardwareMode();
     run(Platform::NPU3720);
 }
@@ -69,7 +70,7 @@ const std::vector<InputType> inputPrecision = {ov::element::f32, ov::element::i3
 const std::vector<BoundedShape> inShapesStatic = {staticShape(120), staticShape(8, 32), staticShape(4, 8, 20),
                                                   staticShape(1, 3, 3)};
 
-INSTANTIATE_TEST_SUITE_P(DISABLED_smoke, NonZeroLayerTest,
+INSTANTIATE_TEST_SUITE_P(smoke, NonZeroLayerTest,
                          ::testing::Combine(::testing::ValuesIn(inShapesStatic), ::testing::ValuesIn(inputPrecision)),
                          PrintTestCaseName());
 

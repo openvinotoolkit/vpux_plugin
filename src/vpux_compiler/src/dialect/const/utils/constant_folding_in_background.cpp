@@ -16,7 +16,7 @@ BackgroundConstantFolding::BackgroundConstantFolding(mlir::MLIRContext* ctx, siz
                                                      double cacheCleanThreshold, Logger log)
         : _ctx(ctx), _maxConcurrentTasks(maxConcurrentTasks), _log(log) {
     if (!_ctx->isMultithreadingEnabled()) {
-        _log.warning("Multi thread is disabled, background constant folding is disabled");
+        _log.info("Multi thread is disabled, background constant folding is disabled");
         _isEnabled = false;
         return;
     }
@@ -24,7 +24,7 @@ BackgroundConstantFolding::BackgroundConstantFolding(mlir::MLIRContext* ctx, siz
     auto& threadPool = _ctx->getThreadPool();
 
     if (threadPool.getThreadCount() <= 1) {
-        _log.warning("The thread pool size is not greater than 1, background constant folding is disabled");
+        _log.info("The thread pool size is not greater than 1, background constant folding is disabled");
         _isEnabled = false;
         return;
     }
@@ -59,6 +59,28 @@ BackgroundConstantFolding::~BackgroundConstantFolding() {
     }
 }
 
+SmallVector<TransformAttrInterface> vpux::Const::BackgroundConstantFolding::stripTransformationsFrom(
+        ArrayRef<TransformAttrInterface> transformations, TransformAttrInterface transformation) {
+    auto it = std::find(transformations.rbegin(), transformations.rend(), transformation);
+
+    if (it == transformations.rend()) {
+        return {};
+    }
+
+    return SmallVector<TransformAttrInterface>(transformations.begin(), (it + 1).base());
+}
+
+SmallVector<TransformAttrInterface> vpux::Const::BackgroundConstantFolding::getLastTransformationsFrom(
+        ArrayRef<TransformAttrInterface> transformations, TransformAttrInterface transformation) {
+    auto it = std::find(transformations.rbegin(), transformations.rend(), transformation);
+
+    if (it == transformations.rend()) {
+        return SmallVector<TransformAttrInterface>(transformations);
+    }
+
+    return SmallVector<TransformAttrInterface>((it + 1).base(), transformations.end());
+}
+
 // Checks if the ContentAttr with the list of transformations up to the new one already has the folded result in the
 // cache. If it does, it will be reused and only the new transformation (and any other that is placed after the new
 // transformation in the list) will be applied.
@@ -73,14 +95,17 @@ bool tryFoldingPartially(vpux::Const::ConstantFoldingCache& cache, Const::Conten
     if (newTransformation == nullptr) {
         return false;
     }
-    auto partialContentAttr = request.stripTransformationsFrom(newTransformation);
+    auto partialTransformations = vpux::Const::BackgroundConstantFolding::stripTransformationsFrom(
+            request.getTransformations(), newTransformation);
+    auto partialContentAttr = ContentAttr::get(request.getBaseContent(), partialTransformations);
     auto maybeFoldedPartialContent = cache.getContent(partialContentAttr);
     if (!maybeFoldedPartialContent.has_value()) {
         return false;
     }
-    auto foldedPartialContent = maybeFoldedPartialContent.value();
+    auto foldedPartialContent = std::move(maybeFoldedPartialContent.value());
 
-    auto lastTransformations = request.getLastTransformationsFrom(newTransformation);
+    auto lastTransformations = vpux::Const::BackgroundConstantFolding::getLastTransformationsFrom(
+            request.getTransformations(), newTransformation);
     if (lastTransformations.empty()) {
         return false;
     }
@@ -95,7 +120,7 @@ bool tryFoldingPartially(vpux::Const::ConstantFoldingCache& cache, Const::Conten
     // Create a copy of the Content which will own the referenced buffer
     // This is done since the Content object obtained after folding may reference an external object without
     // owning it. If that object is erased, the Content object from the cache would point to an invalid object
-    cache.addContent(request, partialContent.copyUnownedBuffer());
+    cache.addContent(request, Const::Content::copyUnownedBuffer(std::move(partialContent)));
     cache.removeContent(partialContentAttr);
 
     return true;
@@ -117,8 +142,7 @@ private:
     std::condition_variable* const _cv;
 };
 
-void BackgroundConstantFolding::processFoldingRequest(const FoldingRequest& foldingRequest,
-                                                      ConstantFoldingCache& cache) {
+void BackgroundConstantFolding::processFoldingRequest(FoldingRequest&& req, ConstantFoldingCache& cache) {
     // As the main compilation process also utilizes the pool concurrently, _maxConcurrentTasks is introduced to
     // manually control the resources used by constant folding in background.
     std::unique_lock<std::mutex> lock(_mutex);
@@ -127,19 +151,26 @@ void BackgroundConstantFolding::processFoldingRequest(const FoldingRequest& fold
     });
 
     _activeTasks++;
-    _ctx->getThreadPool().async([this, foldingRequest, &cache]() {
+    _ctx->getThreadPool().async([this, foldingRequest = std::move(req), &cache]() {
         TaskCompletionNotifier notifier(_activeTasks, _cv);
 
         Const::ContentAttr request;
-        if (auto equivalenceRequest = mlir::dyn_cast_or_null<Const::EquivalenceRequestAttr>(foldingRequest.attr)) {
-            if (cache.replaceContentAttr(equivalenceRequest.getOriginalAttr(), equivalenceRequest.getNewAttr())) {
+        if (auto* equivalenceRequest = std::get_if<Const::EquivalenceRequest>(&foldingRequest.attr)) {
+            // E#135947: instead of doing replace here (which at worst does
+            // nothing and at best doesn't prevent doing too much), maintain a
+            // mapping: `(old) -> (new)` and *always* give "new attr" request
+            // (we expect "new" to be more optimal to compute). otherwise,
+            // there's really no point in several declare op canonicalizers and,
+            // in return, in the whole equivalence machinery.
+            if (cache.replaceContentAttr(equivalenceRequest->originalAttr, equivalenceRequest->newAttr)) {
                 return;
             }
-            request = equivalenceRequest.getNewAttr();
+            request = equivalenceRequest->newAttr;
         } else {
-            request = mlir::dyn_cast_if_present<Const::ContentAttr>(foldingRequest.attr);
+            VPUX_THROW_WHEN(!std::holds_alternative<Const::ContentAttr>(foldingRequest.attr),
+                            "Invalid folding request");
+            request = std::get<Const::ContentAttr>(foldingRequest.attr);
         }
-        VPUX_THROW_WHEN(request == nullptr, "Invalid folding request");
 
         if (cache.hasContent(request)) {
             if (cache.isStatisticsCollectionEnabled()) {
@@ -159,7 +190,7 @@ void BackgroundConstantFolding::processFoldingRequest(const FoldingRequest& fold
         // This is done since the Content object obtained after folding may reference an external object without
         // owning it. If that object is erased, the Content object from the cache would point to an invalid
         // object
-        cache.addContent(request, request.fold(/*bypassCache=*/true).copyUnownedBuffer());
+        cache.addContent(request, Const::Content::copyUnownedBuffer(request.fold(/*bypassCache=*/true)));
     });
 }
 
@@ -170,11 +201,11 @@ std::shared_future<void> BackgroundConstantFolding::initFoldingListener(llvm::Th
 
         while (true) {
             auto foldingRequest = cache.getRequest();
-            if (mlir::isa_and_nonnull<Const::TerminateRequestAttr>(foldingRequest.attr)) {
+            if (std::holds_alternative<FoldingRequest::TerminationToken>(foldingRequest.attr)) {
                 break;
             }
 
-            processFoldingRequest(foldingRequest, cache);
+            processFoldingRequest(std::move(foldingRequest), cache);
         }
     });
 
@@ -184,8 +215,7 @@ std::shared_future<void> BackgroundConstantFolding::initFoldingListener(llvm::Th
 void BackgroundConstantFolding::stopFoldingListener() {
     auto& cacheManager = ConstantFoldingCacheManager::getInstance();
     auto& cache = cacheManager.get(_ctx);
-    auto terminationAttr = Const::TerminateRequestAttr::get(_ctx);
-    cache.enqueueRequest(Const::FoldingRequest{terminationAttr, nullptr});
+    cache.enqueueRequest(Const::FoldingRequest{Const::FoldingRequest::TerminationToken{}, nullptr});
 
     _listenerThread.wait();
 

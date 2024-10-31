@@ -6,6 +6,7 @@
 #include "vpux/compiler/dialect/IE/transforms/passes/expand_activation_channels.hpp"
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/IE/utils/interpolate_utils.hpp"
+#include "vpux/compiler/utils/rewriter.hpp"
 
 using namespace vpux;
 
@@ -282,12 +283,28 @@ mlir::LogicalResult generalRewrite(mlir::Operation* origOp, mlir::PatternRewrite
     log.trace("Input padding : {0}", inPadsEnd);
     log.trace("Output padding : {0}", outPadsEnd);
 
+    constexpr std::string_view outChanAttrName = "output_channels";
+    constexpr std::string_view inChanAttrName = "input_channels";
+
     if (inPadsEnd[Dims4D::Act::C] == 0 && outPadsEnd[Dims4D::Act::C] == 0) {
+        if (VPU::hasOnlyOutPadding(getModuleOp(origOp)) && !origOp->hasAttr(outChanAttrName)) {
+            const auto outChanBeforeAttr =
+                    vpux::getIntAttr(origOp->getContext(), outputType.getShape()[Dims4D::Act::C]);
+            origOp->setAttr(mlir::StringAttr::get(origOp->getContext(), outChanAttrName), outChanBeforeAttr);
+        }
+        if (VPU::hasOnlyInPadding(getModuleOp(origOp)) && !origOp->hasAttr(inChanAttrName)) {
+            const auto inChanBeforeAttr = vpux::getIntAttr(origOp->getContext(), inputType.getShape()[Dims4D::Act::C]);
+            origOp->setAttr(mlir::StringAttr::get(origOp->getContext(), inChanAttrName), inChanBeforeAttr);
+        }
         return matchFailed(log, rewriter, origOp, "Both input and output channels are already aligned");
     }
 
     mlir::Value paddedInput;
     if (inPadsEnd[Dims4D::Act::C] == 0) {
+        if (VPU::hasOnlyInPadding(getModuleOp(origOp)) && !origOp->hasAttr(inChanAttrName)) {
+            const auto inChanBeforeAttr = vpux::getIntAttr(origOp->getContext(), inputType.getShape()[Dims4D::Act::C]);
+            origOp->setAttr(mlir::StringAttr::get(origOp->getContext(), inChanAttrName), inChanBeforeAttr);
+        }
         log.trace("Input channels are already aligned");
         paddedInput = origOp->getOperand(0);
     } else {
@@ -299,6 +316,11 @@ mlir::LogicalResult generalRewrite(mlir::Operation* origOp, mlir::PatternRewrite
     auto* newOp = opCreator(paddedInput, outPadsEnd[Dims4D::Act::C]);
 
     if (outPadsEnd[Dims4D::Act::C] == 0) {
+        if (VPU::hasOnlyOutPadding(getModuleOp(origOp)) && !origOp->hasAttr(outChanAttrName)) {
+            const auto outChanBeforeAttr =
+                    vpux::getIntAttr(origOp->getContext(), outputType.getShape()[Dims4D::Act::C]);
+            origOp->setAttr(mlir::StringAttr::get(origOp->getContext(), outChanAttrName), outChanBeforeAttr);
+        }
         log.trace("Output channels are already aligned");
         rewriter.replaceOp(origOp, newOp->getResult(0));
     } else {
@@ -307,8 +329,10 @@ mlir::LogicalResult generalRewrite(mlir::Operation* origOp, mlir::PatternRewrite
         const auto outShape = outputType.getShape();
         auto offsets = calcOutputSliceOffset(origOp, outPadsEnd);
 
-        rewriter.replaceOpWithNewOp<IE::SliceOp>(origOp, origOp->getResult(0).getType(), newOp->getResult(0),
-                                                 getIntArrayAttr(ctx, offsets), getIntArrayAttr(ctx, outShape));
+        auto sliceOp =
+                rewriter.replaceOpWithNewOp<IE::SliceOp>(origOp, origOp->getResult(0).getType(), newOp->getResult(0),
+                                                         getIntArrayAttr(ctx, offsets), getIntArrayAttr(ctx, outShape));
+        extendOpLoc(sliceOp, "slice_out");
     }
 
     return mlir::success();
@@ -334,7 +358,8 @@ mlir::LogicalResult IE::MaxPoolRewriter::matchAndRewrite(IE::MaxPoolOp origOp, m
 
         return rewriter.create<IE::MaxPoolOp>(origOp.getLoc(), newOutputType, expandedInput, origOp.getKernelSize(),
                                               origOp.getStrides(), origOp.getPadsBegin(), origOp.getPadsEnd(),
-                                              origOp.getRoundingType(), origOp.getPostOpAttr(), origOp.getClampAttr());
+                                              origOp.getRoundingType(), origOp.getPostOpAttr(), origOp.getClampAttr(),
+                                              origOp.getOutputChannelsAttr(), origOp.getInputChannelsAttr());
     };
 
     return generalRewrite(origOp, rewriter, opCreator, extractMeaningfulOutput, _log.nest());
@@ -383,7 +408,8 @@ mlir::LogicalResult IE::ConvolutionRewriter::matchAndRewrite(IE::ConvolutionOp o
         return rewriter.create<IE::ConvolutionOp>(origOp.getLoc(), newOutputType, expandedInput, paddedFilter,
                                                   paddedBiases, origOp.getStrides(), origOp.getPadsBegin(),
                                                   origOp.getPadsEnd(), origOp.getDilations(), origOp.getPostOpAttr(),
-                                                  origOp.getClampAttr(), origOp.getStaticScaleAttr());
+                                                  origOp.getClampAttr(), origOp.getStaticScaleAttr(),
+                                                  origOp.getOutputChannelsAttr(), origOp.getInputChannelsAttr());
     };
 
     const auto calcOutputSliceOffset = [&](mlir::Operation*, Shape outPadsEnd) -> SmallVector<int64_t> {
@@ -490,11 +516,11 @@ mlir::LogicalResult IE::GroupConvolutionRewriter::matchAndRewrite(IE::GroupConvo
         const auto newOutputType = ndType.pad(outPadBefore, outPadAfter);
         const auto newConvOutShape = newOutputType.getShape().toValues();
 
-        return rewriter.create<IE::GroupConvolutionOp>(origOp.getLoc(), newOutputType, expandedInput, paddedFilter,
-                                                       paddedBiases, origOp.getStrides(), origOp.getPadsBegin(),
-                                                       origOp.getPadsEnd(), origOp.getDilations(),
-                                                       getIntAttr(getContext(), newConvOutShape[Dims4D::Act::C]),
-                                                       origOp.getPostOpAttr(), origOp.getClampAttr());
+        return rewriter.create<IE::GroupConvolutionOp>(
+                origOp.getLoc(), newOutputType, expandedInput, paddedFilter, paddedBiases, origOp.getStrides(),
+                origOp.getPadsBegin(), origOp.getPadsEnd(), origOp.getDilations(),
+                getIntAttr(getContext(), newConvOutShape[Dims4D::Act::C]), origOp.getPostOpAttr(),
+                origOp.getClampAttr(), origOp.getOutputChannelsAttr(), origOp.getInputChannelsAttr());
     };
 
     return generalRewrite(origOp, rewriter, opCreator, extractMeaningfulOutput, _log.nest());
@@ -588,7 +614,8 @@ mlir::LogicalResult IE::TransposedConvolutionRewriter::matchAndRewrite(IE::Trans
         return rewriter.create<IE::TransposedConvolutionOp>(
                 origOp.getLoc(), newOutputType, expandedInput, paddedFilter, origOp.getOutputShape(), paddedBiases,
                 origOp.getStrides(), origOp.getPadsBegin(), origOp.getPadsEnd(), origOp.getDilations(),
-                origOp.getOutputPaddingAttr(), origOp.getPostOpAttr(), origOp.getClampAttr());
+                origOp.getOutputPaddingAttr(), origOp.getPostOpAttr(), origOp.getClampAttr(),
+                origOp.getOutputChannelsAttr(), origOp.getInputChannelsAttr());
     };
 
     const auto calcOutputSliceOffset = [&](mlir::Operation*, Shape outPadsEnd) -> SmallVector<int64_t> {

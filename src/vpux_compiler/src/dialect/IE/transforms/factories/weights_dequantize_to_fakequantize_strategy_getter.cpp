@@ -12,7 +12,7 @@
 
 using namespace vpux;
 
-std::unique_ptr<IGreedilyPassStrategy> IE::createWeightsDequantizeToFakeQuantizeStrategyGetter(
+std::unique_ptr<IGreedilyPassStrategy> IE::createWeightsDequantizeToFakeQuantizeStrategy(
         mlir::func::FuncOp funcOp, bool enableWDBlockArgumentInput) {
     const auto arch = VPU::getArch(funcOp);
 

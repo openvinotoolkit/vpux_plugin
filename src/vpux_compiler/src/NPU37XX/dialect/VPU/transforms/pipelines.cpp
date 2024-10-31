@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2023-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -16,21 +16,22 @@ void vpux::VPU::arch37xx::buildIncrementalPipeline(mlir::OpPassManager& pm, cons
                                                    Logger log) {
     pm.addPass(VPU::arch37xx::createDecomposeMVNPass(log));
 
-    pm.addPass(VPU::createMultiClusterStrategyAssignmentPass(options.enablePrefetching, log));
+    pm.addPass(VPU::createMultiClusterStrategyAssignmentPass(options.enablePrefetching, options.enableMCSideLoadDump,
+                                                             options.modelHash, log));
 
     pm.addPass(VPU::createManualStrategyUtilsPass(options.writeStrategyToJson, writeStrategyFileLocation,
-                                                  options.readStrategyFromJson, readStrategyFileLocation, log));
+                                                  options.readStrategyFromJson, readStrategyFileLocation,
+                                                  options.enableMCSideLoadDump, options.modelHash, log));
 
     pm.addPass(VPU::createSplitGRUSequencePass(log));
+    pm.addPass(VPU::arch37xx::createApplyTilingMVN1SumPass(log));
 
     VPU::buildTilingPipeline(pm, VPU::TilingOptions(options), log);
 
-    pm.addPass(VPU::createComputeInterpolateCoordinatesPass(log));
     pm.addPass(VPU::createRemoveOutputSparseToAvoidSuboptimalDPUWorkloadsPass(log));
 
-    pm.addPass(VPU::createMakeOpsWithDistributedTensorPass(options.enableExplicitDistributedTensorAttr, log));
+    pm.addPass(VPU::createMakeOpsWithDistributedTensorPass(options.enableExplicitDistributionInfoAttr, log));
     pm.addPass(VPU::createAdjustDistributedTensorAroundOpsPass(log));
-    pm.addPass(VPU::createWrapDistributedOpsInNCEClusterTiling(log));
 }
 
 //
@@ -40,7 +41,7 @@ void vpux::VPU::arch37xx::buildIncrementalPipeline(mlir::OpPassManager& pm, cons
 void vpux::VPU::arch37xx::buildDefaultHWPipeline(mlir::OpPassManager& pm,
                                                  const VPU::arch37xx::DefaultHWOptions& options, Logger log) {
     const auto grc = getDefaultGreedyRewriteConfig();
-    pm.addPass(VPU::arch37xx::createAdjustForOptimizedSwKernelPass(log));
+    pm.addPass(VPU::arch37xx::createAdjustForOptimizedLayersPass(log));
 
     pm.addPass(VPU::createDetectionOutputDecompositionPass(log));
     pm.addPass(VPU::arch37xx::createSplitRealDFTOpsPass(log));
@@ -55,10 +56,10 @@ void vpux::VPU::arch37xx::buildDefaultHWPipeline(mlir::OpPassManager& pm,
                 /*seExperimentalOpsEnabled=*/isOptionEnabled(options.enableExperimentalSEPtrsOperations), log));
     }
 
-    pm.addPass(VPU::createSetupPPEPass(log));
     pm.addPass(VPU::createFuseClampPass(log));
 
     pm.addPass(VPU::createEnsureNCEOpsSizeRequirementsPass(log));
+    pm.addPass(VPU::createOptimizeConcatPass(log));
 
     if (options.enableWeightsSparsity) {
         VPU::buildWeightsSparsityPipeline(pm, VPU::WeightsSparsityOptions(options), log);
@@ -83,6 +84,7 @@ void vpux::VPU::arch37xx::buildDefaultHWPipeline(mlir::OpPassManager& pm,
     pm.addPass(VPU::createOptimizeConcatPass(log));
     pm.addPass(VPU::createAdjustMemorySpacePass(log));
     pm.addPass(mlir::createCanonicalizerPass(grc));
+    pm.addPass(VPU::createWrapDistributedOpsInNCEClusterTiling(log));
 
     pm.addPass(VPU::createCMXConcatPass(log, options.supportNCEOpInsertion));
     pm.addPass(mlir::createCanonicalizerPass(grc));
@@ -90,6 +92,7 @@ void vpux::VPU::arch37xx::buildDefaultHWPipeline(mlir::OpPassManager& pm,
     pm.addPass(VPU::createSplitNCEOpsOntoWorkloadsPass(log));
     pm.addPass(VPU::arch37xx::createCorrectNCEWorkloadsPass(log));
     pm.addPass(VPU::createResolveEltwiseWithZTiledWorkloadsPass(log));
+    pm.addPass(VPU::createLegalizeDynamicShapeConcatForSWLayersPass(log));
 }
 
 void vpux::VPU::arch37xx::registerVPUPipelines() {

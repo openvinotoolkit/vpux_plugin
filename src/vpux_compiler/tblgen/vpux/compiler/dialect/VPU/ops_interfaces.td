@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -75,7 +75,7 @@ def VPU_ClusteredOpInterface : OpInterface<"ClusteredOpInterface"> {
 
         InterfaceMethod<
                 "Get optimal cluster number for operation",
-                "mlir::IntegerAttr", "getOptimalNumClusters", (ins "vpux::ShapeRef":$shape, "vpux::VPU::MultiClusterStrategy":$strategy),
+                "int64_t", "getOptimalNumClusters", (ins "vpux::ShapeRef":$shape, "vpux::VPU::MultiClusterStrategy":$strategy),
                 [{}],
                 [{
                     return vpux::VPU::getOptimalNumClusters($_op, shape, strategy);
@@ -83,8 +83,8 @@ def VPU_ClusteredOpInterface : OpInterface<"ClusteredOpInterface"> {
                 >,
 
         InterfaceMethod<
-                "Get DistributedTensorAttr with per cluster shapes/offsets defined explicitly, rather than through params such as kernel/pad/stride etc.",
-                "vpux::VPU::DistributedTensorNative", "getExplicitDistributedTensorAttr",
+                "Get DistributionInfoAttr with per cluster shapes/offsets defined explicitly, rather than through params such as kernel/pad/stride etc.",
+                "vpux::VPU::DistributionInfo", "getExplicitDistributionInfoAttr",
                 (ins "vpux::ShapeRef":$shape, "vpux::VPU::DistributionMode":$distributionMode,
                 "ArrayRef<int64_t>":$numTiles, "const int64_t":$numClusters, "ArrayRef<int64_t>":$alignment,
                 "const bool":$uniformDistributedSegments, "const vpux::VPU::OverlapDistributionParams&":$overlapParams)
@@ -143,10 +143,10 @@ def VPU_ClusteredOpInterface : OpInterface<"ClusteredOpInterface"> {
         InterfaceMethod<
                 "Verifies if the operation fits into CMX with the given multi-cluster strategy",
                 "bool", "doesLayerFitIntoCMX",
-                (ins "VPU::MultiClusterStrategy":$strategy, "vpux::Byte":$reservedMem),
+                (ins "VPU::MultiClusterStrategy":$strategy, "SiblingOpsAnalysis&":$siblingsAnalysis, "vpux::Byte":$reservedMem),
                 [{}],
                 [{
-                    return VPU::doesLayerFitIntoCMX($_op, strategy, reservedMem);
+                    return VPU::doesLayerFitIntoCMX($_op, strategy, siblingsAnalysis, reservedMem);
                 }]
                 >,
 
@@ -157,6 +157,15 @@ def VPU_ClusteredOpInterface : OpInterface<"ClusteredOpInterface"> {
                 [{}],
                 [{
                     return false;
+                }]
+                >,
+        InterfaceMethod<
+                "Compute distributed type for operand",
+                "vpux::NDTypeInterface", "getDistributedTypeForOpOperand",
+                (ins "mlir::OpOperand&":$operand, "bool":$hasExplicitDistributedAttr, "SiblingOpsAnalysis&":$siblingsAnalysis),
+                [{}],
+                [{
+                    return nullptr;
                 }]
                 >,
     ];
@@ -231,19 +240,19 @@ def VPU_NCEOpInterface : OpInterface<"NCEOpInterface"> {
 
         InterfaceMethod<
             "Get NCE operation PPE",
-            "std::optional<vpux::VPU::PPETaskAttr>", "getPPE", (ins),
+            "vpux::VPU::PPEAttr", "getOpaquePPE", (ins),
             [{}],
             [{
-                return $_op.getPpe();
+                return $_op.getOpaquePpe();
             }]
         >,
 
         InterfaceMethod<
             "Set NCE operation PPE",
-            "void", "setPPE", (ins "vpux::VPU::PPETaskAttr":$ppe_task_attr),
+            "void", "setOpaquePPE", (ins "vpux::VPU::PPEAttr":$opaque_ppe),
             [{}],
             [{
-                $_op->setAttr($_op.getPpeAttrName(), ppe_task_attr);
+                $_op->setAttr($_op.getOpaquePpeAttrName(), opaque_ppe);
             }]
         >,
 
@@ -259,15 +268,6 @@ def VPU_NCEOpInterface : OpInterface<"NCEOpInterface"> {
         InterfaceMethod<
             "Get the weights table operand of the operation",
             "mlir::Value", "getWeightsTableOperand", (ins),
-            [{}],
-            [{
-                return nullptr;
-            }]
-        >,
-
-        InterfaceMethod<
-            "Get the activation window operand of the operation",
-            "mlir::Value", "getActivationWindowOperand", (ins),
             [{}],
             [{
                 return nullptr;
@@ -491,8 +491,8 @@ def VPU_DistributedCastOpInterface: OpInterface<"DistributedCastOpInterface"> {
     let methods = [
         InterfaceMethod<
             "Infer output distributed type from the input type",
-            "mlir::FailureOr<VPU::DistributedTypeInterface>", "inferCastedDistOutput",
-            (ins "VPU::DistributedTensorType":$inDistributedType)
+            "mlir::FailureOr<std::pair<mlir::Type, VPU::DistributionInfo>>", "inferCastedTypeAndDistribution",
+            (ins "vpux::NDTypeInterface":$inType, "VPU::DistributionInfo&":$distribution)
         >
     ];
 }
@@ -563,25 +563,13 @@ class VPU_PPETaskOpBase<Dialect dialect, string mnemonic, list<Trait> props = []
     let summary = "PPE Type";
 
     let arguments = (ins
-        VPU_PPEModeAttr:$ppe_layer_type,
-
-        OptionalAttr<AnyAttrOf<[IntAttr, F64Attr]>>:$clamp_low,
-        OptionalAttr<AnyAttrOf<[IntAttr, F64Attr]>>:$clamp_high,
-        OptionalAttr<IntAttr>:$lrelu_mult,
-        OptionalAttr<IntAttr>:$lrelu_shift,
-        OptionalAttr<I64ArrayAttr>:$quant_mult,
-        OptionalAttr<I64ArrayAttr>:$quant_shift,
-        OptionalAttr<IntAttr>:$quant_post_shift,
-        OptionalAttr<F64ArrayAttr>:$quant_scale,
-        OptionalAttr<AnyAttrOf<[I64ArrayAttr, F64ArrayAttr]>>:$in1_quant_mult,
-        OptionalAttr<AnyAttrOf<[I64ArrayAttr, F64ArrayAttr]>>:$in2_quant_mult,
-        OptionalAttr<F64Attr>:$fp_prelu_alpha,
+        VPU_PPEAttr:$opaque_ppe,
         OptionalAttr<F64Attr>:$ppe_fp_scale,
         OptionalAttr<F64Attr>:$ppe_fp_bias
     );
 
     let assemblyFormat = [{
-        $ppe_layer_type attr-dict
+        attr-dict
     }];
 }
 

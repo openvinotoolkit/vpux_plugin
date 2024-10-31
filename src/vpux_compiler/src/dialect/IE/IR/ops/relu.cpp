@@ -18,8 +18,9 @@ mlir::LogicalResult vpux::IE::ReLUOp::inferReturnTypeComponents(
         return mlir::failure();
     }
 
-    const auto inType = relu.getInput().getType().cast<mlir::ShapedType>();
-    inferredReturnShapes.emplace_back(inType.getShape(), inType.getElementType());
+    const auto inType = mlir::cast<mlir::RankedTensorType>(relu.getInput().getType());
+    const auto outDesc = vpux::getTensorAttr(inType);
+    inferredReturnShapes.emplace_back(inType.getShape(), inType.getElementType(), outDesc);
 
     return mlir::success();
 }

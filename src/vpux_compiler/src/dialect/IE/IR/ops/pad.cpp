@@ -137,14 +137,14 @@ mlir::OpFoldResult vpux::IE::PadOp::fold(FoldAdaptor adaptor) {
 
     VPUX_THROW_UNLESS(!operands.empty(), "Wrong number of operands : {0}", operands.size());
 
-    if (const auto attr = operands[0].dyn_cast_or_null<Const::ContentAttr>()) {
+    if (const auto attr = operands[0].dyn_cast_or_null<Const::EphemeralContentAttr>()) {
         if (getMode() == IE::PadMode::CONSTANT) {
             if (getPadsBeginAttr().has_value() && getPadsEndAttr().has_value() && getPadValueAttr().has_value()) {
                 if (getPadValueAttr()->convertToDouble() == 0.0) {
                     const auto padsBefore = Shape(parseIntArrayAttr<int64_t>(getPadsBeginAttr().value()));
                     const auto padsAfter = Shape(parseIntArrayAttr<int64_t>(getPadsEndAttr().value()));
 
-                    return attr.padWithZero(padsBefore, padsAfter);
+                    return static_cast<Const::ContentAttr>(attr).transform().padWithZero(padsBefore, padsAfter).get();
                 }
             }
         }

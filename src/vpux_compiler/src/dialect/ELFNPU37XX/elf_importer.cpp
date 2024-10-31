@@ -9,6 +9,7 @@
 #include "vpux/compiler/dialect/ELFNPU37XX/attributes.hpp"
 #include "vpux/compiler/dialect/ELFNPU37XX/import.hpp"
 #include "vpux/compiler/dialect/ELFNPU37XX/ops.hpp"
+#include "vpux/compiler/dialect/IE/IR/dialect.hpp"
 #include "vpux/compiler/dialect/VPURegMapped/ops.hpp"
 #include "vpux/compiler/utils/logging.hpp"
 
@@ -21,7 +22,7 @@ constexpr size_t INVALID_SEC_IDX = 0;
 using namespace vpux;
 
 vpux::ELFNPU37XX::ElfImporter::ElfImporter(mlir::MLIRContext* ctx, const std::string& elfFileName, Logger log)
-        : _accessor(new elf::ElfFSAccessManager(elfFileName)),
+        : _accessor(new elf::FSAccessManager(elfFileName)),
           _elfReader(elf::Reader<elf::ELF_Bitness::Elf64>(_accessor)),
           _ctx(ctx),
           _log(log) {
@@ -74,6 +75,10 @@ void vpux::ELFNPU37XX::ElfImporter::parseUserInputsOutputs(OpBuilderLogger& buil
 
             paramTypes.push_back(memRefRankedTensor);
             builder.create<IE::DataInfoOp>(mlir::UnknownLoc::get(_ctx), nameAttr, userTypeAttr,
+                                           /*OptionalAttr originalShape*/ nullptr,
+                                           /*OptionalAttr friendlyName*/ nullptr,
+                                           /*OptionalAttr inputName*/ nullptr,
+                                           /*OptionalAttr tensorNames*/ nullptr,
                                            /*profilingSectionsCount=*/0);
         }
     };
@@ -720,7 +725,9 @@ void vpux::ELFNPU37XX::ElfImporter::createSectionOpForDMA(
             dmaTasks++;
         }
 
-        opsBuilder.restoreInsertionPoint(afterDMAInsertPoint.value());
+        if (afterDMAInsertPoint.has_value()) {
+            opsBuilder.restoreInsertionPoint(afterDMAInsertPoint.value());
+        }
         createSectionOp(opsBuilder, dmaSectionIdx, _nndmaOps[dmaTaskIdx]);
     }
 }
@@ -979,7 +986,8 @@ void vpux::ELFNPU37XX::ElfImporter::buildMainFunc() {
                 }
 
                 builderSec.create<ELFNPU37XX::RelocOp>(mlir::UnknownLoc::get(_ctx), nullptr, entries[idx].r_offset,
-                                                       relocationType, symbolForRelocation, entries[idx].r_addend);
+                                                       relocationType, symbolForRelocation, entries[idx].r_addend,
+                                                       "Main func entry (at idx " + std::to_string(idx) + ") reloc");
             }
         } else if (elf::VPU_SHT_NETDESC == sectionHeader->sh_type) {
             auto elfMetadataSectionOp = opsBuilder.create<ELFNPU37XX::CreateMetadataSectionOp>(

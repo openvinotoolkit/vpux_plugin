@@ -6,14 +6,17 @@
 #include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
 
 #include "vpux/compiler/core/attributes/indexed_symbol_attr.hpp"
+#include "vpux/compiler/dialect/IE/IR/dialect.hpp"
 #include "vpux/compiler/dialect/IE/IR/ops_interfaces.hpp"
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
+#include "vpux/compiler/dialect/VPU/IR/dialect.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPU/utils/cost_model/cost_model.hpp"
 #include "vpux/compiler/dialect/VPU/utils/distributed_tensor_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/generate_tiling.hpp"
 #include "vpux/compiler/dialect/VPU/utils/manual_strategy_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_invariant.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/dialect.hpp"
 #include "vpux/compiler/dialect/VPUIP/IR/dialect_interfaces.hpp"
 #include "vpux/compiler/dialect/VPUIP/interfaces/nce_invariant.hpp"
 
@@ -74,7 +77,7 @@ bool isSupportedIsolatedTilingConvBased(ConcreteOp origOp, const OutputTiling& t
                     VPU::getDistributedActivationTypeFromOp(clusteredOp, inputTileType, numClusters, nullptr,
                                                             inputTile),
                     VPU::getDistributedFilterTypeFromOp(nceOp, filterTileType, numClusters),
-                    VPU::getDistributedOutputTypeFromOp(clusteredOp, outputTileType, numClusters, nullptr, outputTile));
+                    VPU::getDistributedOutputTypeFromOp(clusteredOp, outputTileType, numClusters, {}, outputTile));
         }
         return origOp.fitIntoCMX(inputTileType, filterTileType, outputTileType);
     });
@@ -197,7 +200,7 @@ bool isSupportedIsolatedTiling(VPU::NCEMaxPoolOp origOp, const OutputTiling& til
             return origOp.fitIntoCMX(
                     VPU::getDistributedActivationTypeFromOp(clusteredOp, inputTileType, numClusters, nullptr,
                                                             inputTile),
-                    VPU::getDistributedOutputTypeFromOp(clusteredOp, outputTileType, numClusters, nullptr, outputTile));
+                    VPU::getDistributedOutputTypeFromOp(clusteredOp, outputTileType, numClusters, {}, outputTile));
         }
         return origOp.fitIntoCMX(inputTileType, outputTileType);
     });
@@ -236,7 +239,7 @@ bool isSupportedIsolatedTiling(VPU::NCEAveragePoolOp origOp, const OutputTiling&
             return origOp.fitIntoCMX(
                     VPU::getDistributedActivationTypeFromOp(clusteredOp, inputTileType, numClusters, nullptr,
                                                             inputTile),
-                    VPU::getDistributedOutputTypeFromOp(clusteredOp, outputTileType, numClusters, nullptr, outputTile));
+                    VPU::getDistributedOutputTypeFromOp(clusteredOp, outputTileType, numClusters, {}, outputTile));
         }
         return origOp.fitIntoCMX(inputTileType, outputTileType);
     });
@@ -271,7 +274,8 @@ bool isSupportedIsolatedTilingEltwise(mlir::Operation* origOp, const OutputTilin
                                                             tile),
                     VPU::getDistributedActivationTypeFromOp(clusteredOp, input2TileType, numClusters, outputTileType,
                                                             tile),
-                    VPU::getDistributedOutputTypeFromOp(clusteredOp, outputTileType, numClusters, input1TileType)));
+                    VPU::getDistributedOutputTypeFromOp(clusteredOp, outputTileType, numClusters,
+                                                        {input1TileType, input2TileType})));
         }
         return mlir::succeeded(
                 VPU::NCEEltwiseOp::verifyEltwiseCMX(origOp->getLoc(), origOp->getParentOfType<mlir::ModuleOp>(),
@@ -335,7 +339,7 @@ bool isSupportedIsolatedTilingSwInterface(VPU::SWOpInterface origOp, const Outpu
 
         for (const auto& outputTileType : outputTileTypes) {
             auto outDistributedType =
-                    VPU::getDistributedOutputTypeFromOp(clusteredOp, outputTileType, numClusters, inputTileTypes[0]);
+                    VPU::getDistributedOutputTypeFromOp(clusteredOp, outputTileType, numClusters, inputTileTypes);
             distributedTensorTypes.push_back(outDistributedType.cast<vpux::NDTypeInterface>());
         }
 
@@ -527,6 +531,16 @@ bool isSupportedIsolatedTilingDepthToSpace(VPU::DepthToSpaceOp origOp, const Out
     return isSupportedIsolatedTilingGeneric(origOp, tiles, log);
 }
 
+bool isSupportedIsolatedTilingStridedSlice(VPU::StridedSliceOp origOp, const OutputTiling& tiles, Logger log) {
+    const auto begins = origOp.getBeginsAttrAttr();
+    const auto strides = origOp.getStridesAttrAttr();
+    // TODO(E#132441): Support strided slice tile when begin and stride cannot be obtained.
+    if (begins == nullptr || strides == nullptr) {
+        return true;
+    }
+    return isSupportedIsolatedTilingGeneric(origOp, tiles, log);
+}
+
 bool isSupportedIsolatedTiling(VPU::NCEPermuteOp origOp, const OutputTiling& tiles, Logger log) {
     const auto inputType = origOp.getInput().getType().cast<vpux::NDTypeInterface>();
     const auto outputType = origOp.getOutput().getType().cast<vpux::NDTypeInterface>();
@@ -549,7 +563,7 @@ bool isSupportedIsolatedTiling(VPU::NCEPermuteOp origOp, const OutputTiling& til
             return origOp.fitIntoCMX(
                     VPU::getDistributedActivationTypeFromOp(clusteredOp, inputTileType, numClusters, nullptr,
                                                             inputTile),
-                    VPU::getDistributedOutputTypeFromOp(clusteredOp, outputTileType, numClusters, nullptr, outputTile));
+                    VPU::getDistributedOutputTypeFromOp(clusteredOp, outputTileType, numClusters, {}, outputTile));
         }
         return origOp.fitIntoCMX(inputTileType, outputTileType);
     });
@@ -616,6 +630,9 @@ bool isSupportedIsolatedTilingSwLayer(mlir::Operation* origOp, const OutputTilin
             .Case<VPU::DepthToSpaceOp>([&](VPU::DepthToSpaceOp op) {
                 return isSupportedIsolatedTilingDepthToSpace(op, tiles, log);
             })
+            .Case<VPU::StridedSliceOp>([&](VPU::StridedSliceOp op) {
+                return isSupportedIsolatedTilingStridedSlice(op, tiles, log);
+            })
             .Case<VPU::DetectionOutputSortOp>([&](VPU::DetectionOutputSortOp op) {
                 return isSupportedIsolatedTilingDetectionOutputSort(op, tiles, log);
             })
@@ -662,9 +679,19 @@ bool isDivisibleTile(mlir::Operation* op, ShapeRef tileAxis, Dim tileDim, int64_
     }
     auto outputShape = getShape(op->getResult(0));
     if (tileDim == Dims4D::Act::C) {
-        return (outputShape[tileDim] / tileAxis[tileDim] >= minChannelSize) &&
-               (outputShape[tileDim] % tileAxis[tileDim] == 0) &&
-               ((outputShape[tileDim] / tileAxis[tileDim]) % minChannelSize == 0);
+        // If tiling over C and C is not very large, it is possible that tiling over one more dimensions will be more
+        // efficient. Additionally, if C divided by twice minchannel is an odd number, then in this case, if we continue
+        // to strictly enforce the divisible condition, it is highly likely that we will not be able to find such a
+        // divisible value (so we cannot find a more efficient candicate for cost model). This will
+        // hinder the pipeline in many cases, such as 7888, 8016.
+        if (outputShape[tileDim] % (minChannelSize * 2) == 0 ||
+            outputShape[Dims4D::Act::C] < outputShape[Dims4D::Act::H] * outputShape[Dims4D::Act::W]) {
+            return (outputShape[tileDim] / tileAxis[tileDim] >= minChannelSize) &&
+                   (outputShape[tileDim] % tileAxis[tileDim] == 0) &&
+                   ((outputShape[tileDim] / tileAxis[tileDim]) % minChannelSize == 0);
+        } else {
+            return (outputShape[tileDim] / tileAxis[tileDim] >= minChannelSize);
+        }
     } else if (tileDim == Dims4D::Act::W && mlir::isa<VPU::NCEPermuteOp>(op)) {
         return (outputShape[tileDim] / tileAxis[tileDim] >= minChannelSize) &&
                (outputShape[tileDim] % tileAxis[tileDim] == 0) &&
@@ -908,13 +935,6 @@ public:
     }
 };
 
-class AsyncLayerOpModelForSW final : public VPUIP::AsyncLayerOpInterface::FallbackModel<AsyncLayerOpModelForSW> {
-public:
-    IndexedSymbolAttr getExecutor(mlir::Operation* origOp) const {
-        return VPUIP::getExecutorAttr(origOp, VPU::ExecutorKind::SHAVE_UPA);
-    }
-};
-
 class AsyncLayerOpModelForCallOp final :
         public VPUIP::AsyncLayerOpInterface::ExternalModel<AsyncLayerOpModelForCallOp, mlir::func::CallOp> {
 public:
@@ -999,17 +1019,13 @@ public:
         // TODO: Analyze and define executor type for funcOp - E#117624
         return VPU::ExecutorKind::UNKNOWN;
     }
-
-    vpux::VPUIP::BlobWriter::SpecificTask serialize(mlir::Operation*, VPUIP::BlobWriter&) const {
-        VPUX_THROW("CallOp does not support serialization");
-    }
 };
 
 //
 // redirectOpInterfacesForVPUIP
 //
 
-template <class OpModelForDMA, class OpModelForSW>
+template <class OpModelForDMA>
 void redirectOpInterfacesForVPUIP(mlir::DialectRegistry& registry) {
     registry.addExtension(+[](mlir::MLIRContext* ctx, VPUIP::VPUIPDialect*) {
         VPUIP::CopyOp::attachInterface<OpModelForDMA>(*ctx);
@@ -1019,96 +1035,6 @@ void redirectOpInterfacesForVPUIP(mlir::DialectRegistry& registry) {
         VPUIP::PermuteDMAOp::attachInterface<OpModelForDMA>(*ctx);
         VPUIP::ExpandDMAOp::attachInterface<OpModelForDMA>(*ctx);
         VPUIP::ExpandOp::attachInterface<OpModelForDMA>(*ctx);
-
-        VPUIP::ConvertUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::SoftMaxUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::PoolingUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::AdaptiveAvgPoolUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::AdaptiveMaxPoolUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::ReLUUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::SigmoidUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::SignUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::ClampUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::EluUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::HSwishUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::MishUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::ErfUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::BroadcastUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::FloorUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::RoundUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::TanUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::TanhUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::SinUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::CosUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::SqrtUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::SinhUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::SeluUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::CoshUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::AsinhUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::AcoshUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::AtanhUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::LogUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::GeluUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::BucketizeUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::QuantCastUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::FakeQuantizeUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::GatherUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::GatherNDUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::ScatterUpdateUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::YuvToRgbUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::GatherElementsUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::ScatterNDUpdateUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::PReluUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::LeakyReluUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::SwishUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::GRNUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::NormUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::ReduceUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::PerAxisTileUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::NegativeUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::ROIPoolingUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::PSROIPoolingUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::ROIAlignUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::ProposalUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::FullyConnectedUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::DetectionOutputUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::ScaleShiftUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::CTCGreedyDecoderUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::CTCGreedyDecoderSeqLenUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::PadUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::ExpUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::InterpolateUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::LSTMCellUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::StridedSliceUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::RegionYoloUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::ReorgYoloUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::MVNUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::LSTMSequenceUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::PermuteUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::CeilingUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::NormalizeIEUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::CumSumUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::SelectUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::DepthToSpaceUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::ReverseSequenceUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::UpsamplingUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::SoftPlusUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::TopKUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::LogicalNotUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::SpaceToDepthUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::ExtractImagePatchesUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::AbsUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::HSigmoidUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::RollUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::AtanUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::AsinUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::AcosUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::HardSigmoidUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::EmbeddingBagOffsetsSumUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::EmbeddingSegmentsSumUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::DeformablePSROIPoolingUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::NonMaxSuppressionUPAOp::attachInterface<OpModelForSW>(*ctx);
-        VPUIP::LSTMCellUPAOp::attachInterface<OpModelForSW>(*ctx);
     });
 }
 
@@ -1233,6 +1159,7 @@ void vpux::VPUIP::VPUIPDialect::setupExtraInterfaces(mlir::DialectRegistry& regi
         VPU::SpaceToDepthOp::attachInterface<SwLayerTilingInfoOpModel<VPU::SpaceToDepthOp>>(*ctx);
         VPU::DepthToSpaceOp::attachInterface<SwLayerTilingInfoOpModel<VPU::DepthToSpaceOp>>(*ctx);
         VPU::TileOp::attachInterface<SwLayerTilingInfoOpModel<VPU::TileOp>>(*ctx);
+        VPU::DynamicTileOp::attachInterface<SwLayerTilingInfoOpModel<VPU::DynamicTileOp>>(*ctx);
         VPU::NormalizeL2Op::attachInterface<SwLayerTilingInfoOpModel<VPU::NormalizeL2Op>>(*ctx);
         VPU::YuvToRgbOp::attachInterface<SwLayerTilingInfoOpModel<VPU::YuvToRgbOp>>(*ctx);
         VPU::SquaredDifferenceOp::attachInterface<SwLayerTilingInfoOpModel<VPU::SquaredDifferenceOp>>(*ctx);
@@ -1260,6 +1187,7 @@ void vpux::VPUIP::VPUIPDialect::setupExtraInterfaces(mlir::DialectRegistry& regi
         VPU::GridSampleOp::attachInterface<SoftwareLayerOpModel>(*ctx);
         VPU::SoftMaxOp::attachInterface<SoftwareLayerOpModel>(*ctx);
         VPU::LogSoftmaxOp::attachInterface<SoftwareLayerOpModel>(*ctx);
+        VPU::LoopSelectOp::attachInterface<SoftwareLayerOpModel>(*ctx);
         VPU::HSwishOp::attachInterface<SoftwareLayerOpModel>(*ctx);
         VPU::MVNOp::attachInterface<SoftwareLayerOpModel>(*ctx);
         VPU::MVN1SumOp::attachInterface<SoftwareLayerOpModel>(*ctx);
@@ -1319,6 +1247,7 @@ void vpux::VPUIP::VPUIPDialect::setupExtraInterfaces(mlir::DialectRegistry& regi
         VPU::DepthToSpaceOp::attachInterface<SoftwareLayerOpModel>(*ctx);
         VPU::SpaceToDepthOp::attachInterface<SoftwareLayerOpModel>(*ctx);
         VPU::SpaceToBatch::attachInterface<SoftwareLayerOpModel>(*ctx);
+        VPU::BatchToSpace::attachInterface<SoftwareLayerOpModel>(*ctx);
         VPU::AvgPoolOp::attachInterface<SoftwareLayerOpModel>(*ctx);
         VPU::AdaptiveAvgPoolOp::attachInterface<SoftwareLayerOpModel>(*ctx);
         VPU::AdaptiveMaxPoolOp::attachInterface<SoftwareLayerOpModel>(*ctx);
@@ -1331,6 +1260,7 @@ void vpux::VPUIP::VPUIPDialect::setupExtraInterfaces(mlir::DialectRegistry& regi
         VPU::LeakyReluOp::attachInterface<SoftwareLayerOpModel>(*ctx);
         VPU::MishOp::attachInterface<SoftwareLayerOpModel>(*ctx);
         VPU::TileOp::attachInterface<SoftwareLayerOpModel>(*ctx);
+        VPU::DynamicTileOp::attachInterface<SoftwareLayerOpModel>(*ctx);
         VPU::ReLUOp::attachInterface<SoftwareLayerOpModel>(*ctx);
         VPU::YuvToRgbOp::attachInterface<SoftwareLayerOpModel>(*ctx);
         VPU::RandomUniformOp::attachInterface<SoftwareLayerOpModel>(*ctx);
@@ -1372,6 +1302,7 @@ void vpux::VPUIP::VPUIPDialect::setupExtraInterfaces(mlir::DialectRegistry& regi
         VPU::ROIAlignOp::attachInterface<SoftwareLayerOpModel>(*ctx);
         VPU::PSROIPoolingOp::attachInterface<SoftwareLayerOpModel>(*ctx);
         VPU::PermuteQuantizeOp::attachInterface<SoftwareLayerOpModel>(*ctx);
+        VPU::GroupNormalizationOp::attachInterface<SoftwareLayerOpModel>(*ctx);
         VPU::LogOp::attachInterface<SoftwareLayerOpModel>(*ctx);
         VPU::FloorOp::attachInterface<SoftwareLayerOpModel>(*ctx);
         VPU::RoundOp::attachInterface<SoftwareLayerOpModel>(*ctx);
@@ -1389,6 +1320,7 @@ void vpux::VPUIP::VPUIPDialect::setupExtraInterfaces(mlir::DialectRegistry& regi
         VPU::ErfOp::attachInterface<SoftwareLayerOpModel>(*ctx);
         VPU::BucketizeOp::attachInterface<SoftwareLayerOpModel>(*ctx);
         VPU::MaxPoolOp::attachInterface<SoftwareLayerOpModel>(*ctx);
+        VPU::MaxPool8Op::attachInterface<SoftwareLayerOpModel>(*ctx);
         VPU::RollOp::attachInterface<SoftwareLayerOpModel>(*ctx);
         VPU::CTCGreedyDecoderSeqLenOp::attachInterface<SoftwareLayerOpModel>(*ctx);
         VPU::AbsOp::attachInterface<SoftwareLayerOpModel>(*ctx);
@@ -1408,11 +1340,16 @@ void vpux::VPUIP::VPUIPDialect::setupExtraInterfaces(mlir::DialectRegistry& regi
         VPU::NonZeroOp::attachInterface<SoftwareLayerOpModel>(*ctx);
         VPU::ShapeOfOp::attachInterface<SoftwareLayerOpModel>(*ctx);
         VPU::PermuteCastOp::attachInterface<SoftwareLayerOpModel>(*ctx);
+        VPU::DynamicReshapeOp::attachInterface<SoftwareLayerOpModel>(*ctx);
+        VPU::ConcatOp::attachInterface<SoftwareLayerOpModel>(*ctx);
+        VPU::RMSOp::attachInterface<SoftwareLayerOpModel>(*ctx);
+        VPU::InverseOp::attachInterface<SoftwareLayerOpModel>(*ctx);
+        VPU::DeformableConvolutionOp::attachInterface<SoftwareLayerOpModel>(*ctx);
     });
 
     // When implementing a new SW core, remove the corresponding operation from setupExtraInterfacesAdditional
 
-    redirectOpInterfacesForVPUIP<AsyncLayerOpModelForDMA, AsyncLayerOpModelForSW>(registry);
+    redirectOpInterfacesForVPUIP<AsyncLayerOpModelForDMA>(registry);
 
     registry.addExtension(+[](mlir::MLIRContext* ctx, mlir::BuiltinDialect*) {
         vpux::MemRefAttr::attachInterface<vpux::MemRefAttrLayout>(*ctx);
@@ -1465,7 +1402,7 @@ Byte vpux::VPUIP::SubViewOp::getByteOffset() {
 
     auto distributedType = getSource().getType().dyn_cast<VPUIP::DistributedBufferType>();
 
-    VPU::DistributedTensorAttr distribution;
+    VPU::DistributionInfoAttr distribution;
     std::optional<int64_t> tileIndex;
     int64_t numTile = 0, tileIndexVal = 0;
     if (distributedType != nullptr) {
@@ -1572,11 +1509,9 @@ Byte vpux::VPUIP::ExtractFlatSliceOp::getByteOffset() {
 
     auto resMemSpace = getResult().getType().cast<NDTypeInterface>().getMemSpace();
     auto targetCluster = resMemSpace.cast<IndexedSymbolAttr>().getIndex().value_or(0);
-    auto perClusterShapes = distributedType.getPerClusterMemoryShapes();
-    int64_t clusterStart = 0;
-    for (auto i = 0; i < targetCluster; ++i) {
-        clusterStart += perClusterShapes[i][tileDim];
-    }
+    auto perClusterOffsets = distributedType.getPerClusterMemoryShapeOffsets();
+    int64_t clusterStart = perClusterOffsets[targetCluster][tileDim];
+
     // Consider taking slice with offset 19 from Distributed<1x32x128xf16, SEGMENTED, num_tiles=[1, 4, 1, 1]>
     // Slice is allocated on cluster [@CMX_NN, 2](8+8+3) and offset from cluster begin is 3
     // Then, byte offset is 3 * strides[Dim(1)] = 3 * 128 * 2 = 768 Bytes

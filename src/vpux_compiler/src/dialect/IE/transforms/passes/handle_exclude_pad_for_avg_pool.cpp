@@ -8,6 +8,7 @@
 #include "vpux/compiler/core/layers.hpp"
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
+#include "vpux/compiler/utils/rewriter.hpp"
 
 #include <mlir/Transforms/DialectConversion.h>
 
@@ -17,7 +18,7 @@ namespace {
 
 mlir::Value createSubAvgPool(IE::AvgPoolOp origOp, mlir::PatternRewriter& rewriter, ArrayRef<int64_t> begins,
                              ArrayRef<int64_t> ends, mlir::ArrayAttr avgPoolOpKernelAttr,
-                             mlir::ArrayAttr avgPoolOpStridesAttr) {
+                             mlir::ArrayAttr avgPoolOpStridesAttr, StringRef locSuffix) {
     mlir::MLIRContext* ctx = origOp->getContext();
     const auto beginMask = getIntArrayAttr(ctx, ArrayRef({1, 1, 0, 0}));
     const auto endMask = getIntArrayAttr(ctx, ArrayRef({1, 1, 0, 0}));
@@ -29,15 +30,17 @@ mlir::Value createSubAvgPool(IE::AvgPoolOp origOp, mlir::PatternRewriter& rewrit
     const auto endsAttr = getIntArrayAttr(ctx, ends);
 
     auto stridedSliceOp = rewriter.createOrFold<IE::StridedSliceOp>(
-            origOp.getLoc(), origOp.getInput(), nullptr, nullptr, nullptr, beginsAttr, endsAttr, stridesAttr, beginMask,
-            endMask, newAxisMask, shrinkAxisMask, ellipsisMask);
+            takeOpLoc(origOp, StringLiteral("slice_{0}"), locSuffix), origOp.getInput(), nullptr, nullptr, nullptr,
+            beginsAttr, endsAttr, stridesAttr, beginMask, endMask, newAxisMask, shrinkAxisMask, ellipsisMask);
 
     const auto zeroPadAttr = getIntArrayAttr(ctx, ArrayRef({0, 0}));
 
-    auto avgPoolOp = rewriter.create<IE::AvgPoolOp>(
-            origOp->getLoc(), stridedSliceOp == nullptr ? origOp.getInput() : stridedSliceOp, avgPoolOpKernelAttr,
-            avgPoolOpStridesAttr, zeroPadAttr, zeroPadAttr, origOp.getRoundingTypeAttr(), nullptr,
-            origOp.getPostOpAttr(), origOp.getClampAttr());
+    auto avgPoolOp = rewriter.create<IE::AvgPoolOp>(takeOpLoc(origOp, StringLiteral("pool_{0}"), locSuffix),
+                                                    stridedSliceOp == nullptr ? origOp.getInput() : stridedSliceOp,
+                                                    avgPoolOpKernelAttr, avgPoolOpStridesAttr, zeroPadAttr, zeroPadAttr,
+                                                    origOp.getRoundingTypeAttr(), nullptr, origOp.getPostOpAttr(),
+                                                    origOp.getClampAttr(), origOp.getStaticScaleAttr(),
+                                                    origOp.getOutputChannelsAttr(), origOp.getInputChannelsAttr());
     return avgPoolOp.getOutput();
 }
 
@@ -89,10 +92,10 @@ mlir::LogicalResult AveragePoolRewriter::matchAndRewrite(IE::AvgPoolOp origOp, m
                     : origStrides[Dims4D::Strides::X.ind()] - padsBegin[Dims4D::PadsBegin::Left.ind()];
     const auto beginW = stridePadsbeginWDiff > 0 ? stridePadsbeginWDiff : 0;
 
-    auto avgCenterOp =
-            createSubAvgPool(origOp, rewriter, /*begins=*/
-                             {0, 0, beginH, beginW},
-                             /*ends=*/{0, 0, inputHeight, inputWidth}, origOp.getKernelSize(), origOp.getStrides());
+    auto avgCenterOp = createSubAvgPool(origOp, rewriter, /*begins=*/
+                                        {0, 0, beginH, beginW},
+                                        /*ends=*/{0, 0, inputHeight, inputWidth}, origOp.getKernelSize(),
+                                        origOp.getStrides(), "center");
 
     // The padsEnd attribute maybe redundant. e.g.
     // input: 1x256x96x32xf16, output: 1x256x48x16xf16
@@ -120,7 +123,7 @@ mlir::LogicalResult AveragePoolRewriter::matchAndRewrite(IE::AvgPoolOp origOp, m
     if (padsBegin[Dims4D::PadsBegin::Top.ind()] != 0 && padsBegin[Dims4D::PadsBegin::Left.ind()] != 0) {
         inputs.push_back(createSubAvgPool(origOp, rewriter, /*begins=*/{0, 0, 0, 0},
                                           /*ends=*/{0, 0, cornerKernelH, cornerKernelW}, cornerKernelAttr,
-                                          cornerStridesAttr));
+                                          cornerStridesAttr, "top_left"));
         staticOffsets.push_back({0, 0, 0, 0});
     }
 
@@ -132,7 +135,7 @@ mlir::LogicalResult AveragePoolRewriter::matchAndRewrite(IE::AvgPoolOp origOp, m
         cornerKernelAttr = getIntArrayAttr(ctx, ArrayRef({cornerKernelH, cornerKernelW}));
         inputs.push_back(createSubAvgPool(origOp, rewriter, /*begins=*/{0, 0, 0, beginLocalW},
                                           /*ends=*/{0, 0, cornerKernelH, inputWidth}, cornerKernelAttr,
-                                          cornerStridesAttr));
+                                          cornerStridesAttr, "top_right"));
         staticOffsets.push_back({0, 0, 0, ((outputWidth - 1))});
     }
 
@@ -145,8 +148,8 @@ mlir::LogicalResult AveragePoolRewriter::matchAndRewrite(IE::AvgPoolOp origOp, m
         cornerKernelAttr = getIntArrayAttr(ctx, ArrayRef({cornerKernelH, cornerKernelW}));
         inputs.push_back(createSubAvgPool(origOp, rewriter,
                                           /*begins=*/{0, 0, inputHeight - cornerKernelH, beginLocalW},
-                                          /*ends=*/{0, 0, inputHeight, inputWidth}, cornerKernelAttr,
-                                          cornerStridesAttr));
+                                          /*ends=*/{0, 0, inputHeight, inputWidth}, cornerKernelAttr, cornerStridesAttr,
+                                          "bottom_right"));
         staticOffsets.push_back({0, 0, (outputHeight - 1), (outputWidth - 1)});
     }
 
@@ -156,7 +159,7 @@ mlir::LogicalResult AveragePoolRewriter::matchAndRewrite(IE::AvgPoolOp origOp, m
         cornerKernelAttr = getIntArrayAttr(ctx, ArrayRef({cornerKernelH, cornerKernelW}));
         inputs.push_back(createSubAvgPool(origOp, rewriter, /*begins=*/{0, 0, inputHeight - cornerKernelH, 0},
                                           /*ends=*/{0, 0, inputHeight, cornerKernelW}, cornerKernelAttr,
-                                          cornerStridesAttr));
+                                          cornerStridesAttr, "bottom_left"));
         staticOffsets.push_back({0, 0, (outputHeight - 1), 0});
     }
     nestLog.trace("Create SubAvgPool operation for left side");
@@ -169,7 +172,7 @@ mlir::LogicalResult AveragePoolRewriter::matchAndRewrite(IE::AvgPoolOp origOp, m
     if (padsBegin[Dims4D::PadsBegin::Left.ind()] != 0) {
         inputs.push_back(createSubAvgPool(origOp, rewriter, /*begins=*/{0, 0, beginH, 0},
                                           /*ends=*/{0, 0, inputHeight, verticalKernelW}, verticalKernelAttr,
-                                          verticalStridesAttr));
+                                          verticalStridesAttr, "left"));
         staticOffsets.push_back({0, 0, 1, 0});
     }
 
@@ -181,7 +184,7 @@ mlir::LogicalResult AveragePoolRewriter::matchAndRewrite(IE::AvgPoolOp origOp, m
         verticalKernelAttr = getIntArrayAttr(ctx, ArrayRef({verticalKernelH, verticalKernelW}));
         inputs.push_back(createSubAvgPool(origOp, rewriter, /*begins=*/{0, 0, beginH, beginLocalW},
                                           /*ends=*/{0, 0, inputHeight, inputWidth}, verticalKernelAttr,
-                                          verticalStridesAttr));
+                                          verticalStridesAttr, "right"));
         staticOffsets.push_back({0, 0, padsBegin[Dims4D::PadsBegin::Top.ind()] == 0 ? 0 : 1, (outputWidth - 1)});
     }
 
@@ -196,7 +199,7 @@ mlir::LogicalResult AveragePoolRewriter::matchAndRewrite(IE::AvgPoolOp origOp, m
     if (padsBegin[Dims4D::PadsBegin::Top.ind()] != 0) {
         inputs.push_back(createSubAvgPool(origOp, rewriter, /*begins=*/{0, 0, 0, beginW},
                                           /*ends=*/{0, 0, horizontalKernelH, inputWidth}, horizontalKernelAttr,
-                                          horizontalStridesAttr));
+                                          horizontalStridesAttr, "top"));
         staticOffsets.push_back({0, 0, 0, padsBegin[Dims4D::PadsBegin::Left.ind()] == 0 ? 0 : 1});
     }
 
@@ -206,12 +209,12 @@ mlir::LogicalResult AveragePoolRewriter::matchAndRewrite(IE::AvgPoolOp origOp, m
     if (padsEnd[Dims4D::PadsEnd::Bottom.ind()] != 0) {
         inputs.push_back(createSubAvgPool(origOp, rewriter, /*begins=*/{0, 0, inputHeight - horizontalKernelH, beginW},
                                           /*ends=*/{0, 0, inputHeight, inputWidth}, horizontalKernelAttr,
-                                          horizontalStridesAttr));
+                                          horizontalStridesAttr, "bottom"));
         staticOffsets.push_back({0, 0, (outputHeight - 1), padsBegin[Dims4D::PadsBegin::Left.ind()] == 0 ? 0 : 1});
     }
     mlir::ArrayAttr staticOffsetsAttr = getIntArrayOfArray(ctx, staticOffsets);
-    rewriter.replaceOpWithNewOp<IE::ConcatOp>(origOp, origOp.getType(), inputs, staticOffsetsAttr);
-
+    auto concatOp = rewriter.replaceOpWithNewOp<IE::ConcatOp>(origOp, origOp.getType(), inputs, staticOffsetsAttr);
+    extendOpLoc(concatOp, "out_concat");
     return mlir::success();
 }
 

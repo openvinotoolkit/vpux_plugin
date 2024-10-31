@@ -157,10 +157,11 @@ TEST_F(MLIR_VPU_doesTopKLayerFitIntoCMX, TopKfitsCMX) {
 
     ASSERT_TRUE(mlir::succeeded(pm.run(module.get())));
 
+    auto siblingsAnalysis = vpux::VPU::SiblingOpsAnalysis(func);
     func->walk([&](VPU::TopKOp topk) {
         auto strategy = VPU::MultiClusterStrategy::Clustering;
         auto reservedMem = Byte(0);
-        auto doesLayerFitIntoCMX = topk.doesLayerFitIntoCMX(strategy, reservedMem);
+        auto doesLayerFitIntoCMX = topk.doesLayerFitIntoCMX(strategy, siblingsAnalysis, reservedMem);
         EXPECT_EQ(doesLayerFitIntoCMX, true);
     });
 }
@@ -194,10 +195,11 @@ TEST_F(MLIR_VPU_doesTopKLayerFitIntoCMX, TopKdoesNotFitCMX) {
 
     ASSERT_TRUE(mlir::succeeded(pm.run(module.get())));
 
+    auto siblingsAnalysis = vpux::VPU::SiblingOpsAnalysis(func);
     func->walk([&](VPU::TopKOp topk) {
         auto strategy = VPU::MultiClusterStrategy::Clustering;
         auto reservedMem = Byte(0);
-        auto doesLayerFitIntoCMX = topk.doesLayerFitIntoCMX(strategy, reservedMem);
+        auto doesLayerFitIntoCMX = topk.doesLayerFitIntoCMX(strategy, siblingsAnalysis, reservedMem);
         EXPECT_EQ(doesLayerFitIntoCMX, false);
     });
 }

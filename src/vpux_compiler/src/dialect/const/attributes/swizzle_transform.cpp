@@ -221,10 +221,9 @@ Const::details::PositionRequirement Const::SwizzleConstantAttr::getPositionRequi
     return Const::details::PositionRequirement::LAST;
 }
 
-Const::ContentAttr vpux::Const::ContentAttr::swizzleConstant(uint64_t swizzleKey, uint64_t arch) const {
-    return ContentAttr::addTransformation(
-            *this, Const::SwizzleConstantAttr::get(getIntAttr(getContext(), swizzleKey), getIntAttr(getContext(), arch))
-                           .cast<Const::TransformAttrInterface>());
+Const::ContentSetup vpux::Const::ContentSetup::swizzleConstant(uint64_t swizzleKey, uint64_t arch) {
+    return addTransformation(
+            Const::SwizzleConstantAttr::get(getIntAttr(getContext(), swizzleKey), getIntAttr(getContext(), arch)));
 }
 
 //

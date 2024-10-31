@@ -85,7 +85,7 @@ def VPURT_DeclareBufferOp :
     );
 
     let results = (outs
-        AnyTypeOf<[AnyMemRef, VPUIP_Buffer, VPUIP_DistributedBuffer, VPUIP_ITIBuffer]>:$buffer
+        AnyTypeOf<[AnyMemRef, VPUIP_DistributedBuffer, VPUIP_ITIBuffer]>:$buffer
     );
 
     let builders = [
@@ -128,6 +128,7 @@ def VPURT_DeclareVirtualBarrierOp :
         VPURT_Op<
             "DeclareVirtualBarrier",
             [
+                DeclareOpInterfaceMethods<VPURT_BarrierOpInterface>,
                 Pure,
                 DeclarationOp
             ]
@@ -155,6 +156,7 @@ def VPURT_ConfigureBarrierOp :
         VPURT_Op<"ConfigureBarrier",
             [
                 DeclareOpInterfaceMethods<VPURT_SerializeInterface>,
+                DeclareOpInterfaceMethods<VPURT_BarrierOpInterface>,
                 DeclarationOp,
                 DotInterface
             ]
@@ -210,6 +212,7 @@ def VPURT_TaskOp :
         Optional<MemRefOf<[UI32]>>:$profiling_data,
         Variadic<VPURT_Barrier>:$waitBarriers,
         Variadic<VPURT_Barrier>:$updateBarriers,
+        Optional<VPURT_Barrier>:$enqueueBarrier,
         DefaultValuedAttr<BoolAttr, "false">:$isTrailingSWLayer
     );
 
@@ -220,6 +223,9 @@ def VPURT_TaskOp :
     let builders = [
         OpBuilder<(ins
             "mlir::ValueRange":$waitBarriers, "mlir::ValueRange":$updateBarriers
+        )>,
+        OpBuilder<(ins
+            "mlir::ValueRange":$waitBarriers, "mlir::ValueRange":$updateBarriers, "mlir::Value":$enqueueBarrier
         )>
     ];
 
@@ -242,6 +248,7 @@ def VPURT_TaskOp :
         (`profiling_data` `(` $profiling_data^  `:` type($profiling_data) `)`)?
         (`waits` `(` $waitBarriers^ `:` type($waitBarriers) `)`)?
         (`updates` `(` $updateBarriers^ `:` type($updateBarriers) `)`)?
+        (`enqueueTarget` `(` $enqueueBarrier^ `:` type($enqueueBarrier) `)`)?
         attr-dict-with-keyword
         $body
     }];
@@ -269,7 +276,7 @@ def VPURT_Alloc :
     );
 
     let results = (outs
-        AnyTypeOf<[AnyMemRef, VPUIP_Buffer]>:$buffer
+        AnyTypeOf<[AnyMemRef]>:$buffer
     );
 
     let assemblyFormat = [{

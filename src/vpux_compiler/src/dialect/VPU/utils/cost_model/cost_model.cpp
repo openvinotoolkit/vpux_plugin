@@ -1,10 +1,12 @@
 //
-// Copyright (C) 2022 Intel Corporation
+// Copyright (C) 2022-2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
 #include "vpux/compiler/dialect/VPU/utils/cost_model/cost_model.hpp"
+#include "vpux/compiler/core/cost_model_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/cost_model/cost_model_data.hpp"
+#include "vpux/compiler/dialect/VPU/utils/ppe_version_config.hpp"
 
 #include <llvm/ADT/TypeSwitch.h>
 #include <mlir/Dialect/Quant/QuantTypes.h>
@@ -149,7 +151,7 @@ bool vpux::VPU::isVPUNNSupportedElementType(mlir::Type type) {
     return false;
 }
 
-VPUNN::DataType vpux::VPU::getVPUNNElementType(mlir::Type type) {
+std::optional<VPUNN::DataType> vpux::VPU::getVPUNNElementType(mlir::Type type) {
     if (type.isBF16()) {
         return VPUNN::DataType::BFLOAT16;
     } else if (type.isF16()) {
@@ -166,7 +168,8 @@ VPUNN::DataType vpux::VPU::getVPUNNElementType(mlir::Type type) {
             return qType.isSigned() ? VPUNN::DataType::INT8 : VPUNN::DataType::UINT8;
         }
     }
-    VPUX_THROW("Unsupported data type: '{0}'", type);
+
+    return std::nullopt;
 }
 
 VPUNN::Layout vpux::VPU::getVPUNNLayout(VPUIPDPU::ODUPermuteDataMode oduPermutation) {
@@ -190,6 +193,11 @@ VPUNN::Layout vpux::VPU::getVPUNNLayout(VPUIPDPU::ODUPermuteDataMode oduPermutat
 
 VPUNN::VPUTensor vpux::VPU::getVPUTensor(ShapeRef shape, mlir::Type elemType,
                                          VPUIPDPU::ODUPermuteDataMode oduPermutation) {
+    VPUX_THROW_WHEN(shape.size() != 4, "Non 4D-shape is not supported");
+
+    const auto nnType = VPU::getVPUNNElementType(elemType);
+    VPUX_THROW_UNLESS(nnType.has_value(), "Unsupported data type: '{0}'", elemType);
+
     return VPUNN::VPUTensor(
             {
                     static_cast<unsigned int>(shape[Dims4D::Act::W]),
@@ -197,7 +205,7 @@ VPUNN::VPUTensor vpux::VPU::getVPUTensor(ShapeRef shape, mlir::Type elemType,
                     static_cast<unsigned int>(shape[Dims4D::Act::C]),
                     static_cast<unsigned int>(shape[Dims4D::Act::N]),
             },
-            getVPUNNElementType(elemType), getVPUNNLayout(oduPermutation));
+            nnType.value(), getVPUNNLayout(oduPermutation));
 }
 
 VPUNN::ExecutionMode vpux::VPU::getExecutionMode(VPU::MPEMode mpeMode) {
@@ -216,27 +224,6 @@ VPUNN::ExecutionMode vpux::VPU::getExecutionMode(VPU::MPEMode mpeMode) {
         return VPUNN::ExecutionMode::CUBOID_4x16;
     default:
         VPUX_THROW("Unsupported MPE mode type: '{0}'", mpeMode);
-    }
-}
-
-VPUNN::ActivationFunction vpux::VPU::getVPUNNActivationFunction(VPU::PPETaskAttr ppeTask) {
-    auto ppeMode = ppeTask.getMode().getValue();
-
-    switch (ppeMode) {
-    case VPU::PPEMode::LRELU:
-        return VPUNN::ActivationFunction::LRELU;
-    case VPU::PPEMode::ADD:
-        return VPUNN::ActivationFunction::ADD;
-    case VPU::PPEMode::SUB:
-        return VPUNN::ActivationFunction::SUB;
-    case VPU::PPEMode::MULT:
-        return VPUNN::ActivationFunction::MULT;
-    default:
-        auto clampLow = checked_cast<int32_t>(ppeTask.getClampLow().getValue().getSExtValue());
-        if (clampLow == 0) {
-            return VPUNN::ActivationFunction::RELU;
-        }
-        return VPUNN::ActivationFunction::NONE;
     }
 }
 
@@ -337,11 +324,7 @@ VPUNN::DPUWorkload vpux::VPU::getDPUWorkload(const VPUIP::WorkloadCostParams& ti
 
     const auto IW = (OW - 1) * SX + KX - padsTileConf.left - padsTileConf.right;
     const auto IH = (OH - 1) * SY + KY - padsTileConf.top - padsTileConf.bottom;
-    auto IC = tileParams.nceTaskType == VPUIP::NCETaskType::CONV ||
-                              tileParams.nceTaskType == VPUIP::NCETaskType::CMCONV ||
-                              tileParams.nceTaskType == VPUIP::NCETaskType::FCL
-                      ? tileParams.inputShape[Dims4D::Act::C]
-                      : OC;
+    auto IC = tileParams.nceTaskType == VPUIP::NCETaskType::CONV ? tileParams.inputShape[Dims4D::Act::C] : OC;
     const auto IN = ON;
 
     auto inputTensorShape = Shape({IN, IC, IH, IW});
@@ -423,8 +406,8 @@ VPUNN::DPUWorkload vpux::VPU::getDPUWorkload(const VPUIP::WorkloadCostParams& ti
     }
 
     // set activation
-    if (tileParams.ppeTask != nullptr) {
-        vpunnDPUWorkload.activation_function = VPU::getVPUNNActivationFunction(tileParams.ppeTask);
+    if (tileParams.ppeOpaqueAttr != nullptr) {
+        vpunnDPUWorkload.activation_function = getVPUNNActivationFunction(tileParams.ppeOpaqueAttr);
     }
 
     return vpunnDPUWorkload;
@@ -463,9 +446,7 @@ VPUIP::WorkloadCostParams vpux::VPU::getWorkloadCostParam(VPU::NCEOpInterface nc
     params.isWeightsSparsityEnabled = false;
 
     // set ppe for workload activation
-    if (nceOp.getPPE().has_value()) {
-        params.ppeTask = nceOp.getPPE().value();
-    }
+    params.ppeOpaqueAttr = nceOp.getOpaquePPE();
 
     // set MC strategy
     auto op = nceOp.getOperation();
@@ -525,9 +506,7 @@ VPUIP::WorkloadCostParams vpux::VPU::getWorkloadCostParam(VPU::NCEOpInterface nc
 
     llvm::TypeSwitch<mlir::Operation*, void>(nceOp.getOperation())
             .Case<VPU::NCEConvolutionOp>([&](VPU::NCEConvolutionOp) {
-                const auto inOrder = inputType.getDimsOrder();
-                const auto isCMajor = inOrder == DimsOrder::NCHW;
-                params.nceTaskType = isCMajor ? VPUIP::NCETaskType::CMCONV : VPUIP::NCETaskType::CONV;
+                params.nceTaskType = VPUIP::NCETaskType::CONV;
             })
             .Case<VPU::NCECompressConvolutionOp>([&](VPU::NCECompressConvolutionOp) {
                 params.nceTaskType = VPUIP::NCETaskType::CONV;

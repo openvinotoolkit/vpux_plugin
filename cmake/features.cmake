@@ -56,10 +56,11 @@ if(NOT DEFINED MV_TOOLS_PATH AND DEFINED ENV{MV_TOOLS_DIR} AND DEFINED ENV{MV_TO
 endif()
 
 ov_option(ENABLE_NPU_LOADER "Enable npu-loader" OFF)
-ov_option(ENABLE_NPU_LSP_SERVER "Enable npu-lsp-server" OFF)
+ov_option(ENABLE_NPU_LSP_SERVER "Enable npu-lsp-server" ON)
 ov_option(ENABLE_NPU_PROTOPIPE "Enable protopipe" ON)
 
-if(THREADING STREQUAL "TBB" OR THREADING STREQUAL "TBB_AUTO")
+get_target_property(ov_linked_libs openvino::runtime IMPORTED_LINK_DEPENDENT_LIBRARIES_RELEASE)
+if(THREADING STREQUAL "TBB" OR THREADING STREQUAL "TBB_AUTO" OR "TBB::tbb" IN_LIST ov_linked_libs)
     set(TBB_AVAILABLE ON)
 endif()
 ov_dependent_option(ENABLE_BACKGROUND_FOLDING "Enable constant folding in background" ON "TBB_AVAILABLE" OFF)

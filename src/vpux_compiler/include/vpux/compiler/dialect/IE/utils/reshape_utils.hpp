@@ -29,7 +29,8 @@ IE::ShapeCastOp buildShapeCast(mlir::Location loc, mlir::Value input, ArrayRef<i
                                mlir::PatternRewriter& rewriter);
 
 bool isEligibleToFoldStrideKernel(vpux::NDTypeInterface inputType, vpux::NDTypeInterface outputType, int64_t kernelX,
-                                  int64_t strideX, int64_t inAlignment, int64_t outAlignment, const Logger& log);
+                                  int64_t strideX, int64_t strideY, int64_t inAlignment, int64_t outAlignment,
+                                  const Logger& log);
 
 Shape getNewShapeAfterStrideFolding(ShapeRef origShape, int64_t SX);
 

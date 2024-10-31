@@ -2,6 +2,8 @@
 // Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
+
+#include "vpux/compiler/dialect/IE/utils/dynamic_shape_utils.hpp"
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
 #include "vpux/compiler/dialect/VPU/utils/distributed_tensor_utils.hpp"
 
@@ -35,8 +37,13 @@ void WrapDistributedOpsInNCEClusterTiling::safeRunOnFunc() {
     auto func = getOperation();
 
     func->walk([&](mlir::Operation* origOp) {
-        if (!mlir::isa<ClusteredOpInterface, VPU::CopyOp>(origOp))
+        if (!mlir::isa<ClusteredOpInterface, VPU::CopyOp>(origOp)) {
             return mlir::WalkResult::skip();
+        }
+
+        if (mlir::isa<VPU::ConcatOp>(origOp)) {
+            return mlir::WalkResult::skip();
+        }
 
         if (origOp->getParentOfType<NCEClusterTilingOp>() != nullptr) {
             _log.trace("Op {0} already wrapped into NCEClusterTilingOp", origOp->getName());
@@ -62,12 +69,19 @@ void WrapDistributedOpsInNCEClusterTiling::safeRunOnFunc() {
             return mlir::WalkResult::skip();
         }
 
+        if (IE::hasDynamicTensors(origOp)) {
+            return mlir::WalkResult::skip();
+        }
+
         mlir::OpBuilder nceBuilder(origOp);
         const auto bodyBuilder = [origOp](mlir::OpBuilder& builder, mlir::Location loc, mlir::ValueRange newOperands) {
             mlir::IRMapping mapper;
             mapper.map(origOp->getOperands(), newOperands);
-
             auto* newOp = builder.clone(*origOp, mapper);
+            for (auto operandIter : newOperands | indexed) {
+                newOp->setOperand(operandIter.index(), newOperands[operandIter.index()]);
+            }
+
             for (auto resultIter : newOp->getResults()) {
                 resultIter.setType(vpux::VPU::getCompactTypeFromDistributed(resultIter.getType()));
             }

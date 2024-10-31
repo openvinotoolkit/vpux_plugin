@@ -54,12 +54,29 @@ public:
     };
 };
 
+class EltwiseAddQuantizedFuseOutstandingQuantSubGraphTest_NPU3720 : public EltwiseAddQuantizedSubGraphTest_NPU3720 {
+    void configure_model() override {
+        configuration[ov::intel_npu::compilation_mode_params.name()] = "fuse-outstanding-quant=true";
+    }
+};
+
 TEST_P(EltwiseAddQuantizedSubGraphTest_NPU3720, HW) {
     setDefaultHardwareMode();
     run(Platform::NPU3720);
 }
 
-INSTANTIATE_TEST_CASE_P(smoke_EltwiseAddQuantized, EltwiseAddQuantizedSubGraphTest_NPU3720,
-                        ::testing::Values(ov::element::f16), EltwiseAddQuantizedSubGraphTest_NPU3720::getTestCaseName);
+TEST_P(EltwiseAddQuantizedFuseOutstandingQuantSubGraphTest_NPU3720, HW) {
+    const float fqRange = 14, fqLevels = 256;
+    abs_threshold = fqRange / fqLevels;
+    setDefaultHardwareMode();
+    run(Platform::NPU3720);
+}
+
+INSTANTIATE_TEST_SUITE_P(smoke_EltwiseAddQuantized, EltwiseAddQuantizedSubGraphTest_NPU3720,
+                         ::testing::Values(ov::element::f16), EltwiseAddQuantizedSubGraphTest_NPU3720::getTestCaseName);
+
+INSTANTIATE_TEST_SUITE_P(smoke_EltwiseAddQuantized, EltwiseAddQuantizedFuseOutstandingQuantSubGraphTest_NPU3720,
+                         ::testing::Values(ov::element::f16),
+                         EltwiseAddQuantizedFuseOutstandingQuantSubGraphTest_NPU3720::getTestCaseName);
 
 }  // namespace ov::test

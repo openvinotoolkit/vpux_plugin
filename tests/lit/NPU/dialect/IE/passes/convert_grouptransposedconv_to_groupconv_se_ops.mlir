@@ -62,15 +62,15 @@ func.func @DoNotConvertGroupTransposedConvToGroupConvWithOutputPadding(%input: t
 
 // CHECK-LABEL: func.func @ConvertGroupTransposedConvToGroupConvLargeKernelSize
 // CHECK-SAME:    ([[INPUT:%.+]]: tensor<1x64x64x64xf16>)
-func.func @ConvertGroupTransposedConvToGroupConvLargeKernelSize(%input: tensor<1x64x64x64xf16>) -> tensor<1x64x138x138xf16> {
-    %weights = const.Declare tensor<64x1x1x12x12xf16> = dense<1.000000e+00> : tensor<64x1x1x12x12xf16>
+func.func @ConvertGroupTransposedConvToGroupConvLargeKernelSize(%input: tensor<1x64x64x64xf16>) -> tensor<1x64x142x142xf16> {
+    %weights = const.Declare tensor<64x1x1x16x16xf16> = dense<1.000000e+00> : tensor<64x1x1x16x16xf16>
     %out = IE.GroupTransposedConvolution(%input, %weights) {
             dilations = [1, 1], output_padding = [0, 0], pads_begin = [0, 0], pads_end = [0, 0], strides = [2, 2]
-        } : tensor<1x64x64x64xf16>, tensor<64x1x1x12x12xf16> -> tensor<1x64x138x138xf16>
-    return %out : tensor<1x64x138x138xf16>
+        } : tensor<1x64x64x64xf16>, tensor<64x1x1x16x16xf16> -> tensor<1x64x142x142xf16>
+    return %out : tensor<1x64x142x142xf16>
 
     // CHECK:  [[UPSAMPLING:%.+]] = IE.Upsampling([[INPUT]])
-    // CHECK:  [[WEIGHTS:%.+]] = const.Declare tensor<64x1x12x12xf16>
+    // CHECK:  [[WEIGHTS:%.+]] = const.Declare tensor<64x1x16x16xf16>
     // CHECK:  [[OUT:%.+]] = IE.GroupConvolution([[UPSAMPLING]], [[WEIGHTS]])
     // CHECK:  return [[OUT]]
 }

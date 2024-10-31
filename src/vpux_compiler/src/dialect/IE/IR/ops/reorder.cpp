@@ -55,8 +55,8 @@ mlir::OpFoldResult vpux::IE::ReorderOp::fold(FoldAdaptor adaptor) {
         return getInput();
     }
 
-    if (const auto cst = operands[0].dyn_cast_or_null<Const::ContentAttr>()) {
-        return cst.reorder(DimsOrder::fromValue(getOutput()));
+    if (const auto cst = operands[0].dyn_cast_or_null<Const::EphemeralContentAttr>()) {
+        return static_cast<Const::ContentAttr>(cst).transform().reorder(DimsOrder::fromValue(getOutput())).get();
     }
 
     return nullptr;

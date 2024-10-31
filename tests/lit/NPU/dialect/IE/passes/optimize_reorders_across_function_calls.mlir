@@ -40,6 +40,48 @@ module @OneFunction {
 #NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 
+module @MultipleFunctionsSameProducerReorder {
+    func.func private @function1(%arg0: tensor<1x48x60x60xf16>) -> tensor<1x48x60x60xf16, {order = #NHWC}> {
+        %reorder = IE.Reorder(%arg0) {dstOrder = #NHWC} : tensor<1x48x60x60xf16> -> tensor<1x48x60x60xf16, {order = #NHWC}>
+        %softmax = IE.SoftMax(%reorder) {axisInd = 1 : i64} : tensor<1x48x60x60xf16, {order = #NHWC}> -> tensor<1x48x60x60xf16, {order = #NHWC}>
+        return %softmax : tensor<1x48x60x60xf16, {order = #NHWC}>
+    }
+    func.func private @function2(%arg0: tensor<1x48x60x60xf16>) -> tensor<1x48x60x60xf16, {order = #NHWC}> {
+        %reorder = IE.Reorder(%arg0) {dstOrder = #NHWC} : tensor<1x48x60x60xf16> -> tensor<1x48x60x60xf16, {order = #NHWC}>
+        %softmax = IE.SoftMax(%reorder) {axisInd = 1 : i64} : tensor<1x48x60x60xf16, {order = #NHWC}> -> tensor<1x48x60x60xf16, {order = #NHWC}>
+        return %softmax : tensor<1x48x60x60xf16, {order = #NHWC}>
+    }
+    func.func @main(%arg0: tensor<1x3x62x62xf16, {order = #NHWC}>) -> (tensor<1x48x60x60xf16, {order = #NHWC}>, tensor<1x48x60x60xf16, {order = #NHWC}>) {
+        %cst = const.Declare tensor<48x3x3x3xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<48x3x3x3xf16, {order = #NHWC}>
+        %conv = IE.Convolution(%arg0, %cst) {dilations = [1, 1], pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]} : tensor<1x3x62x62xf16, {order = #NHWC}>, tensor<48x3x3x3xf16, {order = #NHWC}> -> tensor<1x48x60x60xf16, {order = #NHWC}>
+        %reorder = IE.Reorder(%conv) {dstOrder = #NCHW} : tensor<1x48x60x60xf16, {order = #NHWC}> -> tensor<1x48x60x60xf16>
+        %call1 = call @function1(%reorder) : (tensor<1x48x60x60xf16>) -> tensor<1x48x60x60xf16, {order = #NHWC}>
+        %call2 = call @function2(%reorder) : (tensor<1x48x60x60xf16>) -> tensor<1x48x60x60xf16, {order = #NHWC}>
+        return %call1, %call2 : tensor<1x48x60x60xf16, {order = #NHWC}>, tensor<1x48x60x60xf16, {order = #NHWC}>
+    }
+
+    // CHECK:  func.func private @function1([[ARG0:%.+]]: tensor<1x48x60x60xf16, {order = #NHWC}>) -> tensor<1x48x60x60xf16, {order = #NHWC}> {
+    // CHECK:      [[SOFTMAX1:%.+]] = IE.SoftMax([[ARG0]])
+    // CHECK:      return [[SOFTMAX1]] : tensor<1x48x60x60xf16, {order = #NHWC}>
+    // CHECK:  }
+    // CHECK:  func.func private @function2([[ARG0:%.+]]: tensor<1x48x60x60xf16, {order = #NHWC}>) -> tensor<1x48x60x60xf16, {order = #NHWC}> {
+    // CHECK:      [[SOFTMAX2:%.+]] = IE.SoftMax([[ARG0]])
+    // CHECK:      return [[SOFTMAX2]] : tensor<1x48x60x60xf16, {order = #NHWC}>
+    // CHECK:  }
+    // CHECK:  func.func @main([[ARG0:%.+]]: tensor<1x3x62x62xf16, {order = #NHWC}>) -> (tensor<1x48x60x60xf16, {order = #NHWC}>, tensor<1x48x60x60xf16, {order = #NHWC}>) {
+    // CHECK:      [[CST:%.+]] = const.Declare
+    // CHECK:      [[CONV:%.+]] = IE.Convolution([[ARG0]], [[CST]])
+    // CHECK:      [[CALL1:%.+]] = call @function1([[CONV]]) : (tensor<1x48x60x60xf16, {order = #NHWC}>) -> tensor<1x48x60x60xf16, {order = #NHWC}>
+    // CHECK:      [[CALL2:%.+]] = call @function2([[CONV]]) : (tensor<1x48x60x60xf16, {order = #NHWC}>) -> tensor<1x48x60x60xf16, {order = #NHWC}>
+    // CHECK:      return [[CALL1]], [[CALL2]] : tensor<1x48x60x60xf16, {order = #NHWC}>, tensor<1x48x60x60xf16, {order = #NHWC}>
+    // CHECK:  }
+}
+
+// -----
+
+#NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
 module @ReorderPair {
     func.func private @main_part1(%arg0: tensor<1x3x62x62xf16, {order = #NHWC}>) -> tensor<1x48x60x60xf16> {
         %cst = const.Declare tensor<48x3x3x3xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<48x3x3x3xf16, {order = #NHWC}>

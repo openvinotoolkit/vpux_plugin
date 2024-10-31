@@ -20,7 +20,6 @@ add_mlir_dialect_library(${TARGET_NAME}
         npu_compiler_dialect_vpuip
         npu_compiler_dialect_vpuip_interfaces
         npu_compiler_dialect_vpuip_utils
-        npu_compiler_dialect_vpuip_graph_schema
         #TODO:#-102154 remove this dependency
         npu_compiler_dialect_vpu_utils
         inferenceStatic)

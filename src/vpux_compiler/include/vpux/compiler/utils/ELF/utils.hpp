@@ -82,6 +82,7 @@ private:
     mlir::DenseMap<mlir::StringAttr, mlir::SymbolTable> _sectionSymbolContainers;
 };
 
+ELF::MainOp getElfMainOp(mlir::ModuleOp moduleOp);
 ELF::MainOp getElfMainOp(mlir::func::FuncOp funcOp);
 
 size_t getOffsetOfSymRef(ELF::SymbolReferenceMap& symRefMap, mlir::SymbolRefAttr symRef);

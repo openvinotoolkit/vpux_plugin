@@ -22,14 +22,11 @@ namespace NCEInvariant {
 //
 // Constants
 //
-
+// TODO: E113153, config to be moved to init compiler pass
 constexpr int64_t WEIGHT_TABLE_NUM_ELEMENTS_PER_OC = 4;
 
-constexpr int64_t KMB_CMCONV_WIDTH_ALIGNMENT = 16;
-constexpr int64_t KMB_CMCONV_CHANNELS_LIMIT = 16;
-
 constexpr int64_t SUPPORTED_BATCH_SIZE = 1;
-constexpr int64_t MAX_KERNEL_SIZE = 11;
+
 constexpr int64_t MAX_STRIDE = 8;
 
 constexpr int64_t VPU_CHANNEL_ALIGNMENT = 16;
@@ -45,6 +42,8 @@ constexpr int64_t VPU_SEGMENT_SIZE_SPARSE = 8;
 
 constexpr int64_t VPU_CHANNEL_SIZE_FOR_L1OPT = 32;
 
+constexpr int64_t VPU_SPATIAL_ALIGNMENT = 4;
+
 //
 // Precision checks
 //
@@ -55,8 +54,8 @@ bool isPrecisionSupported(ArchKind arch, mlir::ValueRange vals, LogCb logCb = gl
 // Attributes checks
 //
 
-bool isAttrsSupported(ArchKind arch, int64_t KY, int64_t KX, int64_t SY, int64_t SX, int64_t padTop, int64_t padBottom,
-                      int64_t padLeft, int64_t padRight, LogCb logCb = globalLogCb);
+bool isAttrsSupported(mlir::Operation* op, int64_t KY, int64_t KX, int64_t SY, int64_t SX, int64_t padTop,
+                      int64_t padBottom, int64_t padLeft, int64_t padRight, LogCb logCb = globalLogCb);
 
 //
 // Activation type checks
@@ -105,16 +104,19 @@ mlir::LogicalResult isSupported(mlir::Operation* op, Logger log = Logger::global
 //
 bool isSmallKernelOptimizationSupported(const VPU::ArchKind arch, mlir::Operation* op);
 
-mlir::LogicalResult verifyKernel(mlir::Location loc, int64_t KY, int64_t KX, int64_t SY, int64_t SX, int64_t padTop,
-                                 int64_t padBottom, int64_t padLeft, int64_t padRight, VPU::ArchKind arch,
-                                 Logger log = Logger::global());
+mlir::LogicalResult verifyKernel(mlir::Operation* op, int64_t KY, int64_t KX, int64_t SY, int64_t SX, int64_t padTop,
+                                 int64_t padBottom, int64_t padLeft, int64_t padRight, Logger log = Logger::global());
 
 mlir::LogicalResult verifyKernel(mlir::Operation* origOp, Logger log = Logger::global());
 
 mlir::LogicalResult verifyPoolCMX(mlir::Location loc, mlir::ModuleOp module, vpux::NDTypeInterface inputType,
                                   vpux::NDTypeInterface outputType, mlir::ArrayAttr kernelSize,
-                                  mlir::ArrayAttr kernelStrides, bool hasActivationWindow,
-                                  Logger log = Logger::global());
+                                  mlir::ArrayAttr kernelStrides, Logger log = Logger::global());
+//
+// Check if given architecture supports Elementwise multiply operation
+//
+
+bool isElementwiseMultiplySupported(const VPU::ArchKind arch);
 
 }  // namespace NCEInvariant
 

@@ -21,5 +21,5 @@ module @AddProfilingSection {
     }
 }
 
-// CHECK: ELF.CreateProfilingSection @".profiling" aligned(1) secFlags("SHF_NONE") {
+// CHECK: ELF.CreateProfilingSection @".profiling" aligned(1) secFlags(SHF_ALLOC) {
 // CHECK-NEXT: VPUASM.ProfilingMetadata @ProfilingMetadata {metadata = {{.*}} : vector<184xui8>}

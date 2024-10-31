@@ -21,11 +21,12 @@ mlir::OpFoldResult vpux::VPUIP::PermuteCastOp::fold(FoldAdaptor adaptor) {
     auto operands = adaptor.getOperands();
     VPUX_THROW_UNLESS(!operands.empty(), "Wrong number of operands : {0}", operands.size());
 
-    if (auto attr = operands[0].dyn_cast_or_null<Const::ContentAttr>()) {
-        if (attr.getType().getShape() != getShape(getResult())) {
-            attr = attr.reshape(getShape(getResult()));
+    if (auto attr = operands[0].dyn_cast_or_null<Const::EphemeralContentAttr>()) {
+        auto restored = static_cast<Const::ContentAttr>(attr);
+        if (restored.getType().getShape() != getShape(getResult())) {
+            restored = restored.transform().reshape(getShape(getResult())).get();
         }
-        return attr.reorder(DimsOrder::fromAffineMap(getDstOrder()));
+        return restored.transform().reorder(DimsOrder::fromAffineMap(getDstOrder())).get();
     }
 
     return nullptr;
@@ -38,7 +39,7 @@ mlir::LogicalResult vpux::VPUIP::PermuteCastOp::verify() {
     if (distributedInType && distributedOutType) {
         auto outputDistribution = distributedOutType.getDistribution();
 
-        auto expectedOutputDistribution = applyPermutationOnDistributedTensorAttr(
+        auto expectedOutputDistribution = applyPermutationOnDistributionInfoAttr(
                 distributedInType, getMemPerm(), distributedInType.getDimsOrder(), distributedOutType.getDimsOrder(),
                 distributedInType.getShape(), distributedOutType.getShape());
         if (mlir::failed(expectedOutputDistribution)) {

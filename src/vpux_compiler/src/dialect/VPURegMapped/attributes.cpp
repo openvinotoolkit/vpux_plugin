@@ -68,8 +68,8 @@ mlir::LogicalResult vpux::VPURegMapped::RegisterFieldAttr::verify(
     }
 
     if (mlir::failed(VPURegMapped::RegFieldType::verify(emitError, regField.getWidth(), regField.getPos(),
-                                                        regField.getValue(), regField.getName(),
-                                                        regField.getDataType()))) {
+                                                        regField.getValue(), regField.getName(), regField.getDataType(),
+                                                        regField.getRequiredMIVersion()))) {
         return printTo(emitError(), "RegisterFieldAttr - invalid.");
     }
 

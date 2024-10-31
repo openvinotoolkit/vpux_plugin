@@ -10,12 +10,16 @@
 
 using namespace vpux::VPU::arch40xx;
 
+namespace {
+
 double getBarrierMaxVariantSumRatio(bool enableWorkloadManagement) {
     return enableWorkloadManagement ? barrierMaxVariantSumRatioWithWLM : barrierMaxVariantSumRatio;
 }
 size_t getFirmwareVariantCount(bool enableWorkloadManagement) {
     return enableWorkloadManagement ? firmwareVariantCountWithWLM : firmwareVariantCount;
 }
+
+}  // namespace
 
 size_t PerBarrierVariantConstraint::getPerBarrierMaxVariantSum() const {
     return static_cast<size_t>(getBarrierMaxVariantSumRatio(_enablePartialWorkloadManagement) *

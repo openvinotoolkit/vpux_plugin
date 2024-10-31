@@ -74,14 +74,29 @@ void vpux::IE::ConcatOp::build(mlir::OpBuilder& builder, mlir::OperationState& s
 
 namespace {
 
-mlir::FailureOr<Shape> inferOutShapeWithAxis(IE::ConcatOpAdaptor concat, mlir::Location loc) {
-    const auto inType = concat.getInputs().front().getType().cast<vpux::NDTypeInterface>();
+using GetShapeFunc = std::function<Shape(const mlir::Value)>;
+
+Shape getDynamicShape(const mlir::Value val) {
+    return val.getType().cast<vpux::NDTypeInterface>().getShape().toValues();
+}
+
+Shape getUpperBounds(const mlir::Value val) {
+    auto outBounds = val.getType().cast<vpux::BoundedTypeInterface>().getBounds();
+    return Shape(parseIntArrayAttr<int64_t>(outBounds));
+}
+
+mlir::FailureOr<Shape> inferOutShapeWithAxis(IE::ConcatOpAdaptor concat, const GetShapeFunc& getShapeFunctor,
+                                             mlir::Location loc) {
     const auto axis = normalizeAxis(concat);
 
-    auto outShape = inType.getShape().toValues();
+    Shape outShape = getShapeFunctor(concat.getInputs().front());
+
+    if (outShape[axis] == mlir::ShapedType::kDynamic) {
+        return errorAt(loc, "Concatenation over dynamic dimension is not supported.");
+    }
 
     for (const auto val : concat.getInputs().drop_front()) {
-        const auto curShape = getShape(val);
+        const auto curShape = getShapeFunctor(val);
 
         if (curShape.size() != outShape.size()) {
             return errorAt(loc, "Concat inputs have mismatched ranks: '{0}' vs '{1}'", curShape.size(),
@@ -111,7 +126,8 @@ mlir::FailureOr<Shape> inferOutShapeWithAxis(IE::ConcatOpAdaptor concat, mlir::L
     return outShape;
 }
 
-mlir::FailureOr<Shape> inferReturnShapeWithOffsets(IE::ConcatOpAdaptor concat, mlir::Location loc) {
+mlir::FailureOr<Shape> inferReturnShapeWithOffsets(IE::ConcatOpAdaptor concat, const GetShapeFunc& getShapeFunctor,
+                                                   mlir::Location loc) {
     if (!concat.getStaticOffsets().has_value()) {
         return errorAt(loc, "Missing static_offsets attribute");
     }
@@ -129,7 +145,7 @@ mlir::FailureOr<Shape> inferReturnShapeWithOffsets(IE::ConcatOpAdaptor concat, m
 
     for (const auto& p : zip(concat.getInputs(), allOffsets)) {
         const auto curVal = std::get<0>(p);
-        const auto curShape = getShape(curVal);
+        const auto curShape = getShapeFunctor(curVal);
 
         if (curShape.size() != outShape.size()) {
             return errorAt(loc, "Concat inputs have mismatched ranks: '{0}' vs '{1}'", curShape.size(),
@@ -145,7 +161,12 @@ mlir::FailureOr<Shape> inferReturnShapeWithOffsets(IE::ConcatOpAdaptor concat, m
         for (const auto ind : irange(outShape.size())) {
             const auto d = Dim(ind);
 
-            outShape[d] = std::max(outShape[d], curOffsets[d] + curShape[d]);
+            if (curShape[d] == mlir::ShapedType::kDynamic) {
+                VPUX_THROW_UNLESS(curOffsets[d] == 0, "Concatenation over dynamic dimension is not supported.");
+                outShape[d] = curShape[d];
+            } else {
+                outShape[d] = std::max(outShape[d], curOffsets[d] + curShape[d]);
+            }
         }
     }
 
@@ -226,8 +247,8 @@ mlir::LogicalResult vpux::IE::ConcatOp::inferReturnTypeComponents(
 
     // Infer output shape
 
-    const auto outShape =
-            concat.getPerAxis() ? inferOutShapeWithAxis(concat, loc) : inferReturnShapeWithOffsets(concat, loc);
+    const auto outShape = concat.getPerAxis() ? inferOutShapeWithAxis(concat, getDynamicShape, loc)
+                                              : inferReturnShapeWithOffsets(concat, getDynamicShape, loc);
     if (mlir::failed(outShape)) {
         return mlir::failure();
     }
@@ -242,7 +263,22 @@ mlir::LogicalResult vpux::IE::ConcatOp::inferReturnTypeComponents(
 
     // Return inferred components
 
-    inferredReturnShapes.emplace_back(outShape.value().raw(), outElemType.value(), inDesc);
+    if (outShape.value().isStatic()) {
+        // Return inferred components
+        inferredReturnShapes.emplace_back(outShape.value().raw(), outElemType.value(), inDesc);
+    } else {
+        // Infer output bounds
+        const auto outBounds = concat.getPerAxis() ? inferOutShapeWithAxis(concat, getUpperBounds, loc)
+                                                   : inferReturnShapeWithOffsets(concat, getUpperBounds, loc);
+        if (mlir::failed(outBounds)) {
+            return mlir::failure();
+        }
+
+        // Return inferred components
+        const auto outDesc = vpux::getTensorAttr(inDesc.getOrder(), inDesc.getMemSpace(),
+                                                 getIntArrayAttr(ctx, outBounds.value().raw()));
+        inferredReturnShapes.emplace_back(outShape.value().raw(), outElemType.value(), outDesc);
+    }
     return mlir::success();
 }
 
@@ -325,6 +361,12 @@ mlir::LogicalResult FuseConcat::matchAndRewrite(IE::ConcatOp origOp, mlir::Patte
 
     const auto axis = getConcatAxesFromOffsets(origOp, getShape(origOp.getOutput()));
     if (axis.size() != 1) {
+        return mlir::failure();
+    }
+
+    // Skip fuse multi-concat for dynamic case
+    const auto outputType = origOp.getOutput().getType().cast<vpux::NDTypeInterface>();
+    if (!outputType.getShape().isStatic()) {
         return mlir::failure();
     }
 
@@ -427,19 +469,18 @@ mlir::LogicalResult FuseConstConcat::matchAndRewrite(IE::ConcatOp origOp, mlir::
     const auto contentElemType = outNdInterface.getElementType();
     auto rankedTensorType = outNdInterface.cast<mlir::RankedTensorType>();
     mlir::DenseElementsAttr denseAttr;
-    Const::ContentAttr contentAttr;
+    Const::ContentSetup contentAttrSetup;
     if (auto qtype = contentElemType.dyn_cast<mlir::quant::QuantizedType>()) {
         rankedTensorType =
                 outNdInterface.changeElemType(normalizeQuantStorageType(qtype)).cast<mlir::RankedTensorType>();
         denseAttr = mlir::DenseElementsAttr::getFromRawBuffer(rankedTensorType, output.getRawStorageBuf());
-        contentAttr = Const::ContentAttr::get(denseAttr);
-        contentAttr = contentAttr.quantCast(qtype);
+        contentAttrSetup = Const::ContentAttr::transform(denseAttr).quantCast(qtype);
     } else {
         denseAttr = mlir::DenseElementsAttr::getFromRawBuffer(rankedTensorType, output.getRawStorageBuf());
-        contentAttr = Const::ContentAttr::get(denseAttr);
+        contentAttrSetup = Const::ContentAttr::transform(denseAttr);
     }
 
-    rewriter.replaceOpWithNewOp<Const::DeclareOp>(origOp, origOp.getType(), contentAttr);
+    rewriter.replaceOpWithNewOp<Const::DeclareOp>(origOp, origOp.getType(), contentAttrSetup.get());
     return mlir::success();
 }
 

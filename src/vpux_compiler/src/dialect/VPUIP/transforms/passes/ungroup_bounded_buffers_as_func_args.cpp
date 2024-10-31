@@ -74,7 +74,7 @@ void UngroupBoundedBuffersAsFuncArgs::safeRunOnModule() {
         return {type.getData().cast<mlir::MemRefType>(), type.getDynamicShape().cast<mlir::MemRefType>()};
     };
 
-    const auto addDataInfo = [&](auto boundedType, auto& infoBlock, auto dataInfo, int index) {
+    const auto addDataInfo = [&](auto boundedType, auto& infoBlock, auto dataInfo, int index, int dataBufferCount) {
         const auto& [boundedMemRef, dynamicShapeMemRef] = unpackBoundedBuffer(boundedType);
         _log.trace("Memory to store dynamic tensor: {0}, {1}", boundedMemRef, dynamicShapeMemRef);
 
@@ -82,23 +82,28 @@ void UngroupBoundedBuffersAsFuncArgs::safeRunOnModule() {
                 mlir::RankedTensorType::get(dynamicShapeMemRef.getShape(), dynamicShapeMemRef.getElementType()));
         const auto nameAttr = mlir::StringAttr::get(ctx, SHAPE_TENSOR_PREFIX + dataInfo[index].getName());
 
-        auto insertionPointAfter = std::next(infoBlock.begin(), index + 1);
+        auto insertionPointAfter = std::next(infoBlock.begin(), dataBufferCount);
         auto infoBuilder = mlir::OpBuilder(&infoBlock, insertionPointAfter, builder.getListener());
         infoBuilder.create<IE::DataInfoOp>(takeOpLoc(func, StringLiteral("{0}"), func.getName()), nameAttr, typeAttr,
+                                           /*OptionalAttr originalShape*/ nullptr,
+                                           /*OptionalAttr friendlyName*/ nullptr,
+                                           /*OptionalAttr inputName*/ nullptr,
+                                           /*OptionalAttr tensorNames*/ nullptr,
                                            /*profilingSectionsCount=*/0);
         _log.trace("Added new DataInfo '{0}' with type {1}", nameAttr, typeAttr);
     };
     const auto originalInputSize = func.getFunctionType().getInputs().size();
-    for (const auto& index : irange(originalInputSize) | reversed) {
+    for (const auto& index : irange(originalInputSize)) {
         const auto input = func.getFunctionType().getInputs()[index];
         if (const auto boundedType = input.dyn_cast_or_null<VPUIP::BoundedBufferType>()) {
             _log.trace("Found dynamic input {0}", input);
 
-            addDataInfo(boundedType, netInfo.getInputsInfo().front(), netInfo.getInputsDataInfo(), index);
+            addDataInfo(boundedType, netInfo.getInputsInfo().front(), netInfo.getInputsDataInfo(), index,
+                        /*current dataBufferCount*/ netInfo.getInputsDataInfo().size());
 
             const auto& [boundedMemRef, dynamicShapeMemRef] = unpackBoundedBuffer(boundedType);
             auto arg0 = entryBlock.insertArgument(index + 1, boundedMemRef, func.getLoc());
-            auto arg1 = entryBlock.insertArgument(index + 2, dynamicShapeMemRef, func.getLoc());
+            auto arg1 = entryBlock.insertArgument(entryBlock.getNumArguments(), dynamicShapeMemRef, func.getLoc());
 
             auto alloc0 = builder.create<mlir::memref::AllocOp>(func.getLoc(), boundedMemRef.cast<mlir::MemRefType>());
             auto alloc1 =
@@ -132,19 +137,21 @@ void UngroupBoundedBuffersAsFuncArgs::safeRunOnModule() {
     _log.trace("Old function outputs: {0}", returnOp->getOperandTypes());
     _log = _log.nest(4);
     const auto originalOutputSize = func.getFunctionType().getResults().size();
-    for (const auto& index : irange(originalOutputSize) | reversed) {
+    for (const auto& index : irange(originalOutputSize)) {
         const auto output = func.getFunctionType().getResults()[index];
         if (const auto boundedType = output.dyn_cast_or_null<VPUIP::BoundedBufferType>()) {
             _log.trace("Found dynamic output {0}", output);
 
-            addDataInfo(boundedType, netInfo.getOutputsInfo().front(), netInfo.getOutputsDataInfo(), index);
+            addDataInfo(boundedType, netInfo.getOutputsInfo().front(), netInfo.getOutputsDataInfo(), index,
+                        /*current dataBufferCount*/ netInfo.getOutputsDataInfo().size());
 
             const auto operand = returnOp.getOperand(index);
             auto ungroupOp = builder.create<VPUIP::UngroupBoundedBufferOp>(func.getLoc(), operand);
             _log.trace("Wrapped newly added network results into {0}", ungroupOp);
 
             returnOp->eraseOperand(index);
-            returnOp->insertOperands(index, {ungroupOp.getData(), ungroupOp.getDynamicShape()});
+            returnOp->insertOperands(index, ungroupOp.getData());
+            returnOp->insertOperands(returnOp->getOpOperands().size(), ungroupOp.getDynamicShape());
         }
     }
     _log = _log.unnest(4);

@@ -44,7 +44,7 @@ bool vpux::isBufAllocOp(mlir::Operation* op) {
         return false;
     }
 
-    if (!op->getResult(0).getType().isa<mlir::MemRefType, VPUIP::BufferType, VPUIP::DistributedBufferType>()) {
+    if (!op->getResult(0).getType().isa<mlir::BaseMemRefType>()) {
         return false;
     }
 

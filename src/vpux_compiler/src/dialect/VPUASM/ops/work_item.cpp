@@ -27,12 +27,8 @@ size_t vpux::VPUASM::WorkItemOp::getAlignmentRequirements() {
     return alignof(nn_public::VpuWorkItem);
 }
 
-vpux::ELF::SectionFlagsAttr vpux::VPUASM::WorkItemOp::getAccessingProcs(mlir::SymbolUserMap&) {
+vpux::ELF::SectionFlagsAttr vpux::VPUASM::WorkItemOp::getPredefinedMemoryAccessors() {
     return (ELF::SectionFlagsAttr::SHF_EXECINSTR);
-}
-
-vpux::ELF::SectionFlagsAttr vpux::VPUASM::WorkItemOp::getUserProcs() {
-    return (ELF::SectionFlagsAttr::SHF_NONE);
 }
 
 std::optional<ELF::SectionSignature> vpux::VPUASM::WorkItemOp::getSectionSignature() {
@@ -52,13 +48,13 @@ std::vector<ELF::RelocationInfo> vpux::VPUASM::WorkItemOp::getRelocationInfo(ELF
     auto firstTaskOffset = offsetof(nn_public::VpuWorkItem, wi_desc_ptr);
     if (auto firstTask = getFirstTask()) {
         if (getTaskType() == VPURegMapped::TaskType::DMA) {
-            relocs.push_back(ELF::RelocationInfo(firstTask, targetSection, firstTaskOffset,
-                                                 ELF::RelocationType::R_VPU_64,
-                                                 ELF::getOffsetOfSymRef(symRefMap, firstTask)));
+            relocs.push_back(ELF::RelocationInfo(
+                    firstTask, targetSection, firstTaskOffset, ELF::RelocationType::R_VPU_64,
+                    ELF::getOffsetOfSymRef(symRefMap, firstTask), "First task (DMA) in work item reloc"));
         } else {
-            relocs.push_back(ELF::RelocationInfo(firstTask, targetSection, firstTaskOffset,
-                                                 ELF::RelocationType::R_VPU_64_BIT_OR_B21_B26_UNSET,
-                                                 ELF::getOffsetOfSymRef(symRefMap, firstTask)));
+            relocs.push_back(ELF::RelocationInfo(
+                    firstTask, targetSection, firstTaskOffset, ELF::RelocationType::R_VPU_64_BIT_OR_B21_B26_UNSET,
+                    ELF::getOffsetOfSymRef(symRefMap, firstTask), "First task in work item reloc"));
         }
     }
 

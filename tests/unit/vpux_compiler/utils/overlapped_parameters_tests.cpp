@@ -6,6 +6,7 @@
 //
 
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
+#include "vpux/compiler/dialect/VPU/IR/dialect.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
 #include "vpux/compiler/dialect/VPU/utils/overlap_distribution_utils.hpp"
@@ -39,9 +40,7 @@ TEST_P(GetOverlapDistributionParamsTests, GetMemoryViewFromProducerConsumers) {
     const auto expectedMemoryShapes = params.memoryShapes;
     const auto expectedMemoryOffsets = params.memoryOffsets;
 
-    mlir::DialectRegistry registry;
-    vpux::registerDialects(registry);
-    vpux::registerCommonInterfaces(registry);
+    auto registry = vpux::createDialectRegistry();
     auto interfacesRegistry = vpux::createInterfacesRegistry(vpux::VPU::ArchKind::NPU37XX);
     interfacesRegistry->registerInterfaces(registry);
 
@@ -91,31 +90,21 @@ llvm::StringLiteral poolwith2ConvConsumers = R"(
 
             %0 = VPU.NCE.AveragePool(%arg0) {
                 kernel_size = [1, 1],
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-                ppe = #VPU.PPETask<mode = <LPRELU>,
-                clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                lrelu_mult = 1311 : i64, lrelu_shift = 17 : i64,
-                quant_scale = [1.000000e+00],
-                fp_prelu_alpha = 0.01000213623046875 : f64>,
                 strides = [1, 1]}
                     -> tensor<1x144x28x27xf16, {order = #NHWC}>
 
             %1 = VPU.NCE.Convolution(%0, %w0, %weightsTable) {
+                    opaque_ppe = #VPU.PPEStub<>,
                     pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
-                    ppe = #VPU.PPETask<mode = <NOOP>,
-                    clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                    lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-                    fp_prelu_alpha = 1.000000e+00 : f64>,
                     rawFilterShape = [144, 144, 3, 3],
                     strides = [1, 1]}
                         -> tensor<1x144x28x27xf16, {order = #NHWC}>
 
             %2 = VPU.NCE.Convolution(%0, %w1, %weightsTable) {
+                    opaque_ppe = #VPU.PPEStub<>,
                     pad = #VPU.Padding<left = 2 : i64, right = 2 : i64, top = 2 : i64, bottom = 2 : i64>,
-                    ppe = #VPU.PPETask<mode = <NOOP>,
-                    clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                    lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-                    fp_prelu_alpha = 1.000000e+00 : f64>,
                     rawFilterShape = [144, 144, 5, 5],
                     strides = [1, 1]}
                         -> tensor<1x144x28x27xf16, {order = #NHWC}>
@@ -140,41 +129,28 @@ llvm::StringLiteral poolwith3ConvConsumers = R"(
 
             %0 = VPU.NCE.AveragePool(%arg0) {
                 kernel_size = [1, 1],
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-                ppe = #VPU.PPETask<mode = <LPRELU>,
-                clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                lrelu_mult = 1311 : i64, lrelu_shift = 17 : i64,
-                quant_scale = [1.000000e+00],
-                fp_prelu_alpha = 0.01000213623046875 : f64>,
                 strides = [1, 1]}
                     -> tensor<1x144x28x27xf16, {order = #NHWC}>
 
             %1 = VPU.NCE.Convolution(%0, %w0, %weightsTable) {
+                    opaque_ppe = #VPU.PPEStub<>,
                     pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
-                    ppe = #VPU.PPETask<mode = <NOOP>,
-                    clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                    lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-                    fp_prelu_alpha = 1.000000e+00 : f64>,
                     rawFilterShape = [144, 144, 3, 3],
                     strides = [1, 1]}
                         -> tensor<1x144x28x27xf16, {order = #NHWC}>
 
             %2 = VPU.NCE.Convolution(%0, %w1, %weightsTable) {
+                    opaque_ppe = #VPU.PPEStub<>,
                     pad = #VPU.Padding<left = 2 : i64, right = 2 : i64, top = 2 : i64, bottom = 2 : i64>,
-                    ppe = #VPU.PPETask<mode = <NOOP>,
-                    clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                    lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-                    fp_prelu_alpha = 1.000000e+00 : f64>,
                     rawFilterShape = [144, 144, 5, 5],
                     strides = [1, 1]}
                         -> tensor<1x144x28x27xf16, {order = #NHWC}>
 
             %3 = VPU.NCE.Convolution(%0, %w2, %weightsTable) {
+                    opaque_ppe = #VPU.PPEStub<>,
                     pad = #VPU.Padding<left = 4 : i64, right = 4 : i64, top = 3 : i64, bottom = 3 : i64>,
-                    ppe = #VPU.PPETask<mode = <NOOP>,
-                    clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                    lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-                    fp_prelu_alpha = 1.000000e+00 : f64>,
                     rawFilterShape = [144, 144, 7, 9],
                     strides = [1, 1]}
                         -> tensor<1x144x28x27xf16, {order = #NHWC}>
@@ -241,12 +217,8 @@ llvm::StringLiteral poolwith2NCEInterpConsumers = R"(
 
             %0 = VPU.NCE.AveragePool(%arg0) {
                 kernel_size = [1, 1],
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-                ppe = #VPU.PPETask<mode = <LPRELU>,
-                clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                lrelu_mult = 1311 : i64, lrelu_shift = 17 : i64,
-                quant_scale = [1.000000e+00],
-                fp_prelu_alpha = 0.01000213623046875 : f64>,
                 strides = [1, 1]}
                     -> tensor<1x96x20x20xf16, {order = #NHWC}>
 
@@ -266,7 +238,7 @@ llvm::StringLiteral poolwith2NCEInterpConsumers = R"(
                 strides = [1, 1],
                 mode = #VPU.nce_interpolate_mode<BILINEAR>,
                 scales_attr = [2, 2],
-                ppe = #VPU.PPETask<clamp_high = 2147483967, clamp_low = 0, lrelu_mult = 1, lrelu_shift = 0, mode = <NOOP>>}
+                opaque_ppe = #VPU.PPEStub<>}
                     -> tensor<1x96x40x40xf16, {order = #NHWC}>
 
             %input1 = VPU.GroupSparseTensor(%0, %sparseMap1, %storageElement1) {
@@ -285,7 +257,7 @@ llvm::StringLiteral poolwith2NCEInterpConsumers = R"(
                 strides = [1, 1],
                 mode = #VPU.nce_interpolate_mode<BILINEAR>,
                 scales_attr = [3, 3],
-                ppe = #VPU.PPETask<clamp_high = 2147483967, clamp_low = 0, lrelu_mult = 1, lrelu_shift = 0, mode = <NOOP>>}
+                opaque_ppe = #VPU.PPEStub<>}
                     -> tensor<1x96x60x60xf16, {order = #NHWC}>
 
             return %1, %2 : tensor<1x96x40x40xf16, {order = #NHWC}>, tensor<1x96x60x60xf16, {order = #NHWC}>
@@ -313,12 +285,8 @@ llvm::StringLiteral poolWithNCEInterpAndConvConsumers = R"(
 
             %0 = VPU.NCE.AveragePool(%arg0) {
                 kernel_size = [1, 1],
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-                ppe = #VPU.PPETask<mode = <LPRELU>,
-                clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                lrelu_mult = 1311 : i64, lrelu_shift = 17 : i64,
-                quant_scale = [1.000000e+00],
-                fp_prelu_alpha = 0.01000213623046875 : f64>,
                 strides = [1, 1]}
                     -> tensor<1x96x20x20xf16, {order = #NHWC}>
 
@@ -338,15 +306,12 @@ llvm::StringLiteral poolWithNCEInterpAndConvConsumers = R"(
                 strides = [1, 1],
                 mode = #VPU.nce_interpolate_mode<BILINEAR>,
                 scales_attr = [2, 2],
-                ppe = #VPU.PPETask<clamp_high = 2147483967, clamp_low = 0, lrelu_mult = 1, lrelu_shift = 0, mode = <NOOP>>}
+                opaque_ppe = #VPU.PPEStub<>}
                     -> tensor<1x96x40x40xf16, {order = #NHWC}>
 
             %2 = VPU.NCE.Convolution(%0, %w1, %weightsTable) {
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
-                ppe = #VPU.PPETask<mode = <NOOP>,
-                clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-                fp_prelu_alpha = 1.000000e+00 : f64>,
                 rawFilterShape = [96, 96, 3, 3],
                 strides = [1, 1]}
                     -> tensor<1x96x20x20xf16, {order = #NHWC}>
@@ -398,31 +363,21 @@ llvm::StringLiteral convConsumersSameKernelDiffStrides = R"(
 
             %0 = VPU.NCE.AveragePool(%arg0) {
                 kernel_size = [1, 1],
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-                ppe = #VPU.PPETask<mode = <LPRELU>,
-                clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                lrelu_mult = 1311 : i64, lrelu_shift = 17 : i64,
-                quant_scale = [1.000000e+00],
-                fp_prelu_alpha = 0.01000213623046875 : f64>,
                 strides = [1, 1]}
                     -> tensor<1x32x28x27xf16, {order = #NHWC}>
 
             %1 = VPU.NCE.Convolution(%0, %weights, %weightsTable) {
+                    opaque_ppe = #VPU.PPEStub<>,
                     pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-                    ppe = #VPU.PPETask<mode = <NOOP>,
-                    clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                    lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-                    fp_prelu_alpha = 1.000000e+00 : f64>,
                     rawFilterShape = [32, 32, 1, 1],
                     strides = [2, 2]}
                         -> tensor<1x32x14x14xf16, {order = #NHWC}>
 
             %2 = VPU.NCE.Convolution(%0, %weights, %weightsTable) {
+                    opaque_ppe = #VPU.PPEStub<>,
                     pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-                    ppe = #VPU.PPETask<mode = <NOOP>,
-                    clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                    lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-                    fp_prelu_alpha = 1.000000e+00 : f64>,
                     rawFilterShape = [32, 32, 1, 1],
                     strides = [1, 1]}
                         -> tensor<1x32x28x27xf16, {order = #NHWC}>
@@ -447,41 +402,28 @@ llvm::StringLiteral consumersWithMismatchedMemoryView = R"(
 
             %0 = VPU.NCE.AveragePool(%arg0) {
                 kernel_size = [1, 1],
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-                ppe = #VPU.PPETask<mode = <LPRELU>,
-                clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                lrelu_mult = 1311 : i64, lrelu_shift = 17 : i64,
-                quant_scale = [1.000000e+00],
-                fp_prelu_alpha = 0.01000213623046875 : f64>,
                 strides = [1, 1]}
                     -> tensor<1x16x112x111xf16, {order = #NHWC}>
 
             %1 = VPU.NCE.Convolution(%0, %w0, %weightsTable) {
+                    opaque_ppe = #VPU.PPEStub<>,
                     pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-                    ppe = #VPU.PPETask<mode = <NOOP>,
-                    clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                    lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-                    fp_prelu_alpha = 1.000000e+00 : f64>,
                     rawFilterShape = [16, 16, 1, 1],
                     strides = [1, 1]}
                         -> tensor<1x16x112x111xf16, {order = #NHWC}>
 
             %2 = VPU.NCE.Convolution(%0, %w1, %weightsTable) {
+                    opaque_ppe = #VPU.PPEStub<>,
                     pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-                    ppe = #VPU.PPETask<mode = <NOOP>,
-                    clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                    lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-                    fp_prelu_alpha = 1.000000e+00 : f64>,
                     rawFilterShape = [16, 16, 1, 1],
                     strides = [2, 2]}
                         -> tensor<1x16x56x56xf16, {order = #NHWC}>
 
             %3 = VPU.NCE.Convolution(%0, %w2, %weightsTable) {
+                    opaque_ppe = #VPU.PPEStub<>,
                     pad = #VPU.Padding<left = 1 : i64, right = 0 : i64, top = 1 : i64, bottom = 0 : i64>,
-                    ppe = #VPU.PPETask<mode = <NOOP>,
-                    clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                    lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-                    fp_prelu_alpha = 1.000000e+00 : f64>,
                     rawFilterShape = [16, 16, 3, 3],
                     strides = [2, 2]}
                         -> tensor<1x16x56x55xf16, {order = #NHWC}>
@@ -536,41 +478,28 @@ llvm::StringLiteral consumerNotSOHOrWCompatible = R"(
 
             %0 = VPU.NCE.AveragePool(%arg0) {
                 kernel_size = [1, 1],
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-                ppe = #VPU.PPETask<mode = <LPRELU>,
-                clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                lrelu_mult = 1311 : i64, lrelu_shift = 17 : i64,
-                quant_scale = [1.000000e+00],
-                fp_prelu_alpha = 0.01000213623046875 : f64>,
                 strides = [1, 1]}
                     -> tensor<1x16x8x8xf16, {order = #NHWC}>
 
             %1 = VPU.NCE.Convolution(%0, %w0, %weightsTable) {
+                    opaque_ppe = #VPU.PPEStub<>,
                     pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
-                    ppe = #VPU.PPETask<mode = <NOOP>,
-                    clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                    lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-                    fp_prelu_alpha = 1.000000e+00 : f64>,
                     rawFilterShape = [16, 16, 3, 3],
                     strides = [1, 1]}
                         -> tensor<1x16x8x8xf16, {order = #NHWC}>
 
             %2 = VPU.NCE.Convolution(%0, %w1, %weightsTable) {
+                    opaque_ppe = #VPU.PPEStub<>,
                     pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-                    ppe = #VPU.PPETask<mode = <NOOP>,
-                    clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                    lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-                    fp_prelu_alpha = 1.000000e+00 : f64>,
                     rawFilterShape = [16, 16, 1, 1],
                     strides = [2, 2]}
                         -> tensor<1x16x4x4xf16, {order = #NHWC}>
 
             %3 = VPU.NCE.Convolution(%0, %w2, %weightsTable) {
+                    opaque_ppe = #VPU.PPEStub<>,
                     pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-                    ppe = #VPU.PPETask<mode = <NOOP>,
-                    clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                    lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-                    fp_prelu_alpha = 1.000000e+00 : f64>,
                     rawFilterShape = [16, 16, 7, 7],
                     strides = [1, 1]}
                         -> tensor<1x16x2x2xf16, {order = #NHWC}>
@@ -587,12 +516,8 @@ llvm::StringLiteral noCompatibleConsumers = R"(
           -> (tensor<1x144x16x16xf16, {order = #NHWC}>, tensor<1x144x16x16xf16, {order = #NHWC}>) {
             %0 = VPU.NCE.AveragePool(%arg0) {
                 kernel_size = [1, 1],
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-                ppe = #VPU.PPETask<mode = <LPRELU>,
-                clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                lrelu_mult = 1311 : i64, lrelu_shift = 17 : i64,
-                quant_scale = [1.000000e+00],
-                fp_prelu_alpha = 0.01000213623046875 : f64>,
                 strides = [1, 1]}
                     -> tensor<1x144x16x16xf16, {order = #NHWC}>
             %1 = VPU.MVN(%0) {
@@ -616,12 +541,8 @@ llvm::StringLiteral noConsumers = R"(
           -> tensor<1x144x16x16xf16, {order = #NHWC}> {
             %0 = VPU.NCE.AveragePool(%arg0) {
                 kernel_size = [1, 1],
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-                ppe = #VPU.PPETask<mode = <LPRELU>,
-                clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                lrelu_mult = 1311 : i64, lrelu_shift = 17 : i64,
-                quant_scale = [1.000000e+00],
-                fp_prelu_alpha = 0.01000213623046875 : f64>,
                 strides = [1, 1]}
                     -> tensor<1x144x16x16xf16, {order = #NHWC}>
             return %0 : tensor<1x144x16x16xf16, {order = #NHWC}>
@@ -639,12 +560,8 @@ llvm::StringLiteral mixedConsumers = R"(
             %weightsTable = const.Declare tensor<16x1x1x4xsi32> = dense<1> : tensor<16x1x1x4xsi32>
             %0 = VPU.NCE.AveragePool(%arg0) {
                 kernel_size = [1, 1],
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-                ppe = #VPU.PPETask<mode = <LPRELU>,
-                clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                lrelu_mult = 1311 : i64, lrelu_shift = 17 : i64,
-                quant_scale = [1.000000e+00],
-                fp_prelu_alpha = 0.01000213623046875 : f64>,
                 strides = [1, 1]}
                     -> tensor<1x16x96x160xf16, {order = #NHWC}>
             %1 = VPU.Interpolate(%0) {
@@ -655,18 +572,15 @@ llvm::StringLiteral mixedConsumers = R"(
                     cube_coeff = -7.500000e-01 : f64>, axes_attr = [2, 3],
                     initial_input_dims_attr = [1, 16, 96, 160],
                     initial_output_dims_attr = [1, 16, 192, 320],
-                    operandSegmentSizes = array<i32: 1, 0, 0, 0, 0, 0>,
+                    operandSegmentSizes = array<i32: 1, 0, 0, 0>,
                     scales_attr = [2.000000e+00, 2.000000e+00],
                     sizes_attr = [192, 320],
                     tile_offset_attr = [0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00]}
                   : tensor<1x16x96x160xf16, {order = #NHWC}>
                   -> tensor<1x16x192x320xf16, {order = #NHWC}>
             %2 = VPU.NCE.Convolution(%0, %weights, %weightsTable) {
+                    opaque_ppe = #VPU.PPEStub<>,
                     pad = #VPU.Padding<left = 2 : i64, right = 2 : i64, top = 2 : i64, bottom = 2 : i64>,
-                    ppe = #VPU.PPETask<mode = <NOOP>,
-                    clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                    lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-                    fp_prelu_alpha = 1.000000e+00 : f64>,
                     rawFilterShape = [16, 16, 5, 5],
                     strides = [1, 1]}
                         -> tensor<1x16x96x160xf16, {order = #NHWC}>

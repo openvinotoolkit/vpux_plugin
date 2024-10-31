@@ -22,6 +22,7 @@ func.func @ConvRewriter(%arg0: tensor<1x16x16x16xf16, {order = #NHWC}>) -> tenso
     %2 = VPU.Copy(%wt) {out_mem_space = @CMX_NN} : tensor<16x1x1x4xsi32, {order = #NHWC}>
         -> tensor<16x1x1x4xsi32, {mem_space = @CMX_NN, order = #NHWC}>
     %3 = VPU.NCE.Convolution(%0, %1, %2) {
+            opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_scale = [1.000000e+00], fp_prelu_alpha = 1.000000e+00 : f64>,
             pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
             rawFilterShape = [16, 16, 1, 1],
             strides = [1, 1]
@@ -46,6 +47,7 @@ func.func @ConvRewriter(%arg0: tensor<1x16x16x16xf16, {order = #NHWC}>) -> tenso
     // CHECK-SAME:      -> tensor<16x1x1x4xsi32, {mem_space = @CMX_NN, order = #NHWC}>
 
     // CHECK:       [[VAL3:%.+]] = VPU.NCE.Convolution([[VAL0]], [[VAL1]], [[VAL2]]) {
+    // CHECK-SAME:      opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_scale = [1.000000e+00], fp_prelu_alpha = 1.000000e+00 : f64>,
     // CHECK-SAME:      pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
     // CHECK-SAME:      strides = [1, 1]}
     // CHECK-SAME:      -> tensor<1x16x16x16xf16, {mem_space = @CMX_NN, order = #NHWC}> {
@@ -77,6 +79,7 @@ func.func @DepthConvRewriter(%arg0: tensor<1x16x40x80xf16, {order = #NHWC}>) -> 
         -> tensor<16x1x1x4xsi32, {mem_space = @CMX_NN, order = #NHWC}>
 
     %3 = VPU.NCE.DepthConvolution(%0, %1, %2) {
+            opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_scale = [1.000000e+00], fp_prelu_alpha = 1.000000e+00 : f64>,
             pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
             rawFilterShape = [16, 1, 4, 8],
             strides = [1, 1]
@@ -98,6 +101,7 @@ func.func @DepthConvRewriter(%arg0: tensor<1x16x40x80xf16, {order = #NHWC}>) -> 
     // CHECK-SAME:      -> tensor<16x1x1x4xsi32, {mem_space = @CMX_NN, order = #NHWC}>
 
     // CHECK:       [[VAL3:%.+]] = VPU.NCE.DepthConvolution([[VAL0]], [[VAL1]], [[VAL2]]) {
+    // CHECK-SAME:      opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_scale = [1.000000e+00], fp_prelu_alpha = 1.000000e+00 : f64>,
     // CHECK-SAME:      pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
     // CHECK-SAME:      strides = [1, 1]}
     // CHECK-SAME:      -> tensor<1x16x37x73xf16, {mem_space = @CMX_NN, order = #NHWC}> {
@@ -120,6 +124,7 @@ func.func @MaxPoolRewriter(%arg0: tensor<1x16x1x4xf16, {order = #NHWC}>) -> tens
         -> tensor<1x16x1x4xf16, {mem_space = @CMX_NN, order = #NHWC}>
 
     %1 = VPU.NCE.MaxPool(%0) {
+            opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_scale = [1.000000e+00], fp_prelu_alpha = 1.000000e+00 : f64>,
             pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
             strides = [1, 1],
             kernel_size = [1, 1]
@@ -135,6 +140,7 @@ func.func @MaxPoolRewriter(%arg0: tensor<1x16x1x4xf16, {order = #NHWC}>) -> tens
 
     // CHECK:       [[VAL1:%.+]] = VPU.NCE.MaxPool([[VAL0]]) {
     // CHECK-SAME:      kernel_size = [1, 1],
+    // CHECK-SAME:      opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_scale = [1.000000e+00], fp_prelu_alpha = 1.000000e+00 : f64>,
     // CHECK-SAME:      pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
     // CHECK-SAME:      strides = [1, 1]}
     // CHECK-SAME:      -> tensor<1x16x1x4xf16, {mem_space = @CMX_NN, order = #NHWC}> {
@@ -159,7 +165,8 @@ func.func @EltwiseAddRewriter(%arg0: tensor<1x64x28x28xf16, {order = #NHWC}>, %a
     %1 = VPU.Copy(%arg1) {out_mem_space = @CMX_NN} : tensor<1x64x28x28xf16, {order = #NHWC}>
         -> tensor<1x64x28x28xf16, {mem_space = @CMX_NN, order = #NHWC}>
 
-    %2 = VPU.NCE.Eltwise(%0, %1) { op_type = #VPU.eltwise_type<ADD> } :
+    %2 = VPU.NCE.Eltwise(%0, %1) { op_type = #VPU.eltwise_type<ADD>,
+        opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_scale = [1.000000e+00], fp_prelu_alpha = 1.000000e+00 : f64>} :
         tensor<1x64x28x28xf16, {mem_space = @CMX_NN, order = #NHWC}>, tensor<1x64x28x28xf16, {mem_space = @CMX_NN, order = #NHWC}>
         -> tensor<1x64x28x28xf16, {mem_space = @CMX_NN, order = #NHWC}>
 
@@ -255,6 +262,7 @@ func.func @ConvolutionWithDistributedTensor(%arg0: !Input_DDR) -> !Output_DDR {
               -> !OutputDistributed {
         // Generate different workloads due to different pads on each cluster
         %0 = VPU.NCE.Convolution(%arg1, %arg2, %arg3) {
+                opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_scale = [1.000000e+00], fp_prelu_alpha = 1.000000e+00 : f64>,
                 pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
                 rawFilterShape = [64, 32, 3, 3],
                 strides = [1, 1]
@@ -339,6 +347,7 @@ func.func @ConvRewriterCUBOID_16x16(%arg0: tensor<1x16x16x16xf16, {order = #NHWC
     %2 = VPU.Copy(%wt) {out_mem_space = @CMX_NN} : tensor<16x1x1x4xsi32, {order = #NHWC}>
         -> tensor<16x1x1x4xsi32, {mem_space = @CMX_NN, order = #NHWC}>
     %3 = VPU.NCE.Convolution(%0, %1, %2) {
+            opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_scale = [1.000000e+00], fp_prelu_alpha = 1.000000e+00 : f64>,
             pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
             rawFilterShape = [16, 16, 1, 1],
             strides = [1, 1]
@@ -395,6 +404,7 @@ func.func @ConvRewriterCUBOID_8x16(%arg0: tensor<1x128x56x28xf16, {order = #NHWC
     %2 = VPU.Copy(%wt) {out_mem_space = @CMX_NN} : tensor<128x1x1x4xsi32, {order = #NHWC}>
         -> tensor<128x1x1x4xsi32, {mem_space = @CMX_NN, order = #NHWC}>
     %3 = VPU.NCE.Convolution(%0, %1, %2) {
+            opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_scale = [1.000000e+00], fp_prelu_alpha = 1.000000e+00 : f64>,
             pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
             rawFilterShape = [128, 128, 1, 1],
             strides = [1, 1]
@@ -450,6 +460,7 @@ func.func @ConvRewriterCUBOID_4x16(%arg0: tensor<1x256x8x8xf16, {order = #NHWC}>
     %2 = VPU.Copy(%wt) {out_mem_space = @CMX_NN} : tensor<256x1x1x4xsi32, {order = #NHWC}>
         -> tensor<256x1x1x4xsi32, {mem_space = @CMX_NN, order = #NHWC}>
     %3 = VPU.NCE.Convolution(%0, %1, %2) {
+            opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_scale = [1.000000e+00], fp_prelu_alpha = 1.000000e+00 : f64>,
             pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
             rawFilterShape = [256, 256, 1, 1],
             strides = [1, 1]
@@ -560,8 +571,8 @@ func.func @ConvolutionWithSparseDistributedTensor(%arg0: !Input_DDR) -> !Output_
               -> !OutputDistributed {
         // Generate different workloads due to different pads on each cluster
         %0 = VPU.NCE.Convolution(%arg1, %arg2, %arg3) {
+            opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_scale = [1.000000e+00], fp_prelu_alpha = 1.000000e+00 : f64>,
             pad = #VPU.Padding<left = 3 : i64, right = 2 : i64, top = 3 : i64, bottom = 2 : i64>,
-            ppe = #VPU.PPETask<mode = <LRELU>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>,
             rawFilterShape = [32, 16, 7, 7],
             strides = [2, 2]
             } -> !OutputStub_CMX
@@ -611,8 +622,8 @@ func.func @ConvolutionWithSparseDistributedTensor(%arg0: !Input_DDR) -> !Output_
     // CHECK-SAME:             -> !VPU.SparseTensor<data=!VPU.DistributedTensor<1x32x112x112xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}>,
     // CHECK-SAME:                                  sparsity_map=!VPU.DistributedTensor<1x32x112x112xi1, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}>> {
     // CHECK:                [[RES4:%.*]] = VPU.NCE.Convolution(%arg1, %arg2, %arg3)
+    // CHECK-SAME:                            opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_scale = [1.000000e+00], fp_prelu_alpha = 1.000000e+00 : f64>,
     // CHECK-SAME:                            pad = #VPU.Padding<left = 3 : i64, right = 2 : i64, top = 3 : i64, bottom = 2 : i64>,
-    // CHECK-SAME:                            ppe = #VPU.PPETask<mode = <LRELU>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>,
     // CHECK-SAME:                            rawFilterShape = [32, 16, 7, 7], strides = [2, 2]}
     // CHECK-SAME:             -> !VPU.SparseTensor<data=tensor<1x32x112x112xf16, {mem_space = @CMX_NN, order = #NHWC}>,
     // CHECK-SAME:                                  sparsity_map=tensor<1x32x112x112xi1, {mem_space = @CMX_NN, order = #NHWC}>> {
@@ -705,7 +716,7 @@ func.func @InterpolateBilinear(
         strides = [1, 1],
         mode = #VPU.nce_interpolate_mode<BILINEAR>,
         scales_attr = [2, 2],
-        ppe = #VPU.PPETask<clamp_high = 2147483647, clamp_low = 0, lrelu_mult = 1, lrelu_shift = 0, mode = <NOOP>>
+        opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_scale = [1.000000e+00], fp_prelu_alpha = 1.000000e+00 : f64>
     } -> tensor<1x64x10x20xf16, {order = #NHWC, mem_space = @CMX_NN}>
 
     return %task : tensor<1x64x10x20xf16, {order = #NHWC, mem_space = @CMX_NN}>
@@ -766,7 +777,7 @@ func.func @InterpolateBilinear(
 
     // CHECK:       [[INTERPOLATE:%.+]] = VPU.NCE.Interpolate([[SPARSE_TENSOR_CMX]], %arg1, %arg2) {
     // CHECK-SAME:      mode = #VPU.nce_interpolate_mode<BILINEAR>,
-    // CHECK-SAME:      ppe = #VPU.PPETask<mode = <NOOP>, clamp_low = 0 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64>,
+    // CHECK-SAME:      opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_scale = [1.000000e+00], fp_prelu_alpha = 1.000000e+00 : f64>,
     // CHECK-SAME:      rawFilterShape = [64, 64, 2, 2],
     // CHECK-SAME:      scales_attr = [2, 2]
     // CHECK-SAME:      strides = [1, 1]
@@ -851,7 +862,7 @@ func.func @InterpolateNearest(
         strides = [1, 1],
         mode = #VPU.nce_interpolate_mode<NEAREST>,
         scales_attr = [2, 2],
-        ppe = #VPU.PPETask<clamp_high = 2147483647, clamp_low = 0, lrelu_mult = 1, lrelu_shift = 0, mode = <NOOP>>
+        opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_scale = [1.000000e+00], fp_prelu_alpha = 1.000000e+00 : f64>
     } -> tensor<1x64x10x20xf16, {order = #NHWC, mem_space = @CMX_NN}>
 
     return %task : tensor<1x64x10x20xf16, {order = #NHWC, mem_space = @CMX_NN}>
@@ -917,7 +928,7 @@ func.func @InterpolateNearest(
 
     // CHECK:       [[INTERPOLATE:%.+]] = VPU.NCE.Interpolate([[SPARSE_TENSOR_CMX]], %arg1, %arg2) {
     // CHECK-SAME:      mode = #VPU.nce_interpolate_mode<NEAREST>,
-    // CHECK-SAME:      ppe = #VPU.PPETask<mode = <NOOP>, clamp_low = 0 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64>,
+    // CHECK-SAME:      opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_scale = [1.000000e+00], fp_prelu_alpha = 1.000000e+00 : f64>,
     // CHECK-SAME:      rawFilterShape = [64, 64, 1, 1],
     // CHECK-SAME:      scales_attr = [2, 2]
     // CHECK-SAME:      strides = [1, 1]
@@ -939,7 +950,8 @@ func.func @SplitNCEPermute(%arg0: tensor<1x3x224x224xf16>) -> tensor<1x4x224x224
     %0 = VPU.NCE.Permute(%arg0) {
         dstElemType = !qElemType,
         dstOrder = #NHWC,
-        expandedChannels = 4 : i64
+        expandedChannels = 4 : i64,
+        opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_scale = [1.000000e+00], fp_prelu_alpha = 1.000000e+00 : f64>
     } -> tensor<1x4x224x224x!qElemType, {order = #NHWC}>
 
     return %0 : tensor<1x4x224x224x!qElemType, {order = #NHWC}>
@@ -947,7 +959,8 @@ func.func @SplitNCEPermute(%arg0: tensor<1x3x224x224xf16>) -> tensor<1x4x224x224
     // CHECK:       [[NCE_PERMUTE:%.+]] = VPU.NCE.Permute(%arg0) {
     // CHECK-SAME:      dstElemType = !qElemType, dstOrder = #NHWC,
     // CHECK-SAME:      expandedChannels = 4 : i64,
-    // CHECK-SAME:      minimumHardwareExecutionCost = {{[1-9][0-9]+}} : i64}
+    // CHECK-SAME:      minimumHardwareExecutionCost = {{[1-9][0-9]+}} : i64
+    // CHCEK-SAME:      opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_scale = [1.000000e+00], fp_prelu_alpha = 1.000000e+00 : f64>}
     // CHECK-SAME:      -> tensor<1x4x224x224x!qElemType, {order = #NHWC}> {
     // CHECK:               DPU.Workload outOffsets [0, 0, 0, 0] outSizes [1, 4, 224, 224] <left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64> <CUBOID_16x16>
     // CHECK:           }
@@ -993,7 +1006,8 @@ func.func @NCEPermuteOverlapSegmented(%arg0: !Input_DDR) -> !Output_CMX {
         %0 = VPU.NCE.Permute(%arg2) {
                 dstElemType = !quant.uniform<u8:f16, 1.000000e+00>,
                 dstOrder = #NHWC,
-                expandedChannels = 4 : i64
+                expandedChannels = 4 : i64,
+                opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_scale = [1.000000e+00], fp_prelu_alpha = 1.000000e+00 : f64>
         } -> !OutputStub_CMX
         VPU.Yield %0
     }
@@ -1057,7 +1071,8 @@ func.func @NCEPermuteOverlap(%arg0: !Input_DDR) -> !Output_CMX {
         %0 = VPU.NCE.Permute(%arg2) {
                 dstElemType = !quant.uniform<u8:f16, 1.000000e+00>,
                 dstOrder = #NHWC,
-                expandedChannels = 4 : i64
+                expandedChannels = 4 : i64,
+                opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_scale = [1.000000e+00], fp_prelu_alpha = 1.000000e+00 : f64>
         } -> !OutputStub_CMX
         VPU.Yield %0
     }
@@ -1106,8 +1121,8 @@ func.func @MatMulRewriter(%arg0: !InputDistributed,%arg1: !WeightsDistributed) -
                                  %cst as %arg4: tensor<6x32x1x1x4xsi32, {mem_space = @CMX_NN, order = #GNCHW}>) ->  !OutputDistributed {
         %15 = VPU.NCE.MatMul(%arg2, %arg3, %arg4)
         {multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverGroup>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-         ppe = #VPU.PPETask<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-          fp_prelu_alpha = 1.000000e+00 : f64>, rawFilterShape = [6, 32, 16, 1, 1], strides = [1, 1]} -> tensor<6x1x32x4x1xf16, {mem_space = @CMX_NN, order = #GNHWC}>
+         opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_scale = [1.000000e+00], fp_prelu_alpha = 1.000000e+00 : f64>,
+         rawFilterShape = [6, 32, 16, 1, 1], strides = [1, 1]} -> tensor<6x1x32x4x1xf16, {mem_space = @CMX_NN, order = #GNHWC}>
         VPU.Yield %15
     }
 
@@ -1197,8 +1212,8 @@ func.func @MatMulUnevenDistributionRewriter(%arg0: !InputDistributed,%arg1: !Wei
                                  %cst as %arg4: tensor<6x32x1x1x4xsi32, {mem_space = @CMX_NN, order = #GNCHW}>) ->  !OutputDistributed {
         %15 = VPU.NCE.MatMul(%arg2, %arg3, %arg4)
         {multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverGroup>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-         ppe = #VPU.PPETask<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-          fp_prelu_alpha = 1.000000e+00 : f64>, rawFilterShape = [6, 32, 16, 1, 1], strides = [1, 1]} -> tensor<6x1x32x4x1xf16, {mem_space = @CMX_NN, order = #GNHWC}>
+         opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_scale = [1.000000e+00], fp_prelu_alpha = 1.000000e+00 : f64>,
+         rawFilterShape = [6, 32, 16, 1, 1], strides = [1, 1]} -> tensor<6x1x32x4x1xf16, {mem_space = @CMX_NN, order = #GNHWC}>
         VPU.Yield %15
     }
 

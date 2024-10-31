@@ -56,15 +56,17 @@ void ConstantFoldingPass::runOnOperation() {
 
     const auto denseAttr = mlir::DenseElementsAttr::getFromRawBuffer(rankedTensorType, tempBuf);
     auto origType = origOp.getType().cast<NDTypeInterface>();
+
     if (isUnsupportedSubByteStorageType) {
         // Temporary fix to enable compilation.
         // Final design to also include a mechanism to FREEZE constants
         // from accepting future transformations due to the fact of packed
         // sub byte values stored, which would require an unpacking and a repacking
-        origOp.setContentAttr(Const::ContentAttr::get(denseAttr).changeShapeAndElemType(origType.getShape(),
-                                                                                        origType.getElementType()));
+        origOp.getProperties().content = Const::ContentAttr::transform(denseAttr)
+                                                 .changeShapeAndElemType(origType.getShape(), origType.getElementType())
+                                                 .get();
     } else {
-        origOp.setContentAttr(Const::ContentAttr::get(denseAttr));
+        origOp.getProperties().content = Const::ContentAttr::get(denseAttr);
     }
 }
 

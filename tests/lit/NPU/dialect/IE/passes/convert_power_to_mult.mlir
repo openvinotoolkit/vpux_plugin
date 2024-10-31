@@ -21,7 +21,7 @@ func.func @ConvertPowerWithExponent2ToMult(%arg0: tensor<1x16xf16>) -> tensor<1x
 
 // CHECK-LABEL: @RemoveSqrtPowerWithExponent2Pattern
 func.func @RemoveSqrtPowerWithExponent2Pattern(%arg0: tensor<1x900x161xf16>) -> tensor<1x900x161xf16> {
-    %cst = const.Declare tensor<1x1x1xf16> = dense<2.000000e+00> : tensor<1x1x1xf32>, [#const.ConvertElemType<f16>]
+    %cst = const.Declare tensor<1x1x1xf16> = dense<2.000000e+00> : tensor<1x1x1xf32>, [#const.CastElemType<f16>]
     %sqrt = IE.Sqrt(%arg0) : tensor<1x900x161xf16> -> tensor<1x900x161xf16>
     %power = IE.Power(%sqrt, %cst) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x900x161xf16>, tensor<1x1x1xf16> -> tensor<1x900x161xf16>
     return %power : tensor<1x900x161xf16>

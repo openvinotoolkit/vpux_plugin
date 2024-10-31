@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 //
@@ -11,7 +11,7 @@
 
 #include "vpux/utils/core/checked_cast.hpp"
 
-#include "vpux/compiler/dialect/VPUIP/graph-schema/blob_writer.hpp"
+#include "vpux/compiler/dialect/VPUMI37XX/blob_writer.hpp"
 
 #include <npu_37xx_nnrt.hpp>
 
@@ -34,7 +34,7 @@ template <typename T>
 class FlatBufferAccessor {
 public:
     FlatBufferAccessor() = default;
-    FlatBufferAccessor(VPUIP::BlobWriter* blobWriter, flatbuffers::Offset<T> offset)
+    FlatBufferAccessor(VPUMI37XX::BlobWriter* blobWriter, flatbuffers::Offset<T> offset)
             : writer(blobWriter), self(std::move(offset)) {
     }
 
@@ -47,14 +47,17 @@ public:
     }
 
 private:
-    VPUIP::BlobWriter* writer = nullptr;
+    VPUMI37XX::BlobWriter* writer = nullptr;
     flatbuffers::Offset<T> self;
 };
 
-FlatBufferAccessor<MVCNN::TensorReference> createTensorRef(
-        vpux::VPUIP::BlobWriter& writer, mlir::Value val, StringRef name, VPURT::BufferSection section,
-        ArrayRef<int64_t> sectionIndex, int64_t byteOffset, std::optional<int64_t> sparsityMapOffset,
-        std::optional<int64_t> storageElementOffset, std::optional<int64_t> storageElementSize, std::optional<int64_t> swizzlingKey) {
+FlatBufferAccessor<MVCNN::TensorReference> createTensorRef(vpux::VPUMI37XX::BlobWriter& writer, mlir::Value val,
+                                                           StringRef name, VPURT::BufferSection section,
+                                                           ArrayRef<int64_t> sectionIndex, int64_t byteOffset,
+                                                           std::optional<int64_t> sparsityMapOffset,
+                                                           std::optional<int64_t> storageElementOffset,
+                                                           std::optional<int64_t> storageElementSize,
+                                                           std::optional<int64_t> swizzlingKey) {
     const auto off =
             writer.createTensorRef(name, val.getType().cast<vpux::NDTypeInterface>(), section, sectionIndex, byteOffset,
                                    sparsityMapOffset, storageElementOffset, storageElementSize, swizzlingKey);
@@ -62,7 +65,7 @@ FlatBufferAccessor<MVCNN::TensorReference> createTensorRef(
     return {&writer, off};
 }
 
-FlatBufferAccessor<MVCNN::TensorReference> createTensorRef(vpux::VPUIP::BlobWriter& writer,
+FlatBufferAccessor<MVCNN::TensorReference> createTensorRef(vpux::VPUMI37XX::BlobWriter& writer,
                                                            VPURT::DeclareBufferOp bufOp,
                                                            std::optional<int64_t> sparsityMapOffset,
                                                            std::optional<int64_t> storageElementOffset,
@@ -74,7 +77,7 @@ FlatBufferAccessor<MVCNN::TensorReference> createTensorRef(vpux::VPUIP::BlobWrit
 
 std::tuple<FlatBufferAccessor<MVCNN::TensorReference>, FlatBufferAccessor<MVCNN::TensorReference>,
            FlatBufferAccessor<MVCNN::TensorReference>>
-createTensorRef(vpux::VPUIP::BlobWriter& writer, mlir::Value input, mlir::Value sparsityMap = nullptr,
+createTensorRef(vpux::VPUMI37XX::BlobWriter& writer, mlir::Value input, mlir::Value sparsityMap = nullptr,
                 mlir::Value storageElementTable = nullptr, std::optional<int64_t> storageElementSize = std::nullopt) {
     if (input == nullptr) {
         return {};
@@ -112,10 +115,10 @@ createTensorRef(vpux::VPUIP::BlobWriter& writer, mlir::Value input, mlir::Value 
 }
 
 FlatBufferAccessor<MVCNN::TensorReference> createTensorRef(
-        vpux::VPUIP::BlobWriter& writer, StringRef name, vpux::NDTypeInterface type, VPURT::DeclareBufferOp bufferOp,
+        vpux::VPUMI37XX::BlobWriter& writer, StringRef name, vpux::NDTypeInterface type, VPURT::DeclareBufferOp bufferOp,
         ArrayRef<int64_t> ppeQuantMult, ArrayRef<int64_t> ppeQuantShift, int64_t ppeQuantPostShift,
-        ArrayRef<uint8_t> quantZeroPoints, std::optional<int64_t> sparsityMapOffset, std::optional<int64_t> storageElementOffset,
-        std::optional<int64_t> storageElementSize) {
+        ArrayRef<uint8_t> quantZeroPoints, std::optional<int64_t> sparsityMapOffset,
+        std::optional<int64_t> storageElementOffset, std::optional<int64_t> storageElementSize) {
     auto offset = writer.createTensorRef(name, type, bufferOp.getSection(), bufferOp.getNonEmptySectionIndex(),
                                          bufferOp.getByteOffset(), ppeQuantMult, ppeQuantShift, ppeQuantPostShift,
                                          quantZeroPoints, sparsityMapOffset, storageElementOffset, storageElementSize,
@@ -126,7 +129,7 @@ FlatBufferAccessor<MVCNN::TensorReference> createTensorRef(
 // This is a helper routine to build new TensorReference out of NCE task for input, weights and output with provided
 // quantization scale parameters
 FlatBufferAccessor<MVCNN::TensorReference> getTensorReferenceWithUpdatedQuantParams(
-        VPUIP::BlobWriter& writer, ArrayRef<int64_t> ppeQuantMult, ArrayRef<int64_t> ppeQuantShift,
+        VPUMI37XX::BlobWriter& writer, ArrayRef<int64_t> ppeQuantMult, ArrayRef<int64_t> ppeQuantShift,
         int64_t ppeQuantPostShift, mlir::Value tensor, std::optional<int64_t> sparsityMapOffset,
         std::optional<int64_t> storageElementOffset, std::optional<int64_t> storageElementSize) {
     // Get also ZP
@@ -790,8 +793,7 @@ unsigned int SetupVariant_SOH(vpux::VPUMI37XX::DPUInvariantOp fb_invariant, vpux
         // We can't access that field from DPUVariantOp serialization
         // Logic breakdown concludes that we can check for segmentation to be off OR the task type to be ELTWISE
         // If the task type is ELTWISE sp_se_tbl_segment does not get set even if segmentation is ON
-        if (!fb_invariant.getIsSegmented() ||
-            fb_invariant.getNceTaskType() == VPUIP::NCETaskType::ELTWISE) {
+        if (!fb_invariant.getIsSegmented() || fb_invariant.getNceTaskType() == VPUIP::NCETaskType::ELTWISE) {
             int64_t kernelStridesH = 1;
             if (fb_invariant.getKernelStridesAttr() != nullptr) {
                 const auto kernelStrides = parseIntArrayAttr<int64_t>(fb_invariant.getKernelStridesAttr());
@@ -831,7 +833,7 @@ void Setup_Output_SOH(FlatBufferAccessor<MVCNN::TensorReference> outputRef,
     }
 }
 
-void SetupInput(vpux::VPUIP::BlobWriter& writer, vpux::VPUMI37XX::DPUInvariantOp op,
+void SetupInput(vpux::VPUMI37XX::BlobWriter& writer, vpux::VPUMI37XX::DPUInvariantOp op,
                 nn_public::VpuDPUInvariantRegisters& registers) {
     // Parent input override is required for PermuteQuantize.
     // Needed because input dimensions are read from parent input
@@ -881,7 +883,7 @@ void SetupInput(vpux::VPUIP::BlobWriter& writer, vpux::VPUMI37XX::DPUInvariantOp
     registers.kernel_pad_cfg.kernel_pad_cfg_bf.act_dense = is_act_dense;
 }
 
-void SetupWeights(vpux::VPUIP::BlobWriter& writer, vpux::VPUMI37XX::DPUInvariantOp op,
+void SetupWeights(vpux::VPUMI37XX::BlobWriter& writer, vpux::VPUMI37XX::DPUInvariantOp op,
                   nn_public::VpuDPUInvariantRegisters& registers) {
     if (op.getNceTaskType() == vpux::VPUIP::NCETaskType::MAXPOOL) {
         registers.tensor_mode.tensor_mode_bf.wmode = static_cast<unsigned int>(nn_public::VpuInputTensorDType::I8);
@@ -978,7 +980,7 @@ void SetupKernel(vpux::VPUMI37XX::DPUInvariantOp op, nn_public::VpuDPUInvariantR
     }
 }
 
-void SetupOutput(vpux::VPUIP::BlobWriter& writer, vpux::VPUMI37XX::DPUInvariantOp op,
+void SetupOutput(vpux::VPUMI37XX::BlobWriter& writer, vpux::VPUMI37XX::DPUInvariantOp op,
                  nn_public::VpuDPUInvariantRegisters& registers) {
     auto output = op.getOutputBuffs()[0];
     auto outputSparsityMap = op.getOutputSparsityMapBuff();
@@ -1292,7 +1294,7 @@ size_t getInputClusterCount(mlir::Value parentInput) {
     return 1;
 }
 
-void SetupInvariant_Convolution(vpux::VPUIP::BlobWriter& writer, vpux::VPUMI37XX::DPUInvariantOp op,
+void SetupInvariant_Convolution(vpux::VPUMI37XX::BlobWriter& writer, vpux::VPUMI37XX::DPUInvariantOp op,
                                 nn_public::VpuDPUInvariantRegisters& registers) {
     auto input = op.getInput();
     auto inputSparsityMap = op.getInputSparsityMap();
@@ -1365,7 +1367,7 @@ void SetupInvariant_Convolution(vpux::VPUIP::BlobWriter& writer, vpux::VPUMI37XX
     }
 }
 
-void SetupInvariant_MaxPool(vpux::VPUIP::BlobWriter& writer, vpux::VPUMI37XX::DPUInvariantOp op,
+void SetupInvariant_MaxPool(vpux::VPUMI37XX::BlobWriter& writer, vpux::VPUMI37XX::DPUInvariantOp op,
                             nn_public::VpuDPUInvariantRegisters& registers) {
     auto input = op.getInput();
     auto inputSparsityMap = op.getInputSparsityMap();
@@ -1395,7 +1397,7 @@ void SetupInvariant_MaxPool(vpux::VPUIP::BlobWriter& writer, vpux::VPUMI37XX::DP
     SetupInvariant_SOH(inputRef, parentInputRef, registers, inputClusterCount, op.getIsSegmented());
 }
 
-void SetupInvariant_DwConvolution(vpux::VPUIP::BlobWriter& writer, vpux::VPUMI37XX::DPUInvariantOp op,
+void SetupInvariant_DwConvolution(vpux::VPUMI37XX::BlobWriter& writer, vpux::VPUMI37XX::DPUInvariantOp op,
                                   nn_public::VpuDPUInvariantRegisters& registers) {
     auto input = op.getInput();
     auto inputSparsityMap = op.getInputSparsityMap();
@@ -1435,7 +1437,7 @@ void SetupInvariant_DwConvolution(vpux::VPUIP::BlobWriter& writer, vpux::VPUMI37
     SetupInvariant_SOH(inputRef, parentInputRef, registers, inputClusterCount, op.getIsSegmented());
 }
 
-bool SetupInvariant_Eltwise(vpux::VPUIP::BlobWriter& writer, vpux::VPUMI37XX::DPUInvariantOp op,
+bool SetupInvariant_Eltwise(vpux::VPUMI37XX::BlobWriter& writer, vpux::VPUMI37XX::DPUInvariantOp op,
                             nn_public::VpuDPUInvariantRegisters& registers) {
     auto input = op.getInput();
     auto inputSparsityMap = op.getInputSparsityMap();
@@ -1505,11 +1507,15 @@ bool SetupInvariant_Eltwise(vpux::VPUIP::BlobWriter& writer, vpux::VPUMI37XX::DP
     ::std::optional<SmallVector<int64_t>> in2QuantMult;
 
     for (auto ppeOp : op.getPpe().getOps<VPUMI37XX::PPETaskOp>()) {
-        if (ppeOp.getIn1QuantMult().has_value()) {
-            in1QuantMult = parseIntArrayAttr<int64_t>(ppeOp.getIn1QuantMult().value().dyn_cast<mlir::ArrayAttr>());
+        auto opaquePpeAttr = ppeOp.getOpaquePpeAttr();
+        auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(opaquePpeAttr);
+        VPUX_THROW_WHEN(intPpeAttr == nullptr,
+                        "Expected PPEIntAttr type but got {0}, make sure to use the right factory version", opaquePpeAttr);
+        if (const auto in1QuantMultAttr = intPpeAttr.getIn1QuantMult()) {
+            in1QuantMult = parseIntArrayAttr<int64_t>(in1QuantMultAttr);
         }
-        if (ppeOp.getIn2QuantMult().has_value()) {
-            in2QuantMult = parseIntArrayAttr<int64_t>(ppeOp.getIn2QuantMult().value().dyn_cast<mlir::ArrayAttr>());
+        if (const auto in2QuantMultAttr = intPpeAttr.getIn2QuantMult()) {
+            in2QuantMult = parseIntArrayAttr<int64_t>(in2QuantMultAttr);
         }
     }
 
@@ -1521,19 +1527,20 @@ bool SetupInvariant_Eltwise(vpux::VPUIP::BlobWriter& writer, vpux::VPUMI37XX::DP
         // Shifts must be set 0 for NPU37XX and NPU40XX runtime to be considered, otherwise runtime will ignore inputs
         // MULT.
         const auto inputSparsityMapOffset =
-                inputSparsityMap
-                        ? std::optional<int64_t>{inputSparsityMap.getDefiningOp<VPURT::DeclareBufferOp>().getByteOffset()}
-                        : std::nullopt;
+                inputSparsityMap ? std::optional<int64_t>{inputSparsityMap.getDefiningOp<VPURT::DeclareBufferOp>()
+                                                                  .getByteOffset()}
+                                 : std::nullopt;
         const auto inputStorageElementOffset =
-                inputSETables ? std::optional<int64_t>{inputSETables.getDefiningOp<VPURT::DeclareBufferOp>().getByteOffset()}
-                              : std::nullopt;
+                inputSETables
+                        ? std::optional<int64_t>{inputSETables.getDefiningOp<VPURT::DeclareBufferOp>().getByteOffset()}
+                        : std::nullopt;
         inputRef = getTensorReferenceWithUpdatedQuantParams(writer, in1QuantMult.value(), {0}, 0, input,
                                                             inputSparsityMapOffset, inputStorageElementOffset,
                                                             inputSESize);
         const auto weightsSparsityMapOffset =
-                weightsSparsityMap
-                        ? std::optional<int64_t>{weightsSparsityMap.getDefiningOp<VPURT::DeclareBufferOp>().getByteOffset()}
-                        : std::nullopt;
+                weightsSparsityMap ? std::optional<int64_t>{weightsSparsityMap.getDefiningOp<VPURT::DeclareBufferOp>()
+                                                                    .getByteOffset()}
+                                   : std::nullopt;
         weightsRef = getTensorReferenceWithUpdatedQuantParams(writer, in2QuantMult.value(), {0}, 0, weights,
                                                               weightsSparsityMapOffset, std::nullopt, std::nullopt);
     }
@@ -1574,7 +1581,7 @@ bool SetupInvariant_Eltwise(vpux::VPUIP::BlobWriter& writer, vpux::VPUMI37XX::DP
     return true;
 }
 
-FlatBufferAccessor<MVCNN::PPETask> getPPETask(vpux::VPUIP::BlobWriter& writer, vpux::VPUMI37XX::DPUInvariantOp op) {
+FlatBufferAccessor<MVCNN::PPETask> getPPETask(vpux::VPUMI37XX::BlobWriter& writer, vpux::VPUMI37XX::DPUInvariantOp op) {
     SmallVector<uint8_t> ppeList;
     int32_t clampLow = std::numeric_limits<int32_t>::min();
     int32_t clampHigh = std::numeric_limits<int32_t>::max();
@@ -1587,49 +1594,52 @@ FlatBufferAccessor<MVCNN::PPETask> getPPETask(vpux::VPUIP::BlobWriter& writer, v
     float fpPReluAlpha = 1.f;
 
     for (auto ppeOp : op.getPpe().getOps<VPUMI37XX::PPETaskOp>()) {
-        const auto type = getPPELayerType(ppeOp.getPpeLayerType());
-        if (type != MVCNN::PPELayerType_NOOP) {
-            ppeList.push_back(type);
-        }
-        if (ppeOp.getClampLow().has_value()) {
-            if (auto intClampLowAttr = ppeOp.getClampLowAttr().dyn_cast<mlir::IntegerAttr>()) {
-                clampLow = checked_cast<int32_t>(intClampLowAttr.getInt());
-            } else if (auto fpClampLowAttr = ppeOp.getClampLowAttr().dyn_cast<mlir::FloatAttr>()) {
-                VPUX_THROW("Unsupported floating point low clamp for NPU37XX PPE. Use integer clamps.");
+            auto opaquePpeAttr = ppeOp.getOpaquePpeAttr();
+            auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(opaquePpeAttr);
+            VPUX_THROW_WHEN(intPpeAttr == nullptr,
+                            "Expected PPEintAttr type but got {0}, make sure to use the right factory version", opaquePpeAttr);
+
+            if (intPpeAttr.getMode()) {
+                const auto ppeType = getPPELayerType(intPpeAttr.getMode().getValue());
+                if (ppeType != MVCNN::PPELayerType_NOOP) {
+                    ppeList.push_back(ppeType);
+                }
+            } else {
+                VPUX_THROW("PPEMode was not found.");
             }
-        }
-        if (ppeOp.getClampHigh().has_value()) {
-            if (auto intClampHighAttr = ppeOp.getClampHighAttr().dyn_cast<mlir::IntegerAttr>()) {
-                clampHigh = checked_cast<int32_t>(intClampHighAttr.getInt());
-            } else if (auto fpClampHighAttr = ppeOp.getClampHighAttr().dyn_cast<mlir::FloatAttr>()) {
-                VPUX_THROW("Unsupported floating point high clamp for NPU37XX PPE. Use integer clamps.");
+
+            if (const auto clampLowAttr = intPpeAttr.getClampLow()) {
+                clampLow = checked_cast<int32_t>(clampLowAttr.getValue().getSExtValue());
             }
-        }
-        if (ppeOp.getLreluMult().has_value()) {
-            LreluMult = checked_cast<int32_t>(ppeOp.getLreluMult().value());
-        }
-        if (ppeOp.getLreluShift().has_value()) {
-            LreluShift = checked_cast<uint32_t>(ppeOp.getLreluShift().value());
-        }
-        if (ppeOp.getQuantMult().has_value()) {
-            ppeQuantMult = parseIntArrayAttr<int64_t>(ppeOp.getQuantMult().value());
-        }
-        if (ppeOp.getQuantShift().has_value()) {
-            ppeQuantShift = parseIntArrayAttr<int64_t>(ppeOp.getQuantShift().value());
-        }
-        if (ppeOp.getQuantPostShift().has_value()) {
-            ppeQuantPostShift = checked_cast<int64_t>(ppeOp.getQuantPostShift().value());
-        }
-        if (ppeOp.getQuantScale().has_value()) {
-            auto floatScaleAttr = ppeOp.getQuantScaleAttr().getValue()[0];
-            ppeQuantScale = static_cast<float>(floatScaleAttr.dyn_cast_or_null<mlir::FloatAttr>().getValueAsDouble());
-        }
-        if (ppeOp.getFpPreluAlpha().has_value()) {
-            // For values like prelu_alpha=0.1, checked_cast fails, due to loss in precision when converting
-            // from double to float and back, due to the static_cast<double>(static_cast<float>(value)) == value check
-            // Use static_cast instead
-            fpPReluAlpha = static_cast<float>(ppeOp.getFpPreluAlpha().value().convertToDouble());
-        }
+            if (const auto clampHighAttr = intPpeAttr.getClampHigh()) {
+                clampHigh = checked_cast<int32_t>(clampHighAttr.getValue().getSExtValue());
+            }
+            if (const auto LreluMultAttr = intPpeAttr.getLreluMult()) {
+                LreluMult = checked_cast<int32_t>(LreluMultAttr.getValue().getSExtValue());
+            }
+            if (const auto LreluShiftAttr = intPpeAttr.getLreluShift()) {
+                LreluShift = checked_cast<uint32_t>(LreluShiftAttr.getValue().getSExtValue());
+            }
+            if (const auto quantMultAttr = intPpeAttr.getQuantMult()) {
+                ppeQuantMult = parseIntArrayAttr<int64_t>(quantMultAttr);
+            }
+            if (const auto quantShiftAttr = intPpeAttr.getQuantShift()) {
+                ppeQuantShift = parseIntArrayAttr<int64_t>(quantShiftAttr);
+            }
+            if (const auto quantPostShiftAttr = intPpeAttr.getQuantPostShift()) {
+                ppeQuantPostShift = checked_cast<int64_t>(quantPostShiftAttr.getValue().getSExtValue());
+            }
+            // Note: For values like 0.1, checked_cast fails, due to loss in precision when converting
+            // from double to float and back, due to the static_cast<double>(static_cast<float>(value)) == value
+            // check; use static_cast instead
+            if (const auto quantScaleAttr = intPpeAttr.getQuantScale()) {
+                auto floatScaleAttr = quantScaleAttr.getValue()[0];
+                ppeQuantScale =
+                        static_cast<float>(mlir::dyn_cast<mlir::FloatAttr>(floatScaleAttr).getValueAsDouble());
+            }
+            if (const auto fpPReluAlphaAttr = intPpeAttr.getFpPreluAlpha()) {
+                fpPReluAlpha = static_cast<float>(intPpeAttr.getFpPreluAlpha().getValueAsDouble());
+            }
     }
     VPUX_THROW_UNLESS(ppeList.size() <= 1, "Cannot set more than one PPE task");
 
@@ -1648,7 +1658,7 @@ static bool applyClamping(nn_public::VpuDPUInvariantRegisters& regs, const activ
     return true;
 }
 
-static void setupTaskTypeDPUEltwise(vpux::VPUIP::BlobWriter& writer, vpux::VPUMI37XX::DPUInvariantOp op,
+static void setupTaskTypeDPUEltwise(vpux::VPUMI37XX::BlobWriter& writer, vpux::VPUMI37XX::DPUInvariantOp op,
                                     nn_public::VpuDPUInvariantRegisters& regs) {
     auto input = op.getInput();
     auto inputSparsityMap = op.getInputSparsityMap();
@@ -1681,21 +1691,26 @@ static void setupTaskTypeDPUEltwise(vpux::VPUIP::BlobWriter& writer, vpux::VPUMI
     ::std::optional<SmallVector<int64_t>> in2QuantMult;
 
     for (auto ppeOp : op.getPpe().getOps<VPUMI37XX::PPETaskOp>()) {
-        if (ppeOp.getQuantMult().has_value()) {
-            ppeQuantMult = parseIntArrayAttr<int64_t>(ppeOp.getQuantMult().value());
-        }
-        if (ppeOp.getQuantShift().has_value()) {
-            ppeQuantShift = parseIntArrayAttr<int64_t>(ppeOp.getQuantShift().value());
-        }
-        if (ppeOp.getQuantPostShift().has_value()) {
-            ppeQuantPostShift = checked_cast<int64_t>(ppeOp.getQuantPostShift().value());
-        }
-        if (ppeOp.getIn1QuantMult().has_value()) {
-            in1QuantMult = parseIntArrayAttr<int64_t>(ppeOp.getIn1QuantMult().value().dyn_cast<mlir::ArrayAttr>());
-        }
-        if (ppeOp.getIn2QuantMult().has_value()) {
-            in2QuantMult = parseIntArrayAttr<int64_t>(ppeOp.getIn2QuantMult().value().dyn_cast<mlir::ArrayAttr>());
-        }
+            auto opaquePpeAttr = ppeOp.getOpaquePpeAttr();
+            auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(opaquePpeAttr);
+            VPUX_THROW_WHEN(intPpeAttr == nullptr,
+                            "Expected PPEIntAttr type but got {0}, make sure to use the right factory version", opaquePpeAttr);
+
+            if (const auto quantMultAttr = intPpeAttr.getQuantMult()) {
+                ppeQuantMult = parseIntArrayAttr<int64_t>(quantMultAttr);
+            }
+            if (const auto quantShiftAttr = intPpeAttr.getQuantShift()) {
+                ppeQuantShift = parseIntArrayAttr<int64_t>(quantShiftAttr);
+            }
+            if (const auto quantPostShiftAttr = intPpeAttr.getQuantPostShift()) {
+                ppeQuantPostShift = checked_cast<int64_t>(quantPostShiftAttr.getValue().getSExtValue());
+            }
+            if (const auto in1QuantMultAttr = intPpeAttr.getIn1QuantMult()) {
+                in1QuantMult = parseIntArrayAttr<int64_t>(in1QuantMultAttr);
+            }
+            if (const auto in2QuantMultAttr = intPpeAttr.getIn2QuantMult()) {
+                in2QuantMult = parseIntArrayAttr<int64_t>(in2QuantMultAttr);
+            }
     }
 
     const auto isQuantizationProvided =
@@ -1703,9 +1718,9 @@ static void setupTaskTypeDPUEltwise(vpux::VPUIP::BlobWriter& writer, vpux::VPUMI
 
     if (isQuantizationProvided) {
         const auto outputSparsityMapOffset =
-                outputSparsityMap
-                        ? std::optional<int64_t>{outputSparsityMap.getDefiningOp<VPURT::DeclareBufferOp>().getByteOffset()}
-                        : std::nullopt;
+                outputSparsityMap ? std::optional<int64_t>{outputSparsityMap.getDefiningOp<VPURT::DeclareBufferOp>()
+                                                                   .getByteOffset()}
+                                  : std::nullopt;
         outputRef = getTensorReferenceWithUpdatedQuantParams(writer, ppeQuantMult.value(), ppeQuantShift.value(),
                                                              ppeQuantPostShift.value(), output, outputSparsityMapOffset,
                                                              std::nullopt, outputSESize);
@@ -1762,7 +1777,7 @@ static void setupTaskTypeDPUEltwise(vpux::VPUIP::BlobWriter& writer, vpux::VPUMI
     }
 }
 
-static void setupTaskTypeDPUMaxPool(vpux::VPUIP::BlobWriter& writer, vpux::VPUMI37XX::DPUInvariantOp op,
+static void setupTaskTypeDPUMaxPool(vpux::VPUMI37XX::BlobWriter& writer, vpux::VPUMI37XX::DPUInvariantOp op,
                                     nn_public::VpuDPUInvariantRegisters& regs) {
     auto input = op.getInput();
     auto inputSparsityMap = op.getInputSparsityMap();
@@ -1818,7 +1833,7 @@ static void setupTaskTypeDPUMaxPool(vpux::VPUIP::BlobWriter& writer, vpux::VPUMI
     }
 }
 
-static void setupTaskTypeDPUAvgPool(vpux::VPUIP::BlobWriter& writer, vpux::VPUMI37XX::DPUInvariantOp op,
+static void setupTaskTypeDPUAvgPool(vpux::VPUMI37XX::BlobWriter& writer, vpux::VPUMI37XX::DPUInvariantOp op,
                                     nn_public::VpuDPUInvariantRegisters& regs) {
     auto input = op.getInput();
     auto inputSparsityMap = op.getInputSparsityMap();
@@ -1842,16 +1857,24 @@ static void setupTaskTypeDPUAvgPool(vpux::VPUIP::BlobWriter& writer, vpux::VPUMI
     ::std::optional<SmallVector<int64_t>> ppeQuantShift;
 
     for (auto ppeOp : op.getPpe().getOps<VPUMI37XX::PPETaskOp>()) {
-        const auto type = getPPELayerType(ppeOp.getPpeLayerType());
-        if (type != MVCNN::PPELayerType_NOOP) {
-            ppeList.push_back(type);
-        }
-        if (ppeOp.getQuantMult().has_value()) {
-            ppeQuantMult = parseIntArrayAttr<int64_t>(ppeOp.getQuantMult().value());
-        }
-        if (ppeOp.getQuantShift().has_value()) {
-            ppeQuantShift = parseIntArrayAttr<int64_t>(ppeOp.getQuantShift().value());
-        }
+            auto opaquePpeAttr = ppeOp.getOpaquePpeAttr();
+            auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(opaquePpeAttr);
+            VPUX_THROW_WHEN(intPpeAttr == nullptr,
+                            "Expected PPEIntAttr type but got {0}, make sure to use the right factory version", opaquePpeAttr);
+            if (intPpeAttr.getMode()) {
+                const auto ppeType = getPPELayerType(intPpeAttr.getMode().getValue());
+                if (ppeType != MVCNN::PPELayerType_NOOP) {
+                    ppeList.push_back(ppeType);
+                }
+            } else {
+                VPUX_THROW("PPEMode was not found.");
+            }
+            if (const auto quantMultAttr = intPpeAttr.getQuantMult()) {
+                ppeQuantMult = parseIntArrayAttr<int64_t>(quantMultAttr);
+            }
+            if (const auto quantShiftAttr = intPpeAttr.getQuantShift()) {
+                ppeQuantShift = parseIntArrayAttr<int64_t>(quantShiftAttr);
+            }
     }
 
     VPUX_THROW_UNLESS(ppeList.size() <= 1, "Cannot set more than one PPE task");
@@ -1904,7 +1927,7 @@ static void setupTaskTypeDPUAvgPool(vpux::VPUIP::BlobWriter& writer, vpux::VPUMI
     }
 }
 
-static void setupTaskTypeDPUDwConv(vpux::VPUIP::BlobWriter& writer, vpux::VPUMI37XX::DPUInvariantOp op,
+static void setupTaskTypeDPUDwConv(vpux::VPUMI37XX::BlobWriter& writer, vpux::VPUMI37XX::DPUInvariantOp op,
                                    nn_public::VpuDPUInvariantRegisters& regs) {
     auto input = op.getInput();
     auto inputSparsityMap = op.getInputSparsityMap();
@@ -1934,7 +1957,7 @@ static void setupTaskTypeDPUDwConv(vpux::VPUIP::BlobWriter& writer, vpux::VPUMI3
     }
 }
 
-static void setupTaskType(vpux::VPUIP::BlobWriter& writer, vpux::VPUMI37XX::DPUInvariantOp op,
+static void setupTaskType(vpux::VPUMI37XX::BlobWriter& writer, vpux::VPUMI37XX::DPUInvariantOp op,
                           nn_public::VpuDPUInvariantRegisters& regs) {
     if (op.getNceTaskType() == VPUIP::NCETaskType::ELTWISE) {
         setupTaskTypeDPUEltwise(writer, op, regs);
@@ -1949,7 +1972,7 @@ static void setupTaskType(vpux::VPUIP::BlobWriter& writer, vpux::VPUMI37XX::DPUI
     }
 }
 
-bool Setup_PPE(vpux::VPUIP::BlobWriter& writer, vpux::VPUMI37XX::DPUInvariantOp op,
+bool Setup_PPE(vpux::VPUMI37XX::BlobWriter& writer, vpux::VPUMI37XX::DPUInvariantOp op,
                nn_public::VpuDPUInvariantRegisters& regs) {
     auto input = op.getInput();
     auto inputSparsityMap = op.getInputSparsityMap();
@@ -1991,7 +2014,7 @@ bool Setup_PPE(vpux::VPUIP::BlobWriter& writer, vpux::VPUMI37XX::DPUInvariantOp 
     regs.ppe_scale_hclamp = 0;  // Default values applied per output data type, may be serialised in ff
     regs.ppe_scale_lclamp = 0;  // Default values applied per output data type, may be serialised in ff
     regs.ppe_misc.ppe_misc_bf.ppe_i32_convert = 0;  // Use in mixed precision when going fixed -> float point, infer
-    regs.ppe_misc.ppe_misc_bf.ppe_fp16_clamp = 0;   // Not serialised
+    regs.ppe_misc.ppe_misc_bf.ppe_fp16_clamp = 1;
     regs.ppe_misc.ppe_misc_bf.ppe_fp16_ftz = 0;     // Not serialised
     regs.ppe_fp_prelu = 0;                          // Derive from ppe_prelu_mult & ppe_prelu_shift
     regs.ppe_fp_cfg.ppe_fp_cfg_bf.ppe_fp_prelu_en = 0;
@@ -2060,7 +2083,7 @@ bool Setup_PPE(vpux::VPUIP::BlobWriter& writer, vpux::VPUMI37XX::DPUInvariantOp 
 }
 
 void parseVariant(vpux::VPUMI37XX::DPUVariantOp op, vpux::VPUMI37XX::DPUInvariantOp invariant,
-                  nn_public::VpuDPUVariant& taskWrapper, VPUIP::BlobWriter& writer) {
+                  nn_public::VpuDPUVariant& taskWrapper, VPUMI37XX::BlobWriter& writer) {
     nn_public::VpuDPUVariantRegisters& registers = taskWrapper.registers_;
 
     auto input = invariant.getInput();

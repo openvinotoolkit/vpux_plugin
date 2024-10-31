@@ -6,12 +6,13 @@
 #include "vpux/compiler/dialect/VPU/utils/clustered_op_interface_utils.hpp"
 #include "vpux/compiler/core/layers.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops_interfaces.hpp"
+#include "vpux/compiler/dialect/VPU/utils/const_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/distributed_tensor_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/multi_cluster_strategy_utils.hpp"
 
 using namespace vpux;
 
-int64_t getNumTiles(mlir::Operation* op) {
+int64_t VPU::getNumTiles(mlir::Operation* op) {
     auto moduleOp = op->getParentOfType<mlir::ModuleOp>();
     auto tileOp = IE::getTileExecutor(moduleOp);
     return tileOp.getCount();
@@ -47,7 +48,7 @@ bool VPU::isOperationSplitOverHeightCompatible(mlir::Operation* op, const vpux::
     if (!isSOHCompatible) {
         return false;
     }
-
+    auto siblingsOpsAnalysis = SiblingOpsAnalysis(op);
     auto offset = ShapeRef(outputTile.offsets);
     if (!offset.empty()) {
         const auto numClusters = vpux::VPU::getOptimalNumClusters(clusteredOp, outputShape,
@@ -56,7 +57,7 @@ bool VPU::isOperationSplitOverHeightCompatible(mlir::Operation* op, const vpux::
             const auto outputType = clusteredOp->getResult(0).getType().cast<vpux::NDTypeInterface>();
             const auto outputTileType = outputType.extractDenseTile(offset, outputShape);
             auto distributions =
-                    VPU::getOutputDistributionAttrFromOp(clusteredOp, outputTileType, numClusters.getInt());
+                    VPU::getOutputDistributionAttrFromOp(clusteredOp, outputTileType, numClusters, siblingsOpsAnalysis);
             auto distribution = mlir::isa<VPU::SparseTensorType>(outputTileType)
                                         ? distributions.at(outputTileType.cast<VPU::SparseTensorType>().getData())
                                         : distributions.at(outputTileType);
@@ -82,8 +83,8 @@ bool VPU::isOperationSplitOverHeightCompatible(mlir::Operation* op, const vpux::
             const auto inputType = clusteredOp->getOperand(0).getType().cast<vpux::NDTypeInterface>();
             const auto inputTileType = inputType.extractDenseTile(inputTile.offsets, inputTile.shape);
 
-            auto distributions =
-                    VPU::getActivationDistributionAttrFromOp(clusteredOp, inputTileType, numClusters.getInt());
+            auto distributions = VPU::getActivationDistributionAttrFromOp(clusteredOp, inputTileType, numClusters,
+                                                                          siblingsOpsAnalysis);
             auto distribution = mlir::isa<VPU::SparseTensorType>(inputTileType)
                                         ? distributions.at(inputTileType.cast<VPU::SparseTensorType>().getData())
                                         : distributions.at(inputTileType);
@@ -201,8 +202,7 @@ bool VPU::isOperationSplitOverKernelCompatible(mlir::Operation* op, ShapeRef out
             const auto newType = origType.changeShapeElemType(newShape, elemType);
 
             // Create a distributed type in order to determine the channel split over clusters
-            const auto numClustersAttr = getIntAttr(clusteredOp.getContext(), numTiles);
-            const auto filterType = VPU::getDistributedFilterTypeFromOp(nceOp, newType, numClustersAttr,
+            const auto filterType = VPU::getDistributedFilterTypeFromOp(nceOp, newType, numTiles,
                                                                         VPU::MultiClusterStrategy::SplitOverKernel);
             const auto filterDistType = filterType.getDistributedTypes().front().cast<VPU::DistributedTensorType>();
             const auto computeOffsets = filterDistType.getPerClusterComputeShapeOffsets();
@@ -285,19 +285,31 @@ bool VPU::checkMCRestrictions(mlir::Operation* op) {
              inputShape.size() != VPU::RANK_REQUIRED_FOR_TILING || outputShape.size() != VPU::RANK_REQUIRED_FOR_TILING);
 }
 
-bool VPU::doesLayerFitIntoCMX(mlir::Operation* op, VPU::MultiClusterStrategy strategy, Byte reservedMem) {
+bool VPU::doesLayerFitIntoCMX(mlir::Operation* op, VPU::MultiClusterStrategy strategy,
+                              SiblingOpsAnalysis& siblingsAnalysis, Byte reservedMem) {
     if (op == nullptr) {
         return false;
     }
-
-    auto swOp = mlir::dyn_cast<VPU::SWOpInterface>(op);
-    VPUX_THROW_WHEN(swOp == nullptr, "Expected software operation, got {0} at {1}", op->getName(), op->getLoc());
-
     const auto outputType = op->getResult(0).getType().cast<vpux::NDTypeInterface>();
     auto numClusters = getOptimalNumClusters(op, outputType.getShape(), strategy);
     auto clusteredOp = mlir::cast<VPU::ClusteredOpInterface>(op);
-    SmallVector<vpux::NDTypeInterface> distributedTensorNDTypes = {
-            getDistributedActivationTypeFromOp(clusteredOp, op->getOperand(0).getType(), numClusters, strategy),
-            getDistributedOutputTypeFromOp(clusteredOp, op->getResult(0).getType(), numClusters, strategy)};
-    return swOp.fitIntoCMX(distributedTensorNDTypes, reservedMem);
+
+    SmallVector<Byte> buffersSize{};
+    for (auto input : op->getOperands()) {
+        buffersSize.push_back(VPU::getTotalAllocSizeWithDistribution(
+                input.getType(), getActivationDistributionAttrFromOp(clusteredOp, input.getType(), numClusters,
+                                                                     strategy, siblingsAnalysis)));
+    }
+    for (auto result : op->getResults()) {
+        buffersSize.push_back(VPU::getTotalAllocSizeWithDistribution(
+                result.getType(), getOutputDistributionAttrFromOp(clusteredOp, result.getType(), numClusters, strategy,
+                                                                  siblingsAnalysis)));
+    }
+
+    auto totalAvailableCMXSize =
+            reservedMem.count() == 0 ? getTotalCMXSize(op).count() : getTotalCMXFragmentationAwareSize(op).count();
+
+    return vpux::VPU::calculateAlignedBuffersMemoryRequirement(getArch(op), buffersSize).count() +
+                   reservedMem.count() <=
+           totalAvailableCMXSize;
 }

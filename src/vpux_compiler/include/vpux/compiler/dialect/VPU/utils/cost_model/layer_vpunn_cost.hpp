@@ -114,6 +114,8 @@ private:
      */
     size_t getNumClusterCorrectionSize(VPU::MultiClusterStrategy strategy) const;
 
+    StrategyCost correctStrideDMACost(vpux::NDTypeInterface type, StrategyCost cost) const;
+
     VPU::ArchKind _arch;
     int64_t _numTiles;
     int64_t _numDPUs;

@@ -4,7 +4,7 @@
 namespace ProfilingFB;
 
 // Each task represent individual task, which can be executed and so be profiled.
-// DMATask - DMA transaction, DPUTask - DPU invariant, SWTask - UPA task or single kernel invocation,
+// DMATask - DMA transaction, DPUTask - DPU invariant, SWTask - single kernel invocation,
 // M2ITask - M2I Task invocation.
 // Some fields are common, like name(consist of original layer name, which come from IR location)
 // and wait/update barriers, which represent dependencies. Other fields specific to engine

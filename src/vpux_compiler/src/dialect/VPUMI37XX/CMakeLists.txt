@@ -20,7 +20,6 @@ add_mlir_dialect_library(${TARGET_NAME}
         npu_37xx_firmware_headers
         npu_compiler_dialect_vpuip
         npu_compiler_dialect_vpuip_utils
-        npu_compiler_dialect_vpuip_graph_schema
         npu_profiling_schema
 )
 add_dependencies(${TARGET_NAME} MLIRVPUXIncGenList)

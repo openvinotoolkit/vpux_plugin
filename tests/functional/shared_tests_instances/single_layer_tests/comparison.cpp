@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022 Intel Corporation
+// Copyright (C) 2022-2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -48,22 +48,19 @@ class ComparisonLayerTestCommon : public ComparisonLayerTest, virtual public Vpu
     }
 };
 
-class ComparisonLayerTest_NPU3720 : public ComparisonLayerTestCommon {};
-class ComparisonLayerTest_Tiling_NPU3720 : public ComparisonLayerTestCommon {};
+class ComparisonLayerTest_Tiling : public ComparisonLayerTestCommon {};
 
-class ComparisonLayerTest_NPU4000 : public ComparisonLayerTestCommon {};
-
-TEST_P(ComparisonLayerTest_NPU3720, SW) {
+TEST_P(ComparisonLayerTestCommon, NPU3720_SW) {
     setReferenceSoftwareMode();
     run(Platform::NPU3720);
 }
 
-TEST_P(ComparisonLayerTest_Tiling_NPU3720, HW) {
+TEST_P(ComparisonLayerTest_Tiling, NPU3720_HW) {
     setDefaultHardwareMode();
     run(Platform::NPU3720);
 }
 
-TEST_P(ComparisonLayerTest_NPU4000, SW) {
+TEST_P(ComparisonLayerTestCommon, NPU4000_SW) {
     setReferenceSoftwareMode();
     run(Platform::NPU4000);
 }
@@ -93,10 +90,6 @@ auto input_shape_converter = [](const std::vector<std::pair<ov::Shape, ov::Shape
     }
     return result;
 };
-
-//
-// NPU3720/4000 Instantiation
-//
 
 std::map<ov::Shape, std::vector<ov::Shape>> inputShapes = {
         {{5}, {{1}}},
@@ -136,23 +129,13 @@ const auto tiling_comparison_params = ::testing::Combine(
         ::testing::Values(ComparisonTypes::EQUAL), ::testing::ValuesIn(secondInputTypes),
         ::testing::Values(ov::element::f16), ::testing::Values(DEVICE_NPU), ::testing::Values(additionalConfig));
 
-// ------ NPU3720 ------
+INSTANTIATE_TEST_SUITE_P(smoke_Comparison, ComparisonLayerTestCommon, comparison_params,
+                         ComparisonLayerTestCommon::getTestCaseName);
 
-INSTANTIATE_TEST_CASE_P(smoke_Comparison, ComparisonLayerTest_NPU3720, comparison_params,
-                        ComparisonLayerTest_NPU3720::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_Comparison, ComparisonLayerTestCommon, precommit_comparison_params,
+                         ComparisonLayerTestCommon::getTestCaseName);
 
-INSTANTIATE_TEST_CASE_P(smoke_precommit_Comparison, ComparisonLayerTest_NPU3720, precommit_comparison_params,
-                        ComparisonLayerTest_NPU3720::getTestCaseName);
-
-INSTANTIATE_TEST_CASE_P(smoke_tiling_Comparison, ComparisonLayerTest_Tiling_NPU3720, tiling_comparison_params,
-                        ComparisonLayerTest_Tiling_NPU3720::getTestCaseName);
-
-// ------ NPU4000 ------
-
-INSTANTIATE_TEST_CASE_P(smoke_Comparison, ComparisonLayerTest_NPU4000, comparison_params,
-                        ComparisonLayerTest_NPU4000::getTestCaseName);
-
-INSTANTIATE_TEST_CASE_P(smoke_precommit_Comparison, ComparisonLayerTest_NPU4000, precommit_comparison_params,
-                        ComparisonLayerTest_NPU4000::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_tiling_Comparison, ComparisonLayerTestCommon, tiling_comparison_params,
+                         ComparisonLayerTestCommon::getTestCaseName);
 
 }  // namespace

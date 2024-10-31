@@ -98,12 +98,6 @@ Const::Content vpux::Const::ReorderAttr::transform(vpux::Const::Content& input) 
     return Const::details::memPermuteTransformation(input, outType, memPerm);
 }
 
-//
-// ContentAttr::reorder
-//
-
-Const::ContentAttr vpux::Const::ContentAttr::reorder(DimsOrder newOrder) const {
-    return ContentAttr::addTransformation(
-            *this, Const::ReorderAttr::get(mlir::AffineMapAttr::get(newOrder.toAffineMap(getContext())))
-                           .cast<Const::TransformAttrInterface>());
+Const::ContentSetup vpux::Const::ContentSetup::reorder(DimsOrder newOrder) {
+    return addTransformation(Const::ReorderAttr::get(mlir::AffineMapAttr::get(newOrder.toAffineMap(getContext()))));
 }

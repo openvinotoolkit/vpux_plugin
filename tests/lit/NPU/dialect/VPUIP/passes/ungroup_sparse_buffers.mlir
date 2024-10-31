@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
-// RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --ungroup-sparse-buffers --canonicalize %s | FileCheck %s
+// RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --ungroup-sparse-buffers %s | FileCheck %s
 // REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 // CHECK:       func.func @SparseCopy([[ARG0:%.+]]: memref<32x16x3x3xf16>, [[ARG1:%.+]]: memref<32x16x3x3xi1>)
@@ -84,7 +84,6 @@ func.func @SparseConv(%arg0: memref<1x16x64x64xf16, #NHWC>, %arg1: memref<1x16x6
     %out_sm = memref.alloc() : memref<1x32x64x64xi1, #NHWC, @CMX_NN>
 
     %conv_out:2 = VPUIP.NCEClusterTask {
-            activation_window_channel_length = 27 : i64,
             kernel_padding = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
             kernel_size = [3, 3],
             kernel_strides = [1, 1],
@@ -317,7 +316,6 @@ func.func @SparseConvDistributed(%arg0: !IODistributed, %arg1: !IOSMDistributed,
             -> (!IODistributed, !IOSMDistributed) {
 
         %conv_out:2 = VPUIP.NCEClusterTask {
-            activation_window_channel_length = 27 : i64,
             kernel_padding = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
             kernel_size = [3, 3],
             kernel_strides = [1, 1],

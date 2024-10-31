@@ -12,7 +12,7 @@
 #include "vpux/utils/core/logger.hpp"
 #include "vpux/utils/core/small_vector.hpp"
 
-#include "vpux/compiler/dialect/VPUIP/graph-schema/schema.hpp"
+#include "vpux/compiler/utils/schema.hpp"
 
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
 

@@ -96,7 +96,7 @@ private:
     mlir::DenseMap<int64_t, BarrierConfigInfo> _virtBarriers;
     // Map of executor kind which on HW side have more engines but are not
     // identifiable on IR or blob level and are dispatched only during inference
-    // Such case is on NPU37XX for 2 ActShave engines on single cluster. Tasks
+    // Such case is on VPU2 for 2 ActShave engines on single cluster. Tasks
     // are not assigned to it by compiler but are dispatched during inference
     // based on availability. Compiler needs to know this to correctly model
     // this parallelism as this is not modeled on TaskOp level

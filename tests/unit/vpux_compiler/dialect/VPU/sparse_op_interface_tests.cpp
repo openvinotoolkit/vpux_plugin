@@ -22,9 +22,7 @@ using vpux::VPU::ArchKind;
 
 void testSparsitySupport(llvm::StringLiteral inputIR, ArchKind arch, bool supportInputSparsity,
                          bool supportOutputSparsity, bool supportWeightSparsity) {
-    mlir::DialectRegistry registry;
-    vpux::registerDialects(registry);
-    vpux::registerCommonInterfaces(registry);
+    auto registry = vpux::createDialectRegistry();
     auto interfacesRegistry = vpux::createInterfacesRegistry(arch);
     interfacesRegistry->registerInterfaces(registry);
 
@@ -59,6 +57,7 @@ TEST(MLIR_VPU_Sparsity, NCEZMajorConvSparsitySupport) {
             func.func @main(%arg0: tensor<1x16x16x16xf16, {order = #NHWC}>, %wt: tensor<16x1x1x4xsi32>) -> tensor<1x16x16x16xf16, {order = #NHWC}> {
                 %weights = const.Declare tensor<16x16x1x1xf16, {order = #NHWC}> = dense<1.> : tensor<16x16x1x1xf16>, [#const.Reorder<#NHWC>]
                 %1 = VPU.NCE.Convolution(%arg0, %weights, %wt) {
+                        opaque_ppe = #VPU.PPEStub<>,
                         pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
                         rawFilterShape = [16, 16, 1, 1],
                         strides = [1, 1]
@@ -77,7 +76,7 @@ TEST(MLIR_VPU_Sparsity, NCEEltwiseSparsitySupport) {
 
         module @test {
             func.func @main(%arg0: tensor<1x16x16x16xf16, {order = #NHWC}>) -> tensor<1x16x16x16xf16, {order = #NHWC}> {
-                %0 = VPU.NCE.Eltwise(%arg0, %arg0) {op_type = #VPU.eltwise_type<ADD>, ppe = #VPU.PPETask<mode = <ADD>, clamp_high = 2147483647 : i64, clamp_low = -2147483648 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64>} -> tensor<1x16x16x16xf16, {order = #NHWC}>
+                %0 = VPU.NCE.Eltwise(%arg0, %arg0) {op_type = #VPU.eltwise_type<ADD>, opaque_ppe = #VPU.PPEStub<>} -> tensor<1x16x16x16xf16, {order = #NHWC}>
                 return %0 : tensor<1x16x16x16xf16, {order = #NHWC}>
             }
         }
@@ -95,14 +94,12 @@ TEST(MLIR_VPU_Sparsity, NCEDepthconvSparsitySupport) {
                     dense<1.000000e+00> : tensor<16x1x4x8xf16>, [#const.Reorder<#NHWC>]
                 %cst1 = const.Declare tensor<16x1x1x4xsi32> =
                     dense<1> : tensor<16x1x1x4xsi32>
-                %cst2 = const.Declare tensor<1x1x1x16xui8> =
-                    dense<1> : tensor<1x1x1x16xui8>
 
-                %0 = VPU.NCE.DepthConvolution(%arg0, %cst0, %cst1, %cst2) {
+                %0 = VPU.NCE.DepthConvolution(%arg0, %cst0, %cst1) {
+                        opaque_ppe = #VPU.PPEStub<>,
                         pad = #VPU.Padding<left = 0 , right = 0, top = 0, bottom = 0>,
                         rawFilterShape = [16, 1, 4, 8],
-                        strides = [1, 1],
-                        activation_window_channel_length = 44
+                        strides = [1, 1]
                     } -> tensor<1x16x37x73xf16, {order = #NHWC}>
                 return %0 : tensor<1x16x37x73xf16, {order = #NHWC}>
             }
@@ -119,6 +116,7 @@ TEST(MLIR_VPU_Sparsity, NCEMaxpoolSparsitySupport) {
             func.func @main(%arg0: tensor<16x16x16x16xf16, {order = #NHWC}>) -> tensor<16x16x16x16xf16, {order = #NHWC}> {
                 %0 = VPU.MaxPool(%arg0) {
                     kernel_size = [3, 3],
+                    opaque_ppe = #VPU.PPEStub<>,
                     pads_begin = [1, 1],
                     pads_end = [1, 1],
                     rounding_type = #IE.rounding_type<FLOOR>,
@@ -139,9 +137,9 @@ TEST(MLIR_VPU_Sparsity, NCEAvgpoolSparsitySupport) {
             func.func @main(%arg0: tensor<1x16x4x4xf16, {order = #NHWC}>) -> tensor<1x16x4x4xf16, {order = #NHWC}> {
                 %0 = VPU.NCE.AveragePool(%arg0) {
                         kernel_size = [3, 3],
+                        opaque_ppe = #VPU.PPEStub<>,
                         pad = #VPU.Padding<left = 1 , right = 1, top = 1, bottom = 1>,
-                        strides = [1, 1],
-                        ppe = #VPU.PPETask<mode = <NOOP>, clamp_high = 2147483647 : i64, clamp_low = -2147483648 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_mult = [28835], quant_shift = [18]>
+                        strides = [1, 1]
                     } -> tensor<1x16x4x4xf16, {order = #NHWC}>
 
                 return %0 : tensor<1x16x4x4xf16, {order = #NHWC}>

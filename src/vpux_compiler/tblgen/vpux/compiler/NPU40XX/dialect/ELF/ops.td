@@ -106,7 +106,7 @@ def LogicalSectionOp :
     }];
 
     let extraClassDeclaration = [{
-        size_t getTotalSize();
+        size_t getTotalSize(vpux::ELF::SymbolReferenceMap&);
     }];
 }
 
@@ -135,6 +135,7 @@ def CreateMetadataSectionOp :
     );
 
     let extraClassDeclaration = [{
+        void preserialize(elf::Writer& writer, vpux::DenseMap<mlir::Operation*, elf::writer::Section*>& sectionMap, vpux::ELF::SymbolReferenceMap& symRefMap);
         void serialize(elf::Writer& writer, vpux::DenseMap<mlir::Operation*, elf::writer::Section*>& sectionMap, vpux::DenseMap<mlir::Operation*, elf::writer::Symbol*>& symbolMap, ::elf::NetworkMetadata& metadata);
     }];
 
@@ -206,6 +207,7 @@ def CreateProfilingSectionOp :
     );
 
     let extraClassDeclaration = [{
+        void preserialize(elf::Writer& writer, vpux::DenseMap<mlir::Operation*, elf::writer::Section*>& sectionMap, vpux::ELF::SymbolReferenceMap& symRefMap);
         void serialize(elf::Writer& writer, vpux::DenseMap<mlir::Operation*, elf::writer::Section*>& sectionMap, vpux::DenseMap<mlir::Operation*, elf::writer::Symbol*>& symbolMap);
     }];
 

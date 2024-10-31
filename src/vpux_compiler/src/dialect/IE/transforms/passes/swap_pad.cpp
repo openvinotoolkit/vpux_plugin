@@ -45,8 +45,8 @@ mlir::LogicalResult SwapWithTranspose::matchAndRewrite(IE::TransposeOp originOp,
         return matchFailed(rewriter, originOp, "Producer is not a Pad operation");
     }
 
-    auto newTranspose = rewriter.create<IE::TransposeOp>(originOp.getLoc(), padLayer.getInput(), nullptr,
-                                                         originOp.getOrderValueAttr());
+    auto newTranspose = rewriter.create<IE::TransposeOp>(takeOpLoc(originOp, "transpose_in"), padLayer.getInput(),
+                                                         nullptr, originOp.getOrderValueAttr());
 
     const auto orderAttr = originOp.getOrderValueAttr();
     const auto order = DimsOrder::fromAffineMap(orderAttr.getValue());

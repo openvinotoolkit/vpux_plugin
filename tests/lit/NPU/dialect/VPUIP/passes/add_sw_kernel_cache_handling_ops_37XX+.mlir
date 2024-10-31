@@ -580,63 +580,6 @@ VPURT.SW.Runtime
     stack_configuration: [4096, 4096, 4096, 4096]
 
 module @VPU.SW {
-func.func private @builtin_relu(%input : memref<*xf16>, %output : memref<*xf16>)
-    attributes {
-        VPU.kernel_code = "activation_relu.cpp",
-        VPU.kernel_entry = "activation_relu",
-        VPU.task_type = @COMPUTE
-    }
-
-func.func private @runtime()
-    attributes {
-        VPU.kernel_code = "nnActEntry"
-    }
-}
-
-// CHECK-LABEL: @AddChacheOpBlockArgsInOut
-func.func @AddChacheOpBlockArgsInOut(%arg0: memref<1x1x1x1000xf16, @DDR>, %arg1: memref<1x1x1x1000xf16, @DDR>) -> memref<1x1x1x1000xf16, @DDR> {
-    %t1, %r1 = async.execute -> !async.value<memref<1x1x1x1000xf16, @DDR>> attributes {VPUIP.executor = @SHAVE_ACT, "async-deps-index" = 1 : i64} {
-        %sw_kernel = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_relu
-                    inputs(%arg0 as %in_buff_0: memref<1x1x1x1000xf16, @DDR>)
-                    outputs(%arg1 as %out_buff_0: memref<1x1x1x1000xf16, @DDR>)
-                    on tile 0 -> memref<1x1x1x1000xf16, @DDR> {
-                VPUIP.SW.Kernel.run {attrs = [false, true, 6.0892105102539063E-4]} (%in_buff_0, %out_buff_0)
-                    : memref<1x1x1x1000xf16, @DDR>
-                    , memref<1x1x1x1000xf16, @DDR>
-        }
-        async.yield %sw_kernel : memref<1x1x1x1000xf16, @DDR>
-    }
-
-    %3 = async.await %r1 : !async.value<memref<1x1x1x1000xf16, @DDR>>
-
-    return %3: memref<1x1x1x1000xf16, @DDR>
-
-    // CHECK:   [[T_1:%.*]] = async.execute attributes {VPUIP.executor = @SHAVE_ACT} {
-    // CHECK:     VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 0, 0, 0>} @VPU.SW::@cache_invalidate inputs() outputs() on tile 0
-    // CHECK:         VPUIP.SW.Kernel.run
-    // CHECK:     async.yield
-
-    // CHECK:   [[T_2:%.*]], [[R_2:%.*]] = async.execute [[[T_1]]] -> !async.value<memref<1x1x1x1000xf16, @DDR>> attributes {VPUIP.executor = @SHAVE_ACT, "async-deps-index" = 1 : i64}
-    // CHECK:     [[SW_KERNEL_1:%.*]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_relu inputs(%arg0 as [[INPUT:%.*]]: memref<1x1x1x1000xf16, @DDR>) outputs(%arg1 as [[OUTPUT:%.*]]: memref<1x1x1x1000xf16, @DDR>) on tile 0 -> memref<1x1x1x1000xf16, @DDR>{
-    // CHECK:       VPUIP.SW.Kernel.run {attrs = [false, true, 6.0892105102539063E-4]}([[INPUT]], [[OUTPUT]]) : memref<1x1x1x1000xf16, @DDR>, memref<1x1x1x1000xf16, @DDR>
-    // CHECK:     async.yield [[SW_KERNEL_1]] : memref<1x1x1x1000xf16, @DDR>
-
-    // CHECK:   [[T_3:%.*]] = async.execute [[[T_2]]] attributes {VPUIP.executor = @SHAVE_ACT} {
-    // CHECK:     VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 0, 0, 0>} @VPU.SW::@cache_flush inputs() outputs() on tile 0
-    // CHECK:       VPUIP.SW.Kernel.run
-    // CHECK:     async.yield
-
-    // CHECK:   [[ASYNC_WAIT:%.*]] = async.await [[R_2]] : !async.value<memref<1x1x1x1000xf16, @DDR>>
-    // CHECK:   return [[ASYNC_WAIT]] : memref<1x1x1x1000xf16, @DDR>
-}
-
-// -----
-
-VPURT.SW.Runtime
-    entryPoint: @VPU.SW::@runtime
-    stack_configuration: [4096, 4096, 4096, 4096]
-
-module @VPU.SW {
 func.func private @builtin_Convert(memref<*xf16, @CMX_NN>, memref<*xf32, @CMX_NN>)
     attributes {
         VPU.kernel_code = "single_shave_convert.cpp",
@@ -658,7 +601,7 @@ func.func private @runtime()
 
 // CHECK-LABEL: @AddCacheInvalidateSwOpForDDRInputCMXOutput
 func.func @AddCacheInvalidateSwOpForDDRInputCMXOutput(%arg0: memref<1x1x1x1000xf16, [@CMX_NN, 0]>, %arg1: memref<1x1x1x1xf16, @DDR>) -> memref<1x1x1x1000xf16, [@CMX_NN, 0]> {
-    %cst = const.Declare memref<51865x512xf16> = dense<1.0> : tensor<51865x512xf32>, [#const.ConvertElemType<f16>]
+    %cst = const.Declare memref<51865x512xf16> = dense<1.0> : tensor<51865x512xf32>, [#const.CastElemType<f16>]
 
     %indices_fp16_cmx = VPURT.DeclareBuffer <CMX_NN> [0] <1457216> -> memref<1x1x1x1xf16, [@CMX_NN, 0]>
     %indices_si32_cmx = VPURT.DeclareBuffer <CMX_NN> [0] <1457152> -> memref<1x1x1x1xsi32, [@CMX_NN, 0]>
@@ -700,7 +643,7 @@ func.func @AddCacheInvalidateSwOpForDDRInputCMXOutput(%arg0: memref<1x1x1x1000xf
 
     return %arg0: memref<1x1x1x1000xf16, [@CMX_NN, 0]>
 
-    // CHECK:   [[CST:%.*]] = const.Declare memref<51865x512xf16> = dense<1.000000e+00> : tensor<51865x512xf32>, [#const.ConvertElemType<f16>]
+    // CHECK:   [[CST:%.*]] = const.Declare memref<51865x512xf16> = dense<1.000000e+00> : tensor<51865x512xf32>, [#const.CastElemType<f16>]
     // CHECK:   [[INDICES_FP16_CMX:%.*]] = VPURT.DeclareBuffer <CMX_NN> [0] <1457216> -> memref<1x1x1x1xf16, [@CMX_NN, 0]>
     // CHECK:   [[INDICES_SI32_CMX:%.*]] = VPURT.DeclareBuffer <CMX_NN> [0] <1457152> -> memref<1x1x1x1xsi32, [@CMX_NN, 0]>
     // CHECK:   [[INDICES_INPUT_CMX:%.*]] = VPURT.DeclareBuffer <CMX_NN> [0] <1457152> -> memref<1x1xsi32, [@CMX_NN, 0]>

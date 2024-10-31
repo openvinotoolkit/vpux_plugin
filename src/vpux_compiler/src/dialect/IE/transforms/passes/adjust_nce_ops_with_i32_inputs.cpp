@@ -66,13 +66,30 @@ mlir::LogicalResult ConvertPrecisionToFP16<ConcreteOp>::matchAndRewrite(Concrete
 
 class AdjustNCEOpsWithI32InputsPass final : public IE::AdjustNCEOpsWithI32InputsBase<AdjustNCEOpsWithI32InputsPass> {
 public:
-    explicit AdjustNCEOpsWithI32InputsPass(Logger log) {
+    explicit AdjustNCEOpsWithI32InputsPass(Logger log, bool enableConvertFCToConv)
+            : _enableConvertFCToConv(enableConvertFCToConv) {
         Base::initLogger(log, Base::getArgumentName());
     }
 
+    mlir::LogicalResult initialize(mlir::MLIRContext* ctx) final;
+
 private:
     void safeRunOnModule() final;
+
+    bool _enableConvertFCToConv;
 };
+
+mlir::LogicalResult AdjustNCEOpsWithI32InputsPass::initialize(mlir::MLIRContext* ctx) {
+    if (mlir::failed(Base::initialize(ctx))) {
+        return mlir::failure();
+    }
+
+    if (enableConvertFCToConv.hasValue()) {
+        _enableConvertFCToConv = enableConvertFCToConv.getValue();
+    }
+
+    return mlir::success();
+}
 
 void AdjustNCEOpsWithI32InputsPass::safeRunOnModule() {
     auto& ctx = getContext();
@@ -92,6 +109,11 @@ void AdjustNCEOpsWithI32InputsPass::safeRunOnModule() {
     target.addDynamicallyLegalOp<IE::MatMulOp>(isLegalOp);
     target.addDynamicallyLegalOp<IE::ConvolutionOp>(isLegalOp);
     target.addDynamicallyLegalOp<IE::GroupConvolutionOp>(isLegalOp);
+
+    if (_enableConvertFCToConv) {
+        target.addDynamicallyLegalOp<IE::FullyConnectedOp>(isLegalOp);
+    }
+
     target.markUnknownOpDynamicallyLegal([](mlir::Operation*) {
         return true;
     });
@@ -100,6 +122,7 @@ void AdjustNCEOpsWithI32InputsPass::safeRunOnModule() {
     patterns.add<ConvertPrecisionToFP16<IE::MatMulOp>>(&ctx, _log);
     patterns.add<ConvertPrecisionToFP16<IE::ConvolutionOp>>(&ctx, _log);
     patterns.add<ConvertPrecisionToFP16<IE::GroupConvolutionOp>>(&ctx, _log);
+    patterns.add<ConvertPrecisionToFP16<IE::FullyConnectedOp>>(&ctx, _log);
 
     auto module = getOperation();
     if (mlir::failed(mlir::applyPartialConversion(module, target, std::move(patterns)))) {
@@ -113,6 +136,6 @@ void AdjustNCEOpsWithI32InputsPass::safeRunOnModule() {
 // createAdjustNCEOpsWithI32InputsPass
 //
 
-std::unique_ptr<mlir::Pass> vpux::IE::createAdjustNCEOpsWithI32InputsPass(Logger log) {
-    return std::make_unique<AdjustNCEOpsWithI32InputsPass>(log);
+std::unique_ptr<mlir::Pass> vpux::IE::createAdjustNCEOpsWithI32InputsPass(Logger log, bool enableConvertFCToConv) {
+    return std::make_unique<AdjustNCEOpsWithI32InputsPass>(log, enableConvertFCToConv);
 }

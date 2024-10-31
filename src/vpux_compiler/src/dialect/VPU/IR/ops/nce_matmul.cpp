@@ -4,9 +4,8 @@
 //
 
 #include <mlir/Support/LogicalResult.h>
-
 #include "vpux/compiler/dialect/IE/utils/matmul.hpp"
-#include "vpux/compiler/dialect/VPU/IR/native_attributes/distributed_tensor_native.hpp"
+#include "vpux/compiler/dialect/VPU/IR/native_attributes/distribution_info.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops_interfaces.hpp"
 #include "vpux/compiler/dialect/VPU/utils/const_utils.hpp"
@@ -201,13 +200,13 @@ bool vpux::VPU::NCEMatMulOp::checkStrategyCompatibility(vpux::VPU::MultiClusterS
     return strategy == VPU::MultiClusterStrategy::SplitOverGroup;
 }
 
-vpux::VPU::DistributedTensorNative vpux::VPU::NCEMatMulOp::getExplicitDistributedTensorAttr(
+vpux::VPU::DistributionInfo vpux::VPU::NCEMatMulOp::getExplicitDistributionInfoAttr(
         vpux::ShapeRef shape, vpux::VPU::DistributionMode distributionMode, ArrayRef<int64_t> numTiles,
         const int64_t numClusters, ArrayRef<int64_t> alignment, const bool uniformDistributedSegments,
         const vpux::VPU::OverlapDistributionParams& overlapParams) {
-    return VPU::getNCEExplicitDistributedTensorNative(mlir::dyn_cast<VPU::NCEOpInterface>(getOperation()), shape,
-                                                      distributionMode, numTiles, numClusters, alignment,
-                                                      uniformDistributedSegments, overlapParams);
+    return VPU::getNCEExplicitDistributionInfo(mlir::dyn_cast<VPU::NCEOpInterface>(getOperation()), shape,
+                                               distributionMode, numTiles, numClusters, alignment,
+                                               uniformDistributedSegments, overlapParams);
 }
 
 bool VPU::NCEMatMulOp::isOperationSplitOverHeightCompatible([[maybe_unused]] const vpux::TileInfo& oriOutputTile) {
@@ -226,7 +225,8 @@ bool VPU::NCEMatMulOp::isOperationSplitOverKernelCompatible([[maybe_unused]] Sha
     return false;
 }
 
-bool VPU::NCEMatMulOp::doesLayerFitIntoCMX(VPU::MultiClusterStrategy strategy, Byte reservedMem) {
+bool VPU::NCEMatMulOp::doesLayerFitIntoCMX(VPU::MultiClusterStrategy strategy, SiblingOpsAnalysis& siblingsAnalysis,
+                                           Byte reservedMem) {
     auto nceOp = mlir::cast<VPU::NCEMatMulOp>(getOperation());
     auto nceOpInterface = mlir::cast<VPU::NCEOpInterface>(getOperation());
     const auto outputType = nceOp->getResult(0).getType().cast<vpux::NDTypeInterface>();
@@ -245,14 +245,14 @@ bool VPU::NCEMatMulOp::doesLayerFitIntoCMX(VPU::MultiClusterStrategy strategy, B
 
     SmallVector<Byte> buffers = {
             VPU::getTotalAllocSizeWithDistribution(
-                    getInput().getType(),
-                    getActivationDistributionAttrFromOp(nceOp, getInput().getType(), numClusters.getInt(), strategy)),
+                    getInput().getType(), getActivationDistributionAttrFromOp(nceOp, getInput().getType(), numClusters,
+                                                                              strategy, siblingsAnalysis)),
             VPU::getTotalAllocSizeWithDistribution(
-                    getWeights().getType(), getFilterDistributionAttrFromOp(nceOpInterface, getWeights().getType(),
-                                                                            numClusters.getInt(), strategy)),
+                    getWeights().getType(),
+                    getFilterDistributionAttrFromOp(nceOpInterface, getWeights().getType(), numClusters, strategy)),
             VPU::getTotalAllocSizeWithDistribution(
-                    getOutput().getType(),
-                    getOutputDistributionAttrFromOp(nceOp, getOutput().getType(), numClusters.getInt(), strategy)),
+                    getOutput().getType(), getOutputDistributionAttrFromOp(nceOp, getOutput().getType(), numClusters,
+                                                                           strategy, siblingsAnalysis)),
             weightsTableSize};
 
     const auto totalAvailableCMXSize = reservedMem.count() == 0
@@ -275,4 +275,62 @@ bool VPU::NCEMatMulOp::doesLayerChangeOutputAlignmentFitIntoCMX(
     auto distributedFilterType =
             getDistributedFilterTypeFromOp(nceOpInterface, nceOp.getWeights().getType(), numClusters, strategy);
     return fitIntoCMX(distributedInputType, distributedFilterType, newDistributedTensorType);
+}
+
+vpux::NDTypeInterface vpux::VPU::NCEMatMulOp::getDistributedTypeForOpOperand(mlir::OpOperand& operand,
+                                                                             bool hasExplicitDistributedAttr,
+                                                                             SiblingOpsAnalysis& siblingsAnalysis) {
+    auto clusteredOp = mlir::cast<VPU::ClusteredOpInterface>(getOperation());
+    auto origOp = mlir::cast<NCEMatMulOp>(getOperation());
+    const auto strategy = clusteredOp.getMultiClusterStrategy().value();
+    auto outputTensorType = origOp.getOutput().getType().cast<vpux::NDTypeInterface>();
+    auto numClusters = VPU::getOptimalNumClusters(clusteredOp, outputTensorType.getShape(), strategy);
+    auto* ctx = clusteredOp->getContext();
+
+    if (operand.get() == origOp.getInput()) {
+        mlir::ArrayAttr activationAlignmentAttr = nullptr;
+        const auto activationTensorDistributionMode = getActivationTensorDistributionMode(clusteredOp, strategy);
+        const auto activationTensorNumTiles =
+                getIntArrayAttr(ctx, getActivationTensorNumTiles(clusteredOp, numClusters, strategy));
+        const auto activationAlignment = getActivationTensorAlignment(clusteredOp, numClusters, strategy);
+
+        if (activationAlignment.has_value()) {
+            activationAlignmentAttr = getIntArrayAttr(ctx, activationAlignment.value());
+        }
+        return getDistributedTypeFromInput(clusteredOp, origOp.getInput(), activationTensorDistributionMode,
+                                           activationTensorNumTiles, activationAlignmentAttr, strategy,
+                                           hasExplicitDistributedAttr, siblingsAnalysis);
+    } else if (operand.get() == origOp.getWeights()) {
+        auto filterType = origOp.getWeights().getType().cast<vpux::NDTypeInterface>();
+        const auto weightsTensorDistributionMode = getWeightsTensorDistributionMode(strategy);
+        const auto weightsTensorNumTiles =
+                getIntArrayAttr(ctx, getWeightsTensorNumTiles(clusteredOp, filterType, numClusters, strategy));
+        mlir::ArrayAttr weightAlignmentAttr = nullptr;
+
+        const auto weightAlignment = getWeightsTensorAlignment(strategy);
+
+        if (weightAlignment.has_value()) {
+            weightAlignmentAttr = getIntArrayAttr(ctx, weightAlignment.value());
+        }
+        return getDistributedTypeFromInput(clusteredOp, origOp.getWeights(), weightsTensorDistributionMode,
+                                           weightsTensorNumTiles, weightAlignmentAttr, strategy,
+                                           hasExplicitDistributedAttr, siblingsAnalysis);
+    } else if (operand.get() == origOp.getWeightsTable()) {
+        auto outputType = origOp.getOutput().getType().cast<vpux::NDTypeInterface>();
+        const auto weightsTableTensorDistributionMode = getWeightsTensorDistributionMode(strategy);
+        const auto weightsTableTensorNumTiles =
+                getIntArrayAttr(ctx, getWeightsTableTensorNumTiles(clusteredOp, outputType, numClusters, strategy));
+        mlir::ArrayAttr weightAlignmentAttr = nullptr;
+
+        const auto weightAlignment = getWeightsTensorAlignment(strategy);
+
+        if (weightAlignment.has_value()) {
+            weightAlignmentAttr = getIntArrayAttr(ctx, weightAlignment.value());
+        }
+        return getDistributedTypeFromInput(clusteredOp, origOp.getWeightsTable(), weightsTableTensorDistributionMode,
+                                           weightsTableTensorNumTiles, weightAlignmentAttr, strategy,
+                                           hasExplicitDistributedAttr, siblingsAnalysis);
+    }
+    VPUX_THROW("Failed to compute distributed type for op {0}", clusteredOp);
+    return nullptr;
 }

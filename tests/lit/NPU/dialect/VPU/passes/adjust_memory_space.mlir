@@ -13,6 +13,7 @@ func.func @ConvNCEtoCMX(%arg0: tensor<1x16x16x16xf16, {order = #NHWC}>) -> tenso
     %weights_table = const.Declare tensor<16x1x1x4xsi32, {order = #NHWC}> = dense<1> : tensor<16x1x1x4xsi32>, [#const.Reorder<#NHWC>]
 
     %0 = VPU.NCE.Convolution(%arg0, %weights, %weights_table) {
+        opaque_ppe = #VPU.PPEStub<>,
         pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
         rawFilterShape = [16, 16, 1, 1],
         strides = [1, 1]
@@ -31,6 +32,7 @@ func.func @ConvNCEtoCMX(%arg0: tensor<1x16x16x16xf16, {order = #NHWC}>) -> tenso
     // CHECK-SAME:      -> tensor<16x1x1x4xsi32, {mem_space = [@CMX_NN, 0], order = #NHWC}>
 
     // CHECK:       [[OUT_CMX:%.+]] = VPU.NCE.Convolution([[IN_CMX]], [[WEIGHTS_CMX]], [[WEIGHTS_TABLE_CMX]])
+    // CHECK-SAME:      opaque_ppe = #VPU.PPEStub<>,
     // CHECK-SAME:      pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>
     // CHECK-SAME:      strides = [1, 1]
     // CHECK-SAME:      -> tensor<1x16x16x16xf16, {mem_space = [@CMX_NN, 0], order = #NHWC}>
@@ -48,10 +50,9 @@ func.func @ConvNCEtoCMX(%arg0: tensor<1x16x16x16xf16, {order = #NHWC}>) -> tenso
 func.func @DepthConvNCEtoCMX(%arg0: tensor<1x16x40x80xf16, {order = #NHWC}>) -> tensor<1x16x37x73xf16, {order = #NHWC}> {
     %weights = const.Declare tensor<16x1x4x8xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<16x1x4x8xf16>, [#const.Reorder<#NHWC>]
     %weights_table = const.Declare tensor<16x1x1x4xsi32, {order = #NHWC}> = dense<1> : tensor<16x1x1x4xsi32>, [#const.Reorder<#NHWC>]
-    %activation_window = const.Declare tensor<1x1x1x16xui8, {order = #NHWC}> = dense<1> : tensor<1x1x1x16xui8>, [#const.Reorder<#NHWC>]
 
-    %0 = VPU.NCE.DepthConvolution(%arg0, %weights, %weights_table, %activation_window) {
-        activation_window_channel_length = 44 : i64,
+    %0 = VPU.NCE.DepthConvolution(%arg0, %weights, %weights_table) {
+        opaque_ppe = #VPU.PPEStub<>,
         pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
         rawFilterShape = [16, 1, 4, 8],
         strides = [1, 1]
@@ -61,7 +62,6 @@ func.func @DepthConvNCEtoCMX(%arg0: tensor<1x16x40x80xf16, {order = #NHWC}>) -> 
 
     // CHECK-DAG:       [[WEIGHTS_DDR:%.+]] = const.Declare tensor<16x1x4x8xf16, {order = #NHWC}>
     // CHECK-DAG:       [[WEIGHTS_TABLE_DDR:%.+]] = const.Declare tensor<16x1x1x4xsi32, {order = #NHWC}>
-    // CHECK-DAG:       [[ACTIVATION_WINDOW_DDR:%.+]] = const.Declare tensor<1x1x1x16xui8, {order = #NHWC}>
 
     // CHECK:       [[IN_CMX:%.+]] = VPU.Copy(%arg0) {out_mem_space = [@CMX_NN, 0]}
     // CHECK-SAME:      -> tensor<1x16x40x80xf16, {mem_space = [@CMX_NN, 0], order = #NHWC}>
@@ -69,11 +69,9 @@ func.func @DepthConvNCEtoCMX(%arg0: tensor<1x16x40x80xf16, {order = #NHWC}>) -> 
     // CHECK-SAME:      -> tensor<16x1x4x8xf16, {mem_space = [@CMX_NN, 0], order = #NHWC}>
     // CHECK:       [[WEIGHTS_TABLE_CMX:%.+]] = VPU.Copy([[WEIGHTS_TABLE_DDR]]) {out_mem_space = [@CMX_NN, 0]}
     // CHECK-SAME:      -> tensor<16x1x1x4xsi32, {mem_space = [@CMX_NN, 0], order = #NHWC}>
-    // CHECK:       [[ACTIVATION_WINDOW_CMX:%.+]] = VPU.Copy([[ACTIVATION_WINDOW_DDR]]) {out_mem_space = [@CMX_NN, 0]}
-    // CHECK-SAME:      -> tensor<1x1x1x16xui8, {mem_space = [@CMX_NN, 0], order = #NHWC}>
 
-    // CHECK:       [[OUT_CMX:%.+]] = VPU.NCE.DepthConvolution([[IN_CMX]], [[WEIGHTS_CMX]], [[WEIGHTS_TABLE_CMX]], [[ACTIVATION_WINDOW_CMX]] )
-    // CHECK-SAME:      activation_window_channel_length = 44 : i64,
+    // CHECK:       [[OUT_CMX:%.+]] = VPU.NCE.DepthConvolution([[IN_CMX]], [[WEIGHTS_CMX]], [[WEIGHTS_TABLE_CMX]])
+    // CHECK-SAME:      opaque_ppe = #VPU.PPEStub<>,
     // CHECK-SAME:      pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>
     // CHECK-SAME:      strides = [1, 1]
     // CHECK-SAME:      -> tensor<1x16x37x73xf16, {mem_space = [@CMX_NN, 0], order = #NHWC}>
@@ -90,11 +88,10 @@ func.func @DepthConvNCEtoCMX(%arg0: tensor<1x16x40x80xf16, {order = #NHWC}>) -> 
 
 func.func @MaxPoolNCEtoCMX(%arg0: tensor<1x16x1x4xf16, {order = #NHWC}>) -> tensor<1x16x1x4xf16, {order = #NHWC}> {
     %weights = const.Declare tensor<16x1x1x4xsi32, {order = #NHWC}> = dense<1> : tensor<16x1x1x4xsi32>, [#const.Reorder<#NHWC>]
-    %weights_table = const.Declare tensor<1x1x1x16xui8, {order = #NHWC}> = dense<1> : tensor<1x1x1x16xui8>, [#const.Reorder<#NHWC>]
 
-    %0 = VPU.NCE.MaxPool(%arg0, %weights, %weights_table) {
-        activation_window_channel_length = 4 : i64,
+    %0 = VPU.NCE.MaxPool(%arg0, %weights) {
         kernel_size = [1, 1],
+        opaque_ppe = #VPU.PPEStub<>,
         pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
         strides = [1, 1]
     } -> tensor<1x16x1x4xf16, {order = #NHWC}>
@@ -102,17 +99,16 @@ func.func @MaxPoolNCEtoCMX(%arg0: tensor<1x16x1x4xf16, {order = #NHWC}>) -> tens
     return %0 : tensor<1x16x1x4xf16, {order = #NHWC}>
 
     // CHECK-DAG:       [[WEIGHTS_DDR:%.+]] = const.Declare tensor<16x1x1x4xsi32, {order = #NHWC}>
-    // CHECK-DAG:       [[WEIGHTS_TABLE_DDR:%.+]] = const.Declare tensor<1x1x1x16xui8, {order = #NHWC}>
 
     // CHECK:       [[IN_CMX:%.+]] = VPU.Copy(%arg0) {out_mem_space = [@CMX_NN, 0]}
     // CHECK-SAME:      -> tensor<1x16x1x4xf16, {mem_space = [@CMX_NN, 0], order = #NHWC}>
     // CHECK:       [[WEIGHTS_CMX:%.+]] = VPU.Copy([[WEIGHTS_DDR]]) {out_mem_space = [@CMX_NN, 0]}
     // CHECK-SAME:      -> tensor<16x1x1x4xsi32, {mem_space = [@CMX_NN, 0], order = #NHWC}>
-    // CHECK:       [[WEIGHTS_TABLE_CMX:%.+]] = VPU.Copy([[WEIGHTS_TABLE_DDR]]) {out_mem_space = [@CMX_NN, 0]}
-    // CHECK-SAME:      -> tensor<1x1x1x16xui8, {mem_space = [@CMX_NN, 0], order = #NHWC}>
 
-    // CHECK:       [[OUT_CMX:%.+]] = VPU.NCE.MaxPool([[IN_CMX]], [[WEIGHTS_CMX]] , [[WEIGHTS_TABLE_CMX]] )
-    // CHECK-SAME:      pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>
+    // CHECK:       [[OUT_CMX:%.+]] = VPU.NCE.MaxPool([[IN_CMX]], [[WEIGHTS_CMX]] )
+    // CHECK-SAME:      kernel_size = [1, 1],
+    // CHECK-SAME:      opaque_ppe = #VPU.PPEStub<>,
+    // CHECK-SAME:      pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
     // CHECK-SAME:      strides = [1, 1]
     // CHECK-SAME:      -> tensor<1x16x1x4xf16, {mem_space = [@CMX_NN, 0], order = #NHWC}>
 
@@ -130,7 +126,7 @@ func.func @EltwiseAddNCEtoCMX(%arg0: tensor<1x64x28x28xf16, {order = #NHWC}>,
                          %arg1: tensor<1x64x28x28xf16, {order = #NHWC}>)
                         -> tensor<1x64x28x28xf16, {order = #NHWC}> {
     %0 = VPU.NCE.Eltwise(%arg0, %arg1) {
-        op_type = #VPU.eltwise_type<ADD>
+        op_type = #VPU.eltwise_type<ADD>, opaque_ppe = #VPU.PPEStub<>
     } -> tensor<1x64x28x28xf16, {order = #NHWC}>
 
     return %0 : tensor<1x64x28x28xf16, {order = #NHWC}>
@@ -141,7 +137,7 @@ func.func @EltwiseAddNCEtoCMX(%arg0: tensor<1x64x28x28xf16, {order = #NHWC}>,
     // CHECK-SAME:      -> tensor<1x64x28x28xf16, {mem_space = [@CMX_NN, 0], order = #NHWC}>
 
     // CHECK:       [[OUT_CMX:%.+]] = VPU.NCE.Eltwise([[IN1_CMX]], [[IN2_CMX]])
-    // CHECK-SAME:      op_type = #VPU.eltwise_type<ADD>
+    // CHECK-SAME:      op_type = #VPU.eltwise_type<ADD>, opaque_ppe = #VPU.PPEStub<>
     // CHECK-SAME:      -> tensor<1x64x28x28xf16, {mem_space = [@CMX_NN, 0], order = #NHWC}>
 
     // CHECK:       [[OUT_DDR:%.+]] = VPU.Copy([[OUT_CMX]])
@@ -157,7 +153,7 @@ func.func @EltwiseAddNCEtoCMX(%arg0: tensor<1x64x28x28xf16, {order = #NHWC}>,
 func.func @EltwiseAndSameInputsNCEtoCMX(%arg0: tensor<1x64x28x28xf16, {order = #NHWC}>)
                                   -> tensor<1x64x28x28xf16, {order = #NHWC}> {
     %0 = VPU.NCE.Eltwise(%arg0, %arg0) {
-        op_type = #VPU.eltwise_type<AND>
+        op_type = #VPU.eltwise_type<AND>, opaque_ppe = #VPU.PPEStub<>
     } -> tensor<1x64x28x28xf16, {order = #NHWC}>
 
     return %0 : tensor<1x64x28x28xf16, {order = #NHWC}>
@@ -166,7 +162,7 @@ func.func @EltwiseAndSameInputsNCEtoCMX(%arg0: tensor<1x64x28x28xf16, {order = #
     // CHECK-SAME:      -> tensor<1x64x28x28xf16, {mem_space = [@CMX_NN, 0], order = #NHWC}>
 
     // CHECK:       [[OUT_CMX:%.+]] = VPU.NCE.Eltwise([[IN_CMX]], [[IN_CMX]])
-    // CHECK-SAME:      op_type = #VPU.eltwise_type<AND>
+    // CHECK-SAME:      op_type = #VPU.eltwise_type<AND>, opaque_ppe = #VPU.PPEStub<>
     // CHECK-SAME:      -> tensor<1x64x28x28xf16, {mem_space = [@CMX_NN, 0], order = #NHWC}>
 
     // CHECK:       [[OUT_DDR:%.+]] = VPU.Copy([[OUT_CMX]])
@@ -221,7 +217,7 @@ func.func @InterpolateBilinearNCEtoCMX(%arg0: tensor<1x64x5x10xf16, {order = #NH
         rawFilterShape = [64, 64, 2, 2],
         mode = #VPU.nce_interpolate_mode<BILINEAR>,
         scales_attr = [2, 2],
-        ppe = #VPU.PPETask<mode = <NOOP>, clamp_high = 2147483647, clamp_low = 0, lrelu_mult = 1, lrelu_shift = 0>
+        opaque_ppe = #VPU.PPEStub<>
     } -> tensor<1x64x10x20xf16, {order = #NHWC}>
 
     return %interpolate : tensor<1x64x10x20xf16, {order = #NHWC}>
@@ -290,7 +286,7 @@ func.func @InterpolateBilinearNCEtoCMX(%arg0: tensor<1x64x5x10xf16, {order = #NH
 
     // CHECK:       [[INTERPOLATE:%.+]] = VPU.NCE.Interpolate([[COPY_0]], [[COPY_1]], [[COPY_2]]) {
     // CHECK-SAME:      mode = #VPU.nce_interpolate_mode<BILINEAR>,
-    // CHECK-SAME:      ppe = #VPU.PPETask<mode = <NOOP>, clamp_low = 0 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64>,
+    // CHECK-SAME:      opaque_ppe = #VPU.PPEStub<>,
     // CHECK-SAME:      rawFilterShape = [64, 64, 2, 2],
     // CHECK-SAME:      scales_attr = [2, 2]
     // CHECK-SAME:      strides = [1, 1]
@@ -352,7 +348,7 @@ func.func @InterpolateNearestNCEtoCMX(%arg0: tensor<1x64x5x10xf16, {order = #NHW
         rawFilterShape = [64, 64, 1, 1],
         mode = #VPU.nce_interpolate_mode<NEAREST>,
         scales_attr = [2, 2],
-        ppe = #VPU.PPETask<mode = <NOOP>, clamp_high = 2147483647, clamp_low = 0, lrelu_mult = 1, lrelu_shift = 0>
+        opaque_ppe = #VPU.PPEStub<>
     } -> tensor<1x64x10x20xf16, {order = #NHWC}>
 
     return %interpolate : tensor<1x64x10x20xf16, {order = #NHWC}>
@@ -426,7 +422,7 @@ func.func @InterpolateNearestNCEtoCMX(%arg0: tensor<1x64x5x10xf16, {order = #NHW
 
     // CHECK:       [[INTERPOLATE:%.+]] = VPU.NCE.Interpolate([[COPY_0]], [[COPY_1]], [[COPY_2]]) {
     // CHECK-SAME:      mode = #VPU.nce_interpolate_mode<NEAREST>,
-    // CHECK-SAME:      ppe = #VPU.PPETask<mode = <NOOP>, clamp_low = 0 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64>,
+    // CHECK-SAME:      opaque_ppe = #VPU.PPEStub<>,
     // CHECK-SAME:      rawFilterShape = [64, 64, 1, 1],
     // CHECK-SAME:      scales_attr = [2, 2]
     // CHECK-SAME:      strides = [1, 1]

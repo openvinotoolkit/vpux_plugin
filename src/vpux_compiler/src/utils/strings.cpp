@@ -44,8 +44,17 @@ std::pair<mlir::SmallVector<std::string>, mlir::DictionaryAttr> getPrimaryLocati
         }
     } else if (auto nameLoc = location.dyn_cast<mlir::NameLoc>()) {
         locParts.push_back(nameLoc.getName().str());
-    } else if (location.dyn_cast<mlir::UnknownLoc>() || location.dyn_cast<mlir::FileLineColLoc>() ||
-               location.dyn_cast<mlir::CallSiteLoc>()) {
+    } else if (auto callSiteLoc = location.dyn_cast<mlir::CallSiteLoc>()) {
+        // CallSiteLoc consist of Caller location and Callee location. At this moment compile doesn't support recursive
+        // and nested calls, so Caller locations is @main func loc with some extra suffix. Caller metadata will be
+        // always same and doesn't represent actual layer type, so we will forward metadata from the Callee
+        const auto calleeParts = getPrimaryLocationComponents(callSiteLoc.getCallee());
+        const auto callerParts = getPrimaryLocationComponents(callSiteLoc.getCaller());
+
+        locParts = callerParts.first;
+        locParts.append(calleeParts.first.begin(), calleeParts.first.end());
+        metadata = calleeParts.second;
+    } else if (location.dyn_cast<mlir::UnknownLoc>() || location.dyn_cast<mlir::FileLineColLoc>()) {
         // NOTE: This behavior is here to prevent breaking 100+ lit tests which assume that
         // stringifyPrimaryLocation() for FileLineColLoc and UnknownLoc returns an empty string.
         // TODO: E#93652

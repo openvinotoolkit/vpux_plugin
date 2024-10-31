@@ -126,12 +126,6 @@ def VPUIP_TaskOpInterface : OpInterface<"TaskOpInterface"> {
     let cppNamespace = "vpux::VPUIP";
 
     let methods = [
-        InterfaceMethod<
-            "Serialize the Task to BLOB format",
-            "vpux::VPUIP::BlobWriter::SpecificTask",
-            "serialize", (ins "vpux::VPUIP::BlobWriter&":$writer)
-        >,
-
         StaticInterfaceMethod<
             "Get the executor for the Operation",
             "vpux::VPU::ExecutorKind", "getExecutorKind", (ins),
@@ -253,14 +247,6 @@ def VPUIP_DMATypeOpInterface : OpInterface<"DMATypeOpInterface", [DeclareOpInter
             }]
         >
     ];
-}
-
-//
-// UPATask
-//
-
-def VPUIP_UPATask : NativeOpTrait<"UPATask"> {
-    let cppNamespace = "vpux::VPUIP";
 }
 
 //

@@ -117,7 +117,10 @@ Const::Content transformImpl(mlir::quant::QuantizedType qElemType, mlir::Type ou
         const auto zeroPoint = uniformType.getZeroPoint();
         const auto quantizer = createQuantizeFn(scale, zeroPoint, qElemType);
 
-        for (size_t i = 0; i < realVals.size(); ++i) {
+        // qVals.size is 1 when the input is splat, while realVals.size can be greater than 1
+        // realVals must contain same element at every index when the input is splat.
+        // Use qVals.size to terminate the loop early in this scenario.
+        for (size_t i = 0; i < qVals.size(); ++i) {
             qVals[i] = static_cast<StorageType>(quantizer(realVals[i]));
         }
     } else if (const auto uniformType = qElemType.dyn_cast<mlir::quant::UniformQuantizedPerAxisType>()) {
@@ -208,11 +211,6 @@ Const::Content vpux::Const::QuantizeAttr::transform(vpux::Const::Content& input)
     }
 }
 
-//
-// ContentAttr::quantize
-//
-
-Const::ContentAttr vpux::Const::ContentAttr::quantize(mlir::quant::QuantizedType newElemType) const {
-    return ContentAttr::addTransformation(
-            *this, Const::QuantizeAttr::get(getContext(), newElemType).cast<Const::TransformAttrInterface>());
+Const::ContentSetup vpux::Const::ContentSetup::quantize(mlir::quant::QuantizedType newElemType) {
+    return addTransformation(Const::QuantizeAttr::get(getContext(), newElemType));
 }

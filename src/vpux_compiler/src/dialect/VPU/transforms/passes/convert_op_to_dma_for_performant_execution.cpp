@@ -41,7 +41,7 @@ void ConvertOpToDMAForPerformantExecutionPass::safeRunOnFunc() {
     auto& ctx = getContext();
 
     const auto arch = VPU::getArch(func);
-    auto conversionStrategy = VPU::CreateConvertOpToDMAForPerformantExecutionStrategy(arch);
+    auto conversionStrategy = VPU::createConvertOpToDMAForPerformantExecutionStrategy(arch);
 
     mlir::ConversionTarget target(ctx);
     conversionStrategy->markOpLegality(target, _log);

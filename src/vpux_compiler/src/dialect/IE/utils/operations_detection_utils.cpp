@@ -32,7 +32,7 @@ void vpux::IE::detectAndReplacePreProcessedAgrs(Logger _log, mlir::func::FuncOp 
     const auto newResultsTypes = to_small_vector(newResults | transformed(getType));
 
     if (updateFunctionSignature(netFunc, newArgTypes, newResultsTypes, _log).failed()) {
-        _log.info("Failed to updateFunctionSignature");
+        _log.trace("Failed to updateFunctionSignature");
         return;
     }
 

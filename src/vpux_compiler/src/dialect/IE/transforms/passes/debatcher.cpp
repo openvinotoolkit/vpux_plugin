@@ -345,9 +345,8 @@ private:
 
 class DebatcherPass final : public IE::DebatcherBase<DebatcherPass> {
 public:
-    explicit DebatcherPass(Logger log): _log(log) {
+    explicit DebatcherPass(Logger log) {
         Base::initLogger(log, Base::getArgumentName());
-        _log.info("Create DebatcherPass");
     }
 
     mlir::LogicalResult delegateInitializeOptions(StringRef extraArgs);
@@ -355,9 +354,6 @@ public:
 private:
     mlir::LogicalResult initialize(mlir::MLIRContext* ctx) final;
     void safeRunOnFunc() final;
-
-private:
-    Logger _log;
 };
 
 mlir::LogicalResult DebatcherPass::initialize(mlir::MLIRContext* ctx) {

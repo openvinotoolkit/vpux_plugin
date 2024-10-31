@@ -136,8 +136,7 @@ mlir::LogicalResult getPPEQuantConfig(const Logger& log, mlir::Type type, const 
 }
 
 mlir::LogicalResult configureIntPPE(const Logger& log, PPEConfig::IntPPE& config, mlir::Type outDataType,
-                                    VPUIP::NCETaskType dpuTaskType, const PPETask& ppeTask, bool bypassPPEInt,
-                                    VPU::ArchKind arch) {
+                                    VPUIP::NCETaskType dpuTaskType, const PPETask& ppeTask, bool bypassPPEInt) {
     SmallVector<int64_t> quantMult;
     SmallVector<int64_t> quantShift;
     SmallVector<uint8_t> quantZero;
@@ -155,7 +154,7 @@ mlir::LogicalResult configureIntPPE(const Logger& log, PPEConfig::IntPPE& config
             return mlir::failure();
         }
     } else {
-        if (getQuantConfig(log, outDataType, quantMult, quantShift, quantZero, arch).failed()) {
+        if (getQuantConfig(log, outDataType, quantMult, quantShift, quantZero).failed()) {
             return mlir::failure();
         }
     }
@@ -218,7 +217,7 @@ mlir::LogicalResult configureIntPPE(const Logger& log, PPEConfig::IntPPE& config
 }
 
 mlir::LogicalResult configurePPE(const Logger& log, PPEConfig& config, mlir::Type inDataType, mlir::Type outDataType,
-                                 VPUIP::NCETaskType dpuTaskType, const PPETask& ppeTask, VPU::ArchKind arch) {
+                                 VPUIP::NCETaskType dpuTaskType, const PPETask& ppeTask) {
     bool bypassPPEInt = false;
     switch (detectPPEUseCase(inDataType, outDataType)) {
     case PPEUseCase::INT_INT:
@@ -266,7 +265,7 @@ mlir::LogicalResult configurePPE(const Logger& log, PPEConfig& config, mlir::Typ
         return mlir::failure();
     }
 
-    if (configureIntPPE(log, config.intPPE, outDataType, dpuTaskType, ppeTask, bypassPPEInt, arch).failed()) {
+    if (configureIntPPE(log, config.intPPE, outDataType, dpuTaskType, ppeTask, bypassPPEInt).failed()) {
         return mlir::failure();
     }
 
@@ -395,61 +394,54 @@ mlir::FailureOr<PPETask> vpux::VPUIPDPU::arch40xx::PPE::evalPPETasks(const Logge
     PPETask ppeTask{};
 
     for (auto ppeTaskOp : ppeRegion.getOps<VPUASM::PPETaskOp>()) {
-        const auto ppeMode = ppeTaskOp.getPpeLayerType();
-        if (ppeMode != VPU::PPEMode::NOOP) {
-            if (ppeTask.fixedFunction.ppeMode != VPU::PPEMode::NOOP) {
-                log.error("Cannot set more than one PPE task");
-                return mlir::failure();
-            }
-            ppeTask.fixedFunction.ppeMode = ppeMode;
-        }
-        if (ppeTaskOp.getClampLow().has_value()) {
-            if (auto intClampLowAttr = ppeTaskOp.getClampLowAttr().dyn_cast<mlir::IntegerAttr>()) {
-                ppeTask.fixedFunction.intClampLow = checked_cast<int32_t>(intClampLowAttr.getInt());
-            } else if (auto fpClampLowAttr = ppeTaskOp.getClampLowAttr().dyn_cast<mlir::FloatAttr>()) {
-                ppeTask.fixedFunction.fpClampLow = static_cast<float>(fpClampLowAttr.getValue().convertToDouble());
-            }
-        }
-        if (ppeTaskOp.getClampHigh().has_value()) {
-            if (auto intClampHighAttr = ppeTaskOp.getClampHighAttr().dyn_cast<mlir::IntegerAttr>()) {
-                ppeTask.fixedFunction.intClampHigh = checked_cast<int32_t>(intClampHighAttr.getInt());
-            } else if (auto fpClampHighAttr = ppeTaskOp.getClampHighAttr().dyn_cast<mlir::FloatAttr>()) {
-                ppeTask.fixedFunction.fpClampHigh = static_cast<float>(fpClampHighAttr.getValue().convertToDouble());
+        auto opaquePpeAttr = ppeTaskOp.getOpaquePpeAttr();
+        auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(opaquePpeAttr);
+        VPUX_THROW_WHEN(intPpeAttr == nullptr,
+                        "Expected PPEIntAttr type but got {0}, make sure to use the right factory version",
+                        opaquePpeAttr);
+
+        if (intPpeAttr.getMode()) {
+            const auto ppeMode = intPpeAttr.getMode().getValue();
+            if (ppeMode != VPU::PPEMode::NOOP) {
+                if (ppeTask.fixedFunction.ppeMode != VPU::PPEMode::NOOP) {
+                    log.error("Cannot set more than one PPE task");
+                    return mlir::failure();
+                }
+                ppeTask.fixedFunction.ppeMode = ppeMode;
             }
         }
-        if (ppeTaskOp.getLreluMult().has_value()) {
-            ppeTask.fixedFunction.lReluMult = checked_cast<int32_t>(ppeTaskOp.getLreluMult().value());
+
+        if (const auto clampLowAttr = intPpeAttr.getClampLow()) {
+            ppeTask.fixedFunction.intClampLow = checked_cast<int32_t>(clampLowAttr.getValue().getSExtValue());
         }
-        if (ppeTaskOp.getLreluShift().has_value()) {
-            ppeTask.fixedFunction.lReluShift = checked_cast<uint32_t>(ppeTaskOp.getLreluShift().value());
+        if (const auto clampHighAttr = intPpeAttr.getClampHigh()) {
+            ppeTask.fixedFunction.intClampHigh = checked_cast<int32_t>(clampHighAttr.getValue().getSExtValue());
         }
-        if (ppeTaskOp.getQuantScale().has_value()) {
-            auto floatScaleAttr = ppeTaskOp.getQuantScaleAttr().getValue()[0];
-            // for float values checked cast will fail due to floating point precision representation differences
-            // between float and int. Intentionally using static_cast
+        if (const auto LreluMultAttr = intPpeAttr.getLreluMult()) {
+            ppeTask.fixedFunction.lReluMult = checked_cast<int32_t>(LreluMultAttr.getValue().getSExtValue());
+        }
+        if (const auto LreluShiftAttr = intPpeAttr.getLreluShift()) {
+            ppeTask.fixedFunction.lReluShift = checked_cast<uint32_t>(LreluShiftAttr.getValue().getSExtValue());
+        }
+        if (const auto quantMultAttr = intPpeAttr.getQuantMult()) {
+            ppeTask.ppeQuantMult = parseIntArrayAttr<int64_t>(quantMultAttr);
+        }
+        if (const auto quantShiftAttr = intPpeAttr.getQuantShift()) {
+            ppeTask.ppeQuantShift = parseIntArrayAttr<int64_t>(quantShiftAttr);
+        }
+        if (const auto quantPostShiftAttr = intPpeAttr.getQuantPostShift()) {
+            ppeTask.ppeQuantPostShift = checked_cast<int64_t>(quantPostShiftAttr.getValue().getSExtValue());
+        }
+        // Note: For values like 0.1, checked_cast fails, due to loss in precision when converting
+        // from double to float and back, due to the static_cast<double>(static_cast<float>(value)) == value
+        // check; use static_cast instead
+        if (const auto quantScaleAttr = intPpeAttr.getQuantScale()) {
+            auto floatScaleAttr = quantScaleAttr.getValue()[0];
             ppeTask.fpScaleData =
-                    static_cast<float>(floatScaleAttr.cast<mlir::FloatAttr>().getValue().convertToDouble());
+                    static_cast<float>(mlir::dyn_cast<mlir::FloatAttr>(floatScaleAttr).getValueAsDouble());
         }
-        if (ppeTaskOp.getFpPreluAlpha().has_value()) {
-            ppeTask.fpPreluAlpha = static_cast<float>(ppeTaskOp.getFpPreluAlpha().value().convertToDouble());
-        }
-        if (ppeTaskOp.getQuantMult().has_value()) {
-            ppeTask.ppeQuantMult =
-                    parseIntArrayAttr<int64_t>(ppeTaskOp.getQuantMult().value().dyn_cast<mlir::ArrayAttr>());
-        }
-        if (ppeTaskOp.getQuantShift().has_value()) {
-            ppeTask.ppeQuantShift = parseIntArrayAttr<int64_t>(ppeTaskOp.getQuantShift().value());
-        }
-        if (ppeTaskOp.getQuantPostShift().has_value()) {
-            ppeTask.ppeQuantPostShift = checked_cast<int64_t>(ppeTaskOp.getQuantPostShift().value());
-        }
-        if (ppeTaskOp.getPpeFpScale().has_value()) {
-            const auto fpScale = static_cast<float>(ppeTaskOp.getPpeFpScale().value().convertToDouble());
-            ppeTask.ppeFpScale = fpScale;
-        }
-        if (ppeTaskOp.getPpeFpBias().has_value()) {
-            const auto fpBias = static_cast<float>(ppeTaskOp.getPpeFpBias().value().convertToDouble());
-            ppeTask.ppeFpBias = fpBias;
+        if (const auto fpPReluAlphaAttr = intPpeAttr.getFpPreluAlpha()) {
+            ppeTask.fpPreluAlpha = static_cast<float>(intPpeAttr.getFpPreluAlpha().getValueAsDouble());
         }
     }
 
@@ -486,8 +478,7 @@ mlir::LogicalResult vpux::VPUIPDPU::arch40xx::buildDPUInvariantPPE(
         return mlir::failure();
     }
 
-    if (configurePPE(log, config, inDataType, outDataType, dpuTaskType, ppeTask.value(), VPU::getArch(origInvOp))
-                .failed()) {
+    if (configurePPE(log, config, inDataType, outDataType, dpuTaskType, ppeTask.value()).failed()) {
         return mlir::failure();
     }
 

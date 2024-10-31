@@ -115,8 +115,8 @@ void LinearScanHandler::allocated(mlir::Value val, AddressType addr) {
 
     _valOffsets.insert({val, addr});
 
-    const auto endAddr = alignValUp<int64_t>(addr + getSize(val), getAlignment(val));
-    _maxAllocatedSize = Byte(std::max(_maxAllocatedSize.count(), endAddr));
+    int64_t allocatedSize = addr + getSize(val);
+    _maxAllocatedSize = Byte(std::max(_maxAllocatedSize.count(), allocatedSize));
 }
 
 void LinearScanHandler::deallocate(mlir::Value val) {

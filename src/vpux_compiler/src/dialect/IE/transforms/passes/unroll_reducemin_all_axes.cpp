@@ -7,8 +7,10 @@
 
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/IE/utils/handle_kernels_utils.hpp"
+#include "vpux/compiler/dialect/VPU/utils/max_kernel_size_utils.hpp"
 #include "vpux/compiler/dialect/const/utils/utils.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
+#include "vpux/compiler/utils/rewriter.hpp"
 
 #include <mlir/Transforms/DialectConversion.h>
 
@@ -33,7 +35,7 @@ private:
 };
 
 mlir::LogicalResult ReduceMinRewriter::matchAndRewrite(IE::ReduceMinOp origOp, mlir::PatternRewriter& rewriter) const {
-    _log.info("[{0}] Try to unroll ReduceMin at '{1}'", getDebugName(), origOp->getLoc(), origOp);
+    _log.trace("[{0}] Try to unroll ReduceMin at '{1}'", getDebugName(), origOp->getLoc(), origOp);
     mlir::MLIRContext* ctx = origOp->getContext();
     const auto origInput = origOp->getOperand(0);
     const auto axes = parseIntArrayAttr<int64_t>(origOp.getAxesValue().value());
@@ -49,7 +51,8 @@ mlir::LogicalResult ReduceMinRewriter::matchAndRewrite(IE::ReduceMinOp origOp, m
         auto maxAxis = maxNonOneAxis.value_or(Dim(0)).ind();
         SmallVector<int64_t> unrolledAxes = {maxAxis};
         auto axesAttr = getIntArrayAttr(ctx, ArrayRef(unrolledAxes));
-        auto newOp = rewriter.create<IE::ReduceMinOp>(origOp->getLoc(), prevInput, nullptr, axesAttr, false);
+        auto newOp = rewriter.create<IE::ReduceMinOp>(takeOpLoc(origOp, StringLiteral("dim_{0}"), idx), prevInput,
+                                                      nullptr, axesAttr, false);
         prevInput = newOp->getResult(0);
         _log.trace("[{0}] create newOp {1} with size {2}", getDebugName(), newOp,
                    parseIntArrayAttr<int64_t>(newOp.getAxesValue().value()).size());
@@ -83,15 +86,16 @@ void UnrollReduceMinAllAxesPass::safeRunOnFunc() {
         }
 
         // For ReduceMin, in case all axes are reduced, conversion to MaxPool on NCE shows suboptimal
-        // performance than SHAVE when the kernel size exceeds VPU::NCEInvariant::MAX_KERNEL_SIZE.
+        // performance than SHAVE when the kernel size exceeds maxKernelSize.
         // Instead, unroll it to multiple ReduceMin ops on single axis can avoid this issue
-        // when totalsize is over REDUCEMIN_DPU_THRESHOLD as profiled in E-126141.
+        // when totalsize is over REDUCEMIN_DPU_THRESHOLD as profiled in E#126141.
         auto inputTotalSize = getShape(op->getOperand(0)).totalSize();
         if (inputTotalSize < REDUCEMIN_DPU_THRESHOLD) {
             return true;
         }
-        if ((getShape(op->getResult(0)).totalSize() == 1) &&
-            (inputTotalSize > std::pow(VPU::NCEInvariant::MAX_KERNEL_SIZE, 2))) {
+
+        const auto maxKernelSize = VPU::getMaxKernelSize(op);
+        if ((getShape(op->getResult(0)).totalSize() == 1) && (inputTotalSize > std::pow(maxKernelSize, 2))) {
             return false;
         }
 

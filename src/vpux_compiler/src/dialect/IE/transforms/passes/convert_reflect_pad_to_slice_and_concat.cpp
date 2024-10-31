@@ -73,26 +73,28 @@ mlir::Value convertPerAxisPad(mlir::Value input, const int64_t padBegin, const i
     }
 
     auto inputShape = getShape(input);
-    auto sliceData = [&](int64_t offset) {
+    auto sliceData = [&](int64_t offset, StringRef locSuffix) {
         auto offsets = SmallVector<int64_t>(inputShape.size(), 0);
         auto sizes = SmallVector<int64_t>(inputShape.begin(), inputShape.end());
         offsets[padAxis.ind()] = offset;
         sizes[padAxis.ind()] = 1;
-        return rewriter.create<IE::SliceOp>(loc, input, getIntArrayAttr(ctx, offsets), getIntArrayAttr(ctx, sizes))
+        return rewriter
+                .create<IE::SliceOp>(appendLoc(loc, "slice_{0}_{1}", offset, locSuffix), input,
+                                     getIntArrayAttr(ctx, offsets), getIntArrayAttr(ctx, sizes))
                 .getResult();
     };
 
     SmallVector<mlir::Value> subSlices;
     for (auto idx = padBegin; idx > 0; --idx) {
         const auto offset = idx;
-        subSlices.push_back(sliceData(offset));
+        subSlices.push_back(sliceData(offset, "forward"));
     }
 
     subSlices.push_back(input);
 
     for (auto idx = 1; idx <= padEnd; ++idx) {
         const auto offset = inputShape[padAxis] - 1 - idx;
-        subSlices.push_back(sliceData(offset));
+        subSlices.push_back(sliceData(offset, "backward"));
     }
 
     return rewriter.create<IE::ConcatOp>(loc, subSlices, padAxis).getOutput();
@@ -110,7 +112,7 @@ mlir::LogicalResult ConvertReflectPadToSliceAndConcatPass::ReflectPadConverter::
     mlir::Value input = padOp.getInput();
     auto inputRank = input.getType().cast<mlir::RankedTensorType>().getRank();
     for (auto axis = inputRank - 1; axis >= 0; --axis) {
-        auto newLoc = appendLoc(padOp.getLoc(), "_pad_axis_{0}", Dim(axis));
+        auto newLoc = appendLoc(padOp.getLoc(), "pad_axis_{0}", Dim(axis));
         input = convertPerAxisPad(input, padsBegin[axis], padsEnd[axis], Dim(axis), rewriter, newLoc,
                                   padOp.getContext());
     }

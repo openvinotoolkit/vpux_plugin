@@ -11,7 +11,7 @@
 // CHECK-LABEL: @DoNotConvertNonConstDivide
 // CHECK-SAME: ([[ARG:%.+]]: tensor<1x12x512x512xf16>) -> tensor<1x12x512x512xf16>
 func.func @DoNotConvertNonConstDivide(%arg: tensor<1x12x512x512xf16>) -> tensor<1x12x512x512xf16> {
-    %divisor = const.Declare tensor<1x1x1x1x!qElemType> = dense<2> : tensor<1x1x1x1xui8>, [#const.QuantCast<!qElemType>]
+    %divisor = const.Declare tensor<1x1x1x1x!qElemType> = dense<2> : tensor<1x1x1x1xui8>, [#const.CastElemType<!qElemType>]
     %nonCst = IE.Dequantize(%divisor) {dstElemType = f16} : tensor<1x1x1x1x!qElemType> -> tensor<1x1x1x1xf16>
     %0 = IE.Divide(%arg, %nonCst) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>}
         : tensor<1x12x512x512xf16>, tensor<1x1x1x1xf16> -> tensor<1x12x512x512xf16>

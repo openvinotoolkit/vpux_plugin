@@ -21,7 +21,7 @@ namespace {
 std::string getSectionName(elf::Reader<elf::ELF_Bitness::Elf64>& reader,
                            const elf::Reader<elf::ELF_Bitness::Elf64>::Section& section) {
     const auto elfHeader = reader.getHeader();
-    auto testNames = reader.getSection(elfHeader->e_shstrndx);
+    const auto& testNames = reader.getSection(elfHeader->e_shstrndx);
     const auto strings = testNames.getData<char>();
     return std::string(strings + section.getHeader()->sh_name);
 }
@@ -29,7 +29,7 @@ std::string getSectionName(elf::Reader<elf::ELF_Bitness::Elf64>& reader,
 std::string getSymbolName(elf::Reader<elf::ELF_Bitness::Elf64>& reader,
                           const elf::Reader<elf::ELF_Bitness::Elf64>::Section& symbolSection,
                           const elf::SymbolEntry& symbol) {
-    auto symStrTab = reader.getSection(symbolSection.getHeader()->sh_link);
+    const auto& symStrTab = reader.getSection(symbolSection.getHeader()->sh_link);
     const auto strings = symStrTab.getData<char>();
     return std::string(strings + symbol.st_name);
 }
@@ -56,10 +56,11 @@ TEST(ELFWriter, ELFWriterConstructorDoesntThrow) {
 
 TEST(ELFWriter, ELFHeaderForEmptyELFIsCorrect) {
     elf::Writer writer;
-    std::vector<uint8_t> blob;
-    OV_ASSERT_NO_THROW(blob = writer.generateELF());
+    writer.prepareWriter();
+    std::vector<uint8_t> blob(writer.getTotalSize());
+    OV_ASSERT_NO_THROW(writer.generateELF(blob.data()));
 
-    auto accessor = elf::ElfDDRAccessManager(blob.data(), blob.size());
+    auto accessor = elf::DDRAccessManager<elf::DDRAlwaysEmplace>(blob.data(), blob.size());
     elf::Reader<elf::ELF_Bitness::Elf64> reader(&accessor);
     const auto elfHeader = reader.getHeader();
     ASSERT_EQ(elfHeader->e_ident[elf::EI_MAG0], elf::ELFMAG0);
@@ -77,7 +78,6 @@ TEST(ELFWriter, ELFHeaderForEmptyELFIsCorrect) {
     ASSERT_EQ(elfHeader->e_entry, 0);
     ASSERT_EQ(elfHeader->e_flags, 0);
     ASSERT_EQ(elfHeader->e_ehsize, sizeof(elf::ELFHeader));
-    ASSERT_EQ(elfHeader->e_phentsize, sizeof(elf::ProgramHeader));
     ASSERT_EQ(elfHeader->e_shentsize, sizeof(elf::SectionHeader));
 }
 
@@ -95,19 +95,22 @@ TEST(ELFWriter, BinaryDataSection) {
     elf::Writer writer;
     auto refSection = writer.addBinaryDataSection<TestObject>(testName);
     refSection->setAddrAlign(testAlignment);
+    refSection->setSize(sizeof(val1) + sizeof(val2));
+
+    writer.prepareWriter();
+    std::vector<uint8_t> blob(writer.getTotalSize());
+    OV_ASSERT_NO_THROW(writer.generateELF(blob.data()));
+    OV_ASSERT_NO_THROW(writer.setSectionsStartAddr(blob.data()));
+
     refSection->appendData(val1);
     refSection->appendData(val2);
 
-    std::vector<uint8_t> blob;
-    OV_ASSERT_NO_THROW(blob = writer.generateELF());
-
-    auto accessor = elf::ElfDDRAccessManager(blob.data(), blob.size());
+    auto accessor = elf::DDRAccessManager<elf::DDRAlwaysEmplace>(blob.data(), blob.size());
     elf::Reader<elf::ELF_Bitness::Elf64> reader(&accessor);
     const auto binarySections = getSectionsByType(reader, elf::SHT_PROGBITS);
     ASSERT_EQ(binarySections.size(), 1);
-    ASSERT_EQ(reader.getSegmentsNum(), 0);
 
-    auto binarySection = binarySections.front();
+    const auto& binarySection = binarySections.front();
     ASSERT_EQ(getSectionName(reader, binarySection), testName);
     ASSERT_EQ(binarySection.getHeader()->sh_addralign, testAlignment);
     ASSERT_EQ(binarySection.getHeader()->sh_entsize, sizeof(TestObject));
@@ -128,14 +131,14 @@ TEST(ELFWriter, EmptySection) {
     refSection->setFlags(emptySectionFlags);
     refSection->setSize(emptySectionSize);
 
-    std::vector<uint8_t> blob;
-    OV_ASSERT_NO_THROW(blob = writer.generateELF());
+    writer.prepareWriter();
+    std::vector<uint8_t> blob(writer.getTotalSize());
+    OV_ASSERT_NO_THROW(writer.generateELF(blob.data()));
 
-    auto accessor = elf::ElfDDRAccessManager(blob.data(), blob.size());
+    auto accessor = elf::DDRAccessManager<elf::DDRAlwaysEmplace>(blob.data(), blob.size());
     elf::Reader<elf::ELF_Bitness::Elf64> reader(&accessor);
     const auto emptySections = getSectionsByType(reader, elf::SHT_NOBITS);
     ASSERT_EQ(emptySections.size(), 1);
-    ASSERT_EQ(reader.getSegmentsNum(), 0);
 
     const auto& emptySection = emptySections.front();
     ASSERT_EQ(getSectionName(reader, emptySection), testName);
@@ -160,16 +163,16 @@ TEST(ELFWriter, SymbolSection) {
     refSymbol->setType(symbolType);
     refSymbol->setRelatedSection(emptySection);
 
-    std::vector<uint8_t> blob;
-    OV_ASSERT_NO_THROW(blob = writer.generateELF());
+    writer.prepareWriter();
+    std::vector<uint8_t> blob(writer.getTotalSize());
+    OV_ASSERT_NO_THROW(writer.generateELF(blob.data()));
 
-    auto accessor = elf::ElfDDRAccessManager(blob.data(), blob.size());
+    auto accessor = elf::DDRAccessManager<elf::DDRAlwaysEmplace>(blob.data(), blob.size());
     elf::Reader<elf::ELF_Bitness::Elf64> reader(&accessor);
     const auto symbolSections = getSectionsByType(reader, elf::SHT_SYMTAB);
     ASSERT_EQ(symbolSections.size(), 1);
-    ASSERT_EQ(reader.getSegmentsNum(), 0);
 
-    auto symbolSection = symbolSections.front();
+    const auto& symbolSection = symbolSections.front();
     ASSERT_EQ(getSectionName(reader, symbolSection), testName);
     ASSERT_EQ(symbolSection.getHeader()->sh_entsize, sizeof(elf::SymbolEntry));
     ASSERT_EQ(symbolSection.getHeader()->sh_size, sizeof(elf::SymbolEntry) * 2);
@@ -206,16 +209,16 @@ TEST(ELFWriter, SymbolSectionStableSort) {
         refSymbol->setRelatedSection(emptySection);
     }
 
-    std::vector<uint8_t> blob;
-    OV_ASSERT_NO_THROW(blob = writer.generateELF());
+    writer.prepareWriter();
+    std::vector<uint8_t> blob(writer.getTotalSize());
+    OV_ASSERT_NO_THROW(writer.generateELF(blob.data()));
 
-    auto accessor = elf::ElfDDRAccessManager(blob.data(), blob.size());
+    auto accessor = elf::DDRAccessManager<elf::DDRAlwaysEmplace>(blob.data(), blob.size());
     elf::Reader<elf::ELF_Bitness::Elf64> reader(&accessor);
     const auto symbolSections = getSectionsByType(reader, elf::SHT_SYMTAB);
     ASSERT_EQ(symbolSections.size(), 1);
-    ASSERT_EQ(reader.getSegmentsNum(), 0);
 
-    auto symbolSection = symbolSections.front();
+    const auto& symbolSection = symbolSections.front();
     ASSERT_EQ(getSectionName(reader, symbolSection), testName);
     ASSERT_EQ(symbolSection.getHeader()->sh_entsize, sizeof(elf::SymbolEntry));
     ASSERT_EQ(symbolSection.getHeader()->sh_size, sizeof(elf::SymbolEntry) * (sizes.size() + 1));
@@ -248,7 +251,7 @@ TEST(ELFWriter, RelocationSection) {
 
     elf::Writer writer;
     auto refBinaryDataSection = writer.addBinaryDataSection<TestObject>(testBinaryDataName);
-    refBinaryDataSection->appendData(TestObject{});
+    refBinaryDataSection->setSize(sizeof(TestObject));
 
     auto refSymbolSection = writer.addSymbolSection(testSymbolSection);
     auto refSymbol = refSymbolSection->addSymbolEntry(testSymbolName);
@@ -263,16 +266,18 @@ TEST(ELFWriter, RelocationSection) {
     refRelocation->setOffset(sizeof(TestObject::a));
     refRelocation->setAddend(0);
 
-    std::vector<uint8_t> blob;
-    OV_ASSERT_NO_THROW(blob = writer.generateELF());
+    writer.prepareWriter();
+    std::vector<uint8_t> blob(writer.getTotalSize());
+    OV_ASSERT_NO_THROW(writer.generateELF(blob.data()));
+    OV_ASSERT_NO_THROW(writer.setSectionsStartAddr(blob.data()));
+    refBinaryDataSection->appendData(TestObject{});
 
-    auto accessor = elf::ElfDDRAccessManager(blob.data(), blob.size());
+    auto accessor = elf::DDRAccessManager<elf::DDRAlwaysEmplace>(blob.data(), blob.size());
     elf::Reader<elf::ELF_Bitness::Elf64> reader(&accessor);
     const auto relocationSections = getSectionsByType(reader, elf::SHT_RELA);
     ASSERT_EQ(relocationSections.size(), 1);
-    ASSERT_EQ(reader.getSegmentsNum(), 0);
 
-    auto relocationSection = relocationSections.front();
+    const auto& relocationSection = relocationSections.front();
     ASSERT_EQ(getSectionName(reader, relocationSection), testRelocationName);
     ASSERT_EQ(relocationSection.getHeader()->sh_entsize, sizeof(elf::RelocationAEntry));
     ASSERT_EQ(relocationSection.getHeader()->sh_size, sizeof(elf::RelocationAEntry));
@@ -309,7 +314,7 @@ TEST(ELFWriter, SpecialSymReloc) {
 
     elf::Writer writer;
     auto refBinaryDataSection = writer.addBinaryDataSection<TestObject>(testBinaryDataName);
-    refBinaryDataSection->appendData(TestObject{});
+    refBinaryDataSection->setSize(sizeof(TestObject));
 
     auto refRelocationSection = writer.addRelocationSection(testRelocationName);
     refRelocationSection->setSectionToPatch(refBinaryDataSection);
@@ -321,14 +326,16 @@ TEST(ELFWriter, SpecialSymReloc) {
     refRelocation->setOffset(0);
     refRelocation->setAddend(0);
 
-    std::vector<uint8_t> blob;
-    OV_ASSERT_NO_THROW(blob = writer.generateELF());
+    writer.prepareWriter();
+    std::vector<uint8_t> blob(writer.getTotalSize());
+    OV_ASSERT_NO_THROW(writer.generateELF(blob.data()));
+    OV_ASSERT_NO_THROW(writer.setSectionsStartAddr(blob.data()));
+    refBinaryDataSection->appendData(TestObject{});
 
-    auto accessor = elf::ElfDDRAccessManager(blob.data(), blob.size());
+    auto accessor = elf::DDRAccessManager<elf::DDRAlwaysEmplace>(blob.data(), blob.size());
     elf::Reader<elf::ELF_Bitness::Elf64> reader(&accessor);
     auto relocationSections = getSectionsByType(reader, elf::SHT_RELA);
     ASSERT_EQ(relocationSections.size(), 1);
-    ASSERT_EQ(reader.getSegmentsNum(), 0);
 
     auto relocationSection = relocationSections.front();
     ASSERT_EQ(getSectionName(reader, relocationSection), testRelocationName);
@@ -347,24 +354,10 @@ TEST(ELFWriter, SpecialSymReloc) {
     ASSERT_EQ(elf::elf64RType(relocation.r_info), testSpecialRelocationType);
 }
 
-TEST(ELFWriter, Segment) {
-    constexpr auto testSegmentType = elf::PT_LOAD;
-    const auto testSectionData = std::vector<uint8_t>{0, 1, 2, 3};
-    const auto testSegmentData = std::vector<uint8_t>{4, 5, 6, 7};
-
+TEST(ELFWriter, WrongState) {
     elf::Writer writer;
-    auto refSegment = writer.addSegment();
-    refSegment->setType(testSegmentType);
-    refSegment->appendData(testSegmentData.data(), testSegmentData.size());
-
-    auto section = writer.addBinaryDataSection<uint8_t>();
-    section->appendData(testSectionData.data(), testSectionData.size());
-    refSegment->addSection(section);
-
-    std::vector<uint8_t> blob;
-    OV_ASSERT_NO_THROW(blob = writer.generateELF());
-
-    auto accessor = elf::ElfDDRAccessManager(blob.data(), blob.size());
-    elf::Reader<elf::ELF_Bitness::Elf64> reader(&accessor);
-    ASSERT_EQ(reader.getSegmentsNum(), 1);
+    constexpr size_t wrongBlobSize = 256;
+    std::vector<uint8_t> blob(wrongBlobSize);
+    // can not generate elf without call to prepareWriter
+    ASSERT_THROW(writer.generateELF(blob.data()), elf::ImplausibleState);
 }

@@ -42,8 +42,7 @@ auto genRegister =
         [](uint32_t size, std::string name, uint32_t address,
            std::vector<std::tuple<uint8_t /*width*/, uint8_t /*pos*/, uint64_t /*value*/, std::string /*name*/>>
                    regFields) {
-            mlir::DialectRegistry registry;
-            registerDialects(registry);
+            auto registry = createDialectRegistry();
 
             getGlobalContext()->loadDialect<VPURegMapped::VPURegMappedDialect>();
             mlir::OpBuilder globalBuilder(getGlobalContext().get());
@@ -57,7 +56,8 @@ auto genRegister =
                                std::string name;
                                std::tie(width, pos, value, name) = fieldDesc;
                                return vpux::VPURegMapped::RegFieldType::get(getGlobalContext().get(), width, pos, value,
-                                                                            name, VPURegMapped::RegFieldDataType::UINT);
+                                                                            name, VPURegMapped::RegFieldDataType::UINT,
+                                                                            {});
                            });
             mlir::ArrayRef<vpux::VPURegMapped::RegFieldType> arrayRefFields(fields);
             mlir::ArrayAttr fieldsArrayAttr = getVPURegMapped_RegisterFieldArrayAttr(globalBuilder, arrayRefFields);
@@ -78,7 +78,7 @@ std::vector<std::pair<VPURegMapped::RegisterType, std::vector<uint8_t>>> simpleR
         {genRegister(8, "8_bit_reg", 0x0, {std::tuple<uint8_t, uint8_t, uint64_t, std::string>(8, 0, 0xC4, "field_0")}),
          std::vector<uint8_t>{0xC4}}};
 
-INSTANTIATE_TEST_CASE_P(simpleRegisters, MLIR_VPUIPRegisterSerializationTest, testing::ValuesIn(simpleRegistersSet));
+INSTANTIATE_TEST_SUITE_P(simpleRegisters, MLIR_VPUIPRegisterSerializationTest, testing::ValuesIn(simpleRegistersSet));
 
 std::vector<std::pair<VPURegMapped::RegisterType, std::vector<uint8_t>>> compoundRegistersSet = {
         {genRegister(64, "64_bit_reg", 0x0,
@@ -104,8 +104,8 @@ std::vector<std::pair<VPURegMapped::RegisterType, std::vector<uint8_t>>> compoun
                       std::tuple<uint8_t, uint8_t, uint64_t, std::string>(1, 7, 0x1, "field_2")}),
          std::vector<uint8_t>{0xBD}}};
 
-INSTANTIATE_TEST_CASE_P(compoundRegisters, MLIR_VPUIPRegisterSerializationTest,
-                        testing::ValuesIn(compoundRegistersSet));
+INSTANTIATE_TEST_SUITE_P(compoundRegisters, MLIR_VPUIPRegisterSerializationTest,
+                         testing::ValuesIn(compoundRegistersSet));
 
 class MLIR_VPURegMappedSerializationTest :
         public testing::TestWithParam<std::pair<VPURegMapped::RegMappedType, std::vector<uint8_t>>> {};
@@ -118,8 +118,7 @@ TEST_P(MLIR_VPURegMappedSerializationTest, Serialization) {
 }
 
 auto genMappedRegister = [](std::string name, std::vector<VPURegMapped::RegisterType> regs) {
-    mlir::DialectRegistry registry;
-    registerDialects(registry);
+    auto registry = createDialectRegistry();
 
     getGlobalContext()->loadDialect<VPURegMapped::VPURegMappedDialect>();
     mlir::OpBuilder globalBuilder(getGlobalContext().get());
@@ -172,5 +171,5 @@ std::vector<std::pair<VPURegMapped::RegMappedType, std::vector<uint8_t>>> simple
                               {std::tuple<uint8_t, uint8_t, uint64_t, std::string>(32, 0, 0xC4D5E5B8, "field_0")})}),
          std::vector<uint8_t>{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xB8, 0xE5, 0xD5, 0xC4, 0x0, 0x0, 0xC4}}};
 
-INSTANTIATE_TEST_CASE_P(simpleMappedRegisters, MLIR_VPURegMappedSerializationTest,
-                        testing::ValuesIn(simpleMappedRegistersSet));
+INSTANTIATE_TEST_SUITE_P(simpleMappedRegisters, MLIR_VPURegMappedSerializationTest,
+                         testing::ValuesIn(simpleMappedRegistersSet));

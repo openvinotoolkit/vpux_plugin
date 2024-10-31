@@ -33,9 +33,61 @@ SmallVector<int64_t> getBroadcastAxesExplicit(ArrayRef<int64_t> axesMapping, Arr
 mlir::Value createShapeConstForBroadCast(mlir::PatternRewriter& rewriter, mlir::MLIRContext* ctx, mlir::Location loc,
                                          ShapeRef shape) {
     const auto shapeStorageType = mlir::RankedTensorType::get({static_cast<int64_t>(shape.size())}, getSInt64Type(ctx));
-    return Const::createConst(rewriter, loc, shapeStorageType, shape.raw(), [&](Const::ContentAttr attr) {
-        return attr.convertElemType(getSInt32Type(rewriter.getContext()));
+    return Const::createConst(rewriter, loc, shapeStorageType, shape.raw(), [&](Const::ContentSetup& setup) {
+        return setup.castElemType(getSInt32Type(rewriter.getContext()));
     });
+}
+
+Const::ReshapeAttr makeReshape(mlir::MLIRContext* ctx, ShapeRef newShape) {
+    return Const::ReshapeAttr::get(getIntArrayAttr(ctx, newShape));
+}
+
+Const::BroadcastAttr makeBroadcast(mlir::MLIRContext* ctx, Dim axis, int64_t value) {
+    return Const::BroadcastAttr::get(getIntAttr(ctx, axis.ind()), getIntAttr(ctx, value));
+}
+
+mlir::LogicalResult broadcastAlignShapes(mlir::MLIRContext* ctx, Const::Content& x, Const::Content& y,
+                                         const Logger& log) {
+    if (x.isSplat()) {
+        auto reshaper = makeReshape(ctx, y.getType().getShape());
+        x = reshaper.transform(x);
+        return mlir::success();
+    }
+    if (y.isSplat()) {
+        auto reshaper = makeReshape(ctx, x.getType().getShape());
+        y = reshaper.transform(y);
+        return mlir::success();
+    }
+
+    const auto xShape = x.getType().getShape();
+    const auto yShape = y.getType().getShape();
+    if (xShape.size() != yShape.size()) {
+        log.trace("Shape sizes of buffers differ: {0} vs {1}", xShape.size(), yShape.size());
+        return mlir::failure();
+    }
+
+    for (size_t i = 0; i < xShape.size(); ++i) {
+        const auto dim = Dim(i);
+        const auto xSize = xShape[dim];
+        const auto ySize = yShape[dim];
+        if (xSize == ySize) {
+            continue;
+        }
+        if (xSize != 1 && ySize != 1) {
+            log.trace("Cannot broadcast ambiguous shapes at dim #{0}: {1}, {2}", i, xShape, yShape);
+            return mlir::failure();
+        }
+
+        if (const bool needToBroadcastX = ySize > 1; needToBroadcastX) {
+            auto broadcaster = makeBroadcast(ctx, dim, ySize);
+            x = broadcaster.transform(x);
+        } else {
+            auto broadcaster = makeBroadcast(ctx, dim, xSize);
+            y = broadcaster.transform(y);
+        }
+    }
+
+    return mlir::success();
 }
 
 }  // namespace IE

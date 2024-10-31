@@ -13,7 +13,7 @@
 
 func.func @InsertReorderBeforeConcat(%arg0: tensor<1x8x512x64xf16>, %arg1: tensor<1x2x1x512xf16>) -> tensor<1x64x9x512xf16> {
     %cst = const.Declare tensor<64x2x1x1xf16> = dense<1.0>
-        : tensor<64x2x1x1xf32>, [#const.ConvertElemType<f16>]
+        : tensor<64x2x1x1xf32>, [#const.CastElemType<f16>]
 
     %0 = IE.Transpose(%arg0) {order_value = #NWCH}
         : tensor<1x8x512x64xf16> -> tensor<1x64x8x512xf16>
@@ -32,7 +32,7 @@ func.func @InsertReorderBeforeConcat(%arg0: tensor<1x8x512x64xf16>, %arg1: tenso
     return %2 : tensor<1x64x9x512xf16>
 
     // CHECK-DAG:   %[[CONSTANT_1:.*]] = const.Declare tensor<64x2x1x1xf16> = dense<1.000000e+00>
-    // CHECK-SAME:  : tensor<64x2x1x1xf32>, [#const.ConvertElemType<f16>]
+    // CHECK-SAME:  : tensor<64x2x1x1xf32>, [#const.CastElemType<f16>]
 
     // CHECK:   %[[TRANSPOSE:.*]] = IE.Transpose(%arg0) {order_value = #NWCH}
     // CHECK-SAME   : tensor<1x8x512x64xf16> -> tensor<1x64x8x512xf16>
@@ -67,7 +67,7 @@ func.func @InsertReorderBeforeConcat(%arg0: tensor<1x8x512x64xf16>, %arg1: tenso
 
 func.func @InsertReorderBeforeReshapeConcat(%arg0: tensor<1x8x512x64xf16>, %arg1: tensor<1x2x1x512xf16>) -> tensor<1x64x9x512xf16> {
     %cst = const.Declare tensor<64x2x1x1xf16> = dense<1.0>
-        : tensor<64x2x1x1xf32>, [#const.ConvertElemType<f16>]
+        : tensor<64x2x1x1xf32>, [#const.CastElemType<f16>]
 
     %0 = IE.AffineReshape(%arg0) {dim_mapping = [[0], [1], [2], [2], [3], [3]], shape_value = [1, 64, 8, 512]}
         : tensor<1x8x512x64xf16> -> tensor<1x64x8x512xf16>
@@ -86,7 +86,7 @@ func.func @InsertReorderBeforeReshapeConcat(%arg0: tensor<1x8x512x64xf16>, %arg1
     return %2 : tensor<1x64x9x512xf16>
 
     // CHECK-DAG:   %[[CONSTANT_1:.*]] = const.Declare tensor<64x2x1x1xf16> = dense<1.000000e+00>
-    // CHECK-SAME:  : tensor<64x2x1x1xf32>, [#const.ConvertElemType<f16>]
+    // CHECK-SAME:  : tensor<64x2x1x1xf32>, [#const.CastElemType<f16>]
 
     // CHECK:   %[[RESHAPE:.*]] = IE.AffineReshape(%arg0)
     // CHECK-SAME   : tensor<1x8x512x64xf16> -> tensor<1x64x8x512xf16>

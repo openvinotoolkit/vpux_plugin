@@ -31,12 +31,8 @@ size_t vpux::VPUASM::ManagedMappedInferenceOp::getAlignmentRequirements() {
     return alignof(nn_public::VpuManagedMappedInference);
 }
 
-vpux::ELF::SectionFlagsAttr vpux::VPUASM::ManagedMappedInferenceOp::getAccessingProcs(mlir::SymbolUserMap&) {
+vpux::ELF::SectionFlagsAttr vpux::VPUASM::ManagedMappedInferenceOp::getPredefinedMemoryAccessors() {
     return (ELF::SectionFlagsAttr::SHF_EXECINSTR);
-}
-
-vpux::ELF::SectionFlagsAttr vpux::VPUASM::ManagedMappedInferenceOp::getUserProcs() {
-    return (ELF::SectionFlagsAttr::SHF_NONE);
 }
 
 std::optional<ELF::SectionSignature> vpux::VPUASM::ManagedMappedInferenceOp::getSectionSignature() {
@@ -82,19 +78,22 @@ std::vector<ELF::RelocationInfo> VPUASM::ManagedMappedInferenceOp::getRelocation
     if (auto workItemTasks = getWorkItems().value_or(nullptr)) {
         relocs.push_back(
                 ELF::RelocationInfo(workItemTasks, targetSection, getSymRefOffsetForReloc(thisMMI, workItemTasks),
-                                    ELF::RelocationType::R_VPU_64, ELF::getOffsetOfSymRef(symRefMap, workItemTasks)));
+                                    ELF::RelocationType::R_VPU_64, ELF::getOffsetOfSymRef(symRefMap, workItemTasks),
+                                    "workItemTasks for managed mapped inference reloc"));
     }
 
     if (auto barriersTasks = getBarrierTasks().value_or(nullptr)) {
         relocs.push_back(
                 ELF::RelocationInfo(barriersTasks, targetSection, getSymRefOffsetForReloc(thisMMI, barriersTasks),
-                                    ELF::RelocationType::R_VPU_64, ELF::getOffsetOfSymRef(symRefMap, barriersTasks)));
+                                    ELF::RelocationType::R_VPU_64, ELF::getOffsetOfSymRef(symRefMap, barriersTasks),
+                                    "barriersTasks for managed mapped inference reloc"));
     }
 
     if (auto bootstrapTasks = getBootstrapTasks().value_or(nullptr)) {
         relocs.push_back(
                 ELF::RelocationInfo(bootstrapTasks, targetSection, getSymRefOffsetForReloc(thisMMI, bootstrapTasks),
-                                    ELF::RelocationType::R_VPU_64, ELF::getOffsetOfSymRef(symRefMap, bootstrapTasks)));
+                                    ELF::RelocationType::R_VPU_64, ELF::getOffsetOfSymRef(symRefMap, bootstrapTasks),
+                                    "bootstrapTasks for managed mapped inference reloc"));
     }
 
     return relocs;

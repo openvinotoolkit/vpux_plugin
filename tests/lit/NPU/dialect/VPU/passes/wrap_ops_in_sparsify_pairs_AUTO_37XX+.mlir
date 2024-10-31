@@ -11,6 +11,7 @@
 module @main {
     func.func @WrapSingleOpWithStats(%arg0: tensor<1x16x16x16xf16, {order = #NHWC}>, %wt: tensor<16x1x1x4xsi32>, %weights: tensor<16x16x1x1xf16, {order = #NHWC}>) -> tensor<1x16x16x16xf16, {order = #NHWC}> {
         %1 = VPU.NCE.Convolution(%arg0, %weights, %wt) {
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
                 rawFilterShape = [16, 16, 1, 1],
                 strides = [1, 1]
@@ -45,6 +46,7 @@ module @main {
 
     func.func @DoNotWrapSingleOpNotRelatedStats(%arg0: tensor<1x16x16x16xf16, {order = #NHWC}>, %wt: tensor<16x1x1x4xsi32>, %weights: tensor<16x16x1x1xf16, {order = #NHWC}>) -> tensor<1x16x16x16xf16, {order = #NHWC}> {
         %1 = VPU.NCE.Convolution(%arg0, %weights, %wt) {
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
                 rawFilterShape = [16, 16, 1, 1],
                 strides = [1, 1]
@@ -76,6 +78,7 @@ module @main {
 module @main {
     func.func @DoNotWrapSingleOpWithoutStats(%arg0: tensor<1x16x16x16xf16, {order = #NHWC}>, %wt: tensor<16x1x1x4xsi32>, %weights: tensor<16x16x1x1xf16, {order = #NHWC}>) -> tensor<1x16x16x16xf16, {order = #NHWC}> {
         %1 = VPU.NCE.Convolution(%arg0, %weights, %wt) {
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
                 rawFilterShape = [16, 16, 1, 1],
                 strides = [1, 1]
@@ -104,16 +107,19 @@ module @main {
 module @main {
     func.func @WrapMultipleConsumers(%arg0: tensor<1x16x16x16xf16, {order = #NHWC}>, %wt: tensor<16x1x1x4xsi32>, %weights: tensor<16x16x1x1xf16, {order = #NHWC}>) -> (tensor<1x16x16x16xf16, {order = #NHWC}>, tensor<1x16x16x16xf16, {order = #NHWC}>) {
         %1 = VPU.NCE.Convolution(%arg0, %weights, %wt) {
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
                 rawFilterShape = [16, 16, 1, 1],
                 strides = [1, 1]
             } -> tensor<1x16x16x16xf16, {order = #NHWC}> loc(fused["Conv_1", "t_Convolution"])
         %2 = VPU.NCE.Convolution(%1, %weights, %wt) {
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
                 rawFilterShape = [16, 16, 1, 1],
                 strides = [1, 1]
             } -> tensor<1x16x16x16xf16, {order = #NHWC}> loc(fused["Conv_2", "t_Convolution"])
         %3 = VPU.NCE.Convolution(%1, %weights, %wt) {
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
                 rawFilterShape = [16, 16, 1, 1],
                 strides = [1, 1]
@@ -171,15 +177,17 @@ module @main {
 module @main {
     func.func @WrapMultipleMixedConsumers(%arg0: tensor<1x16x16x16xf16, {order = #NHWC}>, %wt: tensor<16x1x1x4xsi32>, %weights: tensor<16x16x1x1xf16, {order = #NHWC}>) -> (tensor<1x16x16x16xf16, {order = #NHWC}>, tensor<1x16x16x16xf16, {order = #NHWC}>) {
         %1 = VPU.NCE.Convolution(%arg0, %weights, %wt) {
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
                 rawFilterShape = [16, 16, 1, 1],
                 strides = [1, 1]
             } -> tensor<1x16x16x16xf16, {order = #NHWC}> loc(fused["Conv_1", "t_Convolution"])
         %2 = VPU.NCE.Eltwise(%1, %1) {
                     op_type = #VPU.eltwise_type<ADD>,
-                    ppe = #VPU.PPETask<clamp_high = 2147483647, clamp_low = -2147483648, lrelu_mult = 1, lrelu_shift = 0, mode = <ADD>>
+                    opaque_ppe = #VPU.PPEStub<>
                 } -> tensor<1x16x16x16xf16, {order = #NHWC}> loc(fused["Add_1", "t_Convolution"])
         %3 = VPU.MaxPool(%1) {
+            opaque_ppe = #VPU.PPEStub<>,
             kernel_size = [3, 3],
             pads_begin = [1, 1],
             pads_end = [1, 1],

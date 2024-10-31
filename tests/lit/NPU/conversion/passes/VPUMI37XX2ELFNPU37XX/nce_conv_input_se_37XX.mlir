@@ -44,38 +44,38 @@ module @mainModule {
 }
 
 //CHECK-LABEL: @conv_input_se_soh_f16_f16_f16
-//CHECK: %[[VAL24:.*]] = VPUMI37XX.DPUInvariant
-//CHECK: %[[VAL25:.*]] = "VPUMI37XX.DPUVariant"
-//CHECK: %[[VAL26:.*]] = VPUMI37XX.DPUInvariant
-//CHECK: %[[VAL27:.*]] = "VPUMI37XX.DPUVariant"
+//CHECK: %[[VAL16:.*]] = VPUMI37XX.DPUInvariant
+//CHECK: %[[VAL17:.*]] = "VPUMI37XX.DPUVariant"
+//CHECK: %[[VAL18:.*]] = VPUMI37XX.DPUInvariant
+//CHECK: %[[VAL19:.*]] = "VPUMI37XX.DPUVariant"
 
 //CHECK-DAG: %[[INVSEC:.*]] = ELFNPU37XX.CreateSection {{.*}} secName = ".text.DPUInvariants"
-//CHECK-NEXT: ELFNPU37XX.PutOpInSection %[[VAL24]] : !VPURegMapped.Index<0:0:0>
-//CHECK-NEXT: ELFNPU37XX.PutOpInSection %[[VAL26]] : !VPURegMapped.Index<0:0:1>
+//CHECK-NEXT: ELFNPU37XX.PutOpInSection %[[VAL16]] : !VPURegMapped.Index<0:0:0>
+//CHECK-NEXT: ELFNPU37XX.PutOpInSection %[[VAL18]] : !VPURegMapped.Index<0:0:1>
 
 //CHECK-DAG: %[[VARSEC:.*]] = ELFNPU37XX.CreateSection {{.*}} secName = ".text.DPUVariants"
-//CHECK-NEXT: ELFNPU37XX.PutOpInSection %[[VAL25]] : !VPURegMapped.Index<0:0:0>
-//CHECK-NEXT: ELFNPU37XX.PutOpInSection %[[VAL27]] : !VPURegMapped.Index<0:0:1>
+//CHECK-NEXT: ELFNPU37XX.PutOpInSection %[[VAL17]] : !VPURegMapped.Index<0:0:0>
+//CHECK-NEXT: ELFNPU37XX.PutOpInSection %[[VAL19]] : !VPURegMapped.Index<0:0:1>
 
 //CHECK: %[[BUILTIN_SYMTABSEC:.*]] = ELFNPU37XX.CreateSymbolTableSection secName("VPU_RT_SYMTAB")
 //CHECK: %[[SYMTABSEC:.*]] = ELFNPU37XX.CreateSymbolTableSection secName(".symtab.tasks")
 
 //CHECK: ELFNPU37XX.CreateRelocationSection secName(".rlt.text.DPUInvariants") sourceSymbolTableSection(%[[BUILTIN_SYMTABSEC]])
-//CHECK-DAG ELFNPU37XX.RelocImmOffset baseOp(%[[VAL24]] : !VPURegMapped.Index<0:0:0>) {{.*}} <R_VPU_32>
-//CHECK-DAG ELFNPU37XX.RelocImmOffset baseOp(%[[VAL24]] : !VPURegMapped.Index<0:0:0>) {{.*}} <R_VPU_32>
-//CHECK-DAG ELFNPU37XX.RelocImmOffset baseOp(%[[VAL24]] : !VPURegMapped.Index<0:0:0>) {{.*}} <R_VPU_32>
-//CHECK-DAG ELFNPU37XX.RelocImmOffset baseOp(%[[VAL24]] : !VPURegMapped.Index<0:0:0>) {{.*}} <R_VPU_32>
-//CHECK-DAG ELFNPU37XX.RelocImmOffset baseOp(%[[VAL24]] : !VPURegMapped.Index<0:0:0>) {{.*}} <R_VPU_32>
-//CHECK-DAG ELFNPU37XX.RelocImmOffset baseOp(%[[VAL24]] : !VPURegMapped.Index<0:0:0>) {{.*}} <R_VPU_32>
-//CHECK-DAG ELFNPU37XX.RelocImmOffset baseOp(%[[VAL24]] : !VPURegMapped.Index<0:0:0>) {{.*}} <R_VPU_32_MULTICAST_BASE>
-//CHECK-DAG ELFNPU37XX.RelocImmOffset baseOp(%[[VAL24]] : !VPURegMapped.Index<0:0:0>) {{.*}} <R_VPU_32_MULTICAST_BASE>
-//CHECK-DAG ELFNPU37XX.RelocImmOffset baseOp(%[[VAL24]] : !VPURegMapped.Index<0:0:0>) {{.*}} <R_VPU_32>
-//CHECK-DAG ELFNPU37XX.RelocImmOffset baseOp(%[[VAL28]] : !VPURegMapped.Index<0:0:1>) {{.*}} <R_VPU_32>
-//CHECK-DAG ELFNPU37XX.RelocImmOffset baseOp(%[[VAL28]] : !VPURegMapped.Index<0:0:1>) {{.*}} <R_VPU_32>
-//CHECK-DAG ELFNPU37XX.RelocImmOffset baseOp(%[[VAL28]] : !VPURegMapped.Index<0:0:1>) {{.*}} <R_VPU_32>
-//CHECK-DAG ELFNPU37XX.RelocImmOffset baseOp(%[[VAL28]] : !VPURegMapped.Index<0:0:1>) {{.*}} <R_VPU_32>
-//CHECK-DAG ELFNPU37XX.RelocImmOffset baseOp(%[[VAL28]] : !VPURegMapped.Index<0:0:1>) {{.*}} <R_VPU_32>
-//CHECK-DAG ELFNPU37XX.RelocImmOffset baseOp(%[[VAL28]] : !VPURegMapped.Index<0:0:1>) {{.*}} <R_VPU_32>
-//CHECK-DAG ELFNPU37XX.RelocImmOffset baseOp(%[[VAL28]] : !VPURegMapped.Index<0:0:1>) {{.*}} <R_VPU_32_MULTICAST_BASE>
-//CHECK-DAG ELFNPU37XX.RelocImmOffset baseOp(%[[VAL28]] : !VPURegMapped.Index<0:0:1>) {{.*}} <R_VPU_32_MULTICAST_BASE>
-//CHECK-DAG ELFNPU37XX.RelocImmOffset baseOp(%[[VAL28]] : !VPURegMapped.Index<0:0:1>) {{.*}} <R_VPU_32>
+//CHECK: ELFNPU37XX.Reloc baseOp(%[[VAL16]] : !VPURegMapped.Index<0:0:0>) {{.*}} <R_VPU_32>
+//CHECK: ELFNPU37XX.Reloc baseOp(%[[VAL16]] : !VPURegMapped.Index<0:0:0>) {{.*}} <R_VPU_32>
+//CHECK: ELFNPU37XX.Reloc baseOp(%[[VAL16]] : !VPURegMapped.Index<0:0:0>) {{.*}} <R_VPU_32>
+//CHECK: ELFNPU37XX.Reloc baseOp(%[[VAL16]] : !VPURegMapped.Index<0:0:0>) {{.*}} <R_VPU_32>
+//CHECK: ELFNPU37XX.Reloc baseOp(%[[VAL16]] : !VPURegMapped.Index<0:0:0>) {{.*}} <R_VPU_32>
+//CHECK: ELFNPU37XX.Reloc baseOp(%[[VAL16]] : !VPURegMapped.Index<0:0:0>) {{.*}} <R_VPU_32>
+//CHECK: ELFNPU37XX.Reloc baseOp(%[[VAL16]] : !VPURegMapped.Index<0:0:0>) {{.*}} <R_VPU_32_MULTICAST_BASE>
+//CHECK: ELFNPU37XX.Reloc baseOp(%[[VAL16]] : !VPURegMapped.Index<0:0:0>) {{.*}} <R_VPU_32_MULTICAST_BASE>
+//CHECK: ELFNPU37XX.Reloc baseOp(%[[VAL16]] : !VPURegMapped.Index<0:0:0>) {{.*}} <R_VPU_32>
+//CHECK: ELFNPU37XX.Reloc baseOp(%[[VAL18]] : !VPURegMapped.Index<0:0:1>) {{.*}} <R_VPU_32>
+//CHECK: ELFNPU37XX.Reloc baseOp(%[[VAL18]] : !VPURegMapped.Index<0:0:1>) {{.*}} <R_VPU_32>
+//CHECK: ELFNPU37XX.Reloc baseOp(%[[VAL18]] : !VPURegMapped.Index<0:0:1>) {{.*}} <R_VPU_32>
+//CHECK: ELFNPU37XX.Reloc baseOp(%[[VAL18]] : !VPURegMapped.Index<0:0:1>) {{.*}} <R_VPU_32>
+//CHECK: ELFNPU37XX.Reloc baseOp(%[[VAL18]] : !VPURegMapped.Index<0:0:1>) {{.*}} <R_VPU_32>
+//CHECK: ELFNPU37XX.Reloc baseOp(%[[VAL18]] : !VPURegMapped.Index<0:0:1>) {{.*}} <R_VPU_32>
+//CHECK: ELFNPU37XX.Reloc baseOp(%[[VAL18]] : !VPURegMapped.Index<0:0:1>) {{.*}} <R_VPU_32_MULTICAST_BASE>
+//CHECK: ELFNPU37XX.Reloc baseOp(%[[VAL18]] : !VPURegMapped.Index<0:0:1>) {{.*}} <R_VPU_32_MULTICAST_BASE>
+//CHECK: ELFNPU37XX.Reloc baseOp(%[[VAL18]] : !VPURegMapped.Index<0:0:1>) {{.*}} <R_VPU_32>

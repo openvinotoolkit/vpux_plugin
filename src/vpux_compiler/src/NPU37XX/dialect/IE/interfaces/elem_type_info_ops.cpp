@@ -5,6 +5,7 @@
 
 #include "vpux/compiler/NPU37XX/dialect/IE/IR/ops_interfaces.hpp"
 
+#include "vpux/compiler/dialect/IE/IR/dialect.hpp"
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/IE/IR/ops_interfaces.hpp"
 #include "vpux/compiler/dialect/IE/utils/elem_type_info_utils.hpp"

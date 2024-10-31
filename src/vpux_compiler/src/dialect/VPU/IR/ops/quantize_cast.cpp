@@ -80,17 +80,13 @@ void vpux::VPU::QuantizeCastOp::adjustAttrs(const TilingInfo&, const TileInfo&, 
 // DistributedCastOpInterface
 //
 
-mlir::FailureOr<VPU::DistributedTypeInterface> vpux::VPU::QuantizeCastOp::inferCastedDistOutput(
-        VPU::DistributedTensorType inDistributedType) {
-    if (inDistributedType == nullptr || inDistributedType.getDistribution() == nullptr) {
+mlir::FailureOr<std::pair<mlir::Type, VPU::DistributionInfo>> vpux::VPU::QuantizeCastOp::inferCastedTypeAndDistribution(
+        vpux::NDTypeInterface inType, VPU::DistributionInfo& distribution) {
+    if (inType == nullptr || mlir::isa<VPU::DistributedTensorType>(inType) ||
+        distribution.getDistributionMode() == DistributionMode::NONE) {
         return mlir::failure();
     }
-    const auto ctx = getContext();
-    const auto origDistribution = inDistributedType.getDistribution();
-    const auto dstType = getOutput().getType().cast<NDTypeInterface>();
-    const auto dstDimsOrderAttr = mlir::AffineMapAttr::get(dstType.getDimsOrder().toAffineMap(ctx));
-    const auto newDistributionType =
-            DistributedTensorType::get(ctx, dstType.getShape().raw(), dstType.getElementType(), dstDimsOrderAttr,
-                                       inDistributedType.cast<NDTypeInterface>().getMemSpace(), origDistribution);
-    return newDistributionType.cast<VPU::DistributedTypeInterface>();
+    const auto typeComponents = TypeComponents().setMemSpace(inType.getMemSpace());
+    auto returnType = mlir::cast<vpux::NDTypeInterface>(getOutput().getType()).changeTypeComponents(typeComponents);
+    return std::make_pair(mlir::cast<mlir::Type>(returnType), distribution);
 }

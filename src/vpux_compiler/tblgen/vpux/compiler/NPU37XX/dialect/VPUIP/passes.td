@@ -43,11 +43,11 @@ def AddSwKernelCacheHandlingOps : PassBase<"add-sw-kernel-cache-handling-ops", "
 
         CACHE_FLUSH_INVALIDATE will be added when we have two consecutive SW Kernels and there is no CACHE_FLUSH
         needed after the first SW Kernel, but there is a CACHE_INVALIDATE needed before the second SW Kernel. So, in
-        order to avoid invalidating the data produced by the first SW Kernel which was not yet synchronized back to DDR, 
+        order to avoid invalidating the data produced by the first SW Kernel which was not yet synchronized back to DDR,
         CACHE_FLUSH_INVALIDATE will be added between the two SW Kernels.
 
         If there are two consecutive SW Kernels and a CACHE_FLUSH was added after the first one and a CACHE_INVALIDATE
-        is needed before the second one, the resulting sequence of ops will be: 
+        is needed before the second one, the resulting sequence of ops will be:
         [SW Kernel 1] - [CACHE_FLUSH] - [CACHE_INVALIDATE] - [SW Kernel 2].
     }];
 

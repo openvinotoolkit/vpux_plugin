@@ -81,8 +81,8 @@ mlir::LogicalResult GroupTransposedConvConverter::matchAndRewrite(IE::GroupTrans
         Shape inputOffsets(inputShape.size(), 0);
         inputOffsets[Dims4D::Act::C] = checked_cast<int64_t>(inputShape[Dims4D::Act::C] / groups * sliceIdx);
         const auto inputOffsetsAttr = getIntArrayAttr(getContext(), inputOffsets);
-        const auto inputSlice =
-                rewriter.createOrFold<IE::SliceOp>(origOp->getLoc(), input, inputOffsetsAttr, inputShapeAttr);
+        const auto inputSlice = rewriter.createOrFold<IE::SliceOp>(
+                takeOpLoc(origOp, StringLiteral("slice_{0}"), sliceIdx), input, inputOffsetsAttr, inputShapeAttr);
 
         // Slice weights
         mlir::Value weightsSlice;
@@ -90,7 +90,7 @@ mlir::LogicalResult GroupTransposedConvConverter::matchAndRewrite(IE::GroupTrans
         weightsOffsets[Dim(IE::GROUP_TRANSPOSED_CONV_GROUPS_DIM_INDEX)] = sliceIdx;
         const auto weightsOffsetsAttr = getIntArrayAttr(getContext(), weightsOffsets);
         if (auto fqOp = weights.getDefiningOp<IE::FakeQuantizeOp>()) {
-            const auto sliceFqConstInput = [&](mlir::Value fqInput) {
+            const auto sliceFqConstInput = [&](mlir::Value fqInput, StringRef locSuffix) {
                 auto fqInputType = fqInput.getType().cast<NDTypeInterface>();
                 const auto fqInputShape = fqInputType.getShape();
                 Shape newFqInputShape(fqInputShape.raw());
@@ -104,47 +104,55 @@ mlir::LogicalResult GroupTransposedConvConverter::matchAndRewrite(IE::GroupTrans
                                   fqInputShape);
                 if (numElems != 1) {
                     const auto newFqInputShapeAttr = getIntArrayAttr(getContext(), newFqInputShape);
-                    fqInput = rewriter.createOrFold<IE::SliceOp>(fqOp->getLoc(), fqInput, weightsOffsetsAttr,
-                                                                 newFqInputShapeAttr);
+                    fqInput = rewriter.createOrFold<IE::SliceOp>(
+                            takeOpLoc(fqOp, StringLiteral("fq_weights_{0}_{1}"), locSuffix, sliceIdx), fqInput,
+                            weightsOffsetsAttr, newFqInputShapeAttr);
                 }
 
                 const auto newFqInputShapeSqueezed = Shape(newFqInputShape.begin() + 1, newFqInputShape.end());
                 const auto newFqInputShapeSqueezedAttr = getIntArrayAttr(getContext(), newFqInputShapeSqueezed);
-                return rewriter.createOrFold<IE::ReshapeOp>(origOp->getLoc(), fqInput, nullptr, false,
-                                                            newFqInputShapeSqueezedAttr);
+                return rewriter.createOrFold<IE::ReshapeOp>(
+                        takeOpLoc(fqOp, StringLiteral("reshape_weights_{0}_{1}"), locSuffix, sliceIdx), fqInput,
+                        nullptr, false, newFqInputShapeSqueezedAttr);
             };
 
-            auto newInput = rewriter.createOrFold<IE::SliceOp>(fqOp->getLoc(), fqOp.getInput(), weightsOffsetsAttr,
-                                                               weightsShapeAttr);
-            newInput = rewriter.createOrFold<IE::ReshapeOp>(origOp->getLoc(), newInput, nullptr, false,
-                                                            newWeightsShapeSqueezedAttr);
-            auto inputLow = sliceFqConstInput(fqOp.getInputLow());
-            auto inputHigh = sliceFqConstInput(fqOp.getInputHigh());
-            auto outputLow = sliceFqConstInput(fqOp.getOutputLow());
-            auto outputHigh = sliceFqConstInput(fqOp.getOutputHigh());
-            weightsSlice = rewriter.create<IE::FakeQuantizeOp>(fqOp.getLoc(), newInput, inputLow, inputHigh, outputLow,
-                                                               outputHigh, fqOp.getLevelsAttr(),
-                                                               fqOp.getLowFpTypeAttr(), fqOp.getAutoBroadcastAttr());
+            auto newInput = rewriter.createOrFold<IE::SliceOp>(takeOpLoc(fqOp, StringLiteral("slice_in_{0}"), sliceIdx),
+                                                               fqOp.getInput(), weightsOffsetsAttr, weightsShapeAttr);
+            newInput = rewriter.createOrFold<IE::ReshapeOp>(takeOpLoc(fqOp, StringLiteral("reshape_in_{0}"), sliceIdx),
+                                                            newInput, nullptr, false, newWeightsShapeSqueezedAttr);
+            auto inputLow = sliceFqConstInput(fqOp.getInputLow(), "in_low");
+            auto inputHigh = sliceFqConstInput(fqOp.getInputHigh(), "in_high");
+            auto outputLow = sliceFqConstInput(fqOp.getOutputLow(), "out_low");
+            auto outputHigh = sliceFqConstInput(fqOp.getOutputHigh(), "out_high");
+            weightsSlice = rewriter.create<IE::FakeQuantizeOp>(
+                    takeOpLoc(fqOp, StringLiteral("fq_in_{0}"), sliceIdx), newInput, inputLow, inputHigh, outputLow,
+                    outputHigh, fqOp.getLevelsAttr(), fqOp.getLowFpTypeAttr(), fqOp.getAutoBroadcastAttr());
         } else {
+            weightsSlice = rewriter.createOrFold<IE::SliceOp>(takeOpLoc(origOp, StringLiteral("weights_{0}"), sliceIdx),
+                                                              weights, weightsOffsetsAttr, weightsShapeAttr);
             weightsSlice =
-                    rewriter.createOrFold<IE::SliceOp>(origOp->getLoc(), weights, weightsOffsetsAttr, weightsShapeAttr);
-            weightsSlice = rewriter.createOrFold<IE::ReshapeOp>(origOp->getLoc(), weightsSlice, nullptr, false,
-                                                                newWeightsShapeSqueezedAttr);
+                    rewriter.createOrFold<IE::SliceOp>(takeOpLoc(origOp, StringLiteral("slice_in_{0}"), sliceIdx),
+                                                       weights, weightsOffsetsAttr, weightsShapeAttr);
+            weightsSlice =
+                    rewriter.createOrFold<IE::ReshapeOp>(takeOpLoc(origOp, StringLiteral("reshape_in_{0}"), sliceIdx),
+                                                         weightsSlice, nullptr, false, newWeightsShapeSqueezedAttr);
         }
 
         _log.nest().trace("Creating TransposedConvolution op for group {0} with channels [{1}-{2})", sliceIdx,
                           inputOffsets[Dims4D::Act::C], inputOffsets[Dims4D::Act::C] + newInShape[Dims4D::Act::C]);
 
-        auto newTransposedConvLoc = appendLoc(origOp->getLoc(), "_ConvertGroupConv_{0}", sliceIdx);
+        auto newTransposedConvLoc = appendLoc(origOp->getLoc(), "as_gconv_{0}", sliceIdx);
         auto transposedConvOp = rewriter.create<IE::TransposedConvolutionOp>(
                 newTransposedConvLoc, inputSlice, weightsSlice, origOp.getOutputShape(), /*bias*/ nullptr,
                 origOp.getStridesAttr(), origOp.getPadsBeginAttr(), origOp.getPadsEndAttr(), origOp.getDilationsAttr(),
-                origOp.getOutputPaddingAttr(), origOp.getPostOpAttr(), origOp.getClampAttr());
+                origOp.getOutputPaddingAttr(), origOp.getPostOpAttr(), origOp.getClampAttr(),
+                origOp.getOutputChannelsAttr(), origOp.getInputChannelsAttr());
 
         slices.push_back(transposedConvOp);
     }
 
-    rewriter.replaceOpWithNewOp<IE::ConcatOp>(origOp, slices, Dims4D::Act::C.ind());
+    auto concatOp = rewriter.replaceOpWithNewOp<IE::ConcatOp>(origOp, slices, Dims4D::Act::C.ind());
+    takeOpLoc(concatOp, "concat_out");
 
     return mlir::success();
 }
@@ -257,23 +265,24 @@ mlir::LogicalResult DepthwiseGroupTransposedConvConverter::matchAndRewrite(IE::G
                                                      fqParamShape[IE::GROUP_TRANSPOSED_CONV_KX_DIM_INDEX]});
         const auto newFQParamShapeSqueezedAttr = getIntArrayAttr(getContext(), newFQParamShapeSqueezed);
         inputLow = mlir::cast<mlir::TypedValue<mlir::RankedTensorType>>(rewriter.createOrFold<IE::ReshapeOp>(
-                origOp->getLoc(), inputLow, nullptr, false, newFQParamShapeSqueezedAttr));
+                takeOpLoc(origOp, "weights_in_low_resh"), inputLow, nullptr, false, newFQParamShapeSqueezedAttr));
         outputLow = mlir::cast<mlir::TypedValue<mlir::RankedTensorType>>(rewriter.createOrFold<IE::ReshapeOp>(
-                origOp->getLoc(), outputLow, nullptr, false, newFQParamShapeSqueezedAttr));
+                takeOpLoc(origOp, "weights_in_high_resh"), outputLow, nullptr, false, newFQParamShapeSqueezedAttr));
         inputHigh = mlir::cast<mlir::TypedValue<mlir::RankedTensorType>>(rewriter.createOrFold<IE::ReshapeOp>(
-                origOp->getLoc(), inputHigh, nullptr, false, newFQParamShapeSqueezedAttr));
+                takeOpLoc(origOp, "weights_out_low_resh"), inputHigh, nullptr, false, newFQParamShapeSqueezedAttr));
         outputHigh = mlir::cast<mlir::TypedValue<mlir::RankedTensorType>>(rewriter.createOrFold<IE::ReshapeOp>(
-                origOp->getLoc(), outputHigh, nullptr, false, newFQParamShapeSqueezedAttr));
+                takeOpLoc(origOp, "weights_out_high_resh"), outputHigh, nullptr, false, newFQParamShapeSqueezedAttr));
 
-        newWeights = rewriter.create<IE::FakeQuantizeOp>(fqOp.getLoc(), newWeights, inputLow, inputHigh, outputLow,
-                                                         outputHigh, fqOp.getLevelsAttr(), fqOp.getLowFpTypeAttr(),
-                                                         fqOp.getAutoBroadcastAttr());
+        newWeights = rewriter.create<IE::FakeQuantizeOp>(takeOpLoc(origOp, "weights_fq"), newWeights, inputLow,
+                                                         inputHigh, outputLow, outputHigh, fqOp.getLevelsAttr(),
+                                                         fqOp.getLowFpTypeAttr(), fqOp.getAutoBroadcastAttr());
     }
 
     rewriter.replaceOpWithNewOp<IE::TransposedConvolutionOp>(
             origOp, input, newWeights, origOp.getOutputShape(), nullptr, origOp.getStridesAttr(),
             origOp.getPadsBeginAttr(), origOp.getPadsEndAttr(), origOp.getDilationsAttr(),
-            origOp.getOutputPaddingAttr(), origOp.getPostOpAttr(), origOp.getClampAttr());
+            origOp.getOutputPaddingAttr(), origOp.getPostOpAttr(), origOp.getClampAttr(),
+            origOp.getOutputChannelsAttr(), origOp.getInputChannelsAttr());
 
     return mlir::success();
 }

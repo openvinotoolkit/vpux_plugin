@@ -120,7 +120,7 @@ RawProfilingRecords parseDmaHwTaskProfiling(
 
 RawProfilingRecords parseDmaSwTaskProfiling(
         const flatbuffers::Vector<flatbuffers::Offset<ProfilingFB::DMATask>>* dmaTaskList, const void* output,
-        size_t outputLen, MVCNN::TargetDevice) {
+        size_t outputLen, TargetDevice) {
     if (dmaTaskList == nullptr) {
         return {};
     }
@@ -153,32 +153,6 @@ RawProfilingRecords parseDmaSwTaskProfiling(
     }
     VPUX_THROW_UNLESS(totalDmaTasks == foundDmaTasks, "Unexpected number of DMA tasks in profiling data: {0} != {1}",
                       totalDmaTasks, foundDmaTasks);
-    return rawRecords;
-}
-
-RawProfilingRecords parseUPATaskProfiling(
-        const flatbuffers::Vector<flatbuffers::Offset<ProfilingFB::SWTask>>* upaTaskList, const void* output,
-        size_t outputLen) {
-    if (upaTaskList == nullptr) {
-        return {};
-    }
-
-    auto outputUpa = reinterpret_cast<const UpaData_t*>(output);
-    VPUX_THROW_UNLESS(outputLen % sizeof(UpaData_t) == 0, "Invalid profiling data");
-    const size_t totalUpaTasks = outputLen / sizeof(UpaData_t);
-    size_t foundUpaTasks = 0;
-
-    RawProfilingRecords rawRecords;
-    for (const ProfilingFB::SWTask* taskMeta : *upaTaskList) {
-        auto currentPos = taskMeta->dataIndex();
-        VPUX_THROW_UNLESS(currentPos < outputLen / sizeof(UpaData_t), "Unexpected end of blob in UPA profiling data.");
-        foundUpaTasks++;
-
-        const auto record = std::make_shared<RawProfilingUPARecord>(outputUpa[currentPos], taskMeta, currentPos);
-        record->checkDataOrDie();
-        rawRecords.push_back(record);
-    }
-    VPUX_THROW_UNLESS(totalUpaTasks == foundUpaTasks, "Unexpected number of UPA tasks in profiling data");
     return rawRecords;
 }
 
@@ -231,14 +205,14 @@ RawProfilingRecords parseM2ITaskProfiling(
     return rawRecords;
 }
 
-size_t getDpuRecordSize(MVCNN::TargetDevice device) {
+size_t getDpuRecordSize(TargetDevice device) {
     switch (device) {
-    case MVCNN::TargetDevice::TargetDevice_VPUX40XX:
+    case TargetDevice::TargetDevice_VPUX40XX:
         return sizeof(HwpDpuIduOduData_t);
-    case MVCNN::TargetDevice::TargetDevice_VPUX37XX:
+    case TargetDevice::TargetDevice_VPUX37XX:
         return sizeof(HwpDpu27Mode0Data_t);
     default:
-        VPUX_THROW("TargetDevice {0} is not supported ", MVCNN::EnumNameTargetDevice(device));
+        VPUX_THROW("TargetDevice {0} is not supported ", EnumNameTargetDevice(device));
     }
 }
 
@@ -251,7 +225,7 @@ struct DpuMetaComparator {
 
 RawProfilingRecords parseDPUTaskProfiling(
         const flatbuffers::Vector<flatbuffers::Offset<ProfilingFB::DPUTask>>* dpuTaskList, const void* output,
-        size_t outputLen, MVCNN::TargetDevice device, vpux::Logger& log, bool ignoreSanitizationErrors) {
+        size_t outputLen, TargetDevice device, vpux::Logger& log, bool ignoreSanitizationErrors) {
     if (dpuTaskList == nullptr) {
         return {};
     }
@@ -278,7 +252,7 @@ RawProfilingRecords parseDPUTaskProfiling(
             if (variantId < taskMeta->numVariants()) {
                 const auto inClusterIndex = currentPos - clusterBeginning;
                 VPUX_THROW_WHEN(currentPos >= outputLen / recordSize, "Profiling index is out of range");
-                if (device == MVCNN::TargetDevice::TargetDevice_VPUX40XX) {
+                if (device == TargetDevice::TargetDevice_VPUX40XX) {
                     const HwpDpuIduOduData_t dpuTimings =
                             reinterpret_cast<const HwpDpuIduOduData_t*>(output)[currentPos];
                     const auto taskWloadId = taskMeta->workloadIds()->Get(variantId);
@@ -288,11 +262,11 @@ RawProfilingRecords parseDPUTaskProfiling(
                                "Wrong workload ID. Please report! Expected: {0}, but got IDU {1}, ODU {2}", taskWloadId,
                                dpuTimings.idu_wl_id, dpuTimings.odu_wl_id);
 
-                    if (device == MVCNN::TargetDevice::TargetDevice_VPUX40XX) {
+                    if (device == TargetDevice::TargetDevice_VPUX40XX) {
                         record = std::make_shared<RawProfilingDPUHW40Record>(dpuTimings, taskMeta, variantId,
                                                                              currentPos, inClusterIndex);
                     }
-                } else if (device == MVCNN::TargetDevice::TargetDevice_VPUX37XX) {
+                } else if (device == TargetDevice::TargetDevice_VPUX37XX) {
                     const HwpDpu27Mode0Data_t dpuTimings =
                             reinterpret_cast<const HwpDpu27Mode0Data_t*>(output)[currentPos];
                     record = std::make_shared<RawProfilingDPUHW27Record>(dpuTimings, taskMeta, variantId, currentPos,
@@ -323,9 +297,9 @@ std::vector<std::pair<WorkpointConfiguration_t, size_t>> getWorkpointData(const 
     return workpoints;
 }
 
-RawProfilingData parseProfilingTaskLists(const RawDataLayout& sections, MVCNN::TargetDevice device,
-                                         const uint8_t* profData, const ProfilingFB::ProfilingMeta* profilingSchema,
-                                         vpux::Logger& log, bool ignoreSanitizationErrors) {
+RawProfilingData parseProfilingTaskLists(const RawDataLayout& sections, TargetDevice device, const uint8_t* profData,
+                                         const ProfilingFB::ProfilingMeta* profilingSchema, vpux::Logger& log,
+                                         bool ignoreSanitizationErrors) {
     RawProfilingData rawProfData;
 
     for (const auto& section : sections) {
@@ -344,11 +318,6 @@ RawProfilingData parseProfilingTaskLists(const RawDataLayout& sections, MVCNN::T
             rawProfData.parseOrder.emplace_back(ExecutorType::DMA_HW, offset);
             break;
         }
-        case ExecutorType::UPA: {
-            rawProfData.swTasks = parseUPATaskProfiling(profilingSchema->swTasks(), profData + offset, length);
-            rawProfData.parseOrder.emplace_back(ExecutorType::UPA, offset);
-            break;
-        }
         case ExecutorType::ACTSHAVE: {
             rawProfData.swTasks = parseActShaveTaskProfiling(profilingSchema->swTasks(), profData + offset, length);
             rawProfData.parseOrder.emplace_back(ExecutorType::ACTSHAVE, offset);
@@ -361,8 +330,8 @@ RawProfilingData parseProfilingTaskLists(const RawDataLayout& sections, MVCNN::T
             break;
         }
         case ExecutorType::WORKPOINT: {
-            const auto isWorkpointAccessible = device == MVCNN::TargetDevice::TargetDevice_VPUX37XX ||
-                                               device == MVCNN::TargetDevice::TargetDevice_VPUX40XX;
+            const auto isWorkpointAccessible =
+                    device == TargetDevice::TargetDevice_VPUX37XX || device == TargetDevice::TargetDevice_VPUX40XX;
             if (isWorkpointAccessible && length != 0) {
                 rawProfData.workpoints = getWorkpointData(profData + offset, length, offset);
             }
@@ -501,12 +470,7 @@ std::vector<TaskInfo> convertRawTasksToTaskInfo(const RawProfilingData& rawTasks
 
     if (!swTaskInfo.empty()) {
         int64_t dma2SwOffset = 0;
-        if (!frequenciesSetup.hasSharedDmaSwCounter) {
-            const auto dma2UpaTimerShift = getDMA2OtherTimersShift(
-                    rawTasks.dmaTasks, rawTasks.swTasks, frequenciesSetup, SynchronizationPointKind::DMA_TO_UPA, log);
-            log.trace("Timers DMA2UPA difference: {0}", dma2UpaTimerShift);
-            dma2SwOffset = getTimersOffset(dma2UpaTimerShift, earliestDmaNs, earliestSwNs.value());
-        } else {
+        if (frequenciesSetup.hasSharedDmaSwCounter) {
             // If DMA profiling enabled difference is 0, otherwise setting to earliest task without call to
             // getTimersOffset to avoid counting twice. Timer also can be shared with SW tasks
             // List of other engines, which share timer with DMA
@@ -544,9 +508,9 @@ RawData getRawProfilingTasks(const uint8_t* blobData, size_t blobSize, const uin
 
     auto log = vpux::Logger::global();
     const auto profilingDataSchema = getProfilingSectionMeta(blobData, blobSize);
-    auto device = (MVCNN::TargetDevice)profilingDataSchema->platform()->device();
-    VPUX_THROW_WHEN(device == MVCNN::TargetDevice::TargetDevice_NONE, "Unknown device");
-    log.trace("Using target device {0}", MVCNN::EnumNameTargetDevice(device));
+    auto device = (TargetDevice)profilingDataSchema->platform()->device();
+    VPUX_THROW_WHEN(device == TargetDevice::TargetDevice_NONE, "Unknown device");
+    log.trace("Using target device {0}", EnumNameTargetDevice(device));
 
     const auto profilingBufferMeta = profilingDataSchema->profilingBuffer();
     const auto sections = getRawDataLayoutFB(profilingBufferMeta, profSize);
@@ -632,7 +596,7 @@ std::vector<LayerInfo> getLayerInfo(const std::vector<TaskInfo>& taskInfo) {
 
         if (task.exec_type == TaskInfo::ExecType::DPU) {
             layer->dpu_ns += task.duration_ns;
-        } else if (task.exec_type == TaskInfo::ExecType::SW || task.exec_type == TaskInfo::ExecType::UPA) {
+        } else if (task.exec_type == TaskInfo::ExecType::SW) {
             layer->sw_ns += task.duration_ns;
         } else if (task.exec_type == TaskInfo::ExecType::DMA) {
             layer->dma_ns += task.duration_ns;

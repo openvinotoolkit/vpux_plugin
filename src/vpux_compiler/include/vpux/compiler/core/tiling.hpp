@@ -37,12 +37,15 @@ static constexpr double LARGE_CONST_THRESHOLD_RATIO = 0.25;
 // The purpose is to avoid excessive tiling.
 static constexpr int MAX_PREFETCH_TILING_TIME = 3;
 
+// Experimental number to avoid excessive tiling in output pipeline tiling
+static constexpr int MAX_OUTPUT_PIPELINE_TILING_TIME = 10;
+
 // Experimental number to avoid long compilation time caused by excessive tiling.
 static constexpr int MAX_EXCESSIVE_TILING_TIME = 3;
 
 // Track [E#87286]
 // Experimental number to avoid spilling in vertical fusion
-static constexpr double VF_CONST_RATIO = 0.58;
+static constexpr double VF_CONST_RATIO = 0.55;
 
 // Experimental number to avoid spilling in vertical fusion
 static constexpr double VF_LARGEST_OP_MEM_RATIO = 0.6;
@@ -241,8 +244,6 @@ InputTiling backInferReduceTile(const vpux::TileInfo& outputTile, ShapeRef inSha
 InputTiling backInferInterpolateTile(const vpux::TileInfo& outputTile, ArrayRef<int64_t> initialInputDims,
                                      ArrayRef<int64_t> initialOutputDims, ArrayRef<int64_t> initialInputOffsets,
                                      ArrayRef<int64_t> initialOutputOffsets, ArrayRef<int64_t> currentInputDims,
-                                     std::optional<ArrayRef<int64_t>> coordinatesDims,
-                                     std::optional<ArrayRef<int64_t>> lambdasDims,
                                      vpux::IE::InterpolateMode interpolateMode,
                                      vpux::IE::InterpolateCoordMode coordMode,
                                      vpux::IE::InterpolateNearestMode nearestMode, vpux::Logger log);
@@ -253,7 +254,7 @@ InputTiling backInferInterpolateTile(const vpux::TileInfo& outputTile, ArrayRef<
 
 InputTiling backInferGatherTile(const vpux::TileInfo& outputTile, const ShapeRef& origInputShape,
                                 const ShapeRef& origIndicesShape, int64_t axisValue, int64_t batchDims,
-                                bool hasAxisTensor, vpux::Logger log);
+                                bool hasAxisTensor, const int64_t indicesRank, vpux::Logger log);
 
 //
 // GatherDMA tiling

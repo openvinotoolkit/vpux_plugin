@@ -190,3 +190,120 @@ func.func @TileSliceNotOpt(%arg0: tensor<1x128x3x1xf16>) -> tensor<1x128x2x83xf1
     // CHECK:        return [[SLICE]] : tensor<1x128x2x83xf16>
 
 }
+
+
+// -----
+
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
+// CHECK-LABEL: @FuseSliceConcat
+// CHECK-SAME:      [[INPUT0:%.+]]: tensor<4x128x3x6xf16, {order = #NHWC}>
+func.func @FuseSliceConcat(%arg0: tensor<4x128x3x6xf16, {order = #NHWC}>) -> tensor<7x128x3x6xf16, {order = #NHWC}> {
+    %0 = IE.Slice %arg0 [1, 0, 0, 0] [2, 128, 3, 6] : tensor<4x128x3x6xf16, {order = #NHWC}> to tensor<2x128x3x6xf16, {order = #NHWC}>
+    %1 = IE.Slice %arg0 [3, 0, 0, 0] [1, 128, 3, 6] : tensor<4x128x3x6xf16, {order = #NHWC}> to tensor<1x128x3x6xf16, {order = #NHWC}>
+
+    %2 = IE.Concat(%0, %1, %arg0) {per_axis = #IE.Concat<axis = 0 : i64>} : tensor<2x128x3x6xf16, {order = #NHWC}>, tensor<1x128x3x6xf16, {order = #NHWC}>, tensor<4x128x3x6xf16, {order = #NHWC}> -> tensor<7x128x3x6xf16, {order = #NHWC}>
+    return %2 : tensor<7x128x3x6xf16, {order = #NHWC}>
+
+    // CHECK:       [[SLICE:%.+]] = IE.Slice [[INPUT0]]
+    // CHECK-SAME{LITERAL}           [1, 0, 0, 0] [3, 128, 3, 6] : tensor<4x128x3x6xf16, {order = #NHWC}> to tensor<3x128x3x6xf16, {order = #NHWC}>
+    // CHECK:       [[CONCAT:%.+]] = IE.Concat([[SLICE]], [[INPUT0]]) {per_axis = #IE.Concat<axis = 0 : i64>} : tensor<3x128x3x6xf16, {order = #NHWC}>, tensor<4x128x3x6xf16, {order = #NHWC}> -> tensor<7x128x3x6xf16, {order = #NHWC}>
+    // CHECK:       return [[CONCAT]] : tensor<7x128x3x6xf16, {order = #NHWC}>
+}
+
+// -----
+
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
+// CHECK-LABEL: @FuseSliceConcatWithPermuteCast
+// CHECK-SAME:      [[INPUT0:%.+]]: tensor<4x128x1x1xf16, {order = #NHWC}>
+func.func @FuseSliceConcatWithPermuteCast(%arg0: tensor<4x128x1x1xf16, {order = #NHWC}>) -> tensor<1x128x2x1xf16, {order = #NHWC}> {
+    %0 = IE.Slice %arg0 [2, 0, 0, 0] [1, 128, 1, 1] : tensor<4x128x1x1xf16, {order = #NHWC}> to tensor<1x128x1x1xf16, {order = #NHWC}>
+    %1 = IE.Slice %arg0 [3, 0, 0, 0] [1, 128, 1, 1] : tensor<4x128x1x1xf16, {order = #NHWC}> to tensor<1x128x1x1xf16, {order = #NHWC}>
+
+    %2 = IE.Concat(%0, %1) {per_axis = #IE.Concat<axis = 2 : i64>} : tensor<1x128x1x1xf16, {order = #NHWC}>, tensor<1x128x1x1xf16, {order = #NHWC}> -> tensor<1x128x2x1xf16, {order = #NHWC}>
+    return %2 : tensor<1x128x2x1xf16, {order = #NHWC}>
+
+    // CHECK:       [[PERMUTECAST:%.+]] = IE.PermuteCast([[INPUT0]]) {dst_order = #NHWC, mem_perm = #map} : tensor<4x128x1x1xf16, {order = #NHWC}> -> tensor<1x128x4x1xf16, {order = #NHWC}>
+    // CHECK:       [[SLICE:%.+]] = IE.Slice [[PERMUTECAST]]
+    // CHECK-SAME{LITERAL}              [0, 0, 2, 0] [1, 128, 2, 1] : tensor<1x128x4x1xf16, {order = #NHWC}> to tensor<1x128x2x1xf16, {order = #NHWC}>
+    // CHECK:       return [[SLICE]] : tensor<1x128x2x1xf16, {order = #NHWC}>
+}
+
+
+// -----
+
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
+// CHECK-LABEL: @NotFuseSliceIsNotContinuous
+// CHECK-SAME:      [[INPUT0:%.+]]: tensor<4x128x3x6xf16, {order = #NHWC}>
+func.func @NotFuseSliceIsNotContinuous(%arg0: tensor<4x128x3x6xf16, {order = #NHWC}>) -> tensor<3x128x3x6xf16, {order = #NHWC}> {
+    %0 = IE.Slice %arg0 [0, 0, 0, 0] [2, 128, 3, 6] : tensor<4x128x3x6xf16, {order = #NHWC}> to tensor<2x128x3x6xf16, {order = #NHWC}>
+    %1 = IE.Slice %arg0 [3, 0, 0, 0] [1, 128, 3, 6] : tensor<4x128x3x6xf16, {order = #NHWC}> to tensor<1x128x3x6xf16, {order = #NHWC}>
+
+    %2 = IE.Concat(%0, %1) {per_axis = #IE.Concat<axis = 0 : i64>} : tensor<2x128x3x6xf16, {order = #NHWC}>, tensor<1x128x3x6xf16, {order = #NHWC}> -> tensor<3x128x3x6xf16, {order = #NHWC}>
+    return %2 : tensor<3x128x3x6xf16, {order = #NHWC}>
+
+    // CHECK:       [[SLICE_0:%.+]] = IE.Slice [[INPUT0]]
+    // CHECK:       [[SLICE_1:%.+]] = IE.Slice [[INPUT0]]
+    // CHECK:       [[CONCAT:%.+]] = IE.Concat([[SLICE_0]], [[SLICE_1]])
+    // CHECK:       return  [[CONCAT]]
+}
+
+// -----
+
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
+// CHECK-LABEL: @NotFuseConcatIsNotContinuous
+// CHECK-SAME:      [[INPUT0:%.+]]: tensor<4x128x3x6xf16, {order = #NHWC}>
+func.func @NotFuseConcatIsNotContinuous(%arg0: tensor<4x128x3x6xf16, {order = #NHWC}>) -> tensor<3x128x3x6xf16, {order = #NHWC}> {
+    %0 = IE.Slice %arg0 [1, 0, 0, 0] [2, 128, 3, 6] : tensor<4x128x3x6xf16, {order = #NHWC}> to tensor<2x128x3x6xf16, {order = #NHWC}>
+    %1 = IE.Slice %arg0 [3, 0, 0, 0] [1, 128, 3, 6] : tensor<4x128x3x6xf16, {order = #NHWC}> to tensor<1x128x3x6xf16, {order = #NHWC}>
+
+    %2 = IE.Concat(%1, %0) {per_axis = #IE.Concat<axis = 0 : i64>} : tensor<1x128x3x6xf16, {order = #NHWC}>, tensor<2x128x3x6xf16, {order = #NHWC}> -> tensor<3x128x3x6xf16, {order = #NHWC}>
+    return %2 : tensor<3x128x3x6xf16, {order = #NHWC}>
+
+    // CHECK:       [[SLICE_0:%.+]] = IE.Slice [[INPUT0]]
+    // CHECK:       [[SLICE_1:%.+]] = IE.Slice [[INPUT0]]
+    // CHECK:       [[CONCAT:%.+]] = IE.Concat([[SLICE_1]], [[SLICE_0]])
+    // CHECK:       return  [[CONCAT]]
+}
+
+// -----
+
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
+// CHECK-LABEL: @NotFuseCouldNotInsertPermuteCast
+// CHECK-SAME:      [[INPUT0:%.+]]: tensor<4x128x3x6xf16, {order = #NHWC}>
+func.func @NotFuseCouldNotInsertPermuteCast(%arg0: tensor<4x128x3x6xf16, {order = #NHWC}>) -> tensor<1x128x6x6xf16, {order = #NHWC}> {
+    %0 = IE.Slice %arg0 [2, 0, 0, 0] [1, 128, 3, 6] : tensor<4x128x3x6xf16, {order = #NHWC}> to tensor<1x128x3x6xf16, {order = #NHWC}>
+    %1 = IE.Slice %arg0 [3, 0, 0, 0] [1, 128, 3, 6] : tensor<4x128x3x6xf16, {order = #NHWC}> to tensor<1x128x3x6xf16, {order = #NHWC}>
+
+    %2 = IE.Concat(%0, %1) {per_axis = #IE.Concat<axis = 2 : i64>} : tensor<1x128x3x6xf16, {order = #NHWC}>, tensor<1x128x3x6xf16, {order = #NHWC}> -> tensor<1x128x6x6xf16, {order = #NHWC}>
+    return %2 : tensor<1x128x6x6xf16, {order = #NHWC}>
+
+    // CHECK:       [[SLICE_0:%.+]] = IE.Slice [[INPUT0]]
+    // CHECK:       [[SLICE_1:%.+]] = IE.Slice [[INPUT0]]
+    // CHECK:       [[CONCAT:%.+]] = IE.Concat([[SLICE_0]], [[SLICE_1]])
+    // CHECK:       return  [[CONCAT]]
+}
+
+
+// -----
+
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
+// CHECK-LABEL: @NotFuseMultiDimSlice
+// CHECK-SAME:      [[INPUT0:%.+]]: tensor<4x128x3x6xf16, {order = #NHWC}>
+func.func @NotFuseMultiDimSlice(%arg0: tensor<4x128x3x6xf16, {order = #NHWC}>) -> tensor<3x128x2x6xf16, {order = #NHWC}> {
+    %0 = IE.Slice %arg0 [0, 0, 0, 0] [2, 128, 2, 6] : tensor<4x128x3x6xf16, {order = #NHWC}> to tensor<2x128x2x6xf16, {order = #NHWC}>
+    %1 = IE.Slice %arg0 [3, 0, 0, 0] [1, 128, 2, 6] : tensor<4x128x3x6xf16, {order = #NHWC}> to tensor<1x128x2x6xf16, {order = #NHWC}>
+
+    %2 = IE.Concat(%0, %1) {per_axis = #IE.Concat<axis = 0 : i64>} : tensor<2x128x2x6xf16, {order = #NHWC}>, tensor<1x128x2x6xf16, {order = #NHWC}> -> tensor<3x128x2x6xf16, {order = #NHWC}>
+    return %2 : tensor<3x128x2x6xf16, {order = #NHWC}>
+
+    // CHECK:       [[SLICE_0:%.+]] = IE.Slice [[INPUT0]]
+    // CHECK:       [[SLICE_1:%.+]] = IE.Slice [[INPUT0]]
+    // CHECK:       [[CONCAT:%.+]] = IE.Concat([[SLICE_0]], [[SLICE_1]])
+    // CHECK:       return  [[CONCAT]]
+}

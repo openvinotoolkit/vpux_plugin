@@ -54,7 +54,7 @@ module @GroupConvolutionToSingleConvolution {
 
         return %2 : tensor<1x96x96x96xf16>
 
-        // CHECK-DAG:       [[CST:%.*]] = const.Declare tensor<96x96x3x3x!qElemType, {order = #NHWC}> = dense_resource<__elided__> : tensor<96x96x3x3xf16>, [#const.ConvertElemType<si8>, #const.QuantCast<!qElemType1>, #const.QuantCast<>, #const.ConvertElemType<i32>, #const.Add<1.270000e+02 : f64>, #const.ConvertElemType<ui8>, #const.QuantCast<!qElemType>, #const.Reorder<#NHWC>]
+        // CHECK-DAG:       [[CST:%.*]] = const.Declare tensor<96x96x3x3x!qElemType, {order = #NHWC}> = dense_resource<__elided__> : tensor<96x96x3x3xf16>, [#const.CastElemType<si8>, #const.CastElemType<!qElemType1>, #const.CastElemType<si8>, #const.CastElemType<i32>, #const.Add<1.270000e+02 : f64>, #const.CastElemType<ui8>, #const.CastElemType<!qElemType>, #const.Reorder<#NHWC>]
         // CHECK:           [[PERMUTE_QUANTIZE:%.*]] = IE.PermuteQuantize([[ARG0]]) {dstElemType = f16, dst_order = #NHWC, mem_perm = #NHWC, pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 0]} : tensor<1x96x96x96xf16> -> tensor<1x96x96x96xf16, {order = #NHWC}>
         // CHECK:           [[AVGPOOL:%.*]] = IE.AvgPool([[PERMUTE_QUANTIZE]]) {exclude_pads, kernel_size = [1, 1], pads_begin = [0, 0], pads_end = [0, 0], rounding_type = #IE.rounding_type<FLOOR>, strides = [1, 1]} : tensor<1x96x96x96xf16, {order = #NHWC}> -> tensor<1x96x96x96x!qElemType2, {order = #NHWC}>
         // CHECK:           [[QUANTIZE_CAST:%.*]] = IE.QuantizeCast([[AVGPOOL]]) {dstElemType = !qElemType3} : tensor<1x96x96x96x!qElemType2, {order = #NHWC}> -> tensor<1x96x96x96x!qElemType3, {order = #NHWC}>

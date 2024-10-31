@@ -185,8 +185,8 @@ module @TransformationChangeShapeAndElemType {
 
 // -----
 
-// CHECK-LABEL: @TransformationConvertElemType
-module @TransformationConvertElemType {
+// CHECK-LABEL: @TransformationCastElemType
+module @TransformationCastElemType {
     IE.CNNNetwork entryPoint : @main inputsInfo : {
     } outputsInfo : {
         DataInfo "output" : tensor<32x16x3x3xui8>
@@ -196,7 +196,7 @@ module @TransformationConvertElemType {
         const.Rodata @value dense<1.000000e+00> : tensor<32x16x3x3xf16>
     }
     func.func @main() -> memref<32x16x3x3xui8> {
-        %cst = const.Declare memref<32x16x3x3xui8> = ref<@ov_bin::@value> : tensor<32x16x3x3xf16>, [#const.ConvertElemType<ui8>]
+        %cst = const.Declare memref<32x16x3x3xui8> = ref<@ov_bin::@value> : tensor<32x16x3x3xf16>, [#const.CastElemType<ui8>]
         return %cst : memref<32x16x3x3xui8>
     }
 

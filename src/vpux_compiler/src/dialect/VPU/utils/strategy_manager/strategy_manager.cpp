@@ -4,19 +4,22 @@
 //
 
 #include "vpux/compiler/dialect/VPU/utils/strategy_manager/strategy_manager.hpp"
-#include <llvm/ADT/TypeSwitch.h>
-#include <unordered_map>
 #include "vpux/compiler/core/layers.hpp"
+#include "vpux/compiler/dialect/IE/utils/dynamic_shape_utils.hpp"
+
+#include <llvm/ADT/TypeSwitch.h>
 
 using namespace vpux;
 using namespace VPU;
 
-StrategyManager::StrategyManager(mlir::func::FuncOp func, int64_t numTiles, bool enablePrefetchTiling, Logger log)
+StrategyManager::StrategyManager(mlir::func::FuncOp func, int64_t numTiles, bool enablePrefetchTiling, Logger log,
+                                 SiblingOpsAnalysis& siblingsOpsAnalysis)
         : _func(func),
           _numTiles(numTiles),
           _log(log),
-          _costModel(func, enablePrefetchTiling, log),
-          _optimizer(func, enablePrefetchTiling, log) {
+          _costModel(func, enablePrefetchTiling, log, siblingsOpsAnalysis),
+          _optimizer(func, enablePrefetchTiling, log, siblingsOpsAnalysis),
+          _siblingsOpsAnalysis(siblingsOpsAnalysis) {
 }
 
 void StrategyManager::assignMultiClusterStrategy(bool enableMultiClusterForSWLayer) {
@@ -55,6 +58,10 @@ void StrategyManager::assignMultiClusterStrategy(bool enableMultiClusterForSWLay
             if (outputShape.size() != RANK_REQUIRED_FOR_TILING && outputShape.size() != DimsGroups5D::Act::numDims) {
                 return;
             }
+        }
+
+        if (IE::hasDynamicTensors(op)) {
+            return;
         }
 
         llvm::TypeSwitch<mlir::Operation*, void>(op)
@@ -114,6 +121,10 @@ void StrategyManager::assignMultiClusterStrategy(bool enableMultiClusterForSWLay
                         VPUX_THROW("Unsupported input layout {0} to CompressConvolution ",
                                    DimsOrder::fromValue(origOp.getInput()));
                     }
+                    const auto inputBatch = getShape(origOp.getInput())[Dims4D::Act::N];
+                    if (inputBatch > VPU::NCEInvariant::SUPPORTED_BATCH_SIZE) {
+                        setLayerStrategy(VPU::MultiClusterStrategy::SplitOverBatch, origOp.getOperation());
+                    }
                 })
                 .Case<NCEDepthConvolutionOp>([&](NCEDepthConvolutionOp origOp) {
                     auto bestStrategy = _costModel.getOptimalLayerStrategy(
@@ -157,8 +168,8 @@ void StrategyManager::assignMultiClusterStrategy(bool enableMultiClusterForSWLay
                     }
                     if (bestStrategy.has_value()) {
                         setLayerStrategy(bestStrategy.value(), origOp.getOperation());
-                        _log.info("SW Operation '{0}' {1} set to {2}", origOp->getName(), origOp->getLoc(),
-                                  bestStrategy);
+                        _log.debug("SW Operation '{0}' {1} set to {2}", origOp->getName(), origOp->getLoc(),
+                                   bestStrategy);
                     }
                     return;
                 })
@@ -219,6 +230,7 @@ void StrategyManager::assignMultiClusterStrategy(bool enableMultiClusterForSWLay
                             return false;
                         }
                         return clusteredOp.doesLayerFitIntoCMX(VPU::MultiClusterStrategy::SplitOverKernel,
+                                                               _siblingsOpsAnalysis,
                                                                /*reservedMem=*/Byte(0)) &&
                                clusteredOp.checkStrategyCompatibility(VPU::MultiClusterStrategy::SplitOverKernel,
                                                                       _numTiles) &&
@@ -253,7 +265,7 @@ void StrategyManager::assignMultiClusterStrategy(bool enableMultiClusterForSWLay
                         const auto outputShape = getShape(permuteOp.getOutput());
                         const auto numClusters = VPU::getOptimalNumClusters(permuteOp, outputShape,
                                                                             VPU::MultiClusterStrategy::SplitOverKernel);
-                        if (numClusters.getInt() <= 1) {
+                        if (numClusters <= 1) {
                             return false;
                         }
                         auto clusteredOp = mlir::cast<VPU::ClusteredOpInterface>(permuteOp.getOperation());

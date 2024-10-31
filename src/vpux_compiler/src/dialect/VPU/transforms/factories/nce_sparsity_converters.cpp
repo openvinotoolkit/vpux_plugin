@@ -26,9 +26,8 @@ VPU::NCESparsity::PPEConverterCb VPU::NCESparsity::getPPEConverterCb(VPU::ArchKi
 VPU::NCESparsity::BiasConverterCb VPU::NCESparsity::getBiasConverterCb(VPU::ArchKind arch) {
     switch (arch) {
     case VPU::ArchKind::NPU37XX:
-    case VPU::ArchKind::NPU40XX: {
+    case VPU::ArchKind::NPU40XX:
         return VPU::arch37xx::getBias;
-    }
     case VPU::ArchKind::UNKNOWN:
     default: {
         VPUX_THROW("Unexpected architecture {0}", arch);

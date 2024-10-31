@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2023-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -74,15 +74,13 @@ private:
 
 class MaxPoolToNCE final : public mlir::OpRewritePattern<IE::MaxPoolOp> {
 public:
-    MaxPoolToNCE(mlir::MLIRContext* ctx, VPU::ArchKind arch, Logger log)
-            : mlir::OpRewritePattern<IE::MaxPoolOp>(ctx), _arch(arch), _log(log) {
+    MaxPoolToNCE(mlir::MLIRContext* ctx, Logger log): mlir::OpRewritePattern<IE::MaxPoolOp>(ctx), _log(log) {
     }
 
 public:
     mlir::LogicalResult matchAndRewrite(IE::MaxPoolOp origOp, mlir::PatternRewriter& rewriter) const final;
 
 private:
-    VPU::ArchKind _arch;
     Logger _log;
 };
 
@@ -92,15 +90,13 @@ private:
 
 class AveragePoolToNCE final : public mlir::OpRewritePattern<IE::AvgPoolOp> {
 public:
-    AveragePoolToNCE(mlir::MLIRContext* ctx, VPU::ArchKind arch, Logger log)
-            : mlir::OpRewritePattern<IE::AvgPoolOp>(ctx), _arch(arch), _log(log) {
+    AveragePoolToNCE(mlir::MLIRContext* ctx, Logger log): mlir::OpRewritePattern<IE::AvgPoolOp>(ctx), _log(log) {
     }
 
 public:
     mlir::LogicalResult matchAndRewrite(IE::AvgPoolOp origOp, mlir::PatternRewriter& rewriter) const final;
 
 private:
-    VPU::ArchKind _arch;
     Logger _log;
 };
 

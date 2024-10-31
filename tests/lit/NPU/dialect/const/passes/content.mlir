@@ -18,22 +18,22 @@ func.func @ParsePrintDenseConst() -> tensor<2xf16> {
 // -----
 
 func.func @ParsePrintDenseConstWithTransformation() -> tensor<1xf16> {
-    %cst = const.Declare tensor<1xf16> = dense<1.0> : tensor<1xf32>, [#const.ConvertElemType<f16>]
+    %cst = const.Declare tensor<1xf16> = dense<1.0> : tensor<1xf32>, [#const.CastElemType<f16>]
 
     return %cst : tensor<1xf16>
 
-    // CHECK:       [[CST:%.*]] = const.Declare tensor<1xf16> = dense<1.000000e+00> : tensor<1xf32>, [#const.ConvertElemType<f16>]
+    // CHECK:       [[CST:%.*]] = const.Declare tensor<1xf16> = dense<1.000000e+00> : tensor<1xf32>, [#const.CastElemType<f16>]
     // CHECK:       return [[CST]]
 }
 
 // -----
 
 func.func @ParsePrintDenseConstWithTransformations() -> tensor<3xf16> {
-    %cst = const.Declare tensor<3xf16> = dense<1.0> : tensor<1xf32>, [#const.ConvertElemType<f16>, #const.Broadcast<0 : i64, 3 : i64>]
+    %cst = const.Declare tensor<3xf16> = dense<1.0> : tensor<1xf32>, [#const.CastElemType<f16>, #const.Broadcast<0 : i64, 3 : i64>]
 
     return %cst : tensor<3xf16>
 
-    // CHECK:       [[CST:%.*]] = const.Declare tensor<3xf16> = dense<1.000000e+00> : tensor<1xf32>, [#const.ConvertElemType<f16>, #const.Broadcast<0 : i64, 3 : i64>]
+    // CHECK:       [[CST:%.*]] = const.Declare tensor<3xf16> = dense<1.000000e+00> : tensor<1xf32>, [#const.CastElemType<f16>, #const.Broadcast<0 : i64, 3 : i64>]
     // CHECK:       return [[CST]]
 }
 
@@ -41,7 +41,7 @@ func.func @ParsePrintDenseConstWithTransformations() -> tensor<3xf16> {
 
 func.func @ParsePrintDenseConstWithInvalidConversion() -> tensor<2xi8> {
     // expected-error@+1 {{'Const.Declare' has mismatch in value element type 'f16' and result element type 'i8'}}
-    %cst = const.Declare tensor<2xi8> = dense<1.0> : tensor<2xf32>, [#const.ConvertElemType<f16>]
+    %cst = const.Declare tensor<2xi8> = dense<1.0> : tensor<2xf32>, [#const.CastElemType<f16>, #const.Add<1.0>]
 
     return %cst : tensor<2xi8>
 }
@@ -107,7 +107,7 @@ func.func @ParsePrintDenseResourceNoAlignment() -> tensor<1x3x1x1xf32> {
 
 func.func @ParsePrintDenseResourceWrongDataSize() -> tensor<1x3x1x1xf16> {
     // expected-error@+1 {{custom op 'const.Declare' Size of dense resource buffer '16' in 'baseContent' doesn't match its type 'tensor<1x3x1x1xf32>'}}
-    %cst = const.Declare tensor<1x3x1x1xf16> = dense_resource<too_big_blob> : tensor<1x3x1x1xf32>, [#const.ConvertElemType<f16>]
+    %cst = const.Declare tensor<1x3x1x1xf16> = dense_resource<too_big_blob> : tensor<1x3x1x1xf32>, [#const.CastElemType<f16>]
 
     return %cst : tensor<1x3x1x1xf16>
 }

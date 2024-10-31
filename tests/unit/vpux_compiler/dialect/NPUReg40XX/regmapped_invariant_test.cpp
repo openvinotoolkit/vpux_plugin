@@ -722,14 +722,6 @@ std::vector<std::pair<MappedRegValues, nn_public::VpuDPUInvariant>> dpuInvariant
                  {"barriers_post_mask_lo_", {{"barriers_post_mask_lo_", 0xFFFFFFFFFFFFFFFF}}},
          },
          CREATE_HW_DMA_DESC(barriers_.post_mask_lo_, 0xFFFFFFFFFFFFFFFF)},
-        {{
-                 {"barriers_group_mask_", {{"group_", 0xFF}}},
-         },
-         CREATE_HW_DMA_DESC(barriers_.group_, 0xFF)},
-        {{
-                 {"barriers_group_mask_", {{"mask_", 0xFF}}},
-         },
-         CREATE_HW_DMA_DESC(barriers_.mask_, 0xFF)},
         // barriers_sched_ ---------------------------------------------------------------------
         {{
                  {"barriers_sched_", {{"start_after_", 0xFFFFFFFF}}},
@@ -739,16 +731,6 @@ std::vector<std::pair<MappedRegValues, nn_public::VpuDPUInvariant>> dpuInvariant
                  {"barriers_sched_", {{"clean_after_", 0xFFFFFFFF}}},
          },
          CREATE_HW_DMA_DESC(barriers_sched_.clean_after_, 0xFFFFFFFF)},
-        // output_sparsity_offset_ ---------------------------------------------------------------------
-        {{
-                 {"output_sparsity_offset_invariant_", {{"output_sparsity_offset_invariant_", 0xFFFFFFFF}}},
-         },
-         CREATE_HW_DMA_DESC(output_sparsity_offset_, 0xFFFFFFFF)},
-        // hwp_cmx_base_offset_ ---------------------------------------------------------------------
-        {{
-                 {"hwp_cmx_base_offset_", {{"hwp_cmx_base_offset_", 0xFFFFFFFF}}},
-         },
-         CREATE_HW_DMA_DESC(hwp_cmx_base_offset_, 0xFFFFFFFF)},
         // variant_count_ ---------------------------------------------------------------------
         {{
                  {"variant_count_", {{"variant_count_", 0xFFFF}}},
@@ -758,12 +740,7 @@ std::vector<std::pair<MappedRegValues, nn_public::VpuDPUInvariant>> dpuInvariant
         {{
                  {"cluster_invariant_", {{"cluster_invariant_", 0xFF}}},
          },
-         CREATE_HW_DMA_DESC(cluster_, 0xFF)},
-        // is_cont_conv_ ---------------------------------------------------------------------
-        {{
-                 {"is_cont_conv_", {{"is_cont_conv_", 0xFF}}},
-         },
-         CREATE_HW_DMA_DESC(is_cont_conv_, 0xFF)},
-};
+         CREATE_HW_DMA_DESC(cluster_, 0xFF)}};
 
-INSTANTIATE_TEST_CASE_P(NPUReg40XX_MappedRegs, NPUReg40XX_NpuDPUInvariantTest, testing::ValuesIn(dpuInvariantFieldSet));
+INSTANTIATE_TEST_SUITE_P(NPUReg40XX_MappedRegs, NPUReg40XX_NpuDPUInvariantTest,
+                         testing::ValuesIn(dpuInvariantFieldSet));

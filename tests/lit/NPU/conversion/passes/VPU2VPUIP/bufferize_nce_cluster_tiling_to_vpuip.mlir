@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
-// RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch% compilation-mode=DefaultHW" --one-shot-bufferize-VPU-to-VPUIP --canonicalize %s | FileCheck %s
+// RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch% compilation-mode=DefaultHW ppe-version=IntPPE" --one-shot-bufferize-VPU-to-VPUIP --canonicalize %s | FileCheck %s
 // REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
@@ -233,6 +233,7 @@ func.func @NCEClusterTilingWithNCEConv(%arg0: tensor<1x32x16x16xf16, {mem_space 
             %wt as %arg3: tensor<64x1x1x4xsi32, {mem_space = @CMX_NN, order = #NCHW}>)
                 -> tensor<1x64x14x14xf16, {mem_space = @CMX_NN, order = #NHWC}> {
         %1 = VPU.NCE.Convolution(%arg1, %arg2, %arg3) {
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
                 rawFilterShape = [64, 32, 3, 3],
                 strides = [1, 1]
@@ -283,8 +284,8 @@ func.func @NCEClusterTilingWithNceCompressConv(%input: tensor<1x4x224x224xf16, {
                 -> tensor<1x64x112x112xf16, {order = #NHWC, mem_space = @CMX_NN}> {
         %1 = VPU.NCE.CompressConvolution(%arg0, %arg1, %arg2) {
                 cm_sp_pattern = 15 : i64,
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 3 : i64, right = 2 : i64, top = 3 : i64, bottom = 2 : i64>,
-                ppe = #VPU.PPETask<mode = <NOOP>, clamp_high = 255 : i64, clamp_low = 0 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>,
                 rawFilterShape = [64, 4, 7, 7], strides = [2, 2]
             } -> tensor<1x64x112x112xf16, {order = #NHWC, mem_space = @CMX_NN}> {
             VPU.DPU.Workload outOffsets [0, 0, 0, 0] outSizes [1, 64, 112, 112] <left = 3 : i64, right = 2 : i64, top = 3 : i64, bottom = 0 : i64> #VPU.mpe_mode<CUBOID_16x16> attributes {cluster_id = 0 : i64}

@@ -40,10 +40,9 @@ def VPURT_BufferSection :
                 I64EnumAttrCase<"SW_KernelText",    4>,
                 I64EnumAttrCase<"DDR",              5>,
                 I64EnumAttrCase<"CSRAM",            6>,
-                I64EnumAttrCase<"CMX_UPA",          7>,
-                I64EnumAttrCase<"CMX_NN",           8>,
-                I64EnumAttrCase<"Register",         9>,
-                I64EnumAttrCase<"MAC_Accumulators", 10>,
+                I64EnumAttrCase<"CMX_NN",           7>,
+                I64EnumAttrCase<"Register",         8>,
+                I64EnumAttrCase<"MAC_Accumulators", 9>,
             ]
         > {
 }

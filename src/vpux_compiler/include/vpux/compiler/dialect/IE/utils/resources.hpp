@@ -175,10 +175,11 @@ exec_resource_if<Enum> getAvailableExecutor(mlir::ModuleOp mainModule, Enum kind
 }
 
 //
-// ShaveResources
+// EngineResources
 //
 
-int64_t getTotalNumOfActShaveEngines(mlir::ModuleOp moduleOp);
+int64_t getTotalNumOfEngines(mlir::ModuleOp moduleOp, VPU::ExecutorKind execKind);
+int64_t getTotalNumOfEngines(mlir::Operation* op, VPU::ExecutorKind execKind);
 
 //
 // TileResourceOp

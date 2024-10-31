@@ -46,17 +46,13 @@ void reindexEnqueueOps(llvm::SmallVector<VPURegMapped::EnqueueOp> enquOps) {
     return;
 }
 
-void AddBootstrapOpsPass::safeRunOnFunc() {
-    auto ctx = &(getContext());
-    auto netFunc = getOperation();
-    auto mpi = VPUMI40XX::getMPI(netFunc);
-    auto builder = mlir::OpBuilder(mpi.getOperation());
-    int64_t nBarrs = VPUIP::getNumAvailableBarriers(netFunc);
-
-    std::vector<bool> initialized(nBarrs, false);
-
+void addBootstrapBarriers(mlir::MLIRContext* ctx, mlir::func::FuncOp netFunc) {
     int64_t bootstrapID = 0;
     mlir::Value first;
+    int64_t nBarrs = VPUIP::getNumAvailableBarriers(netFunc);
+    auto mpi = VPUMI40XX::getMPI(netFunc);
+    auto builder = mlir::OpBuilder(mpi.getOperation());
+    std::vector<bool> initialized(nBarrs, false);
     for (auto op : netFunc.getOps<VPUMI40XX::ConfigureBarrierOp>()) {
         auto trivialIndexType = VPURegMapped::IndexType::get(ctx, checked_cast<uint32_t>(bootstrapID));
         auto pid = op.getId();
@@ -77,54 +73,83 @@ void AddBootstrapOpsPass::safeRunOnFunc() {
         mpi.getBootstrapTasksMutable().assign(first);
         mpi.setBootstrapTasksCountAttr(builder.getI64IntegerAttr(std::min(nBarrs, bootstrapID)));
     }
+}
+
+bool hasEnqueue(VPURegMapped::TaskOpInterface task) {
+    auto users = task.getResult().getUsers();
+    auto enquIt = llvm::find_if(users, [](mlir::Operation* user) {
+        return mlir::isa<VPURegMapped::EnqueueOp>(user);
+    });
+    return enquIt != users.end();
+}
+
+int64_t addEnqueueForOp(mlir::MLIRContext* ctx, mlir::func::FuncOp netFunc, mlir::Value listHead,
+                        const VPURegMapped::TaskType taskType, VPURegMapped::EnqueueOp firstEnqueue) {
+    auto mpi = VPUMI40XX::getMPI(netFunc);
+    auto builder = mlir::OpBuilder(mpi.getOperation());
+    int64_t bootstrapWorkItems = 0;
+    if (!listHead) {
+        return bootstrapWorkItems;
+    }
+
+    auto curTask = mlir::cast<VPURegMapped::TaskOpInterface>(listHead.getDefiningOp());
+    if (!hasEnqueue(curTask)) {
+        auto startTask = curTask;
+        auto endTask = curTask;
+        while (auto nextTask = VPUMI40XX::getNextOp(endTask)) {
+            if (!hasEnqueue(nextTask)) {
+                endTask = nextTask;
+            } else {
+                break;
+            }
+        }
+        auto trivialIndexType = VPURegMapped::IndexType::get(ctx, checked_cast<uint32_t>(0));
+        auto bootstrapEnqueue =
+                builder.create<VPURegMapped::EnqueueOp>(startTask->getLoc(), trivialIndexType, nullptr, nullptr,
+                                                        taskType, startTask->getResult(0), endTask->getResult(0));
+        if (firstEnqueue) {
+            bootstrapEnqueue.getOperation()->moveBefore(
+                    mlir::cast<VPURegMapped::EnqueueOp>(firstEnqueue).getOperation());
+        }
+
+        bootstrapWorkItems++;
+    }
+    return bootstrapWorkItems;
+}
+
+void AddBootstrapOpsPass::safeRunOnFunc() {
+    auto ctx = &(getContext());
+    auto netFunc = getOperation();
+    auto mpi = VPUMI40XX::getMPI(netFunc);
+    auto builder = mlir::OpBuilder(mpi.getOperation());
+    addBootstrapBarriers(ctx, netFunc);
 
     auto parentModule = netFunc.getOperation()->getParentOfType<mlir::ModuleOp>();
     const auto tilesCount = IE::getTileExecutor(parentModule).getCount();
 
-    int64_t bootstrapDmaID = 0;
     VPURegMapped::EnqueueOp firstEnqueue = nullptr;
     if (mpi.getWorkItemTasks()) {
         firstEnqueue = mlir::cast<VPURegMapped::EnqueueOp>(mpi.getWorkItemTasks().getDefiningOp());
     }
 
+    int totalNumberBootstrapworkItems = 0;
+
     for (int64_t tileIdx = 0; tileIdx < tilesCount; tileIdx++) {
         for (int64_t listIdx = 0; listIdx < 2; listIdx++) {
-            auto dmaTaskVal = mpi.getListHead(VPURegMapped::TaskType::DMA, tileIdx, listIdx);
-            if (!dmaTaskVal) {
-                continue;
-            }
-
-            auto dmaTask = mlir::cast<VPURegMapped::TaskOpInterface>(dmaTaskVal.getDefiningOp());
-            auto hasEnqu = [](VPURegMapped::TaskOpInterface dma) -> bool {
-                auto users = dma.getResult().getUsers();
-                auto enquIt = llvm::find_if(users, [](mlir::Operation* user) {
-                    return mlir::isa<VPURegMapped::EnqueueOp>(user);
-                });
-                return enquIt != users.end();
-            };
-
-            if (!hasEnqu(dmaTask)) {
-                auto startDma = dmaTask;
-                auto endDma = dmaTask;
-                while (auto nextDma = VPUMI40XX::getNextOp(endDma)) {
-                    if (!hasEnqu(nextDma)) {
-                        endDma = nextDma;
-                    } else {
-                        break;
-                    }
-                }
-                auto trivialIndexType = VPURegMapped::IndexType::get(ctx, checked_cast<uint32_t>(bootstrapDmaID));
-                auto bootstrapEnqueue = builder.create<VPURegMapped::EnqueueOp>(
-                        startDma->getLoc(), trivialIndexType, nullptr, nullptr, VPURegMapped::TaskType::DMA,
-                        startDma->getResult(0), endDma->getResult(0));
-                if (firstEnqueue) {
-                    bootstrapEnqueue.getOperation()->moveBefore(
-                            mlir::cast<VPURegMapped::EnqueueOp>(firstEnqueue).getOperation());
-                }
-
-                bootstrapDmaID++;
-            }
+            auto curHead = mpi.getListHead(VPURegMapped::TaskType::DMA, tileIdx, listIdx);
+            totalNumberBootstrapworkItems +=
+                    addEnqueueForOp(ctx, netFunc, curHead, VPURegMapped::TaskType::DMA, firstEnqueue);
         }
+    }
+
+    for (int64_t tileIdx = 0; tileIdx < tilesCount; tileIdx++) {
+        auto curVariantHead = mpi.getListHead(VPURegMapped::TaskType::DPUVariant, tileIdx);
+        totalNumberBootstrapworkItems +=
+                addEnqueueForOp(ctx, netFunc, curVariantHead, VPURegMapped::TaskType::DPUVariant, firstEnqueue);
+
+        auto curActKernelHead = mpi.getListHead(VPURegMapped::TaskType::ActKernelInvocation, tileIdx);
+        totalNumberBootstrapworkItems += addEnqueueForOp(ctx, netFunc, curActKernelHead,
+                                                         VPURegMapped::TaskType::ActKernelInvocation, firstEnqueue);
     }
 
     auto enquOps = to_small_vector(netFunc.getOps<VPURegMapped::EnqueueOp>());
@@ -132,7 +157,7 @@ void AddBootstrapOpsPass::safeRunOnFunc() {
         reindexEnqueueOps(enquOps);
         mpi.getWorkItemTasksMutable().assign(enquOps[0].getResult());
         mpi.setWorkItemCount(enquOps.size());
-        mpi.setBootsrapWorkItemsCountAttr(builder.getI64IntegerAttr(bootstrapDmaID));
+        mpi.setBootsrapWorkItemsCountAttr(builder.getI64IntegerAttr(totalNumberBootstrapworkItems));
     } else {
         VPUX_THROW("We expect at least one enqueue operation in the function.");
     }

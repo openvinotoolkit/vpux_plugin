@@ -41,9 +41,6 @@ struct DefaultHWOptions : public VPU::DefaultHWOptionsDialectBase, virtual vpux:
 
     BoolOption enableOutputPipelining{*this, "output-pipelining", llvm::cl::desc("Enable output pipelining"),
                                       llvm::cl::init(true)};
-
-    IntOption wlmOptimizationThreshold{*this, "wlm-barriers-threshold",
-                                       llvm::cl::desc("Threshold for WLM optimization"), llvm::cl::init(3000)};
 };
 
 void buildDefaultHWPipeline(mlir::OpPassManager& pm, const DefaultHWOptions& options, Logger log = Logger::global());

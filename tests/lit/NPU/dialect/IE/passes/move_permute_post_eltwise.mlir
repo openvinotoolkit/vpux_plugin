@@ -663,7 +663,7 @@ func.func @SkipAvgPoolNonEltwise(%arg0: tensor<1x64x64x192xf16>) -> tensor<1x64x
 // CHECK-LABEL: @PropagatePermuteThrough2EltwiseGroupConvs
 // CHECK-SAME:      [[INPUT:%.*]]: tensor<1x4x8x1x1xf16>
 func.func @PropagatePermuteThrough2EltwiseGroupConvs(%input: tensor<1x4x8x1x1xf16>) -> tensor<1x4x8x1x1xf16> {
-  %cst = const.Declare tensor<4x1x1x1x!qElemType, {order = #NHWC}> = dense<1.000000e+00> : tensor<4x1x1x1xf16>, [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType>, #const.Reorder<#NHWC>]
+  %cst = const.Declare tensor<4x1x1x1x!qElemType, {order = #NHWC}> = dense<1.000000e+00> : tensor<4x1x1x1xf16>, [#const.CastElemType<ui8>, #const.CastElemType<!qElemType>, #const.Reorder<#NHWC>]
   %cst_0 = const.Declare tensor<4x1x1x1xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<4x1x1x1xf16>, [#const.Reorder<#NHWC>]
   %0 = IE.AffineReshape(%input) {dim_mapping = [[0], [1], [2], [3], [3]], shape_value = [1, 4, 8, 1]} : tensor<1x4x8x1x1xf16> -> tensor<1x4x8x1xf16>
   %1 = IE.AffineReshape(%0) {dim_mapping = [[0], [1], [2, 3], [3]], shape_value = [1, 4, 2, 4]} : tensor<1x4x8x1xf16> -> tensor<1x4x2x4xf16>
@@ -675,7 +675,7 @@ func.func @PropagatePermuteThrough2EltwiseGroupConvs(%input: tensor<1x4x8x1x1xf1
   %7 = IE.AffineReshape(%6) {dim_mapping = [[0], [1], [2], [3, 4]], shape_value = [1, 4, 8, 1, 1]} : tensor<1x4x8x1xf16> -> tensor<1x4x8x1x1xf16>
   return %7 : tensor<1x4x8x1x1xf16>
 
-  // CHECK:       [[CONST:%.*]] = const.Declare tensor<4x1x1x1x!qElemType, {order = #NHWC}> = dense<1.000000e+00> : tensor<4x1x1x1xf16>, [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType>, #const.Reorder<#NHWC>]
+  // CHECK:       [[CONST:%.*]] = const.Declare tensor<4x1x1x1x!qElemType, {order = #NHWC}> = dense<1.000000e+00> : tensor<4x1x1x1xf16>, [#const.CastElemType<ui8>, #const.CastElemType<!qElemType>, #const.Reorder<#NHWC>]
 
   // CHECK:       [[CONST_0:%.*]] = const.Declare tensor<4x1x1x1xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<4x1x1x1xf16>, [#const.Reorder<#NHWC>]
 
@@ -717,7 +717,7 @@ func.func @PropagatePermuteThrough2EltwiseGroupConvs(%input: tensor<1x4x8x1x1xf1
 // CHECK-LABEL: @PropagatePermuteThrough3EltwiseGroupConvs
 // CHECK-SAME:      [[INPUT:%.*]]: tensor<1x4x8x1x1xf16>
 func.func @PropagatePermuteThrough3EltwiseGroupConvs(%input: tensor<1x4x8x1x1xf16>) -> tensor<1x4x8x1x1xf16> {
-  %cst = const.Declare tensor<4x1x1x1x!qElemType, {order = #NHWC}> = dense<1.000000e+00> : tensor<4x1x1x1xf16>, [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType>, #const.Reorder<#NHWC>]
+  %cst = const.Declare tensor<4x1x1x1x!qElemType, {order = #NHWC}> = dense<1.000000e+00> : tensor<4x1x1x1xf16>, [#const.CastElemType<ui8>, #const.CastElemType<!qElemType>, #const.Reorder<#NHWC>]
   %cst_0 = const.Declare tensor<4x1x1x1xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<4x1x1x1xf16>, [#const.Reorder<#NHWC>]
   %0 = IE.AffineReshape(%input) {dim_mapping = [[0], [1], [2], [3], [3]], shape_value = [1, 4, 8, 1]} : tensor<1x4x8x1x1xf16> -> tensor<1x4x8x1xf16>
   %1 = IE.AffineReshape(%0) {dim_mapping = [[0], [1], [2, 3], [3]], shape_value = [1, 4, 2, 4]} : tensor<1x4x8x1xf16> -> tensor<1x4x2x4xf16>
@@ -730,7 +730,7 @@ func.func @PropagatePermuteThrough3EltwiseGroupConvs(%input: tensor<1x4x8x1x1xf1
   %8 = IE.AffineReshape(%7) {dim_mapping = [[0], [1], [2], [3, 4]], shape_value = [1, 4, 8, 1, 1]} : tensor<1x4x8x1xf16> -> tensor<1x4x8x1x1xf16>
   return %8 : tensor<1x4x8x1x1xf16>
 
-  // CHECK:       [[CONST:%.*]] = const.Declare tensor<4x1x1x1x!qElemType, {order = #NHWC}> = dense<1.000000e+00> : tensor<4x1x1x1xf16>, [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType>, #const.Reorder<#NHWC>]
+  // CHECK:       [[CONST:%.*]] = const.Declare tensor<4x1x1x1x!qElemType, {order = #NHWC}> = dense<1.000000e+00> : tensor<4x1x1x1xf16>, [#const.CastElemType<ui8>, #const.CastElemType<!qElemType>, #const.Reorder<#NHWC>]
 
   // CHECK:       [[CONST_0:%.*]] = const.Declare tensor<4x1x1x1xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<4x1x1x1xf16>, [#const.Reorder<#NHWC>]
 
@@ -785,17 +785,17 @@ func.func @Skip2ndNonEltwiseGroupConv(%input: tensor<1x128x51x64xf16>) -> tensor
     // CHECK-SAME:      {order = #NHWC}> = dense<1.000000e+00>
     // CHECK-SAME:      : tensor<128x1x1x1xf16>, [#const.Reorder<#NHWC>]
 
-    // CHECK:       [[SHAPECAST_INPUT_1:%.+]] = IE.PermuteCast([[INPUT]]) {dst_order = #NHWC, mem_perm = #NCHW} : tensor<1x128x51x64xf16> -> tensor<1x64x128x51xf16, {order = #NHWC}> 
+    // CHECK:       [[SHAPECAST_INPUT_1:%.+]] = IE.PermuteCast([[INPUT]]) {dst_order = #NHWC, mem_perm = #NCHW} : tensor<1x128x51x64xf16> -> tensor<1x64x128x51xf16, {order = #NHWC}>
 
     // CHECK:       [[GROUPCONV_INPUT_1:%.+]] = IE.ShapeCast {shape = [1, 128, 51, 64]} inputs([[SHAPECAST_INPUT_1]] : tensor<1x64x128x51xf16, {order = #NHWC}>) -> tensor<1x128x51x64xf16, {order = #NHWC}>
-        
+
     // CHECK:       [[SHAPECAST_INPUT_2:%.+]] = IE.GroupConvolution([[GROUPCONV_INPUT_1]], [[CONST_0]])
     // CHECK-SAME:      {dilations = [1, 1], groups = 128 : i64, pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]}
     // CHECK-SAME:      : tensor<1x128x51x64xf16, {order = #NHWC}>, tensor<128x1x1x1xf16, {order = #NHWC}> -> tensor<1x128x51x64xf16, {order = #NHWC}>
 
-    // CHECK:       [[MEMPERMUTE_INPUT_1:%.+]] = IE.ShapeCast {shape = [1, 64, 128, 51]} inputs([[SHAPECAST_INPUT_2]] : tensor<1x128x51x64xf16, {order = #NHWC}>) -> tensor<1x64x128x51xf16, {order = #NHWC}> 
+    // CHECK:       [[MEMPERMUTE_INPUT_1:%.+]] = IE.ShapeCast {shape = [1, 64, 128, 51]} inputs([[SHAPECAST_INPUT_2]] : tensor<1x128x51x64xf16, {order = #NHWC}>) -> tensor<1x64x128x51xf16, {order = #NHWC}>
 
-    // CHECK:       [[GROUPCONV_INPUT_2:%.+]] = IE.MemPermute([[MEMPERMUTE_INPUT_1]]) {dst_order = #NHWC, mem_perm = #NHWC} : tensor<1x64x128x51xf16, {order = #NHWC}> -> tensor<1x128x51x64xf16, {order = #NHWC}> 
+    // CHECK:       [[GROUPCONV_INPUT_2:%.+]] = IE.MemPermute([[MEMPERMUTE_INPUT_1]]) {dst_order = #NHWC, mem_perm = #NHWC} : tensor<1x64x128x51xf16, {order = #NHWC}> -> tensor<1x128x51x64xf16, {order = #NHWC}>
 
     // CHECK:       [[RET:%.+]] = IE.GroupConvolution([[GROUPCONV_INPUT_2]], [[CONST]])
     // CHECK-SAME:      {dilations = [1, 1], groups = 128 : i64, pads_begin = [1, 1], pads_end = [1, 1], strides = [1, 1]}

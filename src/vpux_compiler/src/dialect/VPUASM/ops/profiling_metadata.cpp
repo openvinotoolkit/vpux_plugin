@@ -24,14 +24,6 @@ size_t vpux::VPUASM::ProfilingMetadataOp::getAlignmentRequirements() {
     return ELF::VPUX_NO_ALIGNMENT;
 }
 
-vpux::ELF::SectionFlagsAttr vpux::VPUASM::ProfilingMetadataOp::getAccessingProcs(mlir::SymbolUserMap&) {
-    return ELF::SectionFlagsAttr::SHF_NONE;
-}
-
-vpux::ELF::SectionFlagsAttr vpux::VPUASM::ProfilingMetadataOp::getUserProcs() {
-    return ELF::SectionFlagsAttr::SHF_NONE;
-}
-
 // The operation is placed inside the section (CreateProfilingSectionOp) by a separate pass,
 // see: AddProfilingSectionPass
 std::optional<ELF::SectionSignature> vpux::VPUASM::ProfilingMetadataOp::getSectionSignature() {

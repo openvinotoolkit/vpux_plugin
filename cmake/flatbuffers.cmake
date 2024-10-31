@@ -74,7 +74,10 @@ function(vpux_gf_version_generate SRC_DIR DST_DIR)
         OUTPUT_STRIP_TRAILING_WHITESPACE
     )
 
-    set(GIT_DESCRIBE_DIRTY "v3.35.2")
+    if ("${GIT_DESCRIBE_DIRTY}" STREQUAL "")
+        message(WARNING "GraphFile version cannot be read from ${SRC_DIR}")
+        set(GIT_DESCRIBE_DIRTY "v3.35.2")
+    endif()
 
     string(REGEX REPLACE "^v([0-9]+)\\..*" "\\1" VERSION_MAJOR "${GIT_DESCRIBE_DIRTY}")
     string(REGEX REPLACE "^v[0-9]+\\.([0-9]+).*" "\\1" VERSION_MINOR "${GIT_DESCRIBE_DIRTY}")

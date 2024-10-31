@@ -46,8 +46,11 @@ mlir::FailureOr<SmallVector<int64_t>> vpux::IE::broadcastEltwiseShape(ArrayRef<i
                 }
             }
 
-            *outShapeRIter = std::max(in1ShapeIter != shape1.rend() ? *in1ShapeIter : 0,
-                                      in2ShapeIter != shape2.rend() ? *in2ShapeIter : 0);
+            auto in1Shape = in1ShapeIter != shape1.rend() ? *in1ShapeIter : 0;
+            auto in2Shape = in2ShapeIter != shape2.rend() ? *in2ShapeIter : 0;
+            *outShapeRIter = (in1Shape == mlir::ShapedType::kDynamic || in2Shape == mlir::ShapedType::kDynamic)
+                                     ? mlir::ShapedType::kDynamic
+                                     : std::max(in1Shape, in2Shape);
 
             if (in1ShapeIter != shape1.rend()) {
                 ++in1ShapeIter;
@@ -375,41 +378,4 @@ mlir::FailureOr<Shape> vpux::IE::getShapeCastExpandedShapeCanNotAlign(mlir::Oper
     }
 
     return newExpandedShape;
-}
-
-bool vpux::IE::isShapeCompatibleWithODUPermute(const ShapeRef shape, const int64_t alignment) {
-    if (shape.size() != 4) {
-        return false;
-    }
-    if (shape[Dims4D::Act::N] != 1) {
-        return false;
-    }
-    const auto tensorSizeZ = shape[Dims4D::Act::W];
-    return tensorSizeZ % alignment == 0;
-}
-
-bool vpux::IE::isODUPermuteEffectiveForShape(const ShapeRef shape, const int64_t alignment) {
-    // Set alignment to 1 to make alignment check pass all the time.
-    // In this case, when isShapeCompatibleWithODUPermute fails, it's not because of the alignment.
-    const int64_t neutralAlignment = 1;
-    if (!isShapeCompatibleWithODUPermute(shape, neutralAlignment)) {
-        return false;
-    }
-
-    // E116504: NCEPermute's multi-cluster strategy is manually set as SOK on NPU40XX which
-    // introduces performance issue when dim of H/W is greater than VPU_DIMENSION_LIMIT(8192).
-    // Add checking to avoid converting to PermuteQuantize if dims are out of limits.
-    bool isOutOfDimLimits = std::any_of(shape.begin(), shape.end(), [](const auto& dim) {
-        return dim > VPU::NCEInvariant::VPU_DIMENSION_LIMIT;
-    });
-    if (isOutOfDimLimits) {
-        return false;
-    }
-
-    const auto IH = shape[Dims4D::Act::H];
-    const auto IW = shape[Dims4D::Act::W];
-    // Expanding 1xCxHx1 to 1xCxHx16 is not very effective.
-    // PermuteQuantize has to process a tensor which is 16 times bigger than the original.
-    const int64_t minimalEffectiveWidth = 2;
-    return IH * IW % alignment == 0 || IW >= minimalEffectiveWidth;
 }

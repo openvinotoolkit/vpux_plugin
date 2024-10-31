@@ -141,8 +141,8 @@ mlir::Value complexFFTGetTwiddleFactors(mlir::Location loc, int64_t axisLength, 
     }
     const SmallVector<int64_t> twiddleShape({axisLengthOut * complexNoScale, axisLength * complexNoScale});
     const auto twiddleType = mlir::RankedTensorType::get(twiddleShape, mlir::Float32Type::get(dtype.getContext()));
-    return Const::createConst(rewriter, loc, twiddleType, ArrayRef(twiddleVals), [&](Const::ContentAttr attr) {
-        return attr.convertElemType(dtype);
+    return Const::createConst(rewriter, loc, twiddleType, ArrayRef(twiddleVals), [&](Const::ContentSetup& setup) {
+        return setup.castElemType(dtype);
     });
 }
 
@@ -170,8 +170,8 @@ mlir::Value fftGetTwiddleFactorsForRdftRealInput(mlir::Location loc, int64_t axi
     }
     const SmallVector<int64_t> twiddleShape({axisLengthOut * complexNoScale, axisLength});
     const auto twiddleType = mlir::RankedTensorType::get(twiddleShape, mlir::Float32Type::get(dtype.getContext()));
-    return Const::createConst(rewriter, loc, twiddleType, ArrayRef(twiddleVals), [&](Const::ContentAttr attr) {
-        return attr.convertElemType(dtype);
+    return Const::createConst(rewriter, loc, twiddleType, ArrayRef(twiddleVals), [&](Const::ContentSetup& setup) {
+        return setup.castElemType(dtype);
     });
 }
 
@@ -209,8 +209,8 @@ mlir::Value fftGetTwiddleFactorsForIrdftRealOutput(mlir::Location loc, int64_t a
     }
     const SmallVector<int64_t> twiddleShape({outAxisLength, inAxisLength * complexNoScale});
     const auto twiddleType = mlir::RankedTensorType::get(twiddleShape, mlir::Float32Type::get(dtype.getContext()));
-    return Const::createConst(rewriter, loc, twiddleType, ArrayRef(twiddleVals), [&](Const::ContentAttr attr) {
-        return attr.convertElemType(dtype);
+    return Const::createConst(rewriter, loc, twiddleType, ArrayRef(twiddleVals), [&](Const::ContentSetup& setup) {
+        return setup.castElemType(dtype);
     });
 }
 
@@ -264,7 +264,6 @@ auto fftOneAxisDecompose(mlir::PatternRewriter& rewriter, mlir::Location loc, An
 auto complexFFTDecompose(mlir::PatternRewriter& rewriter, mlir::Location loc, AnyRankedTensor input,
                          ArrayRef<int64_t> axes, bool isInverseFFT, bool isRdft, Logger log) {
     log.trace("complexFFTDecompose: {0}", input);
-    const auto fftLoc = appendLoc(loc, "ComplexFftAxes");
     Logger _log = log.nest();
     auto inIter = input;
     const auto inType = input.getType().cast<vpux::NDTypeInterface>();
@@ -273,6 +272,7 @@ auto complexFFTDecompose(mlir::PatternRewriter& rewriter, mlir::Location loc, An
     const auto curOrder = DimsOrder::fromValue(inIter).toPermutation();
     auto shape = to_small_vector(inType.getShape());
     for (auto axis : axes | indexed) {
+        const auto fftLoc = appendLoc(loc, "ComplexFft_axis_{0}", axis.index());
         inIter = fftOneAxisDecompose(rewriter, fftLoc, inIter, shape[axis.value()], curOrder, lastComplexAxes,
                                      axis.value(), isInverseFFT, true, (axis.index() == (axes.size() - 1)) && isRdft,
                                      _log, complexFFTGetTwiddleFactors);

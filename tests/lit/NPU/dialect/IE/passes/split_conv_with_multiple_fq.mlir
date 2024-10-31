@@ -16,7 +16,7 @@ func.func @SplitConvWithOnlyFakeQuantConsumers(%input: tensor<1x3x62x62xf32>) ->
 
     %weights_low = const.Declare tensor<1xf32> = dense<1.0> : tensor<1xf32>
     %weights_high = const.Declare tensor<1xf32> = dense<10.0> : tensor<1xf32>
-    %weights = const.Declare tensor<4x3x3x3xf32> = dense<128> : tensor<4x3x3x3xui8>, [#const.ConvertElemType<f32>]
+    %weights = const.Declare tensor<4x3x3x3xf32> = dense<128> : tensor<4x3x3x3xui8>, [#const.CastElemType<f32>]
     %1 = IE.FakeQuantize(%weights, %weights_low, %weights_high, %weights_low, %weights_high)
         { auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 255 } :
         tensor<4x3x3x3xf32>, tensor<1xf32>, tensor<1xf32>, tensor<1xf32>, tensor<1xf32> -> tensor<4x3x3x3xf32>
@@ -63,7 +63,7 @@ func.func @SplitConvWithOnlyFakeQuantConsumers(%input: tensor<1x3x62x62xf32>) ->
     // CHECK-DAG: [[MIN_WEIGHTS:%.*]] = const.Declare tensor<1xf32> = dense<1.000000e+00> : tensor<1xf32>
     // CHECK-DAG: [[MAX_WEIGHTS:%.*]] = const.Declare tensor<1xf32> = dense<1.000000e+01> : tensor<1xf32>
 
-    // CHECK-DAG: [[FILTERS:%.*]] = const.Declare tensor<4x3x3x3xf32> = dense<128> : tensor<4x3x3x3xui8>, [#const.ConvertElemType<f32>]
+    // CHECK-DAG: [[FILTERS:%.*]] = const.Declare tensor<4x3x3x3xf32> = dense<128> : tensor<4x3x3x3xui8>, [#const.CastElemType<f32>]
     // CHECK-DAG: [[BIAS:%.*]] = const.Declare tensor<1x4x1x1xf32> = dense<1.000000e+00> : tensor<1x4x1x1xf32>
 
     // CHECK-DAG: [[MIN3:%.*]] = const.Declare tensor<f32> = dense<-5.000000e+00> : tensor<f32>
@@ -101,7 +101,7 @@ func.func @SplitConvWithReLUAndFakeQuant(%input: tensor<1x3x62x62xf32>) -> (tens
         { auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 256 } :
         tensor<1x3x62x62xf32>, tensor<f32>, tensor<f32>, tensor<f32>, tensor<f32> -> tensor<1x3x62x62xf32>
 
-    %weights = const.Declare tensor<4x3x3x3xf32> = dense<128> : tensor<4x3x3x3xui8>, [#const.ConvertElemType<f32>]
+    %weights = const.Declare tensor<4x3x3x3xf32> = dense<128> : tensor<4x3x3x3xui8>, [#const.CastElemType<f32>]
     %1 = IE.FakeQuantize(%weights, %input_low, %input_high, %input_low, %input_high)
         { auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 255 } :
         tensor<4x3x3x3xf32>, tensor<f32>, tensor<f32>, tensor<f32>, tensor<f32> -> tensor<4x3x3x3xf32>
@@ -131,7 +131,7 @@ func.func @SplitConvWithReLUAndFakeQuant(%input: tensor<1x3x62x62xf32>) -> (tens
 
     // CHECK-DAG: [[MIN:%.*]] = const.Declare tensor<f32> = dense<0.000000e+00> : tensor<f32>
     // CHECK-DAG: [[MAX:%.*]] = const.Declare tensor<f32> = dense<2.550000e+02> : tensor<f32>
-    // CHECK-DAG: [[FILTERS:%.*]] = const.Declare tensor<4x3x3x3xf32> = dense<128> : tensor<4x3x3x3xui8>, [#const.ConvertElemType<f32>]
+    // CHECK-DAG: [[FILTERS:%.*]] = const.Declare tensor<4x3x3x3xf32> = dense<128> : tensor<4x3x3x3xui8>, [#const.CastElemType<f32>]
     // CHECK-DAG: [[BIAS:%.*]] = const.Declare tensor<1x4x1x1xf32> = dense<1.000000e+00> : tensor<1x4x1x1xf32>
 
     // CHECK: [[VAL0:%.*]] = IE.FakeQuantize(%arg0, [[MIN]], [[MAX]], [[MIN]], [[MAX]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 256 : i64} : tensor<1x3x62x62xf32>, tensor<f32>, tensor<f32>, tensor<f32>, tensor<f32> -> tensor<1x3x62x62xf32>
@@ -158,7 +158,7 @@ func.func @SplitConvWithFakeQuant(%input: tensor<1x3x62x62xf32>) -> (tensor<1x4x
 
     %weights_low = const.Declare tensor<1xf32> = dense<1.0> : tensor<1xf32>
     %weights_high = const.Declare tensor<1xf32> = dense<10.0> : tensor<1xf32>
-    %weights = const.Declare tensor<4x3x3x3xf32> = dense<128> : tensor<4x3x3x3xui8>, [#const.ConvertElemType<f32>]
+    %weights = const.Declare tensor<4x3x3x3xf32> = dense<128> : tensor<4x3x3x3xui8>, [#const.CastElemType<f32>]
     %1 = IE.FakeQuantize(%weights, %weights_low, %weights_high, %weights_low, %weights_high)
         { auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 255 } :
         tensor<4x3x3x3xf32>, tensor<1xf32>, tensor<1xf32>, tensor<1xf32>, tensor<1xf32> -> tensor<4x3x3x3xf32>
@@ -202,7 +202,7 @@ func.func @SplitConvWithFakeQuant(%input: tensor<1x3x62x62xf32>) -> (tensor<1x4x
     // CHECK-DAG: [[MIN_WEIGHTS:%.*]] = const.Declare tensor<1xf32> = dense<1.000000e+00> : tensor<1xf32>
     // CHECK-DAG: [[MAX_WEIGHTS:%.*]] = const.Declare tensor<1xf32> = dense<1.000000e+01> : tensor<1xf32>
 
-    // CHECK-DAG: [[FILTERS:%.*]] = const.Declare tensor<4x3x3x3xf32> = dense<128> : tensor<4x3x3x3xui8>, [#const.ConvertElemType<f32>]
+    // CHECK-DAG: [[FILTERS:%.*]] = const.Declare tensor<4x3x3x3xf32> = dense<128> : tensor<4x3x3x3xui8>, [#const.CastElemType<f32>]
     // CHECK-DAG: [[BIAS:%.*]] = const.Declare tensor<1x4x1x1xf32> = dense<1.000000e+00> : tensor<1x4x1x1xf32>
 
     // CHECK-DAG: [[MIN3:%.*]] = const.Declare tensor<f32> = dense<-5.000000e+00> : tensor<f32>

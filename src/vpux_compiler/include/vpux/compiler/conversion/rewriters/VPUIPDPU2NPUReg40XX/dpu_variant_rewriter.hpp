@@ -24,13 +24,17 @@ private:
 
     mlir::LogicalResult verifyDPUVariant(VPUIPDPU::DPUVariantOp op) const;
 
-    void fillIDUCfg(mlir::Region& DPURegion, std::map<std::string, std::map<std::string, uint64_t>>& initValues) const;
-    void fillODUCfg(mlir::Region& DPURegion, std::map<std::string, std::map<std::string, uint64_t>>& initValues) const;
-    void fillBarrierCfg(VPUIPDPU::DPUVariantOp op,
-                        std::map<std::string, std::map<std::string, uint64_t>>& initValues) const;
-    void fillProfilingCfg(VPUIPDPU::DPUVariantOp origOp,
-                          std::map<std::string, std::map<std::string, uint64_t>>& initValues) const;
-    void fillStubCfg(std::map<std::string, std::map<std::string, uint64_t>>& initValues) const;
+    void fillDPUConfigs(
+            mlir::Region& DPURegion,
+            std::map<std::string, std::map<std::string, vpux::VPURegMapped::RegFieldValue>>& initValues) const;
+
+    void fillBarrierCfg(
+            VPUIPDPU::DPUVariantOp op,
+            std::map<std::string, std::map<std::string, vpux::VPURegMapped::RegFieldValue>>& initValues) const;
+    void fillProfilingCfg(
+            VPUIPDPU::DPUVariantOp origOp,
+            std::map<std::string, std::map<std::string, vpux::VPURegMapped::RegFieldValue>>& initValues) const;
+    void fillStubCfg(std::map<std::string, std::map<std::string, vpux::VPURegMapped::RegFieldValue>>& initValues) const;
 };
 
 }  // namespace vpuipdpu2npureg40xx

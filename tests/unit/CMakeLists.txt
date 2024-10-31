@@ -71,7 +71,6 @@ ov_add_test_target(
         ${EXCLUDED_UNIT_TESTS_DIR}
     INCLUDES
         ${OPTIONAL_UNIT_TESTS_INCLUDES}
-        "${IE_MAIN_VPUX_PLUGIN_SOURCE_DIR}/artifacts/vpuip_2"
         "${IE_MAIN_VPUX_PLUGIN_SOURCE_DIR}/src/vpux_translate_utils/include"
         ${CMAKE_CURRENT_SOURCE_DIR}/vpux_compiler
     LINK_LIBRARIES

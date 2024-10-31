@@ -7,6 +7,7 @@
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
 #include "vpux/compiler/dialect/VPU/utils/generate_tiling.hpp"
 #include "vpux/compiler/dialect/VPU/utils/manual_strategy_utils.hpp"
+#include "vpux/compiler/dialect/VPU/utils/sibling_ops_analysis.hpp"
 #include "vpux/compiler/utils/VPU/tile_utils.hpp"
 
 #include "vpux/compiler/utils/rewriter.hpp"
@@ -87,8 +88,7 @@ bool OutputPipelineTilingPass::isTilingAdjustmentBeneficial(VPU::NCEOpInterface 
         const auto firstClusterShape = perClusterShape.front();
         for (const auto& shape : perClusterShape) {
             if (shape[axisDim] <= firstClusterShape[axisDim] / 2) {
-                _log.nest().warning("Input tile type {0} is not evenly unrolled at {1}", inputDistType,
-                                    origOp->getLoc());
+                _log.nest().debug("Input tile type {0} is not evenly unrolled at {1}", inputDistType, origOp->getLoc());
                 return false;
             }
         }
@@ -131,7 +131,8 @@ void OutputPipelineTilingPass::safeRunOnFunc() {
     }
 
     auto func = getOperation();
-    _costModel = std::make_shared<VPU::LayerCostModel>(func, _enablePrefetchTiling, _log);
+    auto siblingsOpsAnalysis = getAnalysis<VPU::SiblingOpsAnalysis>();
+    _costModel = std::make_shared<VPU::LayerCostModel>(func, _enablePrefetchTiling, _log, siblingsOpsAnalysis);
 
     func->walk([&](VPU::TilingBuilderOpInterface tilingBuilderOp) {
         auto origOp = tilingBuilderOp.getOperation();
@@ -195,16 +196,18 @@ void OutputPipelineTilingPass::safeRunOnFunc() {
                 break;
             }
             prefetchableTilesOnDim = nextTileSearchResult.value();
-        } while (mlir::failed(findSupportedTileSize));
+        } while (
+                mlir::failed(findSupportedTileSize) &&
+                (prefetchableTilesOnDim[targetDim] <= MAX_OUTPUT_PIPELINE_TILING_TIME * origTilingStrategy[targetDim]));
 
         if (!mlir::failed(findSupportedTileSize) && prefetchableTilesOnDim != origTilingStrategy) {
             // find an available tiling strategy for output pipelining
             auto curTiles = findSupportedTileSize.value();
             if (isTilingAdjustmentBeneficial(nceOp, origTiles.value(), curTiles)) {
                 origOp->setAttr(tilingStrategy, getIntArrayAttr(origOp->getContext(), curTiles[0].axis));
-                _log.warning("Overwrite original tiling strategy: {0} with output pipelining tiling strategy: {1} at "
-                             "{2}",
-                             origTilingStrategy, prefetchableTilesOnDim, origOp->getLoc());
+                _log.debug("Overwrite original tiling strategy: {0} with output pipelining tiling strategy: {1} at "
+                           "{2}",
+                           origTilingStrategy, prefetchableTilesOnDim, origOp->getLoc());
             }
         }
 

@@ -63,99 +63,6 @@ void resolveOutOfOrderDependencies(const std::map<VPURT::TaskQueueType, SmallVec
     barrierInfo.optimizeBarriers();
 }
 
-// link tasks to barriers and create legal variant batches if needed
-void linkTasksToBarriers(const BarrierInfo::TaskSet& tasksToAdd, const BarrierInfo::TaskSet& newBarriers,
-                         bool waitBarriers, size_t legalVariantCount, BarrierInfo& barrierInfo) {
-    mlir::OpBuilder builder(barrierInfo.getBarrierOpAtIndex(*newBarriers.begin()));
-    BarrierInfo::TaskSet newBarrierBatch;
-
-    for (const auto& barrierIdn : newBarriers) {
-        BarrierInfo::TaskSet barrierTasks;
-        if (waitBarriers) {
-            barrierTasks = barrierInfo.getBarrierConsumers(barrierIdn);
-        } else {
-            barrierTasks = barrierInfo.getBarrierProducers(barrierIdn);
-        }
-
-        llvm::set_union(barrierTasks, tasksToAdd);
-        auto batches = barrierInfo.createLegalVariantBatches(barrierTasks, legalVariantCount);
-        if (batches.size() > 1) {
-            auto insertionPoint = barrierInfo.getBarrierOpAtIndex(barrierIdn);
-            BarrierInfo::TaskSet prevBatch;
-            if (waitBarriers) {
-                prevBatch = barrierInfo.getBarrierProducers(barrierIdn);
-            } else {
-                batches.push_back(barrierInfo.getBarrierConsumers(barrierIdn));
-            }
-            for (const auto& batch : batches) {
-                if (!prevBatch.empty()) {
-                    builder.setInsertionPoint(insertionPoint);
-                    const auto newBarrier = builder.create<VPURT::DeclareVirtualBarrierOp>(insertionPoint->getLoc());
-                    barrierInfo.addNewBarrier(newBarrier);
-                    const auto newBarrierIdn = barrierInfo.getIndex(newBarrier);
-                    newBarrierBatch.insert(newBarrierIdn);
-                    barrierInfo.addProducers(newBarrierIdn, prevBatch);
-                    barrierInfo.addConsumers(newBarrierIdn, batch);
-                }
-                prevBatch = batch;
-            }
-            barrierInfo.resetBarrier(barrierIdn);
-        } else if (waitBarriers) {
-            barrierInfo.addConsumers(barrierIdn, tasksToAdd);
-            newBarrierBatch.insert(barrierIdn);
-        } else {
-            barrierInfo.addProducers(barrierIdn, tasksToAdd);
-            newBarrierBatch.insert(barrierIdn);
-        }
-    }
-}
-
-// eliminate tasks (if possible) not controlled by barriers, by sharing wait / update barriers of
-// parent / child DMA to create a schedule fully managed by barriers which simplifies runtime handling
-// 1) update barriers: find task(s) without update barrier, find next task (on the same FIFO) with
-// update barrier(s) link update barrier(s) to all tasks that don't have update barrier
-// 2) wait barriers: find task(s) without wait barrier, find previous task (on the same FIFO) with
-// wait barrier(s) link wait barrier(s) to all tasks that don't have wait barrier
-/*
-    Bar0
-      |             Bar0
-    DMA-0            |
-      |     =>  DMA-0 DMA-1
-    DMA-1            |
-      |             Bar1
-    Bar1
-*/
-void shareWaitAndUpdateBarriers(const std::map<VPURT::TaskQueueType, SmallVector<uint32_t>>& dmaTaskOpQueues,
-                                size_t legalVariantCount, BarrierInfo& barrierInfo) {
-    for (const auto& entry : dmaTaskOpQueues) {
-        // operate per queue
-        const auto& dmaQueue = entry.second;
-        // handle update barriers
-        BarrierInfo::TaskSet tasksNoUpdateBarrier;
-        for (const auto& taskInd : dmaQueue) {
-            const auto taskUpdateBarriers = barrierInfo.getUpdateBarriers(taskInd);
-            if (taskUpdateBarriers.empty()) {
-                tasksNoUpdateBarrier.insert(taskInd);
-            } else if (!tasksNoUpdateBarrier.empty()) {
-                linkTasksToBarriers(tasksNoUpdateBarrier, taskUpdateBarriers, false, legalVariantCount, barrierInfo);
-                tasksNoUpdateBarrier.clear();
-            }
-        }
-
-        // handle wait barriers
-        BarrierInfo::TaskSet tasksNoWaitBarrier;
-        for (const auto& taskInd : dmaQueue | reversed) {
-            const auto taskWaitBarriers = barrierInfo.getWaitBarriers(taskInd);
-            if (taskWaitBarriers.empty()) {
-                tasksNoWaitBarrier.insert(taskInd);
-            } else if (!tasksNoWaitBarrier.empty()) {
-                linkTasksToBarriers(tasksNoWaitBarrier, taskWaitBarriers, true, legalVariantCount, barrierInfo);
-                tasksNoWaitBarrier.clear();
-            }
-        }
-    }
-}
-
 // check if barrier is waiting for / updating tasks only on the same queue
 bool taskQueueIsBottleneck(size_t taskInd, size_t barrierInd, bool producers, BarrierInfo& barrierInfo) {
     BarrierInfo::TaskSet tasks;
@@ -433,7 +340,8 @@ void SimplifySchedulePass::safeRunOnFunc() {
     VPURT::orderExecutionTasksAndBarriers(funcOp, barrierInfo);
 
     // 2. make execution fully controlled by barriers
-    shareWaitAndUpdateBarriers(dmaTaskOpQueues, legalVariantCount, barrierInfo);
+    barrierInfo.buildTaskQueueTypeMap();
+    barrierInfo.shareWaitAndUpdateBarriers(legalVariantCount);
     // re-order execution
     VPURT::orderExecutionTasksAndBarriers(funcOp, barrierInfo);
 
@@ -453,7 +361,7 @@ void SimplifySchedulePass::safeRunOnFunc() {
         VPURT::orderExecutionTasksAndBarriers(funcOp, barrierInfo);
 
         // optimize
-        barrierInfo.optimizeBarriers();
+        barrierInfo.optimizeBarriers(/* checkValidSlotCount */ false, /* considerTaskFifoDependency */ false);
 
         // order to by producer after optimization
         VPURT::orderExecutionTasksAndBarriers(funcOp, barrierInfo);

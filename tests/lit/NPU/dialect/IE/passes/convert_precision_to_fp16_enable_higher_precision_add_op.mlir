@@ -62,7 +62,7 @@ func.func @main(%input: tensor<1x4x16x16xf32>) -> tensor<1x4x16x16xf32> {
     %add = IE.Add(%input, %cst) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x4x16x16xf32>, tensor<1x4x1x1xf32> -> tensor<1x4x16x16xf32>
     return %add : tensor<1x4x16x16xf32>
 
-    // CHECK:   [[CST:%.+]] = const.Declare tensor<1x4x1x1xf16> = dense<1.000000e+00> : tensor<1x4x1x1xf32>, [#const.ConvertElemType<f16>]
+    // CHECK:   [[CST:%.+]] = const.Declare tensor<1x4x1x1xf16> = dense<1.000000e+00> : tensor<1x4x1x1xf32>, [#const.CastElemType<f16>]
     // CHECK:   [[ADD:%.+]] = IE.Add([[INPUT]], [[CST]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x4x16x16xf16>, tensor<1x4x1x1xf16> -> tensor<1x4x16x16xf16>
     // CHECK:   return [[ADD]] : tensor<1x4x16x16xf16>
 }

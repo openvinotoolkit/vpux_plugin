@@ -25,12 +25,12 @@ func.func @ReorderVFPipelinePattern(
                 -> tensor<1x48x256x16xf16, {order = #NHWC}> {
       %1 = VPU.NCE.Convolution(%arg3, %arg4, %arg5)
       {multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-      ppe = #VPU.PPETask<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>,
+      opaque_ppe = #VPU.PPEStub<>,
       rawFilterShape = [256, 48, 1, 1], strides = [1, 1]} -> tensor<1x256x256x16xf16, {order = #NHWC}>
       %2 = VPU.SoftMax(%1) {axisInd = 1 : i64, multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>} : tensor<1x256x256x16xf16, {order = #NHWC}> -> tensor<1x256x256x16xf16, {order = #NHWC}>
       %3 = VPU.NCE.Convolution(%2, %arg6, %arg7)
             {multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-            ppe = #VPU.PPETask<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>,
+            opaque_ppe = #VPU.PPEStub<>,
             rawFilterShape = [48, 256, 1, 1], strides = [1, 1]} -> tensor<1x48x256x16xf16, {order = #NHWC}>
       VPU.Yield %3
    }
@@ -62,22 +62,22 @@ func.func @ReorderVFPipelinePattern(
 !qElemType1 = !quant.uniform<u8:f16, 1.000000e+00>
 !qElemType2 = !quant.uniform<u8:f16, 5.000000e-01>
 
-func.func @VfTilingWithSwish(%arg0: tensor<1x16x176x176x!quant.uniform<u8:f16, 0.14376571505677466:128>, {order = #NHWC}>, %cst_0: tensor<1x1x1x16xui8>, %cst_1: tensor<96x16x1x1x!qElemType1, {order = #NHWC}>, %cst_2: tensor<96x1x1x4xsi32>, %cst_3: tensor<96x16x1x1xf16, {order = #NHWC}>, %cst_4: tensor<96x1x1x4xsi32>) -> tensor<1x96x176x176x!qElemType2, {order = #NHWC}>  {
-   %0 = VPU.VerticalFusion (%arg0 as %arg1: tensor<1x16x176x176x!quant.uniform<u8:f16, 0.14376571505677466:128>, {order = #NHWC}>, %cst_0 as %arg2: tensor<1x1x1x16xui8>, %cst_1 as %arg3: tensor<96x16x1x1x!qElemType1, {order = #NHWC}>, %cst_2 as %arg4: tensor<96x1x1x4xsi32>, %cst_3 as %arg5: tensor<96x16x1x1xf16, {order = #NHWC}>, %cst_4 as %arg6: tensor<96x1x1x4xsi32>) attributes {tilingStrategy = [1, 1, 4, 1]} -> tensor<1x96x176x176x!qElemType2, {order = #NHWC}> {
+func.func @VfTilingWithSwish(%arg0: tensor<1x16x176x176x!quant.uniform<u8:f16, 0.14376571505677466:128>, {order = #NHWC}>, %cst_1: tensor<96x16x1x1x!qElemType1, {order = #NHWC}>, %cst_2: tensor<96x1x1x4xsi32>, %cst_3: tensor<96x16x1x1xf16, {order = #NHWC}>, %cst_4: tensor<96x1x1x4xsi32>) -> tensor<1x96x176x176x!qElemType2, {order = #NHWC}>  {
+   %0 = VPU.VerticalFusion (%arg0 as %arg1: tensor<1x16x176x176x!quant.uniform<u8:f16, 0.14376571505677466:128>, {order = #NHWC}>, %cst_1 as %arg3: tensor<96x16x1x1x!qElemType1, {order = #NHWC}>, %cst_2 as %arg4: tensor<96x1x1x4xsi32>, %cst_3 as %arg5: tensor<96x16x1x1xf16, {order = #NHWC}>, %cst_4 as %arg6: tensor<96x1x1x4xsi32>) attributes {tilingStrategy = [1, 1, 4, 1]} -> tensor<1x96x176x176x!qElemType2, {order = #NHWC}> {
       %1 = VPU.NCE.Convolution(%arg1, %arg3, %arg4)
          {multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
          pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-         ppe = #VPU.PPETask<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-         fp_prelu_alpha = 1.000000e+00 : f64>, rawFilterShape = [96, 16, 1, 1], strides = [1, 1]} -> tensor<1x96x176x176xf16, {order = #NHWC}>
+         opaque_ppe = #VPU.PPEStub<>,
+         rawFilterShape = [96, 16, 1, 1], strides = [1, 1]} -> tensor<1x96x176x176xf16, {order = #NHWC}>
 
       %2 = VPU.Swish(%1)
          {beta_value = 1.000000e+00 : f64, multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>} : tensor<1x96x176x176xf16, {order = #NHWC}> -> tensor<1x96x176x176xf16, {order = #NHWC}>
 
-      %3 = VPU.NCE.DepthConvolution(%2, %arg5, %arg6, %arg2)
-         {activation_window_channel_length = 4 : i64, multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
+      %3 = VPU.NCE.DepthConvolution(%2, %arg5, %arg6)
+         {multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
          pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-         ppe = #VPU.PPETask<mode = <NOOP>, clamp_low = 0 : i64, clamp_high = 255 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-         fp_prelu_alpha = 1.000000e+00 : f64>, rawFilterShape = [96, 1, 1, 1], strides = [1, 1]} -> tensor<1x96x176x176x!qElemType2, {order = #NHWC}>
+         opaque_ppe = #VPU.PPEStub<>,
+         rawFilterShape = [96, 1, 1, 1], strides = [1, 1]} -> tensor<1x96x176x176x!qElemType2, {order = #NHWC}>
 
       VPU.Yield %3
    }
@@ -85,28 +85,28 @@ func.func @VfTilingWithSwish(%arg0: tensor<1x16x176x176x!quant.uniform<u8:f16, 0
    return %0 : tensor<1x96x176x176x!qElemType2, {order = #NHWC}>
 
    // CHECK: [[SLICE0:%.+]] = VPU.Slice %arg0 [0, 0, 0, 0] [1, 16, 44, 176] : tensor<1x16x176x176x!qElemType, {order = #NHWC}> to tensor<1x16x44x176x!qElemType, {order = #NHWC}>
-   // CHECK: [[CONV0:%.+]] = VPU.NCE.Convolution([[SLICE0]], %arg2, %arg3) {multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, ppe = #VPU.PPETask<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>, rawFilterShape = [96, 16, 1, 1], strides = [1, 1]} -> tensor<1x96x44x176xf16, {order = #NHWC}>
+   // CHECK: [[CONV0:%.+]] = VPU.NCE.Convolution([[SLICE0]], %arg1, %arg2) {multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>, opaque_ppe = #VPU.PPEStub<>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, rawFilterShape = [96, 16, 1, 1], strides = [1, 1]} -> tensor<1x96x44x176xf16, {order = #NHWC}>
    // CHECK: [[SWISH0:%.+]] = VPU.Swish([[CONV0]]) {beta_value = 1.000000e+00 : f64, multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>} : tensor<1x96x44x176xf16, {order = #NHWC}> -> tensor<1x96x44x176xf16, {order = #NHWC}>
 
    // CHECK: [[SLICE1:%.+]] = VPU.Slice %arg0 [0, 0, 44, 0] [1, 16, 44, 176] : tensor<1x16x176x176x!qElemType, {order = #NHWC}> to tensor<1x16x44x176x!qElemType, {order = #NHWC}>
 
-   // CHECK: [[CONV1:%.+]] = VPU.NCE.Convolution([[SLICE1]], %arg2, %arg3) {multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, ppe = #VPU.PPETask<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>, rawFilterShape = [96, 16, 1, 1], strides = [1, 1]} -> tensor<1x96x44x176xf16, {order = #NHWC}>
+   // CHECK: [[CONV1:%.+]] = VPU.NCE.Convolution([[SLICE1]], %arg1, %arg2) {multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>, opaque_ppe = #VPU.PPEStub<>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, rawFilterShape = [96, 16, 1, 1], strides = [1, 1]} -> tensor<1x96x44x176xf16, {order = #NHWC}>
    // CHECK: [[SWISH1:%.+]] = VPU.Swish([[CONV1]]) {beta_value = 1.000000e+00 : f64, multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>} : tensor<1x96x44x176xf16, {order = #NHWC}> -> tensor<1x96x44x176xf16, {order = #NHWC}>
-   // CHECK: [[DEPTHCONV0:%.+]] = VPU.NCE.DepthConvolution([[SWISH0]], %arg4, %arg5, %arg1 ) {activation_window_channel_length = 4 : i64, multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, ppe = #VPU.PPETask<mode = <NOOP>, clamp_low = 0 : i64, clamp_high = 255 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>, rawFilterShape = [96, 1, 1, 1], strides = [1, 1]} -> tensor<1x96x44x176x!qElemType2, {order = #NHWC}>
+   // CHECK: [[DEPTHCONV0:%.+]] = VPU.NCE.DepthConvolution([[SWISH0]], %arg3, %arg4) {multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>, opaque_ppe = #VPU.PPEStub<>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, rawFilterShape = [96, 1, 1, 1], strides = [1, 1]} -> tensor<1x96x44x176x!qElemType2, {order = #NHWC}>
 
    // CHECK: [[SLICE2:%.+]] = VPU.Slice %arg0 [0, 0, 88, 0] [1, 16, 44, 176] : tensor<1x16x176x176x!qElemType, {order = #NHWC}> to tensor<1x16x44x176x!qElemType, {order = #NHWC}>
 
-   // CHECK: [[CONV2:%.+]] = VPU.NCE.Convolution([[SLICE2]], %arg2, %arg3) {multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, ppe = #VPU.PPETask<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>, rawFilterShape = [96, 16, 1, 1], strides = [1, 1]} -> tensor<1x96x44x176xf16, {order = #NHWC}>
+   // CHECK: [[CONV2:%.+]] = VPU.NCE.Convolution([[SLICE2]], %arg1, %arg2) {multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>, opaque_ppe = #VPU.PPEStub<>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, rawFilterShape = [96, 16, 1, 1], strides = [1, 1]} -> tensor<1x96x44x176xf16, {order = #NHWC}>
    // CHECK: [[SWISH2:%.+]] = VPU.Swish([[CONV2]]) {beta_value = 1.000000e+00 : f64, multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>} : tensor<1x96x44x176xf16, {order = #NHWC}> -> tensor<1x96x44x176xf16, {order = #NHWC}>
-   // CHECK: [[DEPTHCONV1:%.+]] = VPU.NCE.DepthConvolution([[SWISH1]], %arg4, %arg5, %arg1 ) {activation_window_channel_length = 4 : i64, multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, ppe = #VPU.PPETask<mode = <NOOP>, clamp_low = 0 : i64, clamp_high = 255 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>, rawFilterShape = [96, 1, 1, 1], strides = [1, 1]} -> tensor<1x96x44x176x!qElemType2, {order = #NHWC}>
+   // CHECK: [[DEPTHCONV1:%.+]] = VPU.NCE.DepthConvolution([[SWISH1]], %arg3, %arg4) {multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>, opaque_ppe = #VPU.PPEStub<>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, rawFilterShape = [96, 1, 1, 1], strides = [1, 1]} -> tensor<1x96x44x176x!qElemType2, {order = #NHWC}>
 
 
    // CHECK: [[SLICE3:%.+]] = VPU.Slice %arg0 [0, 0, 132, 0] [1, 16, 44, 176] : tensor<1x16x176x176x!qElemType, {order = #NHWC}> to tensor<1x16x44x176x!qElemType, {order = #NHWC}>
-   // CHECK: [[CONV3:%.+]] = VPU.NCE.Convolution([[SLICE3]], %arg2, %arg3) {multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, ppe = #VPU.PPETask<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>, rawFilterShape = [96, 16, 1, 1], strides = [1, 1]} -> tensor<1x96x44x176xf16, {order = #NHWC}>
+   // CHECK: [[CONV3:%.+]] = VPU.NCE.Convolution([[SLICE3]], %arg1, %arg2) {multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>, opaque_ppe = #VPU.PPEStub<>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, rawFilterShape = [96, 16, 1, 1], strides = [1, 1]} -> tensor<1x96x44x176xf16, {order = #NHWC}>
    // CHECK: [[SWISH3:%.+]] = VPU.Swish([[CONV3]]) {beta_value = 1.000000e+00 : f64, multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>} : tensor<1x96x44x176xf16, {order = #NHWC}> -> tensor<1x96x44x176xf16, {order = #NHWC}>
-   // CHECK: [[DEPTHCONV2:%.+]] = VPU.NCE.DepthConvolution([[SWISH2]], %arg4, %arg5, %arg1 ) {activation_window_channel_length = 4 : i64, multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, ppe = #VPU.PPETask<mode = <NOOP>, clamp_low = 0 : i64, clamp_high = 255 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>, rawFilterShape = [96, 1, 1, 1], strides = [1, 1]} -> tensor<1x96x44x176x!qElemType2, {order = #NHWC}>
+   // CHECK: [[DEPTHCONV2:%.+]] = VPU.NCE.DepthConvolution([[SWISH2]], %arg3, %arg4) {multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>, opaque_ppe = #VPU.PPEStub<>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, rawFilterShape = [96, 1, 1, 1], strides = [1, 1]} -> tensor<1x96x44x176x!qElemType2, {order = #NHWC}>
 
-   // CHECK: [[DEPTHCONV3:%.+]] = VPU.NCE.DepthConvolution([[SWISH3]], %arg4, %arg5, %arg1 ) {activation_window_channel_length = 4 : i64, multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, ppe = #VPU.PPETask<mode = <NOOP>, clamp_low = 0 : i64, clamp_high = 255 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>, rawFilterShape = [96, 1, 1, 1], strides = [1, 1]} -> tensor<1x96x44x176x!qElemType2, {order = #NHWC}>
+   // CHECK: [[DEPTHCONV3:%.+]] = VPU.NCE.DepthConvolution([[SWISH3]], %arg3, %arg4) {multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>, opaque_ppe = #VPU.PPEStub<>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, rawFilterShape = [96, 1, 1, 1], strides = [1, 1]} -> tensor<1x96x44x176x!qElemType2, {order = #NHWC}>
 
    // CHECK: [[CONCAT:%.+]] = VPU.Concat([[DEPTHCONV0]], [[DEPTHCONV1]], [[DEPTHCONV2]], [[DEPTHCONV3]]) {static_offsets = {{\[\[}}0, 0, 0, 0], [0, 0, 44, 0], [0, 0, 88, 0], [0, 0, 132, 0]]} : tensor<1x96x44x176x!qElemType2, {order = #NHWC}>, tensor<1x96x44x176x!qElemType2, {order = #NHWC}>, tensor<1x96x44x176x!qElemType2, {order = #NHWC}>, tensor<1x96x44x176x!qElemType2, {order = #NHWC}> -> tensor<1x96x176x176x!qElemType2, {order = #NHWC}>
    // CHECK: return [[CONCAT]] : tensor<1x96x176x176x!qElemType2, {order = #NHWC}>
@@ -122,8 +122,7 @@ func.func @VfTilingWithAbs(%arg0: tensor<1x32x48x48xf16, {order = #NHWC}>) -> te
    %0 = VPU.VerticalFusion (%arg0 as %arg1: tensor<1x32x48x48xf16, {order = #NHWC}>) attributes {tilingStrategy = [1, 1, 2, 1]} -> tensor<1x32x48x48xf16, {order = #NHWC}> {
       %1 = VPU.Abs(%arg1) {multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>} : tensor<1x32x48x48xf16, {order = #NHWC}> -> tensor<1x32x48x48xf16, {order = #NHWC}>
       %2 = VPU.NCE.Eltwise(%1, %1)
-         {multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>, op_type = #VPU.eltwise_type<ADD>, ppe = #VPU.PPETask<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-         quant_mult = [16384], quant_shift = [36], quant_post_shift = 0 : i64, in1_quant_mult = [19729], in2_quant_mult = [19729], fp_prelu_alpha = 1.000000e+00 : f64>} -> tensor<1x32x48x48xf16, {order = #NHWC}>
+         {multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>, op_type = #VPU.eltwise_type<ADD>, opaque_ppe = #VPU.PPEStub<>} -> tensor<1x32x48x48xf16, {order = #NHWC}>
       VPU.Yield %2
    }
    return %0 : tensor<1x32x48x48xf16, {order = #NHWC}>
@@ -156,8 +155,7 @@ func.func @VfTilingWithPRelu(%arg0: tensor<1x32x48x48xf16, {order = #NHWC}>) -> 
    %0 = VPU.VerticalFusion (%arg0 as %arg1: tensor<1x32x48x48xf16, {order = #NHWC}>, %cst as %arg2: tensor<1x32x1x1xf16, {order = #NHWC}>) attributes {tilingStrategy = [1, 1, 2, 1]} -> tensor<1x32x48x48xf16, {order = #NHWC}> {
       %1 = VPU.PRelu(%arg1, %arg2) {multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>} : tensor<1x32x48x48xf16, {order = #NHWC}>, tensor<1x32x1x1xf16, {order = #NHWC}> -> tensor<1x32x48x48xf16, {order = #NHWC}>
       %2 = VPU.NCE.Eltwise(%1, %1)
-         {multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>, op_type = #VPU.eltwise_type<ADD>, ppe = #VPU.PPETask<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-         quant_mult = [16384], quant_shift = [36], quant_post_shift = 0 : i64, in1_quant_mult = [19729], in2_quant_mult = [19729], fp_prelu_alpha = 1.000000e+00 : f64>} -> tensor<1x32x48x48xf16, {order = #NHWC}>
+         {multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>, op_type = #VPU.eltwise_type<ADD>, opaque_ppe = #VPU.PPEStub<>} -> tensor<1x32x48x48xf16, {order = #NHWC}>
       VPU.Yield %2
    }
    return %0 : tensor<1x32x48x48xf16, {order = #NHWC}>

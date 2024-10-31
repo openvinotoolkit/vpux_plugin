@@ -7,6 +7,7 @@
 
 #include "vpux/compiler/core/layers.hpp"
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
+#include "vpux/compiler/dialect/IE/utils/quantization.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 
@@ -23,14 +24,6 @@ struct OperationPart {
     mlir::ArrayAttr padBegin;
     mlir::ArrayAttr padEnd;
 };
-
-mlir::Operation* createFQ(mlir::PatternRewriter& rewriter, mlir::Operation* inputOp, IE::FakeQuantizeOp fq) {
-    const auto outputType = fq.getOutput().getType().cast<vpux::NDTypeInterface>();
-    const auto newOutputType = outputType.changeShape(getShape(inputOp->getResult(0)));
-    return rewriter.create<IE::FakeQuantizeOp>(fq.getLoc(), newOutputType, inputOp->getResult(0), fq.getInputLow(),
-                                               fq.getInputHigh(), fq.getOutputLow(), fq.getOutputHigh(),
-                                               fq.getLevelsAttr(), fq.getLowFpTypeAttr(), fq.getAutoBroadcastAttr());
-}
 
 mlir::LogicalResult generalSplitter(mlir::Operation* origOp, mlir::PatternRewriter& rewriter,
                                     mlir::ArrayAttr stridesAttr, ArrayRef<int64_t> kernelSize, mlir::ArrayAttr padBegin,
@@ -91,7 +84,8 @@ mlir::LogicalResult generalSplitter(mlir::Operation* origOp, mlir::PatternRewrit
             // TODO: temporary FQ propagation
             if (inputFQ != nullptr && outputFQ != nullptr && (i != 0 || j != 0)) {
                 slicedInput->setOperand(0, inputFQ->getOperand(0));
-                slicedInput = createFQ(rewriter, slicedInput, inputFQ);
+                slicedInput = vpux::IE::createFQ(rewriter, slicedInput->getResult(0), inputFQ,
+                                                 takeOpLoc(inputFQ, StringLiteral("fq_in_{0}_{1}"), i, j));
             }
 
             auto newPaddingEnd = paddingEnd;
@@ -107,7 +101,8 @@ mlir::LogicalResult generalSplitter(mlir::Operation* origOp, mlir::PatternRewrit
 
             // TODO: temporary FQ propagation
             if (inputFQ != nullptr && outputFQ != nullptr) {
-                newOp = createFQ(rewriter, newOp, outputFQ);
+                newOp = vpux::IE::createFQ(rewriter, newOp->getResult(0), outputFQ,
+                                           takeOpLoc(inputFQ, StringLiteral("fq_out_{0}_{1}"), i, j));
             }
 
             wSliced.push_back(newOp->getResult(0));
@@ -159,10 +154,10 @@ mlir::LogicalResult ConvolutionRewriter::matchAndRewrite(IE::ConvolutionOp origO
             origOp, rewriter, origOp.getStrides(), {filterShape[Dims4D::Act::W], filterShape[Dims4D::Act::H]},
             origOp.getPadsBegin(), origOp.getPadsEnd(),
             [&](mlir::Location loc, mlir::Value input, OperationPart part) -> mlir::Operation* {
-                return rewriter.create<IE::ConvolutionOp>(loc, input, origOp.getFilter(), origOp.getBias(),
-                                                          part.strides, part.padBegin, part.padEnd,
-                                                          origOp.getDilations(), origOp.getPostOpAttr(),
-                                                          origOp.getClampAttr(), origOp.getStaticScaleAttr());
+                return rewriter.create<IE::ConvolutionOp>(
+                        loc, input, origOp.getFilter(), origOp.getBias(), part.strides, part.padBegin, part.padEnd,
+                        origOp.getDilations(), origOp.getPostOpAttr(), origOp.getClampAttr(),
+                        origOp.getStaticScaleAttr(), origOp.getOutputChannelsAttr(), origOp.getInputChannelsAttr());
             },
             _log.nest());
 }

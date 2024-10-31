@@ -80,10 +80,6 @@ void PipelineStrategy40XX::buildPipeline(mlir::PassManager& pm, const intel_npu:
 
     const auto enableProfiling = config.get<intel_npu::PERF_COUNT>();
     const auto compilationMode = getCompilationMode(config);
-    const auto isElf = isELFEnabled(config);
-
-    VPUX_THROW_WHEN(!isElf && numOfDMAPorts.hasValue() && numOfDMAPorts.getValue() > 1,
-                    "With Graphfile backend only single DMA is supported");
 
     auto backendCompilationOptions =
             BackendCompilationOptions40XX::createFromString(config.get<intel_npu::BACKEND_COMPILATION_PARAMS>());
@@ -104,9 +100,9 @@ void PipelineStrategy40XX::buildPipeline(mlir::PassManager& pm, const intel_npu:
         options->enableConvertAvgPoolToDWConv = false;
         options->enableHandleAsymmetricStrides = false;
         options->enablePartialWorkloadManagement = backendCompilationOptions->enablePartialWorkloadManagement;
-
-        // TODO: E-108844 Support Compressed activation with Partial workload management
-        if (!isElf || backendCompilationOptions->enablePartialWorkloadManagement) {
+        options->wlmOptimizationThreshold = backendCompilationOptions->wlmOptimizationThreshold;
+        // TODO: E#108844 Support Compressed activation with Partial workload management
+        if (backendCompilationOptions->enablePartialWorkloadManagement) {
             options->enableCompressActivationSpill = false;
         }
         buildDefaultHWModePipeline(pm, *options, log.nest());
@@ -125,6 +121,7 @@ void PipelineStrategy40XX::buildELFPipeline(mlir::PassManager& pm, const intel_n
     const auto compilationMode = getCompilationMode(config);
     auto backendCompilationOptions =
             BackendCompilationOptions40XX::createFromString(config.get<intel_npu::BACKEND_COMPILATION_PARAMS>());
+
     VPUX_THROW_UNLESS(backendCompilationOptions != nullptr,
                       "build ELF pipeline failed to parse BACKEND_COMPILATION_PARAMS: {0}",
                       config.get<intel_npu::BACKEND_COMPILATION_PARAMS>());
@@ -136,6 +133,7 @@ void PipelineStrategy40XX::buildELFPipeline(mlir::PassManager& pm, const intel_n
         setupPWLMCompilationParams(options->optimizationLevel, *backendCompilationOptions);
         dpuDryRunMode = VPU::getDPUDryRunMode(options->dpuDryRun);
         backendCompilationOptions->enableDMAProfiling = options->enableDMAProfiling.getValue();
+        backendCompilationOptions->enableShaveDDRAccessOptimization = options->enableShaveDDRAccessOptimization;
     }
     arch40xx::buildLowerVPUIP2ELFPipeline(pm, *backendCompilationOptions, log.nest(), dpuDryRunMode);
 }

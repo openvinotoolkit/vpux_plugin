@@ -21,9 +21,9 @@ else:
     outputDir = sys.argv[2]
 
 print("Start looking for IR-files in directory:", rootDir)
-print("Results will be saved in directory:", os.path.abspath(outputDir) )
+print("Results will be saved in directory:", os.path.abspath(outputDir))
 
-list_of_IR_files = file_func.get_list_of_all_IRs(rootDir) # Get list of all IRs for processing
+list_of_IR_files = file_func.get_list_of_all_IRs(rootDir)  # Get list of all IRs for processing
 dict_layers_per_IR = layer_func.create_dictionary_network_names_vs_layers(list_of_IR_files)
 
 print("\nWrite data to csv-files.")

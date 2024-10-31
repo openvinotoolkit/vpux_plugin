@@ -260,3 +260,126 @@ func.func @MovePermuteCastBeforeTilingCopyWithExplicitAttr(%arg0: !InputDistribu
     //CHECK:              }
     //CHECK:              return [[COPY]] : memref<1x48x192x16xf16, #NHWC, @DDR>
 }
+
+// -----
+
+#NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+#NWCH = affine_map<(d0, d1, d2, d3) -> (d0, d3, d1, d2)>
+
+!InputDistributed = !VPUIP.DistributedBuffer<
+    1x48x192x16xf16, #NCHW, @CMX_NN, {
+    mode = "OVERLAPPED",
+    num_tiles = [1, 1, 6, 1],
+    num_clusters = 6,
+    uniform_distributed_segments,
+    compute_shapes = [[1, 48, 32, 16], [1, 48, 32, 16], [1, 48, 32, 16], [1, 48, 32, 16], [1, 48, 32, 16], [1, 48, 32, 16]],
+    compute_offsets = [[0, 0, 0, 0], [0, 0, 32, 0], [0, 0, 64, 0], [0, 0, 96, 0], [0, 0, 128, 0], [0, 0, 160, 0]],
+    memory_shapes = [[1, 48, 32, 16], [1, 48, 32, 16], [1, 48, 32, 16], [1, 48, 32, 16], [1, 48, 32, 16], [1, 48, 32, 16]],
+    memory_offsets = [[0, 0, 0, 0], [0, 0, 32, 0], [0, 0, 64, 0], [0, 0, 96, 0], [0, 0, 128, 0], [0, 0, 160, 0]]
+}>
+
+
+// CHECK-LABEL: @MoveOverlappedPermuteCastBeforeTilingCopyWithExplicitAttr
+// CHECK-SAME:  [[INPUT:%.+]]: !VPUIP.DistributedBuffer<1x48x192x16xf16, #NCHW, @CMX_NN, {mode = "OVERLAPPED"
+func.func @MoveOverlappedPermuteCastBeforeTilingCopyWithExplicitAttr(%arg0: !InputDistributed) -> memref<1x192x16x48xf16, #NWCH, @DDR> {
+    %0 = memref.alloc() : memref<1x48x192x16xf16, @DDR>
+    %1 = VPUIP.NCEClusterTiling inputs(%arg0 as %arg1: memref<1x48x192x16xf16, @CMX_NN>) outputs(%0 as %arg2: memref<1x48x192x16xf16, @DDR>) -> memref<1x48x192x16xf16, @DDR> {
+        VPUIP.Copy inputs(%arg1: memref<1x48x192x16xf16, @CMX_NN>) outputs(%arg2: memref<1x48x192x16xf16, @DDR>) -> memref<1x48x192x16xf16, @DDR>
+    }
+    %2 = VPUIP.PermuteCast {dst_order = #NWCH, mem_perm = #NCHW} inputs(%1: memref<1x48x192x16xf16, @DDR>) -> memref<1x192x16x48xf16, #NWCH, @DDR>
+    return %2 : memref<1x192x16x48xf16, #NWCH, @DDR>
+
+    //CHECK:              [[PERMUTECAST:%.+]] = VPUIP.PermuteCast {dst_order = #NWCH, mem_perm = #NCHW} inputs([[INPUT]] : !VPUIP.DistributedBuffer<1x48x192x16xf16, #NCHW, @CMX_NN, {mode = "OVERLAPPED", num_tiles = [1, 1, 6, 1], num_clusters = 6 : i64, uniform_distributed_segments,
+    //CHECK-SAME:              -> !VPUIP.DistributedBuffer<1x192x16x48xf16, #NWCH, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 6, 1, 1], num_clusters = 6 : i64, uniform_distributed_segments,
+    //CHECK:              [[ALLOC:%.+]] = memref.alloc() : memref<1x192x16x48xf16, #NWCH, @DDR>
+    //CHECK:              [[COPY:%.+]] = VPUIP.NCEClusterTiling
+    //CHECK-SAME:             inputs([[PERMUTECAST]] as {{[^:]+}}: memref<1x192x16x48xf16, #NWCH, @CMX_NN>)
+    //CHECK-SAME:             outputs([[ALLOC]] as {{[^:]+}}: memref<1x192x16x48xf16, #NWCH, @DDR>)
+    //CHECK-SAME:             -> memref<1x192x16x48xf16, #NWCH, @DDR> {
+    //CHECK:                     VPUIP.Copy
+    //CHECK:              }
+    //CHECK:              return [[COPY]] : memref<1x192x16x48xf16, #NWCH, @DDR>
+}
+
+// -----
+
+#NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+#NWCH = affine_map<(d0, d1, d2, d3) -> (d0, d3, d1, d2)>
+
+!InputDistributed = !VPUIP.DistributedBuffer<
+    1x48x192x16xf16, #NCHW, @CMX_NN, {
+    mode = "OVERLAPPED",
+    num_tiles = [1, 1, 6, 1],
+    num_clusters = 6,
+    uniform_distributed_segments,
+    compute_shapes = [[1, 48, 34, 16], [1, 48, 34, 16], [1, 48, 34, 16], [1, 48, 34, 16], [1, 48, 34, 16], [1, 48, 34, 16]],
+    compute_offsets = [[0, 0, 0, 0], [0, 0, 30, 0], [0, 0, 62, 0], [0, 0, 94, 0], [0, 0, 126, 0], [0, 0, 158, 0]],
+    memory_shapes = [[1, 48, 34, 16], [1, 48, 34, 16], [1, 48, 34, 16], [1, 48, 34, 16], [1, 48, 34, 16], [1, 48, 34, 16]],
+    memory_offsets = [[0, 0, 0, 0], [0, 0, 30, 0], [0, 0, 62, 0], [0, 0, 94, 0], [0, 0, 126, 0], [0, 0, 158, 0]]
+}>
+
+
+// CHECK-LABEL: @NotMoveOverlappedPermuteCastBeforeTilingCopyWithExplicitAttr
+// CHECK-SAME:  [[INPUT:%.+]]: !VPUIP.DistributedBuffer<1x48x192x16xf16, #NCHW, @CMX_NN, {mode = "OVERLAPPED"
+func.func @NotMoveOverlappedPermuteCastBeforeTilingCopyWithExplicitAttr(%arg0: !InputDistributed) -> memref<1x192x16x48xf16, #NWCH, @DDR> {
+    %0 = memref.alloc() : memref<1x48x192x16xf16, @DDR>
+    %1 = VPUIP.NCEClusterTiling inputs(%arg0 as %arg1: memref<1x48x192x16xf16, @CMX_NN>) outputs(%0 as %arg2: memref<1x48x192x16xf16, @DDR>) -> memref<1x48x192x16xf16, @DDR> {
+        VPUIP.Copy inputs(%arg1: memref<1x48x192x16xf16, @CMX_NN>) outputs(%arg2: memref<1x48x192x16xf16, @DDR>) -> memref<1x48x192x16xf16, @DDR>
+    }
+    %2 = VPUIP.PermuteCast {dst_order = #NWCH, mem_perm = #NCHW} inputs(%1: memref<1x48x192x16xf16, @DDR>) -> memref<1x192x16x48xf16, #NWCH, @DDR>
+    return %2 : memref<1x192x16x48xf16, #NWCH, @DDR>
+
+    //CHECK:              [[ALLOC:%.+]] = memref.alloc() : memref<1x48x192x16xf16, @DDR>
+    //CHECK:              [[COPY:%.+]] = VPUIP.NCEClusterTiling
+    //CHECK-SAME:             inputs([[INPUT]] as {{[^:]+}}: memref<1x48x192x16xf16, @CMX_NN>)
+    //CHECK-SAME:             outputs([[ALLOC]] as {{[^:]+}}: memref<1x48x192x16xf16, @DDR>)
+    //CHECK-SAME:             -> memref<1x48x192x16xf16, @DDR> {
+    //CHECK:                     VPUIP.Copy
+    //CHECK:              }
+    //CHECK:              [[PERMUTECAST:%.+]] = VPUIP.PermuteCast {dst_order = #NWCH, mem_perm = #NCHW} inputs([[COPY]] : memref<1x48x192x16xf16, @DDR>)
+    //CHECK-SAME:              -> memref<1x192x16x48xf16, #NWCH, @DDR>
+
+    //CHECK:              return [[PERMUTECAST]] : memref<1x192x16x48xf16, #NWCH, @DDR>
+}
+
+// -----
+
+#NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
+!InputDistributed = !VPUIP.DistributedBuffer<
+    1x64x64x64xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, @CMX_NN, {
+    mode = "OVERLAPPED",
+    num_tiles = [1, 1, 4, 1],
+    num_clusters = 4 : i64,
+    uniform_distributed_segments,
+    compute_shapes = [[1, 64, 16, 64], [1, 64, 16, 64], [1, 64, 16, 64], [1, 64, 16, 64]],
+    compute_offsets = [[0, 0, 0, 0], [0, 0, 16, 0], [0, 0, 32, 0], [0, 0, 48, 0]],
+    memory_shapes = [[1, 64, 16, 64], [1, 64, 16, 64], [1, 64, 16, 64], [1, 64, 16, 64]],
+    memory_offsets = [[0, 0, 0, 0], [0, 0, 16, 0], [0, 0, 32, 0], [0, 0, 48, 0]]
+}>
+
+// CHECK-LABEL: @NotMoveOverlappedPermuteCastBeforeTilingCopyWithNonTrivialReorder
+// CHECK-SAME:  [[INPUT:%.+]]: !VPUIP.DistributedBuffer<1x64x64x64xf16, #NHWC, @CMX_NN, {mode = "OVERLAPPED"
+func.func @NotMoveOverlappedPermuteCastBeforeTilingCopyWithNonTrivialReorder(%arg0: !InputDistributed) -> memref<1x64x64x64xf16> {
+    %alloc = memref.alloc() : memref<1x64x64x64xf16, #NHWC>
+    %cluster_copy = VPUIP.NCEClusterTiling inputs(%arg0 as %arg1: memref<1x64x64x64xf16, #NHWC, @CMX_NN>) outputs(%alloc as %arg2: memref<1x64x64x64xf16, #NHWC>) -> memref<1x64x64x64xf16, #NHWC> {
+        VPUIP.Copy inputs(%arg1 : memref<1x64x64x64xf16, #NHWC, @CMX_NN>) outputs(%arg2 : memref<1x64x64x64xf16, #NHWC>) -> memref<1x64x64x64xf16, #NHWC>
+    }
+    %permute_cast = VPUIP.PermuteCast {dst_order = #NCHW, mem_perm = #NCHW} inputs(%cluster_copy : memref<1x64x64x64xf16, #NHWC>) -> memref<1x64x64x64xf16>
+
+    return %permute_cast : memref<1x64x64x64xf16>
+
+    // CHECK:              [[ALLOC:%.+]] = memref.alloc() : memref<1x64x64x64xf16, #NHWC>
+    // CHECK:              [[COPY:%.+]] = VPUIP.NCEClusterTiling
+    // CHECK-SAME:             inputs([[INPUT]] as %arg1: memref<1x64x64x64xf16, #NHWC, @CMX_NN>)
+    // CHECK-SAME:             outputs([[ALLOC]] as %arg2: memref<1x64x64x64xf16, #NHWC>)
+    // CHECK-SAME:             -> memref<1x64x64x64xf16, #NHWC> {
+    // CHECK:                     VPUIP.Copy
+    // CHECK:              }
+    // CHECK:              [[PERMUTECAST:%.+]] = VPUIP.PermuteCast {dst_order = #NCHW, mem_perm = #NCHW} inputs([[COPY]] : memref<1x64x64x64xf16, #NHWC>)
+    // CHECK-SAME:              -> memref<1x64x64x64xf16>
+    // CHECK:              return [[PERMUTECAST]] : memref<1x64x64x64xf16>
+}

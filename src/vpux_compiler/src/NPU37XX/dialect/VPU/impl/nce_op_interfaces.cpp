@@ -5,6 +5,7 @@
 
 #include "vpux/compiler/dialect/VPU/interfaces/nce_op_interfaces.hpp"
 #include "vpux/compiler/NPU37XX/dialect/VPU/IR/ops_interfaces.hpp"
+#include "vpux/compiler/dialect/VPU/IR/dialect.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
 
 using namespace vpux;
@@ -70,6 +71,7 @@ public:
 class ConvolutionOpModel :
         public VPU::NCEConvolutionOpModel<ConvolutionOpModel, VPU::NCEConvolutionOp>,
         public ConvMpeModeModel {};
+class ReduceOpModel : public VPU::NCEReduceOpModel<ReduceOpModel, VPU::NCEReduceOp>, public ConvMpeModeModel {};
 class DepthConvolutionOpModel :
         public VPU::NCEConvolutionOpModel<DepthConvolutionOpModel, VPU::NCEDepthConvolutionOp>,
         public Cuboid16MpeModeModel {};
@@ -102,5 +104,6 @@ void vpux::VPU::arch37xx::registerNCEOpInterface(mlir::DialectRegistry& registry
         VPU::NCEPermuteOp::attachInterface<PermuteOpModel>(*ctx);
         VPU::NCEInterpolateOp::attachInterface<InterpolateOpModel>(*ctx);
         VPU::NCEMatMulOp::attachInterface<MatMulOpModel>(*ctx);
+        VPU::NCEReduceOp::attachInterface<ReduceOpModel>(*ctx);
     });
 }

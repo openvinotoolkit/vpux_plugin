@@ -78,6 +78,40 @@ def OptimizeConcatViewCopies : PassBase<"optimize-concat-view-copies", "vpux::Fu
 }
 
 //
+// OptimizeSubviewCopies
+//
+
+def OptimizeSubviewCopies : PassBase<"optimize-subview-copies", "vpux::FunctionPass"> {
+    let summary = "Optimize SubView Op to remove unnecessary copies or reduce copies data size";
+
+    let description = [{
+        This pass handles the following pattern:
+        %source -> n x Subview -> n x CopyOp -> n x (input act of NCEClusterTask<CONV>)
+
+        This will become:
+        %source -> Copyop -> n x Subview -> n x (input act of NCEClusterTask<CONV>)
+
+        The following restrictions apply:
+            * Subview can only have CopyOp consumers which go into input 0 of a DPU Conv
+            * Subview is of kind: 1xCx1x1 -> VPUIP.Subview -> 1xC'x1x1, with C > C'
+            * if Conv is distributed, the input **must** be DUPLICATED
+            * all Convs must individually fit in CMX with a buff %source's size
+
+        Additionally, if %source is the result of a compatible CMX -> DDR DMA we can also optimize it as well:
+        %cmx_source -> DMA to DDR  -> n x Subview over C -> n x DMA to CMX ->  n x NCEConv
+            to
+        %cmx_source  -> (optional DistributedCast) -> n x Subview over C ->  n x NCEConv
+
+        A compatible CMX -> DMA DMA must meet the following requirements:
+            * if Distributed must be of DUPLICATED-like mode
+            * the input of this DMA must fit in CMX with all the children Convs after the Subviews
+
+    }];
+
+    let constructor = "vpux::VPUIP::createOptimizeSubviewCopiesPass()";
+}
+
+//
 // OptimizeParallelCopies
 //
 
@@ -244,6 +278,21 @@ def PatchWeightsTable : PassBase<"patch-weight-table", "vpux::FunctionPass"> {
     let constructor = "vpux::VPUIP::createPatchWeightsTablePass()";
 }
 
+//
+// PatchPopulateWeightTableWithShave
+//
+
+def PatchPopulateWeightTableWithShave : PassBase<"patch-populate-weight-table-with-shave", "vpux::FunctionPass"> {
+    let summary = "Adjusts weights pointers after memory scheduling and before loosing data dependencies due to slices";
+
+    let description = [{
+        This pass updates weight base address and weight offset for Shave populating the weight table.
+    }];
+
+    let constructor = "vpux::VPUIP::createPatchPopulateWeightTableWithShavePass()";
+}
+
+//
 // Linearization
 //
 
@@ -517,28 +566,6 @@ def FeasibleAllocation : PassBase<"feasible-allocation", "vpux::FunctionPass"> {
 }
 
 //
-// MaximizeUPACycles
-//
-
-def MaximizeUPACycles : PassBase<"maximize-upa-cycles", "vpux::FunctionPass"> {
-    let summary = "Expand cycles for UPA ops";
-
-    let description = [{
-        For each SHAVE_UPA executor the pass recalculates cycleBegin, cycleEnd and cycleCost
-        in order to expand cycle from latest producer of executor to nearest consumer.
-        It takes maximum of cycleEnd value of producers as new cycleBegin and minimum of cycleBegin
-        of consumers as new cycleEnd.
-    }];
-
-    let constructor = "vpux::VPUIP::createMaximizeUPACyclesPass()";
-
-    let dependentDialects = [
-        "vpux::VPUIP::VPUIPDialect"
-    ];
-
-}
-
-//
 // WrapWithPermuteAsNNDMA
 //
 
@@ -597,10 +624,10 @@ def ConvertExpand : PassBase<"convert-expand", "vpux::FunctionPass"> {
 //
 
 def ConvertToDMA: PassBase<"convert-to-dma", "vpux::FunctionPass"> {
-    let summary = "Convert Permute and DepthToSpace from SW/UPA ops to DMA ops";
+    let summary = "Convert Permute and DepthToSpace from SW ops to DMA ops";
 
     let description = [{
-        This pass will convert some SW/UPA operations (e.g. DepthToSpace, Permute) to DMA ops
+        This pass will convert some SW operations (e.g. DepthToSpace, Permute) to DMA ops
         if it is possible to achieve better performance
     }];
 
@@ -609,21 +636,6 @@ def ConvertToDMA: PassBase<"convert-to-dma", "vpux::FunctionPass"> {
     let dependentDialects = [
         "vpux::VPUIP::VPUIPDialect"
     ];
-}
-
-//
-// UPAProfiling
-//
-
-def UPAProfiling : PassBase<"upa-profiling", "vpux::ModulePass"> {
-    let summary = "upa task profiling";
-
-    let description = [{
-        This pass allocate required memory in DDR space for UPA profiling and is own profiling output to the network
-    }];
-
-    let constructor = "vpux::VPUIP::createUPAProfilingPass()";
-
 }
 
 //
@@ -1014,7 +1026,7 @@ def FuseConstants : PassBase<"fuse-constants", "vpux::FunctionPass"> {
 
     let description = [{
         Concatenates input constants into one in the following order:
-            weight_table -> weights -> weights_sparsity_map -> activation_window
+            weight_table -> weights -> weights_sparsity_map
         For any NCEClusterTaskOp if the number of constants to fuse is 1 such layers are skipped
         Special Case with DWCONV, if the constants to fuse are == 2 such DWCONV are skipped as weights are not constants
         Special Case for Compressed Conv layer, if the weights are ShapeCast these such layers are skipped
@@ -1055,8 +1067,7 @@ def UngroupSparseBuffers : PassBase<"ungroup-sparse-buffers", "vpux::FunctionPas
         each working with an individual buffer.
 
         These separate operations are then surrounded by UngroupSparseBuffer
-        and / or GroupSparseBuffer operations, which can be optimized-out by
-        the canonicalizer.
+        and / or GroupSparseBuffer operations, which are then optimized-out.
     }];
 
     let constructor = "vpux::VPUIP::createUngroupSparseBuffersPass()";
@@ -1458,24 +1469,6 @@ def CollectUsedMemory : PassBase<"collect-used-memory", "vpux::ModulePass"> {
 }
 
 //
-// ReduceBarrierDependencies
-//
-
-def ReduceBarrierDependencies : PassBase<"reduce-barrier-dependencies", "vpux::FunctionPass"> {
-    let summary = "The pass tries to reduce barrier dependencies which can be deduced by the FIFO order";
-
-    let description = [{
-        Long term solution to make optimizeBarriers FIFO aware would be done with E#126891
-        This pass will remove some barrier dependencies by :
-            1. Adding explicit barrier dependencies between tasks in same FIFO
-            2. Calls Optimize Barriers
-            3. Removes the explicitly added dependencies
-    }];
-
-    let constructor = "vpux::VPUIP::createReduceBarrierDependenciesPass()";
-}
-
-//
 // IntroduceInitFunction
 //
 
@@ -1517,4 +1510,18 @@ def BatchMatMulToMatMul : PassBase<"batch-matmul-to-matmul", "vpux::FunctionPass
     let constructor = "vpux::VPUIP::createBatchMatMulToMatMulPass()";
 }
 
+//
+// AddCopyBetweenSWKernelsAndNetworkIO
+//
+
+def AddCopyBetweenSWKernelsAndNetworkIO : PassBase<"add-copy-between-swkernels-and-network-io", "vpux::ModulePass"> {
+    let summary = "Adds NNDMA ops between SwKernls and NetworkInput or NetworkOutput";
+
+    let description = [{
+        Inserts NNDMA Ops before/after SWKernels that directly access NetworkInput/NetworkOutput,
+        to avoid restricting NetworkInput and NetworkOutput section allocation to the ActSHAVE address range.
+    }];
+
+    let constructor = "vpux::VPUIP::createAddCopyBetweenSWKernelsAndNetworkIOPass()";
+}
 #endif

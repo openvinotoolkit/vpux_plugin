@@ -86,6 +86,7 @@ void OptimizeSliceExpandPass::safeRunOnFunc() {
     patterns.add<IE::OptimizeSliceImplicitExpand<IE::HSwishOp>>(&ctx, _log, /*hasCalculationCost=*/true);
     patterns.add<IE::OptimizeSliceImplicitExpand<IE::SwishOp>>(&ctx, _log, /*hasCalculationCost=*/true);
     patterns.add<IE::OptimizeSliceImplicitExpand<IE::GeluOp>>(&ctx, _log, /*hasCalculationCost=*/true);
+    patterns.add<IE::OptimizeSliceImplicitExpand<IE::ClampOp>>(&ctx, _log, /*hasCalculationCost=*/true);
     patterns.add<OptimizeSliceSoftmaxExpand>(&ctx, _log);
 
     patterns.add<IE::OptimizeSliceShapeCastExpand<IE::HSwishOp>>(&ctx, _log);
@@ -96,6 +97,10 @@ void OptimizeSliceExpandPass::safeRunOnFunc() {
     // The middle op has multi inputs
     patterns.add<IE::OptimizeSliceConcatExpand>(&ctx, _log);
     patterns.add<IE::OptimizeSlicePReluExpand>(&ctx, _log);
+    patterns.add<IE::OptimizeSliceEltwiseExpand<IE::MultiplyOp>>(&ctx, _log);
+    patterns.add<IE::OptimizeSliceEltwiseExpand<IE::AddOp>>(&ctx, _log);
+    patterns.add<IE::OptimizeSliceEltwiseExpand<IE::SubtractOp>>(&ctx, _log);
+
     // Pattern slice-op1-op2-...-opN-expand
     patterns.add<IE::OptimizeSliceOpsExpand>(&ctx, _log);
 

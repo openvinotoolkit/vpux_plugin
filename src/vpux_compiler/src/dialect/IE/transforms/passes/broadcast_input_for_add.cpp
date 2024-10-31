@@ -40,10 +40,9 @@ mlir::TypedValue<mlir::RankedTensorType> BroadcastInputRewriter::createBroadcast
                                                                                       mlir::Location loc,
                                                                                       mlir::Value broadcastInput,
                                                                                       ShapeRef targetShape) const {
-    const auto broadcastedLoc = appendLoc(loc, "broadcasted");
-    auto targetShapeConst = vpux::IE::createShapeConstForBroadCast(rewriter, ctx, broadcastedLoc, targetShape);
+    auto targetShapeConst = vpux::IE::createShapeConstForBroadCast(rewriter, ctx, appendLoc(loc, "shape"), targetShape);
     return rewriter
-            .create<IE::BroadcastOp>(broadcastedLoc, broadcastInput, targetShapeConst, /*axes_mapping*/ nullptr,
+            .create<IE::BroadcastOp>(loc, broadcastInput, targetShapeConst, /*axes_mapping*/ nullptr,
                                      IE::BroadcastTypeAttr::get(ctx, IE::BroadcastType::NUMPY))
             .getResult();
 }
@@ -96,16 +95,20 @@ mlir::LogicalResult BroadcastInputRewriter::matchAndRewrite(IE::AddOp origOp, ml
 
     auto lhsInput = origOp.getInput1();
     if (doesInputNeedBroadCast(origOp.getInput1())) {
-        lhsInput = createBroadcastInput(rewriter, ctx, loc, origOp.getInput1(), outputShape);
+        lhsInput =
+                createBroadcastInput(rewriter, ctx, appendLoc(loc, "broadcast_lhs"), origOp.getInput1(), outputShape);
     }
 
     auto rhsInput = origOp.getInput2();
     if (doesInputNeedBroadCast(origOp.getInput2())) {
-        rhsInput = createBroadcastInput(rewriter, ctx, loc, origOp.getInput2(), outputShape);
+        rhsInput =
+                createBroadcastInput(rewriter, ctx, appendLoc(loc, "broadcast_rhs"), origOp.getInput2(), outputShape);
     }
 
-    rewriter.replaceOpWithNewOp<IE::AddOp>(origOp, lhsInput, rhsInput, origOp.getAutoBroadcast(),
-                                           origOp.getPostOpAttr(), origOp.getClampAttr());
+    auto addOp = rewriter.replaceOpWithNewOp<IE::AddOp>(origOp, lhsInput, rhsInput, origOp.getAutoBroadcast(),
+                                                        origOp.getPostOpAttr(), origOp.getClampAttr(),
+                                                        origOp.getOutputChannelsAttr(), origOp.getInputChannelsAttr());
+    extendOpLoc(addOp, "as_add");
 
     return mlir::success();
 }

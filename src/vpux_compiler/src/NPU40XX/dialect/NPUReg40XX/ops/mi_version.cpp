@@ -45,14 +45,6 @@ size_t vpux::NPUReg40XX::MappedInferenceVersionOp::getAlignmentRequirements() {
     return alignof(MIVersionNote);
 }
 
-vpux::ELF::SectionFlagsAttr vpux::NPUReg40XX::MappedInferenceVersionOp::getAccessingProcs(mlir::SymbolUserMap&) {
-    return ELF::SectionFlagsAttr::SHF_NONE;
-}
-
-vpux::ELF::SectionFlagsAttr vpux::NPUReg40XX::MappedInferenceVersionOp::getUserProcs() {
-    return ELF::SectionFlagsAttr::SHF_NONE;
-}
-
 std::optional<ELF::SectionSignature> vpux::NPUReg40XX::MappedInferenceVersionOp::getSectionSignature() {
     return ELF::SectionSignature(vpux::ELF::generateSignature("note", "MappedInferenceVersion"),
                                  ELF::SectionFlagsAttr::SHF_NONE, ELF::SectionTypeAttr::SHT_NOTE);

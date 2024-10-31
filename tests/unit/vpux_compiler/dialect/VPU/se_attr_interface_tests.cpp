@@ -36,8 +36,7 @@ struct SEInterpolateAttrParams {
 class SEInterpolateAttrTests : public testing::TestWithParam<SEInterpolateAttrParams> {};
 
 TEST_P(SEInterpolateAttrTests, ComputeSEOffsets) {
-    mlir::DialectRegistry registry;
-    vpux::registerDialects(registry);
+    auto registry = vpux::createDialectRegistry();
 
     mlir::MLIRContext ctx(registry);
     ctx.loadDialect<VPU::VPUDialect>();
@@ -349,8 +348,8 @@ std::vector<SEInterpolateAttrParams> bilinearAsymmetricParams = {
 
 // clang-format on
 
-INSTANTIATE_TEST_CASE_P(NearestAsymmetric, SEInterpolateAttrTests, testing::ValuesIn(nearestAsymmetricParams));
-INSTANTIATE_TEST_CASE_P(BilinearAsymmetric, SEInterpolateAttrTests, testing::ValuesIn(bilinearAsymmetricParams));
+INSTANTIATE_TEST_SUITE_P(NearestAsymmetric, SEInterpolateAttrTests, testing::ValuesIn(nearestAsymmetricParams));
+INSTANTIATE_TEST_SUITE_P(BilinearAsymmetric, SEInterpolateAttrTests, testing::ValuesIn(bilinearAsymmetricParams));
 
 //
 // SEUpsamplingAttr
@@ -384,8 +383,7 @@ struct SEUpsamplingAttrParams {
 class SEUpsamplingAttrTests : public testing::TestWithParam<SEUpsamplingAttrParams> {};
 
 TEST_P(SEUpsamplingAttrTests, SEAttrInterface) {
-    mlir::DialectRegistry registry;
-    vpux::registerDialects(registry);
+    auto registry = vpux::createDialectRegistry();
 
     mlir::MLIRContext ctx(registry);
     ctx.loadDialect<VPU::VPUDialect>();
@@ -623,7 +621,7 @@ std::vector<SEUpsamplingAttrParams> upsamplingParams = {
 
 // clang-format on
 
-INSTANTIATE_TEST_CASE_P(unit, SEUpsamplingAttrTests, testing::ValuesIn(upsamplingParams));
+INSTANTIATE_TEST_SUITE_P(unit, SEUpsamplingAttrTests, testing::ValuesIn(upsamplingParams));
 
 //
 // SEPaddingAttr
@@ -658,8 +656,7 @@ struct SEPaddingAttrParams {
 class SEPaddingAttrTests : public testing::TestWithParam<SEPaddingAttrParams> {};
 
 TEST_P(SEPaddingAttrTests, SEAttrInterface) {
-    mlir::DialectRegistry registry;
-    vpux::registerDialects(registry);
+    auto registry = vpux::createDialectRegistry();
 
     mlir::MLIRContext ctx(registry);
     ctx.loadDialect<VPU::VPUDialect>();
@@ -989,7 +986,7 @@ std::vector<SEPaddingAttrParams> paddingParams = {
 
 // clang-format on
 
-INSTANTIATE_TEST_CASE_P(unit, SEPaddingAttrTests, testing::ValuesIn(paddingParams));
+INSTANTIATE_TEST_SUITE_P(unit, SEPaddingAttrTests, testing::ValuesIn(paddingParams));
 
 //
 // SERollAttr
@@ -1025,8 +1022,7 @@ struct SERollAttrParams {
 class SERollAttrTests : public testing::TestWithParam<SERollAttrParams> {};
 
 TEST_P(SERollAttrTests, SEAttrInterface) {
-    mlir::DialectRegistry registry;
-    vpux::registerDialects(registry);
+    auto registry = vpux::createDialectRegistry();
 
     mlir::MLIRContext ctx(registry);
     ctx.loadDialect<VPU::VPUDialect>();
@@ -1232,4 +1228,4 @@ std::vector<SERollAttrParams> rollParams = {
 
 // clang-format on
 
-INSTANTIATE_TEST_CASE_P(unit, SERollAttrTests, testing::ValuesIn(rollParams));
+INSTANTIATE_TEST_SUITE_P(unit, SERollAttrTests, testing::ValuesIn(rollParams));

@@ -30,19 +30,37 @@ private:
 };
 
 bool DMAOutOfOrderOptimizationPass::isMemoryOverlap(VPURT::DeclareBufferOp bufOp1, VPURT::DeclareBufferOp bufOp2) {
+    // When buffers are located in different memory types, the two buffers are definitely non-overlapping
+    if (bufOp1.getSection() != bufOp2.getSection()) {
+        return false;
+    }
+
+    // When buffers are located on different section indexes (e.g. CMX tiles), the two buffers are definitely
+    // non-overlapping
+    if (bufOp1.getSectionIndex().has_value() && bufOp2.getSectionIndex().has_value()) {
+        auto bufOp1Sections = parseIntArrayAttr<int64_t>(bufOp1.getSectionIndex().value());
+        auto bufOp2Sections = parseIntArrayAttr<int64_t>(bufOp2.getSectionIndex().value());
+        // For each section in bufOp2 check if is present in bufOp1 section indexes
+        // Example to handle:
+        //  bufOp1 CMX[0, 1]
+        //  bufOp2 CMX[0]
+
+        bool commonSectionIndex = false;
+        for (auto bufOp2Section : bufOp2Sections) {
+            if (std::find(bufOp1Sections.begin(), bufOp1Sections.end(), bufOp2Section) != bufOp1Sections.end()) {
+                // Common element located
+                commonSectionIndex = true;
+                break;
+            }
+        }
+
+        if (!commonSectionIndex) {
+            return false;
+        }
+    }
+
     auto type1 = bufOp1.getBuffer().getType().cast<vpux::NDTypeInterface>();
     auto type2 = bufOp2.getBuffer().getType().cast<vpux::NDTypeInterface>();
-
-    // When buffers are located on CMX and DDR respectively, the two buffers are definitely non-overlapping
-    if (type1.getMemoryKind() != type2.getMemoryKind()) {
-        return false;
-    }
-
-    // When buffers are located on different CMX tiles, the two buffers are definitely non-overlapping
-    if (type1.getMemSpace().getIndex().has_value() && type2.getMemSpace().getIndex().has_value() &&
-        type1.getMemSpace().getIndex().value() != type2.getMemSpace().getIndex().value()) {
-        return false;
-    }
 
     // Need to check the offsets of the buffers to determine whether there is an overlap for other possible cases:
     // 1. when both buffers are on DDR
@@ -64,25 +82,10 @@ void DMAOutOfOrderOptimizationPass::safeRunOnFunc() {
 
     // Algorithm will check each independent DMA queues identified by port and channel
     // and will store vector of previous DMA tasks which are to be checked for memory overlap
-    // against the next task. If no overlap then ORD bit can be cleared.
-    // If task on queue waits for a new barrier or ORD bit cannot be set then vector of tasks will
-    // be cleared Vector of tasks per queue will always contain 1 task with some dependency (either
-    // barrier or ORD bit set) and if available all subsequent tasks with ORD bit cleared
-    vpux::DenseMap<int64_t, SmallVector<VPUIP::DMATypeOpInterface>> dmaPreviousTasksQueueMap;
-    vpux::DenseMap<int64_t, mlir::DenseSet<mlir::Value>> dmaPreviousWaitBarrierMap;
-
-    const auto previousDMAsOnQueueWaitsFor = [&](int64_t queueId, mlir::ValueRange waitBarriers) {
-        bool dmaAlreadyWaiting = true;
-        for (const auto& barrier : waitBarriers) {
-            if (dmaPreviousWaitBarrierMap[queueId].find(barrier) != dmaPreviousWaitBarrierMap[queueId].end()) {
-                continue;
-            }
-            dmaPreviousWaitBarrierMap[queueId].insert(barrier);
-            dmaAlreadyWaiting = false;
-        }
-
-        return dmaAlreadyWaiting;
-    };
+    // against the next task. Based on HW details to make decision for task[N] to clear ORD bit
+    // Task[N-1] and Task[N-2] need to be checked for overlap. Task[N-2] only if Task[N-1] had
+    // ORD bit also set. Checking Task[N-3] is not needed
+    vpux::DenseMap<int64_t, std::deque<VPUIP::DMATypeOpInterface>> dmaPreviousTasksQueueMap;
 
     // Traverse IR and check all dmaOps
     funcOp->walk([&](VPUIP::DMATypeOpInterface dmaOp) {
@@ -102,24 +105,18 @@ void DMAOutOfOrderOptimizationPass::safeRunOnFunc() {
 
         // Skip DMAs which are used for profiling buffer management because
         // applying OOO optimization to them can lead to concurrency issues,
-        // specifically in DMA HWP
+        // specifically in DMA HWP. Clean data for this queue so that next DMA
+        // is also not conidered for ORD clear
         if (auto nndmaOp = mlir::dyn_cast<VPUIP::NNDMAOp>(dmaOp.getOperation())) {
             if (nndmaOp.getProfilingBufferMgmt()) {
+                dmaPreviousTasksQueueMap[dmaQueueTaskId].clear();
+                dmaPreviousTasksQueueMap.erase(dmaQueueTaskId);
                 return;
             }
         }
 
-        const auto waitBarriers = taskOp.getWaitBarriers();
         if (dmaPreviousTasksQueueMap.find(dmaQueueTaskId) == dmaPreviousTasksQueueMap.end()) {
             // First task on this queue. Just store information about it
-            dmaPreviousTasksQueueMap[dmaQueueTaskId].push_back(dmaOp);
-            dmaPreviousWaitBarrierMap[dmaQueueTaskId].insert(waitBarriers.begin(), waitBarriers.end());
-            return;
-        }
-
-        // if task has new wait barrier just clean the queue and leave this op as last one
-        if (!previousDMAsOnQueueWaitsFor(dmaQueueTaskId, waitBarriers)) {
-            dmaPreviousTasksQueueMap[dmaQueueTaskId].clear();
             dmaPreviousTasksQueueMap[dmaQueueTaskId].push_back(dmaOp);
             return;
         }
@@ -153,6 +150,11 @@ void DMAOutOfOrderOptimizationPass::safeRunOnFunc() {
             dmaOp.setOutOfOrder();
         }
         dmaPreviousTasksQueueMap[dmaQueueTaskId].push_back(dmaOp);
+        // Only store parent and grand parent tasks as only they are relevant for
+        // mem overlap check
+        if (dmaPreviousTasksQueueMap[dmaQueueTaskId].size() > 2) {
+            dmaPreviousTasksQueueMap[dmaQueueTaskId].pop_front();
+        }
     });
 
     VPURT::verifyBarrierSlots(funcOp, _log);

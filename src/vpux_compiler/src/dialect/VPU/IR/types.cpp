@@ -4,7 +4,7 @@
 //
 
 #include "vpux/compiler/dialect/VPU/IR/types.hpp"
-#include "vpux/compiler/dialect/VPU/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPU/IR/dialect.hpp"
 
 #include <llvm/ADT/TypeSwitch.h>
 
@@ -49,7 +49,7 @@ IndexedSymbolAttr VPU::DistributedTensorType::getMemSpace() const {
     return getImpl()->memSpace;
 }
 
-VPU::DistributedTensorAttr VPU::DistributedTensorType::getDistribution() const {
+VPU::DistributionInfoAttr VPU::DistributedTensorType::getDistribution() const {
     return getImpl()->distribution;
 }
 

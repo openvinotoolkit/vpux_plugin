@@ -10,9 +10,9 @@
 namespace vpux::VPUIPDPU::arch40xx {
 
 mlir::LogicalResult verifyODUCfgOp(VPUIPDPU::ODUCfgOp op);
-mlir::LogicalResult verifyDPUVariantOp(VPUIPDPU::DPUVariantOp op);
 
 void registerDPUExpandOpInterfaces(mlir::DialectRegistry& registry);
 void registerVerifiersOpInterfaces(mlir::DialectRegistry& registry);
+void registerLowerToRegistersInterfaces(mlir::DialectRegistry& registry);
 
 }  // namespace vpux::VPUIPDPU::arch40xx

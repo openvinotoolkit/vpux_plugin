@@ -45,7 +45,7 @@ func.func @ConstFoldWithSwizzlingSubByte(%input: !BufferDdr, %output: !BufferCmx
 // Swizzling transformation needs to use always state of constant buffer which is an input for this transformation
 func.func @ConstFoldWithSwizzlingWhereInputIsDifferentThanRawStorageValue(%input: !BufferDdr, %output: !BufferCmx) -> !BufferCmx {
 
-  %cst = const.Declare memref<512x1x1x1xui8, {order = #NHWC, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 512 : i64>}> = dense<1.000000e+00> : tensor<32x1x1x1xf16>, [#const.ConvertElemType<ui8>, #const.QuantCast<!quant.uniform<u8<0:254>:f16, 1.000000e+00>>, #const.Reorder<affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>>, #const.Reorder<affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>>, #const.Reshape<[32, 1, 1, 1]>, #const.PadWithZero<[0, 0, 0, 0], [0, 15, 0, 0]>, #const.Reorder<affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>>, #const.SubView<[0, 0, 0, 0], [16, 16, 1, 1]>, #const.SwizzleConstant<5 : i64, 3 : i64>]
+  %cst = const.Declare memref<512x1x1x1xui8, {order = #NHWC, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 512 : i64>}> = dense<1.000000e+00> : tensor<32x1x1x1xf16>, [#const.CastElemType<ui8>, #const.CastElemType<!quant.uniform<u8<0:254>:f16, 1.000000e+00>>, #const.Reorder<affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>>, #const.Reorder<affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>>, #const.Reshape<[32, 1, 1, 1]>, #const.PadWithZero<[0, 0, 0, 0], [0, 15, 0, 0]>, #const.Reorder<affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>>, #const.SubView<[0, 0, 0, 0], [16, 16, 1, 1]>, #const.SwizzleConstant<5 : i64, 3 : i64>]
 
   %buf = VPURT.DeclareBuffer <CMX_NN> [0] <0> {swizzlingKey = 5 : i64} -> !BufferCmx
 
@@ -66,7 +66,7 @@ func.func @ConstFoldWithSwizzlingWhereInputIsDifferentThanRawStorageValue(%input
 
 func.func @ConstFoldWithSwizzlingWhereContentShapeIsDifferentFromOpShape() -> memref<768x1x1x1xui8, {order = #NCHW, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 512 : i64>}> {
 
-  %cst = const.Declare memref<768x1x1x1xui8, {order = #NCHW, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 512 : i64>}> = dense<[[[[1], [2], [3]]]]> : tensor<1x1x3x1xui8>, [#const.Reshape<[768, 1, 1, 1]>, #const.Broadcast<3, 1>, #const.SwizzleConstant<5 : i64, 3 : i64>]
+  %cst = const.Declare memref<768x1x1x1xui8, {order = #NCHW, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 512 : i64>}> = dense<[[[[1], [2], [3]]]]> : tensor<1x1x3x1xui8>, [#const.Reshape<[3, 1, 1, 1]>, #const.Broadcast<0, 768>, #const.SwizzleConstant<5 : i64, 3 : i64>]
 
   return %cst: memref<768x1x1x1xui8, {order = #NCHW, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 512 : i64>}>
 

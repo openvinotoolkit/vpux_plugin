@@ -1,11 +1,12 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 #include "vpux/compiler/core/cost_model_utils.hpp"
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
 #include "vpux/compiler/dialect/VPU/utils/cost_model/cost_model.hpp"
+#include "vpux/compiler/dialect/VPU/utils/ppe_version_config.hpp"
 #include "vpux/compiler/dialect/VPUIP/IR/attributes.hpp"
 #include "vpux/compiler/dialect/VPUIP/utils/sw_utils.hpp"
 #include "vpux/compiler/utils/swizzling_utils.hpp"
@@ -63,10 +64,11 @@ VPUNN::Swizzling getVPUNNSwizzlingKey(mlir::Type type) {
     return swizzlingKeyVPUNN[swizzlingKey];
 }
 
-VPUNN::ActivationFunction getVPUNNActivationFunction(VPUIP::PPETaskOp ppeOp) {
-    auto ppeType = ppeOp.getPpeLayerType();
+VPUNN::ActivationFunction vpux::getVPUNNActivationFunction(VPU::PPEAttr ppeOpaqueAttr) {
+    const auto ppeMode = VPU::PpeVersionConfig::getFactoryAs<VPU::IPpeAdapterMode>().getMode(ppeOpaqueAttr);
+    const auto clampLow = VPU::PpeVersionConfig::getFactoryAs<VPU::IPpeAdapterClamp>().getClamps(ppeOpaqueAttr).first;
 
-    switch (ppeType) {
+    switch (ppeMode) {
     case VPU::PPEMode::LRELU:
         return VPUNN::ActivationFunction::LRELU;
     case VPU::PPEMode::ADD:
@@ -76,18 +78,8 @@ VPUNN::ActivationFunction getVPUNNActivationFunction(VPUIP::PPETaskOp ppeOp) {
     case VPU::PPEMode::MULT:
         return VPUNN::ActivationFunction::MULT;
     default:
-        if (ppeOp.getClampLow().has_value()) {
-            if (auto intClampLowAttr = ppeOp.getClampLowAttr().dyn_cast<mlir::IntegerAttr>()) {
-                auto clampLow = checked_cast<int32_t>(intClampLowAttr.getInt());
-                if (clampLow == 0) {
-                    return VPUNN::ActivationFunction::RELU;
-                }
-            } else if (auto fpClampLowAttr = ppeOp.getClampLowAttr().dyn_cast<mlir::FloatAttr>()) {
-                auto clampLow = static_cast<float>(fpClampLowAttr.getValue().convertToDouble());
-                if (clampLow == 0) {
-                    return VPUNN::ActivationFunction::RELU;
-                }
-            }
+        if (isDoubleEqual(clampLow, 0)) {
+            return VPUNN::ActivationFunction::RELU;
         }
         return VPUNN::ActivationFunction::NONE;
     }
@@ -126,7 +118,7 @@ VPUNN::DPUWorkload vpux::getDPUWorkload(VPUIP::DPUTaskOp dpuTaskOp, VPU::ArchKin
     VPUNN::ActivationFunction activationFunction = VPUNN::ActivationFunction::NONE;
     auto ppeOps = to_small_vector(nceClusterOp.getPpe().getOps<VPUIP::PPETaskOp>());
     if (!ppeOps.empty()) {
-        activationFunction = getVPUNNActivationFunction(ppeOps[0]);
+        activationFunction = getVPUNNActivationFunction(ppeOps.front().getOpaquePpeAttr());
     }
 
     unsigned int outputWriteTiles = 1;
@@ -220,8 +212,7 @@ VPUNN::DPUWorkload vpux::getDPUWorkload(VPUIP::DPUTaskOp dpuTaskOp, VPU::ArchKin
 
     auto IW = (OW - 1) * SX + KX - left - right;
     auto IH = (OH - 1) * SY + KY - top - bottom;
-    auto IC = nceTaskType == VPUIP::NCETaskType::CONV || nceTaskType == VPUIP::NCETaskType::CMCONV ||
-                              nceTaskType == VPUIP::NCETaskType::FCL
+    auto IC = nceTaskType == VPUIP::NCETaskType::CONV
                       ? inputOneType.cast<vpux::NDTypeInterface>().getShape()[Dims4D::Act::C]
                       : OC;
 

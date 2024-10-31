@@ -31,20 +31,6 @@ size_t VPUASM::DeclareBufferOp::getAlignmentRequirements() {
     return ELF::VPUX_NO_ALIGNMENT;
 }
 
-ELF::SectionFlagsAttr VPUASM::DeclareBufferOp::getAccessingProcs(mlir::SymbolUserMap& symbolUserMap) {
-    auto flags = ELF::SectionFlagsAttr::SHF_NONE;
-    const auto users = symbolUserMap.getUsers(getOperation());
-    for (auto user : users) {
-        flags = flags | mlir::cast<ELF::WrappableOpInterface>(user).getUserProcs();
-    }
-
-    return flags;
-}
-
-ELF::SectionFlagsAttr VPUASM::DeclareBufferOp::getUserProcs() {
-    return ELF::SectionFlagsAttr::SHF_NONE;
-}
-
 void VPUASM::DeclareBufferOp::setMemoryOffset(mlir::IntegerAttr) {
     // declareBufferOp's offset is implicit in it's memLocation
     return;
@@ -76,17 +62,20 @@ std::optional<ELF::SectionSignature> vpux::VPUASM::DeclareBufferOp::getSectionSi
         break;
     case VPURT::BufferSection::NetworkInput:
         type = ELF::SectionTypeAttr::SHT_NOBITS;
-        flags = ELF::SectionFlagsAttr::VPU_SHF_USERINPUT;
+        flags = ELF::SectionFlagsAttr::VPU_SHF_USERINPUT | ELF::SectionFlagsAttr::SHF_WRITE |
+                ELF::SectionFlagsAttr::SHF_ALLOC;
         isInputOrOutputBuffer = true;
         break;
     case VPURT::BufferSection::NetworkOutput:
         type = ELF::SectionTypeAttr::SHT_NOBITS;
-        flags = ELF::SectionFlagsAttr::VPU_SHF_USEROUTPUT;
+        flags = ELF::SectionFlagsAttr::VPU_SHF_USEROUTPUT | ELF::SectionFlagsAttr::SHF_WRITE |
+                ELF::SectionFlagsAttr::SHF_ALLOC;
         isInputOrOutputBuffer = true;
         break;
     case VPURT::BufferSection::ProfilingOutput:
         type = ELF::SectionTypeAttr::SHT_NOBITS;
-        flags = ELF::SectionFlagsAttr::VPU_SHF_PROFOUTPUT;
+        flags = ELF::SectionFlagsAttr::VPU_SHF_PROFOUTPUT | ELF::SectionFlagsAttr::SHF_WRITE |
+                ELF::SectionFlagsAttr::SHF_ALLOC;
         break;
     default:
         return std::nullopt;

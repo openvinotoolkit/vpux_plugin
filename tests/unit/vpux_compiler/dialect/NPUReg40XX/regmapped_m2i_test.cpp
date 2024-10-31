@@ -314,4 +314,4 @@ std::vector<std::pair<MappedRegValues, nn_public::VpuMediaTask>> m2iValuesSet = 
          CREATE_HW_M2I_DESC(barriers_sched_.clean_after_, 0xFFFFFFFF)},
 };
 
-INSTANTIATE_TEST_CASE_P(NPUReg40XX_MappedRegs, NPUReg40XX_M2IRegisterTest, testing::ValuesIn(m2iValuesSet));
+INSTANTIATE_TEST_SUITE_P(NPUReg40XX_MappedRegs, NPUReg40XX_M2IRegisterTest, testing::ValuesIn(m2iValuesSet));

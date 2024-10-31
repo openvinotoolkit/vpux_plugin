@@ -526,12 +526,12 @@ def VPUMI37XX_DPUInvariantOp :
         Optional<AnyTypeOf<[MemRefOf<[UI64]>, VPUIP_DistributedBuffer]>>:$profiling_data,
 
         VPUIP_NCETaskTypeAttr:$nce_task_type,
+        OptionalAttr<VPU_EltwiseTypeAttr>:$eltwise_type,
         VPU_MPEModeAttr:$mpe_frequent_mode,
 
         OptionalAttr<I64ArrayAttr>:$kernel_size,
         OptionalAttr<I64ArrayAttr>:$kernel_strides,
         OptionalAttr<VPU_PaddingAttr>:$kernel_padding,
-        OptionalAttr<IntAttr>:$activation_window_channel_length,
         UnitAttr:$is_continued,
         OptionalAttr<IntAttr>:$cm_sp_pattern,
         UnitAttr:$is_segmented,

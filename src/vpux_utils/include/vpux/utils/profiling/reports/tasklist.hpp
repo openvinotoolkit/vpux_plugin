@@ -24,7 +24,6 @@ public:
     TaskList selectTasksFromCluster(unsigned clusterId) const;
     TaskList selectDMAtasks() const;
     TaskList selectDPUtasks() const;
-    TaskList selectUPAtasks() const;
     TaskList selectSWtasks() const;
     TaskList selectM2Itasks() const;
     TaskList getSortedByStartTime() const;
@@ -43,7 +42,7 @@ public:
      *
      * @return sum of all tasks durations
      */
-    int getSumOfDurations() const;
+    uint64_t getSumOfDurations() const;
 
     /**
      * @brief Walltime duration of all tasks in units defined by TaskInfo
@@ -52,7 +51,7 @@ public:
      *
      * Note: Tasks do not need to be ordered chronologically.
      */
-    int getTotalDuration() const;
+    uint64_t getTotalDuration() const;
 
 private:
     /**
@@ -60,14 +59,14 @@ private:
      *
      * @return minimal start time among all tasks
      */
-    int getStartTime() const;
+    uint64_t getStartTime() const;
 
     /**
      * @brief Get last chronologically task end time
      *
      * @return maximal end time among all tasks
      */
-    int getEndTime() const;
+    uint64_t getEndTime() const;
 
     void sortByStartTime();
 

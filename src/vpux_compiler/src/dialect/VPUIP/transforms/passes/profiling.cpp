@@ -129,20 +129,6 @@ void ActShaveProfilingPass::safeRunOnModule() {
 }
 
 //
-// UPAProfilingPass
-//
-
-class UPAProfilingPass final : public VPUIP::UPAProfilingBase<UPAProfilingPass> {
-public:
-    explicit UPAProfilingPass(Logger log) {
-        Base::initLogger(log, Base::getArgumentName());
-    }
-
-private:
-    void safeRunOnModule() final;
-};
-
-//
 // GroupProfilingBuffersPass
 //
 
@@ -156,66 +142,6 @@ private:
     static unsigned getAlignment(StringRef name);
     void safeRunOnModule() final;
 };
-
-void UPAProfilingPass::safeRunOnModule() {
-    auto module = getOperation();
-    auto* ctx = module->getContext();
-
-    IE::CNNNetworkOp netOp;
-    mlir::func::FuncOp netFunc;
-    IE::CNNNetworkOp::getFromModule(module, netOp, netFunc);
-    OpBuilderLogger builderLog(_log.nest());
-    mlir::OpBuilder builder(&netFunc.getBody().front().front(), &builderLog);
-
-    SmallVector<VPURT::TaskOp> upaTasks;
-    netFunc.walk([&](VPURT::TaskOp taskOp) {
-        if (taskOp.getExecutorKind() == vpux::VPU::ExecutorKind::SHAVE_UPA) {
-            _log.trace("Adding Operation '{0}'", taskOp->getLoc());
-            upaTasks.push_back(taskOp);
-        }
-    });
-
-    if (upaTasks.empty()) {  // No UPA task in the network
-        return;
-    }
-
-    unsigned elementSize = VPUIP::HW_UPA_PROFILING_SIZE_BYTES / sizeof(uint32_t);
-    unsigned outputSize = static_cast<unsigned>(upaTasks.size() * elementSize);
-    auto outputResult = mlir::MemRefType::get({outputSize}, getUInt32Type(ctx));
-
-    auto profilingId = static_cast<int64_t>(netOp.getProfilingOutputsCount());
-    unsigned upaId = 0;
-    for (auto& upaTask : upaTasks) {
-        builder.setInsertionPoint(upaTask);
-        auto timestampType = mlir::MemRefType::get({elementSize}, getUInt32Type(ctx));
-        int offset = upaId * elementSize * sizeof(uint32_t);
-        auto declareOp = builder.create<VPURT::DeclareBufferOp>(
-                mlir::NameLoc::get(mlir::StringAttr::get(ctx, "declareProfilingBuffer")), timestampType,
-                VPURT::BufferSection::ProfilingOutput, profilingId, offset);
-
-        // UPA profiling use single DDR buffer and UPA doesn't support tiling/clustering, so fill metadata only by
-        // inClusterOffset
-        auto profilingMetadata =
-                vpux::getSwProfilingMetaAttr(ctx, /*bufferId=*/0, /*bufferOffset=*/0, /*clusterSize=*/upaTasks.size(),
-                                             /*inClusterOffset=*/upaId,
-                                             /*tileId=*/0, /*clusterId=*/0);
-        const auto loc = upaTask->getLoc();
-        upaTask->setLoc(loc);
-        upaTask.getInnerTaskOp()->setLoc(loc);
-        vpux::attachSwProfilingMetadataToUpa(upaTask.getInnerTaskOp(), profilingMetadata);
-        upaTask.getProfilingDataMutable().assign(declareOp);
-        upaId++;
-    }
-
-    // Declare and create additional output from network
-    auto profilngResult = addNewProfilingOutput(ctx, netFunc, netOp, outputResult, profiling::ExecutorType::UPA);
-
-    // And to the returnOp
-    mlir::func::ReturnOp returnOp =
-            mlir::dyn_cast_or_null<mlir::func::ReturnOp>(netFunc.getBody().front().getTerminator());
-    VPUX_THROW_UNLESS(returnOp != nullptr, "No ReturnOp was found");
-    returnOp.getOperandsMutable().append(profilngResult);
-}
 
 void GroupProfilingBuffersPass::safeRunOnModule() {
     auto ctx = &getContext();
@@ -272,9 +198,14 @@ void GroupProfilingBuffersPass::safeRunOnModule() {
                                           newOutputShapedType.getDimsOrder(), nullptr);
     auto userInfoBuilder = mlir::OpBuilder::atBlockEnd(&profilingOutputs.front(), &builderLog);
 
-    auto dataInfo = userInfoBuilder.create<IE::DataInfoOp>(
-            mlir::UnknownLoc::get(ctx), mlir::StringAttr::get(ctx, profiling::PROFILING_OUTPUT_NAME),
-            mlir::TypeAttr::get(outputUserResult), /*profilingSectionsCount=*/1);
+    auto dataInfo = userInfoBuilder.create<IE::DataInfoOp>(mlir::UnknownLoc::get(ctx),
+                                                           mlir::StringAttr::get(ctx, profiling::PROFILING_OUTPUT_NAME),
+                                                           mlir::TypeAttr::get(outputUserResult),
+                                                           /*OptionalAttr originalShape*/ nullptr,
+                                                           /*OptionalAttr friendlyName*/ nullptr,
+                                                           /*OptionalAttr inputName*/ nullptr,
+                                                           /*OptionalAttr tensorNames*/ nullptr,
+                                                           /*profilingSectionsCount=*/1);
     dataInfo.getSections().front().emplaceBlock();
 
     auto sectionsBuilder =
@@ -384,14 +315,6 @@ void GroupProfilingBuffersPass::safeRunOnModule() {
 
 std::unique_ptr<mlir::Pass> vpux::VPUIP::createActShaveProfilingPass(MemKindCreateFunc memKindCb, Logger log) {
     return std::make_unique<ActShaveProfilingPass>(std::move(memKindCb), log);
-}
-
-//
-// createUPAProfilingPass
-//
-
-std::unique_ptr<mlir::Pass> vpux::VPUIP::createUPAProfilingPass(Logger log) {
-    return std::make_unique<UPAProfilingPass>(log);
 }
 
 //

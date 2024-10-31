@@ -14,7 +14,7 @@ namespace vpux::IE {
 /*
    Find right class to get strategies for particular platform
 */
-std::unique_ptr<IGreedilyPassStrategy> createWeightsDequantizeToFakeQuantizeStrategyGetter(
-        mlir::func::FuncOp funcOp, bool enableWDBlockArgumentInput);
+std::unique_ptr<IGreedilyPassStrategy> createWeightsDequantizeToFakeQuantizeStrategy(mlir::func::FuncOp funcOp,
+                                                                                     bool enableWDBlockArgumentInput);
 
 }  // namespace vpux::IE

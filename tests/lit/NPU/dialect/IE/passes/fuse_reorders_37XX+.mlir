@@ -12,7 +12,7 @@
 // CHECK-LABEL: @FusePermuteToConvolution
 func.func @FusePermuteToConvolution(%arg0: tensor<1x11x16x23xf16, {order = #NHWC}>) -> tensor<1x11x15x21xf16> {
     %cst = const.Declare tensor<11x11x2x3xf16, {order = #NHWC}> =
-        dense<1.000000e+00> : tensor<11x11x2x3xf32>, [#const.ConvertElemType<f16>, #const.Reorder<#NHWC>]
+        dense<1.000000e+00> : tensor<11x11x2x3xf32>, [#const.CastElemType<f16>, #const.Reorder<#NHWC>]
 
     %CONV = IE.Convolution(%arg0, %cst) {
         dilations = [1, 1],
@@ -29,7 +29,7 @@ func.func @FusePermuteToConvolution(%arg0: tensor<1x11x16x23xf16, {order = #NHWC
     return %REORDER : tensor<1x11x15x21xf16>
 
     // CHECK-DAG:   [[CST:%.*]] = const.Declare tensor<11x11x2x3xf16, {order = #NHWC}> =
-    // CHECK-SAME:  dense<1.000000e+00> : tensor<11x11x2x3xf32>, [#const.ConvertElemType<f16>, #const.Reorder<#NHWC>]
+    // CHECK-SAME:  dense<1.000000e+00> : tensor<11x11x2x3xf32>, [#const.CastElemType<f16>, #const.Reorder<#NHWC>]
 
     // CHECK:   [[CONV:%.*]] = IE.Convolution(%arg0, [[CST]]) {
     // CHECK-SAME:  dilations = [1, 1],
@@ -50,7 +50,7 @@ func.func @FusePermuteToConvolution(%arg0: tensor<1x11x16x23xf16, {order = #NHWC
 // CHECK-LABEL: @FusePermuteToConvolutionWithConvertOp
 func.func @FusePermuteToConvolutionWithConvertOp(%arg0: tensor<1x11x16x23xf16, {order = #NHWC}>) -> tensor<1x11x15x21xf32> {
     %cst = const.Declare tensor<11x11x2x3xf16, {order = #NHWC}> =
-        dense<1.000000e+00> : tensor<11x11x2x3xf32>, [#const.ConvertElemType<f16>, #const.Reorder<#NHWC>]
+        dense<1.000000e+00> : tensor<11x11x2x3xf32>, [#const.CastElemType<f16>, #const.Reorder<#NHWC>]
 
     %CONV = IE.Convolution(%arg0, %cst) {
         dilations = [1, 1],
@@ -69,7 +69,7 @@ func.func @FusePermuteToConvolutionWithConvertOp(%arg0: tensor<1x11x16x23xf16, {
     return %CONVERT : tensor<1x11x15x21xf32>
 
     // CHECK-DAG:   [[CST:%.*]] = const.Declare tensor<11x11x2x3xf16, {order = #NHWC}> =
-    // CHECK-SAME:  dense<1.000000e+00> : tensor<11x11x2x3xf32>, [#const.ConvertElemType<f16>, #const.Reorder<#NHWC>]
+    // CHECK-SAME:  dense<1.000000e+00> : tensor<11x11x2x3xf32>, [#const.CastElemType<f16>, #const.Reorder<#NHWC>]
 
     // CHECK:   [[CONV:%.*]] = IE.Convolution(%arg0, [[CST]]) {
     // CHECK-SAME:  dilations = [1, 1],
@@ -126,7 +126,7 @@ func.func @FusePermuteToMaxPool(%arg0: tensor<1x11x16x23xf16, {order = #NHWC}>) 
 func.func @FusePermuteToGroupConv(%arg0: tensor<1x11x16x23xf16, {order = #NHWC}>) -> tensor<1x11x15x21xf16> {
     %cst = const.Declare tensor<11x1x2x3xf16, {order = #NHWC}> =
         dense<1.000000e+00> : tensor<11x1x1x2x3xf32>,
-        [#const.Reshape<[11, 1, 2, 3]>, #const.ConvertElemType<f16>, #const.Reorder<#NHWC>]
+        [#const.Reshape<[11, 1, 2, 3]>, #const.CastElemType<f16>, #const.Reorder<#NHWC>]
 
     %DWCONV = IE.GroupConvolution(%arg0, %cst) {
         dilations = [1, 1],
@@ -145,7 +145,7 @@ func.func @FusePermuteToGroupConv(%arg0: tensor<1x11x16x23xf16, {order = #NHWC}>
 
     // CHECK-DAG:   [[CST:%.*]] = const.Declare tensor<11x1x2x3xf16, {order = #NHWC}> =
     // CHECK-SAME:  dense<1.000000e+00> : tensor<11x1x1x2x3xf32>,
-    // CHECK-SAME:  [#const.Reshape<[11, 1, 2, 3]>, #const.ConvertElemType<f16>, #const.Reorder<#NHWC>]
+    // CHECK-SAME:  [#const.Reshape<[11, 1, 2, 3]>, #const.CastElemType<f16>, #const.Reorder<#NHWC>]
 
     // CHECK:   [[DWCONV:%.*]] = IE.GroupConvolution(%arg0, [[CST]]) {
     // CHECK-SAME:  dilations = [1, 1],
@@ -200,7 +200,7 @@ func.func @FusePermuteToAvgPool(%arg0: tensor<1x11x16x23xf16, {order = #NHWC}>) 
 // CHECK-LABEL: @FusePermuteToAdd
 func.func @FusePermuteToAdd(%arg0: tensor<1x11x16x23xf16, {order = #NHWC}>) -> tensor<1x11x16x23xf16> {
     %cst = const.Declare tensor<1x11x16x23xf16, {order = #NHWC}> =
-        dense<1.000000e+00> : tensor<1x11x16x23xf32>, [#const.ConvertElemType<f16>, #const.Reorder<#NHWC>]
+        dense<1.000000e+00> : tensor<1x11x16x23xf32>, [#const.CastElemType<f16>, #const.Reorder<#NHWC>]
 
     %ADD = IE.Add(%arg0, %cst) {
         auto_broadcast = #IE.auto_broadcast_type<NUMPY>
@@ -215,7 +215,7 @@ func.func @FusePermuteToAdd(%arg0: tensor<1x11x16x23xf16, {order = #NHWC}>) -> t
 
     // CHECK-DAG:   [[CST:%.*]] = const.Declare tensor<1x11x16x23xf16, {order = #NHWC}> =
     // CHECK-SAME:  dense<1.000000e+00> : tensor<1x11x16x23xf32>,
-    // CHECK-SAME:  [#const.ConvertElemType<f16>, #const.Reorder<#NHWC>]
+    // CHECK-SAME:  [#const.CastElemType<f16>, #const.Reorder<#NHWC>]
 
     // CHECK:   [[ADD:%.*]] = IE.Add(%arg0, [[CST]]) {
     // CHECK-SAME:  auto_broadcast = #IE.auto_broadcast_type<NUMPY>
@@ -233,7 +233,7 @@ func.func @FusePermuteToAdd(%arg0: tensor<1x11x16x23xf16, {order = #NHWC}>) -> t
 // CHECK-LABEL: @FuseNCWHPermuteToAdd
 func.func @FuseNCWHPermuteToAdd(%arg0: tensor<1x11x16x23xf16, {order = #NHWC}>) -> tensor<1x11x16x23xf16, {order = #NCWH}> {
     %cst = const.Declare tensor<1x11x16x23xf16, {order = #NHWC}> =
-        dense<1.000000e+00> : tensor<1x11x16x23xf32>, [#const.ConvertElemType<f16>, #const.Reorder<#NHWC>]
+        dense<1.000000e+00> : tensor<1x11x16x23xf32>, [#const.CastElemType<f16>, #const.Reorder<#NHWC>]
 
     %ADD = IE.Add(%arg0, %cst) {
         auto_broadcast = #IE.auto_broadcast_type<NUMPY>
@@ -248,7 +248,7 @@ func.func @FuseNCWHPermuteToAdd(%arg0: tensor<1x11x16x23xf16, {order = #NHWC}>) 
 
     // CHECK-DAG:   [[CST:%.*]] = const.Declare tensor<1x11x16x23xf16, {order = #NHWC}> =
     // CHECK-SAME:  dense<1.000000e+00> : tensor<1x11x16x23xf32>,
-    // CHECK-SAME:  [#const.ConvertElemType<f16>, #const.Reorder<#NHWC>]
+    // CHECK-SAME:  [#const.CastElemType<f16>, #const.Reorder<#NHWC>]
 
     // CHECK:   [[ADD:%.*]] = IE.Add(%arg0, [[CST]]) {
     // CHECK-SAME:  auto_broadcast = #IE.auto_broadcast_type<NUMPY>
@@ -266,7 +266,7 @@ func.func @FuseNCWHPermuteToAdd(%arg0: tensor<1x11x16x23xf16, {order = #NHWC}>) 
 // CHECK-LABEL: @FuseNHCWPermuteToAdd
 func.func @FuseNHCWPermuteToAdd(%arg0: tensor<1x11x16x23xf16, {order = #NHWC}>) -> tensor<1x11x16x23xf16, {order = #NHCW}> {
     %cst = const.Declare tensor<1x11x16x23xf16, {order = #NHWC}> =
-        dense<1.000000e+00> : tensor<1x11x16x23xf32>, [#const.ConvertElemType<f16>, #const.Reorder<#NHWC>]
+        dense<1.000000e+00> : tensor<1x11x16x23xf32>, [#const.CastElemType<f16>, #const.Reorder<#NHWC>]
 
     %ADD = IE.Add(%arg0, %cst) {
         auto_broadcast = #IE.auto_broadcast_type<NUMPY>
@@ -281,7 +281,7 @@ func.func @FuseNHCWPermuteToAdd(%arg0: tensor<1x11x16x23xf16, {order = #NHWC}>) 
 
     // CHECK-DAG:   [[CST:%.*]] = const.Declare tensor<1x11x16x23xf16, {order = #NHWC}> =
     // CHECK-SAME:  dense<1.000000e+00> : tensor<1x11x16x23xf32>,
-    // CHECK-SAME:  [#const.ConvertElemType<f16>, #const.Reorder<#NHWC>]
+    // CHECK-SAME:  [#const.CastElemType<f16>, #const.Reorder<#NHWC>]
 
     // CHECK:   [[ADD:%.*]] = IE.Add(%arg0, [[CST]]) {
     // CHECK-SAME:  auto_broadcast = #IE.auto_broadcast_type<NUMPY>
@@ -299,7 +299,7 @@ func.func @FuseNHCWPermuteToAdd(%arg0: tensor<1x11x16x23xf16, {order = #NHWC}>) 
 // CHECK-LABEL: @FuseNWHCPermuteToAdd
 func.func @FuseNWHCPermuteToAdd(%arg0: tensor<1x11x16x23xf16, {order = #NHWC}>) -> tensor<1x11x16x23xf16, {order = #NWHC}> {
     %cst = const.Declare tensor<1x11x16x23xf16, {order = #NHWC}> =
-        dense<1.000000e+00> : tensor<1x11x16x23xf32>, [#const.ConvertElemType<f16>, #const.Reorder<#NHWC>]
+        dense<1.000000e+00> : tensor<1x11x16x23xf32>, [#const.CastElemType<f16>, #const.Reorder<#NHWC>]
 
     %ADD = IE.Add(%arg0, %cst) {
         auto_broadcast = #IE.auto_broadcast_type<NUMPY>
@@ -314,7 +314,7 @@ func.func @FuseNWHCPermuteToAdd(%arg0: tensor<1x11x16x23xf16, {order = #NHWC}>) 
 
     // CHECK-DAG:   [[CST:%.*]] = const.Declare tensor<1x11x16x23xf16, {order = #NHWC}> =
     // CHECK-SAME:  dense<1.000000e+00> : tensor<1x11x16x23xf32>,
-    // CHECK-SAME:  [#const.ConvertElemType<f16>, #const.Reorder<#NHWC>]
+    // CHECK-SAME:  [#const.CastElemType<f16>, #const.Reorder<#NHWC>]
 
     // CHECK:   [[ADD:%.*]] = IE.Add(%arg0, [[CST]]) {
     // CHECK-SAME:  auto_broadcast = #IE.auto_broadcast_type<NUMPY>
@@ -332,7 +332,7 @@ func.func @FuseNWHCPermuteToAdd(%arg0: tensor<1x11x16x23xf16, {order = #NHWC}>) 
 // CHECK-LABEL: @FuseNWCHPermuteToAdd
 func.func @FuseNWCHPermuteToAdd(%arg0: tensor<1x11x16x23xf16, {order = #NHWC}>) -> tensor<1x11x16x23xf16, {order = #NWCH}> {
     %cst = const.Declare tensor<1x11x16x23xf16, {order = #NHWC}> =
-        dense<1.000000e+00> : tensor<1x11x16x23xf32>, [#const.ConvertElemType<f16>, #const.Reorder<#NHWC>]
+        dense<1.000000e+00> : tensor<1x11x16x23xf32>, [#const.CastElemType<f16>, #const.Reorder<#NHWC>]
 
     %ADD = IE.Add(%arg0, %cst) {
         auto_broadcast = #IE.auto_broadcast_type<NUMPY>
@@ -347,7 +347,7 @@ func.func @FuseNWCHPermuteToAdd(%arg0: tensor<1x11x16x23xf16, {order = #NHWC}>) 
 
     // CHECK-DAG:   [[CST:%.*]] = const.Declare tensor<1x11x16x23xf16, {order = #NHWC}> =
     // CHECK-SAME:  dense<1.000000e+00> : tensor<1x11x16x23xf32>,
-    // CHECK-SAME:  [#const.ConvertElemType<f16>, #const.Reorder<#NHWC>]
+    // CHECK-SAME:  [#const.CastElemType<f16>, #const.Reorder<#NHWC>]
 
     // CHECK:   [[ADD:%.*]] = IE.Add(%arg0, [[CST]]) {
     // CHECK-SAME:  auto_broadcast = #IE.auto_broadcast_type<NUMPY>

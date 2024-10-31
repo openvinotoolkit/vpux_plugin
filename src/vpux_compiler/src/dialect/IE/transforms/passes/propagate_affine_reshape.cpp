@@ -3,12 +3,14 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+#include "vpux/compiler/core/type_interfaces.hpp"
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/IE/transforms/passes.hpp"
 #include "vpux/compiler/dialect/IE/transforms/rewriters/propagate_transpose_affine_reshape_common.hpp"
 
 #include "vpux/compiler/dialect/IE/utils/concat_utils.hpp"
 #include "vpux/compiler/dialect/IE/utils/pooling_utils.hpp"
+#include "vpux/compiler/dialect/IE/utils/quantization.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
 #include "vpux/compiler/utils/error.hpp"
 #include "vpux/compiler/utils/passes.hpp"
@@ -459,6 +461,72 @@ mlir::LogicalResult MoveThroughSoftmax::matchAndRewrite(IE::SoftMaxOp origOp, ml
 }
 
 //
+// MoveThroughMVN
+//
+
+class MoveThroughMVN final : public mlir::OpRewritePattern<IE::MVNOp> {
+public:
+    MoveThroughMVN(mlir::MLIRContext* ctx, Logger log): mlir::OpRewritePattern<IE::MVNOp>(ctx), _log(log) {
+        this->setDebugName("MoveThroughMVN");
+    }
+
+private:
+    mlir::LogicalResult matchAndRewrite(IE::MVNOp origOp, mlir::PatternRewriter& rewriter) const final;
+
+private:
+    Logger _log;
+};
+
+mlir::LogicalResult MoveThroughMVN::matchAndRewrite(IE::MVNOp origOp, mlir::PatternRewriter& rewriter) const {
+    _log.trace("Got '{0}' at '{1}'", origOp->getName(), origOp->getLoc());
+
+    auto preAffineReshapeOp = origOp.getInput().getDefiningOp<IE::AffineReshapeOp>();
+    if (preAffineReshapeOp == nullptr || !preAffineReshapeOp->hasOneUse()) {
+        _log.trace("Previous AffineReshapeOp not found or has multiple uses");
+        return mlir::failure();
+    }
+
+    auto isAcrossChannels = origOp.getAcrossChannels();
+    const auto mvnInShape = getShape(origOp.getInput());
+    const auto preAffineReshapeInShape = getShape(preAffineReshapeOp.getInput());
+    const int64_t rank4D = 4;
+    if (preAffineReshapeInShape.size() != rank4D) {
+        _log.trace("Previous AffineReshapeOp input shape size is not 4");
+        return mlir::failure();
+    }
+
+    // For example, across_channels = false, 1x2x1280x1 -> 1x2560x1x1, it is not equivalent to propagate
+    if (!isAcrossChannels && mvnInShape[Dims4D::Act::C] != 1 &&
+        preAffineReshapeInShape[Dims4D::Act::C] != mvnInShape[Dims4D::Act::C]) {
+        return mlir::failure();
+    }
+
+    if (mvnInShape[Dims4D::Act::N] != preAffineReshapeInShape[Dims4D::Act::N]) {
+        _log.trace("DimN of MVNOp is different from previous AffineReshapeOp");
+        return mlir::failure();
+    }
+
+    if (!isAcrossChannels && mvnInShape[Dims4D::Act::C] == 1 &&
+        preAffineReshapeInShape[Dims4D::Act::C] != mvnInShape[Dims4D::Act::C]) {
+        isAcrossChannels = true;
+    }
+
+    // Create new MVNOp
+    auto newMvnOp = rewriter.create<IE::MVNOp>(origOp->getLoc(), preAffineReshapeOp.getInput(),
+                                               mlir::BoolAttr::get(getContext(), isAcrossChannels),
+                                               origOp.getNormalizeVarianceAttr(), origOp.getEpsAttr());
+
+    // Create new AffineReshapeOp
+    auto newAffineReshapeOp = rewriter.create<IE::AffineReshapeOp>(preAffineReshapeOp.getLoc(), newMvnOp.getOutput(),
+                                                                   preAffineReshapeOp.getDimMapping(),
+                                                                   preAffineReshapeOp.getShapeValue());
+
+    origOp.replaceAllUsesWith(newAffineReshapeOp.getOutput());
+
+    return mlir::success();
+}
+
+//
 // MoveThroughEltwiseGeneric
 //
 
@@ -507,6 +575,10 @@ mlir::LogicalResult MoveThroughEltwiseGeneric<ConcreteOp>::matchAndRewrite(Concr
     mapper.map(origOp->getOperand(0), inputAffineReshape.getInput());
     auto newOp = rewriter.clone(*origOp, mapper);
     vpux::inferReturnTypes(newOp, vpux::InferShapedTypeMode::SHAPE);
+    // Input layout should be kept
+    auto dimsOrder = mlir::cast<NDTypeInterface>(newOp->getOperand(0).getType()).getDimsOrder();
+    auto newOutType = mlir::cast<NDTypeInterface>(newOp->getResult(0).getType()).changeDimsOrder(dimsOrder);
+    newOp->getResult(0).setType(newOutType);
 
     rewriter.replaceOpWithNewOp<IE::AffineReshapeOp>(origOp, newOp->getResult(0),
                                                      inputAffineReshape.getDimMappingAttr(),
@@ -569,10 +641,10 @@ mlir::LogicalResult MoveThroughMultiply::matchAndRewrite(IE::MultiplyOp origOp, 
         return mlir::failure();
     }
 
-    auto newMultiply = rewriter.create<IE::MultiplyOp>(origOp.getLoc(), inputAffineReshape1.getInput().getType(),
-                                                       inputAffineReshape1.getInput(), inputAffineReshape2.getInput(),
-                                                       origOp.getAutoBroadcastAttr(), origOp.getPostOpAttr(),
-                                                       origOp.getClampAttr());
+    auto newMultiply = rewriter.create<IE::MultiplyOp>(
+            origOp.getLoc(), inputAffineReshape1.getInput().getType(), inputAffineReshape1.getInput(),
+            inputAffineReshape2.getInput(), origOp.getAutoBroadcastAttr(), origOp.getPostOpAttr(),
+            origOp.getClampAttr(), origOp.getOutputChannelsAttr(), origOp.getInputChannelsAttr());
     rewriter.replaceOpWithNewOp<IE::AffineReshapeOp>(origOp, newMultiply.getOutput(),
                                                      inputAffineReshape1.getDimMappingAttr(),
                                                      inputAffineReshape1.getShapeValueAttr());
@@ -668,7 +740,8 @@ mlir::LogicalResult MoveThroughMultiply::processMultiplyOpWithBroadCastConstInpu
     }
     auto newMultiply = rewriter.create<IE::MultiplyOp>(origOp.getLoc(), affineReshapeOp.getInput(), constInput,
                                                        origOp.getAutoBroadcastAttr(), origOp.getPostOpAttr(),
-                                                       origOp.getClampAttr());
+                                                       origOp.getClampAttr(), origOp.getOutputChannelsAttr(),
+                                                       origOp.getInputChannelsAttr());
     rewriter.replaceOpWithNewOp<IE::AffineReshapeOp>(
             origOp, newMultiply.getOutput(), affineReshapeOp.getDimMappingAttr(), affineReshapeOp.getShapeValueAttr());
     return mlir::success();
@@ -725,6 +798,10 @@ mlir::LogicalResult MoveThroughAdd::matchAndRewrite(IE::AddOp origOp, mlir::Patt
         return mlir::failure();
     }
 
+    if (IE::isPerAxisQuant(origOp.getOutput()) || IE::isPerAxisQuant(origOp.getInput1())) {
+        return mlir::failure();
+    }
+
     auto affineReshapeInput = origOp.getInput1();
     auto anotherInput = origOp.getInput2();
     auto inputAffineReshapeOp = affineReshapeInput.getDefiningOp<IE::AffineReshapeOp>();
@@ -738,9 +815,12 @@ mlir::LogicalResult MoveThroughAdd::matchAndRewrite(IE::AddOp origOp, mlir::Patt
         return mlir::failure();
     }
 
-    // Current only support Convolution input for MatMul - Add - Softmax -MatMul VF in LLM.
+    // TODO: E#139356
+    // Consider moving this rewriter into VPU dialect.
+    // It will be easier to check if operation can be closed to VPU::VerticalFusionOpInterface.
+    // This is a better approach to ensure beneficial propagation for generic optimization.
     auto affineReshapeParentOp = inputAffineReshapeOp.getInput().getDefiningOp();
-    if (!mlir::isa_and_nonnull<IE::ConvolutionOp>(affineReshapeParentOp)) {
+    if (!mlir::isa_and_nonnull<IE::ConvolutionOp, IE::GroupConvolutionOp, IE::AddOp>(affineReshapeParentOp)) {
         return mlir::failure();
     }
 
@@ -760,12 +840,17 @@ mlir::LogicalResult MoveThroughAdd::matchAndRewrite(IE::AddOp origOp, mlir::Patt
     auto newInputShapeCast =
             rewriter.create<IE::ShapeCastOp>(anotherInput.getLoc(), anotherInput, getIntArrayAttr(ctx, inputShape));
 
-    auto newAddOp =
-            rewriter.create<IE::AddOp>(origOp.getLoc(), inputAffineReshapeOp.getInput().getType(),
-                                       newInputShapeCast.getResult(), inputAffineReshapeOp.getInput(),
-                                       origOp.getAutoBroadcastAttr(), origOp.getPostOpAttr(), origOp.getClampAttr());
+    auto newInput1 =
+            affineReshapeInput == origOp.getInput1() ? inputAffineReshapeOp.getInput() : newInputShapeCast.getResult();
+    auto newInput2 =
+            affineReshapeInput == origOp.getInput1() ? newInputShapeCast.getResult() : inputAffineReshapeOp.getInput();
+    auto origOutputType = origOp.getOutput().getType().cast<NDTypeInterface>();
+    auto newOutputType = origOutputType.changeShape(inputShape);
+    auto newAddOp = rewriter.create<IE::AddOp>(
+            origOp.getLoc(), newOutputType, newInput1, newInput2, origOp.getAutoBroadcastAttr(), origOp.getPostOpAttr(),
+            origOp.getClampAttr(), origOp.getOutputChannelsAttr(), origOp.getInputChannelsAttr());
 
-    rewriter.replaceOpWithNewOp<IE::AffineReshapeOp>(origOp, newAddOp.getOutput(),
+    rewriter.replaceOpWithNewOp<IE::AffineReshapeOp>(origOp, origOutputType, newAddOp.getOutput(),
                                                      inputAffineReshapeOp.getDimMappingAttr(),
                                                      inputAffineReshapeOp.getShapeValueAttr());
 
@@ -961,6 +1046,90 @@ mlir::LogicalResult MoveThroughSlice::matchAndRewrite(IE::SliceOp origSliceOp, m
 }
 
 //
+// MoveThroughOneInputEltwise
+//
+
+class MoveThroughOneInputEltwise final : public mlir::OpTraitRewritePattern<IE::EltwiseOp> {
+public:
+    MoveThroughOneInputEltwise(mlir::MLIRContext* ctx, Logger log)
+            : mlir::OpTraitRewritePattern<IE::EltwiseOp>(ctx), _log(log) {
+        this->setDebugName("MoveThroughOneInputEltwise");
+    }
+
+private:
+    mlir::LogicalResult matchAndRewrite(mlir::Operation* eltwiseOp, mlir::PatternRewriter& rewriter) const final;
+
+private:
+    Logger _log;
+};
+
+mlir::LogicalResult MoveThroughOneInputEltwise::matchAndRewrite(mlir::Operation* eltwiseOp,
+                                                                mlir::PatternRewriter& rewriter) const {
+    _log.trace("[{0}] Got '{1}' at '{2}'", this->getDebugName(), eltwiseOp->getName(), eltwiseOp->getLoc());
+
+    if (eltwiseOp->getNumOperands() != 1 || eltwiseOp->getNumResults() != 1) {
+        return matchFailed(_log, rewriter, eltwiseOp, "EltwiseOp is not a single input & output operation");
+    }
+
+    auto affineReshapeOp = eltwiseOp->getOperand(0).getDefiningOp<IE::AffineReshapeOp>();
+    if (affineReshapeOp == nullptr || !affineReshapeOp->hasOneUse()) {
+        return matchFailed(_log, rewriter, eltwiseOp, "AffineReshapeOp not found or has multiple uses");
+    }
+
+    // ConvertShapeTo4D could generate this subgraph
+    //   AffineReshape (2D->4D) -> EltwiseOp (4D) -> AffineReshape (4D->2D)
+    // Do not change it into
+    //   EltwiseOp (2D) -> AffineReshape (2D->4D) -> AffineReshape (4D->2D)
+    if (IE::doesAffineReshapeChangeRank(affineReshapeOp)) {
+        return matchFailed(_log, rewriter, eltwiseOp, "AffineReshapeOp changes rank");
+    }
+
+    // No benefit to propagate AffineReshapeOp through, e.g., ConvertOp {f16 -> f32}
+    const auto srcType = eltwiseOp->getOperand(0).getType();
+    const auto dstType = eltwiseOp->getResult(0).getType();
+    if (getElemTypeSize(srcType) < getElemTypeSize(dstType)) {
+        return matchFailed(_log, rewriter, eltwiseOp,
+                           "Input element type size is smaller than output element type size");
+    }
+
+    // Do not change
+    //   TransposeOp -> AffineReshapeOp -> EltwiseOp
+    // into
+    //   TransposeOp -> EltwiseOp -> AffineReshapeOp
+    // because TransposeOp -> AffineReshapeOp results in better performance
+    auto transposeOp = affineReshapeOp->getOperand(0).getDefiningOp<IE::TransposeOp>();
+    if (transposeOp != nullptr && !transposeOp->hasOneUse()) {
+        return matchFailed(_log, rewriter, eltwiseOp, "Input TransposeOp has more than one uses");
+    }
+
+    _log.trace("[{0}] Propagate '{1}' at '{2}' through  '{3}' at '{4}'", this->getDebugName(),
+               affineReshapeOp->getName(), affineReshapeOp->getLoc(), eltwiseOp->getName(), eltwiseOp->getLoc());
+
+    mlir::IRMapping eltwiseMapper;
+    eltwiseMapper.map(eltwiseOp->getOperand(0), affineReshapeOp.getInput());
+    auto newEltwiseOp = rewriter.clone(*eltwiseOp, eltwiseMapper);
+
+    // Optimally, just one function call should be enough:
+    //     vpux::inferReturnTypes(newEltwiseOp, vpux::InferShapedTypeMode::SHAPE | vpux::InferShapedTypeMode::LAYOUT)
+    // However, inferReturnTypes has an unexpected side effect.
+    // Since all the IE EltwiseOps' inferReturnTypeComponents do not forward the layout info, e.g.
+    //     vpux::IE::GeluOp::inferReturnTypeComponents
+    // inferReturnTypes(Gelu, LAYOUT) will overwrite the original layout with empty layout data,
+    // which ultimately removes the original layout.
+    // Therefore, manually set the output layout is required.
+    vpux::inferReturnTypes(newEltwiseOp, vpux::InferShapedTypeMode::SHAPE);
+    auto dimsOrder = mlir::cast<NDTypeInterface>(newEltwiseOp->getOperand(0).getType()).getDimsOrder();
+    auto newOutType = mlir::cast<NDTypeInterface>(newEltwiseOp->getResult(0).getType()).changeDimsOrder(dimsOrder);
+    newEltwiseOp->getResult(0).setType(newOutType);
+
+    rewriter.replaceOpWithNewOp<IE::AffineReshapeOp>(eltwiseOp, newEltwiseOp->getResult(0),
+                                                     affineReshapeOp.getDimMappingAttr(),
+                                                     affineReshapeOp.getShapeValueAttr());
+
+    return mlir::success();
+}
+
+//
 // PropagateAffineReshape
 //
 
@@ -991,15 +1160,16 @@ void PropagateAffineReshape::safeRunOnFunc() {
     patterns.add<MoveThroughExpand>(&ctx, _log);
     patterns.add<MoveThroughConcat>(&ctx, _log);
     patterns.add<MoveThroughSoftmax>(&ctx, _log);
-    patterns.add<MoveThroughEltwiseGeneric<IE::GeluOp>>(&ctx, _log);
-    patterns.add<MoveThroughEltwiseGeneric<IE::SwishOp>>(&ctx, _log);
+    patterns.add<MoveThroughMVN>(&ctx, _log);
     patterns.add<MoveThroughEltwiseGeneric<IE::AvgPoolOp>>(&ctx, _log, verifyAvgPool);
     patterns.add<MoveThroughMultiply>(&ctx, _log);
     patterns.add<MoveThroughSlice>(&ctx, _log);
     patterns.add<IE::MoveTransposeAffineReshapeThroughAdd>(&ctx, vpux::benefitHigh, _log);
     patterns.add<MoveThroughAdd>(&ctx, _log);
+    patterns.add<MoveThroughOneInputEltwise>(&ctx, _log);
     IE::ReshapeOp::getCanonicalizationPatterns(patterns, &ctx);
     IE::AffineReshapeOp::getCanonicalizationPatterns(patterns, &ctx);
+    IE::ShapeCastOp::getCanonicalizationPatterns(patterns, &ctx);
 
     if (mlir::failed(mlir::applyPatternsAndFoldGreedily(func, std::move(patterns), getDefaultGreedyRewriteConfig()))) {
         signalPassFailure();

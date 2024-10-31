@@ -47,8 +47,6 @@ VPU::MemoryKind vpux::VPURT::getMemoryKind(BufferSection section) {
         return VPU::MemoryKind::DDR;
     case BufferSection::CSRAM:
         return VPU::MemoryKind::CSRAM;
-    case BufferSection::CMX_UPA:
-        return VPU::MemoryKind::CMX_UPA;
     case BufferSection::CMX_NN:
         return VPU::MemoryKind::CMX_NN;
     case BufferSection::Register:
@@ -65,8 +63,6 @@ VPURT::BufferSection vpux::VPURT::getBufferSection(VPU::MemoryKind memKind) {
         return BufferSection::DDR;
     case VPU::MemoryKind::CSRAM:
         return BufferSection::CSRAM;
-    case VPU::MemoryKind::CMX_UPA:
-        return BufferSection::CMX_UPA;
     case VPU::MemoryKind::CMX_NN:
         return BufferSection::CMX_NN;
     case VPU::MemoryKind::Register:

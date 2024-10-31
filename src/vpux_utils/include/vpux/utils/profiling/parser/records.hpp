@@ -121,8 +121,6 @@ private:
             return TaskInfo::ExecType::DPU;
         case ExecutorType::ACTSHAVE:
             return TaskInfo::ExecType::SW;
-        case ExecutorType::UPA:
-            return TaskInfo::ExecType::UPA;
         case ExecutorType::M2I:
             return TaskInfo::ExecType::M2I;
         default:
@@ -581,63 +579,6 @@ protected:
     double getTaskDurationClock(FrequenciesSetup frequenciesSetup) const override {
         return frequenciesSetup.profClk;
     }
-};
-
-class RawProfilingUPARecord : public RawProfilingRecord, public DebugFormattableRecordMixin {
-public:
-    explicit RawProfilingUPARecord(UpaData_t data, const ProfilingFB::SWTask* metadata, size_t inMemoryOffset)
-            : RawProfilingRecord(metadata), DebugFormattableRecordMixin(inMemoryOffset), _data(data) {
-        // TODO: Why we don't derive layer type from the task name for UPA?
-        if (metadata->taskType() != nullptr) {
-            _layerType = metadata->taskType()->str();
-        }
-    }
-
-    TaskInfo getTaskInfo(FrequenciesSetup frequenciesSetup) const override {
-        auto profInfoItem = RawProfilingRecord::getTaskInfo(frequenciesSetup);
-        profInfoItem.active_cycles = _data.activeCycles;
-        profInfoItem.stall_cycles = _data.stallCycles;
-        return profInfoItem;
-    }
-
-    void checkDataOrDie() const override {
-        VPUX_THROW_WHEN(_data.begin == 0 && _data.end == 0, "Can't process UPA profiling data.");
-    }
-
-    ExecutorType getExecutorType() const override {
-        return ExecutorType::UPA;
-    }
-
-    TimeType getStartTime(FrequenciesSetup frequenciesSetup) const override {
-        return convertTicksToNs(_data.begin, frequenciesSetup.profClk);
-    }
-
-    TimeType getFinishTime(FrequenciesSetup frequenciesSetup) const override {
-        return convertTicksToNs(_data.end, frequenciesSetup.profClk);
-    }
-
-    size_t getDebugDataSize() const override {
-        return sizeof(UpaData_t);
-    }
-
-protected:
-    ColDesc getColDesc() const override {
-        return {{"Begin tstamp", COL_WIDTH_64},
-                {"End tstamp", COL_WIDTH_64},
-                {"Stall", COL_WIDTH_32},
-                {"Active", COL_WIDTH_32}};
-    }
-
-    void printDebugInfo(std::ostream& outStream) const override {
-        const auto upaCol = getColDesc();
-
-        outStream << std::setw(upaCol[0].second) << _data.begin << std::setw(upaCol[1].second) << _data.end
-                  << std::setw(upaCol[2].second) << _data.stallCycles << std::setw(upaCol[3].second)
-                  << _data.activeCycles;
-    }
-
-private:
-    UpaData_t _data;
 };
 
 class RawProfilingACTRecord : public RawProfilingRecord, public DebugFormattableRecordMixin {

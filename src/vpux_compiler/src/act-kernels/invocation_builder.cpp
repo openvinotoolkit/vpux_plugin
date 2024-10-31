@@ -8,6 +8,7 @@
 #include <kernels/inc/common_types.h>
 
 #include <vpux/compiler/dialect/VPUIP/IR/ops.hpp>
+#include <vpux/compiler/dialect/VPUIP/device.hpp>
 
 #include <mlir/IR/BuiltinAttributes.h>
 #include <mlir/IR/BuiltinTypes.h>
@@ -50,41 +51,41 @@ SmallVector<uint8_t> InvocationBuilder::store() const {
     return serialStorage;
 }
 
-sw_params::DataType mvDTypeToDataType(const MVCNN::DType& mvDType) {
+sw_params::DataType mvDTypeToDataType(const VPUIP::DType& mvDType) {
     switch (mvDType) {
-    case MVCNN::DType::DType_FP64:
+    case VPUIP::DType::DType_FP64:
         return sw_params::DataType::NN_FP64;
-    case MVCNN::DType::DType_FP32:
+    case VPUIP::DType::DType_FP32:
         return sw_params::DataType::NN_FP32;
-    case MVCNN::DType::DType_FP16:
+    case VPUIP::DType::DType_FP16:
         return sw_params::DataType::NN_FP16;
-    case MVCNN::DType::DType_BFP16:
+    case VPUIP::DType::DType_BFP16:
         return sw_params::DataType::NN_BF16;
-    case MVCNN::DType::DType_FP8:
+    case VPUIP::DType::DType_FP8:
         return sw_params::DataType::NN_FP8;
-    case MVCNN::DType::DType_U64:
+    case VPUIP::DType::DType_U64:
         return sw_params::DataType::NN_U64;
-    case MVCNN::DType::DType_U32:
+    case VPUIP::DType::DType_U32:
         return sw_params::DataType::NN_U32;
-    case MVCNN::DType::DType_U16:
+    case VPUIP::DType::DType_U16:
         return sw_params::DataType::NN_U16;
-    case MVCNN::DType::DType_U8:
+    case VPUIP::DType::DType_U8:
         return sw_params::DataType::NN_U8;
-    case MVCNN::DType::DType_I64:
+    case VPUIP::DType::DType_I64:
         return sw_params::DataType::NN_I64;
-    case MVCNN::DType::DType_I32:
+    case VPUIP::DType::DType_I32:
         return sw_params::DataType::NN_I32;
-    case MVCNN::DType::DType_I16:
+    case VPUIP::DType::DType_I16:
         return sw_params::DataType::NN_I16;
-    case MVCNN::DType::DType_I8:
+    case VPUIP::DType::DType_I8:
         return sw_params::DataType::NN_I8;
-    case MVCNN::DType::DType_I4:
+    case VPUIP::DType::DType_I4:
         return sw_params::DataType::NN_I4;
-    case MVCNN::DType::DType_I2:
+    case VPUIP::DType::DType_I2:
         return sw_params::DataType::NN_I2;
-    case MVCNN::DType::DType_BIN:
+    case VPUIP::DType::DType_BIN:
         return sw_params::DataType::NN_BIN;
-    case MVCNN::DType::DType_NOT_SET:
+    case VPUIP::DType::DType_NOT_SET:
         return sw_params::DataType::NN_UNDEFINED;
     default:
         VPUX_THROW("Data type handling is not implemented {0}", mvDType);
@@ -134,7 +135,7 @@ void InvocationBuilder::addTensorArg(mlir::Value value, const MVCNN::TensorRefer
     auto type = value.getType().dyn_cast<vpux::NDTypeInterface>();
     VPUX_THROW_UNLESS(type != nullptr, "Value '{0}' has non vpux::NDTypeInterface '{1}'", value, value.getType());
 
-    memrefData.dataType = mvDTypeToDataType(tensorRef->data_dtype());
+    memrefData.dataType = mvDTypeToDataType(static_cast<VPUIP::DType>(tensorRef->data_dtype()));
     auto memKind = type.getMemoryKind();
     switch (memKind) {
     case VPU::MemoryKind::CMX_NN: {

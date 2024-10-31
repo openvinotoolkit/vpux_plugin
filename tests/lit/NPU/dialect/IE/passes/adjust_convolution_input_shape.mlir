@@ -283,3 +283,21 @@ func.func @ReshapeInputFor1x1GroupConvOnH(%arg0: tensor<1x320x1x4096xf16>) -> te
     // CHECK-SAME{{LITERAL}}:  {dim_mapping = [[0], [1], [2, 3], [3]], shape_value = [1, 320, 1, 4096]} : tensor<1x320x4x1024xf16> -> tensor<1x320x1x4096xf16>
     // CHECK:       return [[RESHAPE1]] : tensor<1x320x1x4096xf16>
 }
+
+// -----
+
+!qElemType = !quant.uniform<u8:f16, 0.026685049019607842>
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
+// CHECK-LABEL: @ReshapeInputForAddOp
+// CHECK-SAME: [[INPUT:%.+]]: tensor<1x245760x1x1xf16, {order = #NHWC}>
+func.func @ReshapeInputForAddOp(%arg0: tensor<1x245760x1x1xf16, {order = #NHWC}>) -> tensor<1x245760x1x1x!qElemType, {order = #NHWC}> {
+    %0 = IE.Add(%arg0, %arg0) {auto_broadcast = #IE.auto_broadcast_type<NONE_OR_EXPLICIT>} : tensor<1x245760x1x1xf16, {order = #NHWC}>, tensor<1x245760x1x1xf16, {order = #NHWC}> -> tensor<1x245760x1x1x!qElemType, {order = #NHWC}>
+
+    return %0 : tensor<1x245760x1x1x!qElemType, {order = #NHWC}>
+
+    // CHECK:       [[SHAPECAST_IN:%.+]] = IE.ShapeCast {shape = [1, 7680, 8, 4]} inputs([[INPUT]] : tensor<1x245760x1x1xf16, {order = #NHWC}>) -> tensor<1x7680x8x4xf16, {order = #NHWC}>
+    // CHECK:       [[ADD:%.+]] = IE.Add([[SHAPECAST_IN]], [[SHAPECAST_IN]]) {auto_broadcast = #IE.auto_broadcast_type<NONE_OR_EXPLICIT>} : tensor<1x7680x8x4xf16, {order = #NHWC}>, tensor<1x7680x8x4xf16, {order = #NHWC}> -> tensor<1x7680x8x4x!qElemType, {order = #NHWC}>
+    // CHECK:       [[SHAPECAST_OUT:%.+]] = IE.ShapeCast {shape = [1, 245760, 1, 1]} inputs([[ADD]] : tensor<1x7680x8x4x!qElemType, {order = #NHWC}>) -> tensor<1x245760x1x1x!qElemType, {order = #NHWC}>
+    // CHECK:       return [[SHAPECAST_OUT:%.+]] : tensor<1x245760x1x1x!qElemType, {order = #NHWC}>
+}

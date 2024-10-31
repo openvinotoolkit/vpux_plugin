@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation
+// Copyright (C) 2022-2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -13,22 +13,19 @@ namespace ov {
 namespace test {
 
 class LogicalLayerTestCommon : public LogicalLayerTest, virtual public VpuOv2LayerTest {};
+class LogicalLayerTestHW : public LogicalLayerTestCommon {};
 
-class LogicalLayerTest_SW_NPU3720 : public LogicalLayerTestCommon {};
-class LogicalLayerTest_HW_NPU3720 : public LogicalLayerTestCommon {};
-class LogicalLayerTest_SW_NPU4000 : public LogicalLayerTestCommon {};
-
-TEST_P(LogicalLayerTest_SW_NPU3720, SW) {
+TEST_P(LogicalLayerTestCommon, NPU3720_SW) {
     setReferenceSoftwareMode();
     run(Platform::NPU3720);
 }
 
-TEST_P(LogicalLayerTest_HW_NPU3720, HW) {
+TEST_P(LogicalLayerTestHW, NPU3720) {
     setDefaultHardwareMode();
     run(Platform::NPU3720);
 }
 
-TEST_P(LogicalLayerTest_SW_NPU4000, SW) {
+TEST_P(LogicalLayerTestCommon, NPU4000_SW) {
     setReferenceSoftwareMode();
     run(Platform::NPU4000);
 }
@@ -87,9 +84,6 @@ std::vector<ov::element::Type> modelTypes = {
 
 std::map<std::string, std::string> additional_config = {};
 
-//
-// NPU3720/4000
-//
 std::set<LogicalTypes> supportedTypes = {
         LogicalTypes::LOGICAL_OR,
         LogicalTypes::LOGICAL_XOR,
@@ -134,29 +128,14 @@ const auto tiling_logical_params = ::testing::Combine(
         ::testing::Values(LogicalTypes::LOGICAL_OR), ::testing::ValuesIn(secondInputTypes),
         ::testing::ValuesIn(modelTypes), ::testing::Values(DEVICE_NPU), ::testing::Values(additional_config));
 
-// ------ NPU3720 ------
-// [Tracking number E#107046]
-INSTANTIATE_TEST_CASE_P(DISABLED_TMP_smoke_logical, LogicalLayerTest_SW_NPU3720, logical_params,
-                        LogicalLayerTest::getTestCaseName);
-// [Tracking number E#107046]
-INSTANTIATE_TEST_CASE_P(DISABLED_TMP_smoke_precommit_logical, LogicalLayerTest_SW_NPU3720, precommit_logical_params,
-                        LogicalLayerTest::getTestCaseName);
-// [Tracking number E#107046]
-INSTANTIATE_TEST_CASE_P(DISABLED_TMP_smoke_precommit_logical_not, LogicalLayerTest_SW_NPU3720,
-                        precommit_logical_params_not, LogicalLayerTest::getTestCaseName);
-// [Tracking number E#107046]
-INSTANTIATE_TEST_CASE_P(DISABLED_TMP_smoke_tiling, LogicalLayerTest_HW_NPU3720, tiling_logical_params,
-                        LogicalLayerTest::getTestCaseName);
-
-// ------ NPU4000 ------
-// [Tracking number E#107046]
-INSTANTIATE_TEST_CASE_P(DISABLED_TMP_smoke_logical, LogicalLayerTest_SW_NPU4000, logical_params,
-                        LogicalLayerTest::getTestCaseName);
-// [Tracking number E#107046]
-INSTANTIATE_TEST_CASE_P(DISABLED_TMP_smoke_precommit_logical, LogicalLayerTest_SW_NPU4000, precommit_logical_params,
-                        LogicalLayerTest::getTestCaseName);
-// [Tracking number E#107046]
-INSTANTIATE_TEST_CASE_P(DISABLED_TMP_smoke_precommit_logical_not, LogicalLayerTest_SW_NPU4000,
-                        precommit_logical_params_not, LogicalLayerTest::getTestCaseName);
+// [Tracking number E#109588]
+INSTANTIATE_TEST_SUITE_P(DISABLED_TMP_smoke_logical, LogicalLayerTestCommon, logical_params,
+                         LogicalLayerTest::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(DISABLED_TMP_smoke_precommit_logical, LogicalLayerTestCommon, precommit_logical_params,
+                         LogicalLayerTest::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(DISABLED_TMP_smoke_precommit_logical_not, LogicalLayerTestCommon, precommit_logical_params_not,
+                         LogicalLayerTest::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(DISABLED_TMP_smoke_tiling, LogicalLayerTestHW, tiling_logical_params,
+                         LogicalLayerTest::getTestCaseName);
 
 }  // namespace

@@ -7,9 +7,12 @@
 
 #include "vpux/compiler/core/layers.hpp"
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
+#include "vpux/compiler/dialect/IE/utils/quantization.hpp"
 #include "vpux/compiler/dialect/VPU/utils/const_utils.hpp"
+#include "vpux/compiler/dialect/VPU/utils/max_kernel_size_utils.hpp"
 #include "vpux/compiler/dialect/VPUIP/interfaces/nce_invariant.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
+#include "vpux/compiler/utils/rewriter.hpp"
 
 #include <mlir/Transforms/DialectConversion.h>
 
@@ -117,45 +120,14 @@ mlir::LogicalResult ConvertAvgPoolToDWConvPass::AvgPoolOpConverter::matchAndRewr
 
     const bool isAvgPoolQuantizedVal = isAvgPoolQuantized(origOp);
     const float weightRealVal = (isAvgPoolQuantizedVal) ? 1.0f : weightsScaleFactor;
-    auto weights = Const::createFloatConst(rewriter, location, dataStorageType, weightRealVal);
+    auto weights = Const::createFloatConst(rewriter, appendLoc(location, "filter"), dataStorageType, weightRealVal);
 
     if (isAvgPoolQuantizedVal) {
         _log.trace("AvgPool is quantized, replacing it by DW convolution with quantized weights.");
-
-        const auto fqArgType = mlir::RankedTensorType::get({}, elemType);
-
-        auto inputLayerFQ = origOp.getInput().getDefiningOp<IE::FakeQuantizeOp>();
-        if (inputLayerFQ.getLevels().has_value()) {
-            // Integer case
-            // The created FQ is artificial, levels are set to 255 in correlation
-            auto fqLevelsVal = getIntAttr(ctx, 255);
-            // With FQ range from 0.0f to 254.0f (255 integer values)
-            auto fqLowVal = Const::createFloatConst(rewriter, location, fqArgType, 0.0f);
-            auto fqInHighVal = Const::createFloatConst(rewriter, location, fqArgType, 254.0f);
-            auto fqOutHighVal = Const::createFloatConst(rewriter, location, fqArgType, 254.0f * weightsScaleFactor);
-
-            auto quantizationForWeights = rewriter.create<IE::FakeQuantizeOp>(
-                    location, dataStorageType, weights, fqLowVal, fqInHighVal, fqLowVal, fqOutHighVal, fqLevelsVal,
-                    /*lowFpType=*/nullptr, inputLayerFQ.getAutoBroadcastAttr());
-            weights = quantizationForWeights.getOutput();
-
-        } else {
-            // Low precision floating-point case
-            const auto lowFpType = *inputLayerFQ.getLowFpType();
-            const auto rangeOrFail = vpux::getFp8Range(lowFpType);
-            VPUX_THROW_WHEN(mlir::failed(rangeOrFail), "Unsupported FQ lowFpType: {0}", lowFpType);
-            const auto lowVal = std::get<0>(*rangeOrFail), highVal = std::get<1>(*rangeOrFail);
-
-            auto fqInLowVal = Const::createFloatConst(rewriter, location, fqArgType, lowVal);
-            auto fqInHighVal = Const::createFloatConst(rewriter, location, fqArgType, highVal);
-            auto fqOutLowVal = Const::createFloatConst(rewriter, location, fqArgType, lowVal * weightsScaleFactor);
-            auto fqOutHighVal = Const::createFloatConst(rewriter, location, fqArgType, highVal * weightsScaleFactor);
-
-            auto quantizationForWeights = rewriter.create<IE::FakeQuantizeOp>(
-                    location, dataStorageType, weights, fqInLowVal, fqInHighVal, fqOutLowVal, fqOutHighVal,
-                    /*levels=*/nullptr, mlir::TypeAttr::get(lowFpType), inputLayerFQ.getAutoBroadcastAttr());
-            weights = quantizationForWeights.getOutput();
-        }
+        auto inputFQ = origOp.getInput().getDefiningOp<IE::FakeQuantizeOp>();
+        weights = vpux::IE::createFQScaling(appendLoc(location, "filter_fq"), weights, weightsScaleFactor, elemType,
+                                            inputFQ.getLevels(), inputFQ.getLowFpType(), inputFQ.getAutoBroadcastAttr(),
+                                            rewriter);
     }
 
     const SmallVector<int32_t> dilations = {1, 1};
@@ -164,7 +136,8 @@ mlir::LogicalResult ConvertAvgPoolToDWConvPass::AvgPoolOpConverter::matchAndRewr
     rewriter.replaceOpWithNewOp<IE::GroupConvolutionOp>(origOp, origOp.getInput(), weights, /*bias=*/nullptr,
                                                         origOp.getStridesAttr(), origOp.getPadsBeginAttr(),
                                                         origOp.getPadsEndAttr(), dilationsAttr, getIntAttr(ctx, OC),
-                                                        /*post_opAttr=*/nullptr, /*clampAttr=*/nullptr);
+                                                        /*post_opAttr=*/nullptr, /*clampAttr=*/nullptr,
+                                                        origOp.getOutputChannelsAttr(), origOp.getInputChannelsAttr());
 
     return mlir::success();
 }
@@ -180,7 +153,7 @@ void ConvertAvgPoolToDWConvPass::safeRunOnFunc() {
         const auto inputShape = getShape(origOp.getInput());
         const auto inputBatch = inputShape[Dims4D::Act::N];
         // Batch unrolling is actually possible for GroupConv, but leads to a large amount of NCE tasks
-        // At this point, uPA task seems more effective.
+        // At this point, SHAVE task seems more effective.
         if (inputBatch != vpux::VPU::NCEInvariant::SUPPORTED_BATCH_SIZE) {
             return true;
         }
@@ -200,9 +173,8 @@ void ConvertAvgPoolToDWConvPass::safeRunOnFunc() {
         const auto padRight = padsEnd[1];
 
         // The logic is reversed here. If AvgPoolOp can be represented as an NCE task, it becomes illegal.
-        const auto arch = VPU::getArch(origOp->getParentOfType<mlir::ModuleOp>());
-        return mlir::failed(VPU::NCEInvariant::verifyKernel(origOp->getLoc(), KY, KX, SY, SX, padTop, padBottom,
-                                                            padLeft, padRight, arch));
+        return mlir::failed(
+                VPU::NCEInvariant::verifyKernel(origOp, KY, KX, SY, SX, padTop, padBottom, padLeft, padRight));
     };
 
     mlir::ConversionTarget target(ctx);

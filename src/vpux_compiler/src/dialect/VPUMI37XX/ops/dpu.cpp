@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -11,7 +11,7 @@
 #include "vpux/compiler/utils/ELF/utils.hpp"
 #include "vpux/utils/core/checked_cast.hpp"
 
-#include "vpux/compiler/dialect/VPUIP/graph-schema/blob_writer.hpp"
+#include "vpux/compiler/dialect/VPUMI37XX/blob_writer.hpp"
 
 #include <npu_37xx_nnrt.hpp>
 
@@ -37,10 +37,7 @@ using namespace npu37xx;
 void vpux::VPUMI37XX::DPUInvariantOp::serialize(elf::writer::BinaryDataSection<uint8_t>& binDataSection) {
     vpux::Logger logger("DPU_Serializer", vpux::LogLevel::Debug);
 
-    auto parentModule = getOperation()->getParentOfType<mlir::ModuleOp>();
-    VPUX_THROW_WHEN(parentModule == nullptr, "Could not get the parent module for DPU Invariant OP");
-
-    VPUIP::BlobWriter writer(logger, VPU::getArch(parentModule));
+    VPUMI37XX::BlobWriter writer(logger);
 
     nn_public::VpuDPUInvariant taskWrapper{};
     nn_public::VpuDPUInvariantRegisters& registers = taskWrapper.registers_;
@@ -187,10 +184,7 @@ vpux::VPURT::BufferSection vpux::VPUMI37XX::DPUInvariantOp::getMemorySpace() {
 void vpux::VPUMI37XX::DPUVariantOp::serialize(elf::writer::BinaryDataSection<uint8_t>& binDataSection) {
     vpux::Logger logger("DPU_Serializer", vpux::LogLevel::Debug);
 
-    auto parentModule = getOperation()->getParentOfType<mlir::ModuleOp>();
-    VPUX_THROW_WHEN(parentModule == nullptr, "Could not get the parent module for DPU Invariant OP");
-
-    VPUIP::BlobWriter writer(logger, VPU::getArch(parentModule));
+    VPUMI37XX::BlobWriter writer(logger);
 
     auto invariant = getInvariant().getDefiningOp<vpux::VPUMI37XX::DPUInvariantOp>();
     VPUX_THROW_WHEN(invariant == nullptr, "variant not pointing to an invariant");

@@ -3,23 +3,12 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
-#include "vpux/compiler/core/attributes/dims_order.hpp"
-#include "vpux/compiler/core/attributes/shape.hpp"
 #include "vpux/compiler/core/tiling.hpp"
-#include "vpux/compiler/dialect/IE/IR/attributes.hpp"
 #include "vpux/compiler/dialect/IE/utils/interpolate_utils.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPU/utils/const_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/explicit_distribution_utils.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
-#include "vpux/utils/core/error.hpp"
-#include "vpux/utils/core/logger.hpp"
-#include "vpux/utils/core/range.hpp"
-
-#include <mlir/IR/BuiltinAttributes.h>
-#include <mlir/IR/Location.h>
-#include <optional>
-#include <utility>
 
 using namespace vpux;
 
@@ -51,45 +40,33 @@ mlir::LogicalResult vpux::VPU::InterpolateOp::inferReturnTypes(mlir::MLIRContext
 // ClusteredOpInterface
 //
 
-bool vpux::VPU::InterpolateOp::checkStrategyCompatibility(VPU::MultiClusterStrategy strategy, size_t numTiles) {
-    const auto inputShape = getShape(getInput());
-    const auto outputShape = getShape(getOutput());
-
-    const auto isCompatibleStrategy{[&](auto strategyToCheck, auto dimensionToCheck) {
-        return strategy == strategyToCheck && inputShape[dimensionToCheck] >= static_cast<int64_t>(numTiles) &&
-               outputShape[dimensionToCheck] >= static_cast<int64_t>(numTiles);
-    }};
-
-    if (isCompatibleStrategy(VPU::MultiClusterStrategy::SplitOverHeightOverlapped, Dims4D::Act::H)) {
-        return true;
-    }
-
-    if (strategy == VPU::MultiClusterStrategy::Clustering) {
+bool vpux::VPU::InterpolateOp::checkStrategyCompatibility(VPU::MultiClusterStrategy strategy, size_t) {
+    if (strategy == VPU::MultiClusterStrategy::Clustering ||
+        strategy == VPU::MultiClusterStrategy::SplitOverHeightOverlapped) {
         return true;
     }
 
     return false;
 }
 
-vpux::VPU::DistributedTensorNative vpux::VPU::InterpolateOp::getExplicitDistributedTensorAttr(
+vpux::VPU::DistributionInfo vpux::VPU::InterpolateOp::getExplicitDistributionInfoAttr(
         vpux::ShapeRef shape, vpux::VPU::DistributionMode distributionMode, ArrayRef<int64_t> numTiles,
         const int64_t numClusters, ArrayRef<int64_t> alignment, const bool uniformDistributedSegments,
         const vpux::VPU::OverlapDistributionParams& overlapParams) {
-    return VPU::getSWExplicitDistributedTensorNative(mlir::cast<VPU::SWOpInterface>(getOperation()), shape,
-                                                     distributionMode, numTiles, numClusters, alignment,
-                                                     uniformDistributedSegments, overlapParams);
+    return VPU::getSWExplicitDistributionInfo(mlir::cast<VPU::SWOpInterface>(getOperation()), shape, distributionMode,
+                                              numTiles, numClusters, alignment, uniformDistributedSegments,
+                                              overlapParams);
 }
 
 void vpux::VPU::InterpolateOp::build(
         ::mlir::OpBuilder& odsBuilder, ::mlir::OperationState& odsState, ::mlir::Value input,
         /*optional*/ ::mlir::Value sizes, /*optional*/ ::mlir::Value scales, /*optional*/ ::mlir::Value axes,
-        /*optional*/ ::mlir::Value coordinates, /*optional*/ ::mlir::Value lambdas,
         /*optional*/ ::mlir::ArrayAttr sizes_attr, /*optional*/ ::mlir::ArrayAttr scales_attr,
         /*optional*/ ::mlir::ArrayAttr axes_attr, /*optional*/ ::mlir::ArrayAttr tile_offset_attr,
         /*optional*/ ::mlir::ArrayAttr initial_input_dims_attr, /*optional*/ ::mlir::ArrayAttr initial_output_dims_attr,
         vpux::IE::InterpolateAttr attr) {
-    build(odsBuilder, odsState, input, sizes, scales, axes, coordinates, lambdas, sizes_attr, scales_attr, axes_attr,
-          tile_offset_attr, initial_input_dims_attr, initial_output_dims_attr, nullptr, nullptr, nullptr, attr);
+    build(odsBuilder, odsState, input, sizes, scales, axes, sizes_attr, scales_attr, axes_attr, tile_offset_attr,
+          initial_input_dims_attr, initial_output_dims_attr, nullptr, nullptr, nullptr, attr);
 }
 
 //
@@ -97,42 +74,15 @@ void vpux::VPU::InterpolateOp::build(
 //
 
 bool vpux::VPU::InterpolateOp::fitIntoCMX(llvm::ArrayRef<vpux::NDTypeInterface> buffers, Byte reservedMem) {
-    VPUX_THROW_UNLESS(buffers.size() >= 2 && buffers.size() <= 7,
-                      "InterpolateOp can have a maximum of 1 input, 5 optional inputs and 1 output, but the "
-                      "number of buffers is {0}",
+    VPUX_THROW_UNLESS(buffers.size() >= 2 && buffers.size() <= 5,
+                      "InterpolateOp requires 1 input, 3 optional attribution inputs and 1 output, but the "
+                      "number of buffer is {0}",
                       buffers.size());
 
     SmallVector<Byte> buffersSize;
     std::transform(buffers.begin(), buffers.end(), std::back_inserter(buffersSize), [](const auto buffer) {
         return buffer.getTotalAllocSize();
     });
-
-    const auto coordinates = getCoordinates();
-    const auto lambdas = getLambdas();
-    const auto interpolateMode = getAttr().getMode().getValue();
-    // Computing coordinates at compile time is a feature supported only for linear interpolate modes.
-    // The ticket for adding support for all interpolate modes is E#129853.
-    if ((coordinates == nullptr || lambdas == nullptr) &&
-        (interpolateMode == IE::InterpolateMode::LINEAR || interpolateMode == IE::InterpolateMode::LINEAR_ONNX)) {
-        const auto inOrder = getInput().getType().cast<NDTypeInterface>().getDimsOrder();
-
-        const auto axesResult = IE::extractIntVector(getLoc(), getAxes(), getAxesAttrAttr());
-        VPUX_THROW_WHEN(mlir::failed(axesResult), "Failed to extract axes");
-        const auto innermostAxisResult = IE::getInnermostAxis(getLoc(), inOrder, axesResult.value());
-        VPUX_THROW_WHEN(mlir::failed(innermostAxisResult), "Failed to get the innermost axis");
-        const auto innermostAxis = innermostAxisResult.value();
-
-        if (coordinates == nullptr) {
-            const auto coordinatesSize = IE::getInterpCoordinatesSize(getOutput(), innermostAxis);
-            const auto coordinatesElemSize = 4_Byte;
-            buffersSize.push_back(coordinatesSize * coordinatesElemSize);
-        }
-        if (lambdas == nullptr) {
-            const auto lambdasSize = IE::getInterpLambdasSize(getOutput(), innermostAxis);
-            const auto lambdasElemSize = 2_Byte;
-            buffersSize.push_back(lambdasSize * lambdasElemSize);
-        }
-    }
 
     auto totalAvailableCMXSize = reservedMem.count() == 0 ? getTotalCMXSize(getOperation()).count()
                                                           : getTotalCMXFragmentationAwareSize(getOperation()).count();
@@ -197,19 +147,8 @@ InputTiling vpux::VPU::InterpolateOp::backInferTileInfo(const vpux::TileInfo& ou
     auto interpolateMode = getAttr().getMode().getValue();
     auto nearestMode = getAttr().getNearestMode().getValue();
     auto currentInputShape = to_small_vector(getShape(getInput()));
-
-    std::optional<SmallVector<int64_t>> coordinatesShape = std::nullopt;
-    std::optional<SmallVector<int64_t>> lambdasShape = std::nullopt;
-    if (const auto coordinates = getCoordinates(); coordinates != nullptr) {
-        coordinatesShape = to_small_vector(getShape(coordinates));
-    }
-    if (const auto lambdas = getLambdas(); lambdas != nullptr) {
-        lambdasShape = to_small_vector(getShape(lambdas));
-    }
-
     auto inTiles = vpux::backInferInterpolateTile(outputTile, iShape, oShape, initialInputOffsets, initialOutputOffsets,
-                                                  currentInputShape, coordinatesShape, lambdasShape, interpolateMode,
-                                                  coordMode, nearestMode, log);
+                                                  currentInputShape, interpolateMode, coordMode, nearestMode, log);
     auto newInputOffset = to_small_vector(inTiles.tiles[0].offsets);
 
     // Recalculate the backward scale based on the new input/output shape
@@ -222,7 +161,7 @@ InputTiling vpux::VPU::InterpolateOp::backInferTileInfo(const vpux::TileInfo& ou
     auto forwardInferedShape = IE::inferInterpOutShape(
             getLoc(), axesVal, inTiles.tiles[0].shape, {beginPads}, {endPads}, shapeCalcMode,
             IE::extractIntVector(getLoc(), getSizes(), getSizesAttr().value_or<mlir::ArrayAttr>({})), {fwdScales},
-            mlir::Float64Type::get(getContext()), log);
+            mlir::Float32Type::get(getContext()), log);
 
     // TODO: E#36319 we counting only endpads - begin pad might matter for offsets not for dims
     auto shapeArray = to_small_vector(outputTile.shape);
@@ -231,11 +170,22 @@ InputTiling vpux::VPU::InterpolateOp::backInferTileInfo(const vpux::TileInfo& ou
             endPads[shapeOrig.index()] = shapeOrig.value() - forwardInferedShape[shapeOrig.index()];
         }
     }
+    auto convertShape = [](::mlir::Value plainShape) {
+        auto origShape = getShape(plainShape);
+        TileInfo tileShape{origShape.size()};
+        tileShape.shape = getShape(plainShape).toValues();
+        return tileShape;
+    };
 
-    VPUX_THROW_WHEN(getSizes() != nullptr, "Interpolate `sizes` input should have been converted to an attribute.");
-    VPUX_THROW_WHEN(getScales() != nullptr, "Interpolate `scales` input should have been converted to an attribute.");
-    VPUX_THROW_WHEN(getAxes() != nullptr, "Interpolate `axes` input should have been converted to an attribute.");
-
+    if (auto size = getSizes()) {
+        inTiles.tiles.push_back(convertShape(size));
+    }
+    if (auto scale = getScales()) {
+        inTiles.tiles.push_back(convertShape(scale));
+    }
+    if (auto axis = getAxes()) {
+        inTiles.tiles.push_back(convertShape(axis));
+    }
     inTiles.pads = {0, endPads[2], 0, endPads[3]};
     return inTiles;
 }
@@ -293,5 +243,5 @@ void vpux::VPU::InterpolateOp::adjustAttrs(const TilingInfo& inputTiling, const 
 }
 
 mlir::FailureOr<OutputTiling> vpux::VPU::InterpolateOp::getTilingStrategy(TilingMode tilingMode, Logger log) {
-    return vpux::getSWLayerTilingStrategy(getOperation(), tilingMode, std::move(log));
+    return vpux::getSWLayerTilingStrategy(this->getOperation(), tilingMode, log);
 }

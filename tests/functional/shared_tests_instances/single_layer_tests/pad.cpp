@@ -18,11 +18,12 @@ class PadLayerTestCommon : public PadLayerTest, virtual public VpuOv2LayerTest {
     }
 };
 
-TEST_P(PadLayerTestCommon, NPU3720) {
+TEST_P(PadLayerTestCommon, NPU3720_HW) {
     setDefaultHardwareMode();
     run(Platform::NPU3720);
 }
-TEST_P(PadLayerTestCommon, NPU4000) {
+
+TEST_P(PadLayerTestCommon, NPU4000_HW) {
     setDefaultHardwareMode();
     run(Platform::NPU4000);
 }

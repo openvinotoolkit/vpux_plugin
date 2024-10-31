@@ -101,44 +101,13 @@ bool vpux::VPU::LSTMGatesOp::checkStrategyCompatibility(VPU::MultiClusterStrateg
     return strategy == VPU::MultiClusterStrategy::Clustering || strategy == VPU::MultiClusterStrategy::SplitOverHeight;
 }
 
-vpux::VPU::DistributedTensorNative vpux::VPU::LSTMGatesOp::getExplicitDistributedTensorAttr(
+vpux::VPU::DistributionInfo vpux::VPU::LSTMGatesOp::getExplicitDistributionInfoAttr(
         vpux::ShapeRef shape, vpux::VPU::DistributionMode distributionMode, ArrayRef<int64_t> numTiles,
         const int64_t numClusters, ArrayRef<int64_t> alignment, const bool uniformDistributedSegments,
         const vpux::VPU::OverlapDistributionParams& overlapParams) {
-    return VPU::getSWExplicitDistributedTensorNative(mlir::cast<VPU::SWOpInterface>(getOperation()), shape,
-                                                     distributionMode, numTiles, numClusters, alignment,
-                                                     uniformDistributedSegments, overlapParams);
-}
-
-bool VPU::LSTMGatesOp::doesLayerFitIntoCMX(VPU::MultiClusterStrategy strategy, Byte reservedMem) {
-    auto lstmGatesOp = mlir::cast<VPU::LSTMGatesOp>(getOperation());
-    const auto outputType = lstmGatesOp->getResult(0).getType().cast<vpux::NDTypeInterface>();
-    auto numClusters = VPU::getOptimalNumClusters(lstmGatesOp, outputType.getShape(), strategy);
-
-    SmallVector<Byte> buffersSize{
-            VPU::getTotalAllocSizeWithDistribution(
-                    getGatesInput().getType(),
-                    getActivationDistributionAttrFromOp(lstmGatesOp, getGatesInput().getType(), numClusters.getInt(),
-                                                        strategy)),
-            VPU::getTotalAllocSizeWithDistribution(
-                    getInitialCellState().getType(),
-                    getActivationDistributionAttrFromOp(lstmGatesOp, getInitialCellState().getType(),
-                                                        numClusters.getInt(), strategy)),
-            VPU::getTotalAllocSizeWithDistribution(
-                    getOutputHiddenState().getType(),
-                    getOutputDistributionAttrFromOp(lstmGatesOp, getOutputHiddenState().getType(), numClusters.getInt(),
-                                                    strategy)),
-            VPU::getTotalAllocSizeWithDistribution(
-                    getOutputCellState().getType(),
-                    getOutputDistributionAttrFromOp(lstmGatesOp, getOutputCellState().getType(), numClusters.getInt(),
-                                                    strategy))};
-
-    auto totalAvailableCMXSize = reservedMem.count() == 0 ? getTotalCMXSize(getOperation()).count()
-                                                          : getTotalCMXFragmentationAwareSize(getOperation()).count();
-
-    return vpux::VPU::calculateAlignedBuffersMemoryRequirement(getArch(getOperation()), buffersSize).count() +
-                   reservedMem.count() <=
-           totalAvailableCMXSize;
+    return VPU::getSWExplicitDistributionInfo(mlir::cast<VPU::SWOpInterface>(getOperation()), shape, distributionMode,
+                                              numTiles, numClusters, alignment, uniformDistributedSegments,
+                                              overlapParams);
 }
 
 //

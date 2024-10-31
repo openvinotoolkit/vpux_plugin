@@ -14,15 +14,15 @@
 namespace vpux {
 namespace VPURegMapped {
 
-void updateRegMappedInitializationValues(std::map<std::string, std::map<std::string, uint64_t>>& values,
-                                         const std::map<std::string, std::map<std::string, uint64_t>>& newValues);
+void updateRegMappedInitializationValues(std::map<std::string, std::map<std::string, RegFieldValue>>& values,
+                                         const std::map<std::string, std::map<std::string, RegFieldValue>>& newValues);
 
 size_t calcMinBitsRequirement(uint64_t value);
 
 template <typename RegType>
 vpux::VPURegMapped::RegMappedType getRegMappedWithValues(
-        mlir::OpBuilder builder, const std::map<std::string, std::map<std::string, uint64_t>>& newValues =
-                                         std::map<std::string, std::map<std::string, uint64_t>>()) {
+        mlir::OpBuilder builder, const std::map<std::string, std::map<std::string, RegFieldValue>>& newValues =
+                                         std::map<std::string, std::map<std::string, RegFieldValue>>()) {
     auto resetValues = RegType::getResetInitilizationValues();
     updateRegMappedInitializationValues(resetValues, newValues);
     return RegType::get(builder, resetValues);
@@ -30,8 +30,8 @@ vpux::VPURegMapped::RegMappedType getRegMappedWithValues(
 
 template <typename RegType>
 vpux::VPURegMapped::RegisterMappedAttr getRegMappedAttributeWithValues(
-        mlir::OpBuilder builder, const std::map<std::string, std::map<std::string, uint64_t>>& newValues =
-                                         std::map<std::string, std::map<std::string, uint64_t>>()) {
+        mlir::OpBuilder builder, const std::map<std::string, std::map<std::string, RegFieldValue>>& newValues =
+                                         std::map<std::string, std::map<std::string, RegFieldValue>>()) {
     return vpux::VPURegMapped::RegisterMappedAttr::get(builder.getContext(),
                                                        getRegMappedWithValues<RegType>(builder, newValues));
 }

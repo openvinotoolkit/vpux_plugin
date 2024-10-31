@@ -16,6 +16,7 @@
 #include "vpux/compiler/core/mem_live_range_info.hpp"
 #include "vpux/compiler/core/reserved_memory_info.hpp"
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/dialect.hpp"
 #include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPUIP/transforms/passes.hpp"
 #include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
@@ -223,7 +224,6 @@ void StaticAllocationPass::safeRunOnFunc() {
     auto func = getOperation();
 
     const auto allocInfo = runLinearScan(func);
-    IE::setUsedMemory(func, _memKindAttr, allocInfo.maxAllocatedSize());
 
     mlir::ConversionTarget target(ctx);
     target.addLegalDialect<VPUIP::VPUIPDialect>();

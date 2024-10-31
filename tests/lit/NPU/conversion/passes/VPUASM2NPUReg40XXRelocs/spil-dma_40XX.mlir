@@ -60,7 +60,7 @@ module @OneDMAWithoutAttributes attributes {VPU.arch = #VPU.arch_kind<NPU40XX>} 
           acceleration_mode(<DISABLE>) {elfMemOffsetAttrKey = 0 : ui64}
         // CHECK-NOT:   VPUASM.NNDMA
         // CHECK:       NPUReg40XX.NNDMA
-        // CHECK:  UINT dma_cfg_fields_acceleration_cfg at 42 size 2 = 0,
+        // CHECK:  UINT dma_cfg_fields_acceleration_cfg at 42 size 2 = 0
 
         VPUASM.NNDMA @NNDMA_0_0_1 idx(!VPURegMapped.Index<0:0:1>) taskLocation(@program.DMA.cmx.0.0::@DeclareTaskBuffer_DMA_0_0_1)
           input(@io.NetworkOutput1::@DeclareBuffer2) outputs([@buffer.CMX_NN.0::@DeclareBuffer5])
@@ -70,11 +70,11 @@ module @OneDMAWithoutAttributes attributes {VPU.arch = #VPU.arch_kind<NPU40XX>} 
           {elfMemOffsetAttrKey = 224 : ui64}
         // CHECK-NOT:   VPUASM.NNDMA
         // CHECK:       NPUReg40XX.NNDMA
-        // CHECK:  UINT dma_cfg_fields_rwf_en at 33 size 1 = 1,
-        // CHECK:  UINT dma_cfg_fields_rws_en at 34 size 1 = 0,
-        // CHECK:  UINT dma_cfg_fields_acceleration_cfg at 42 size 2 = 2,
-        // CHECK:  UINT dma_acc_info_decompress_dtype at 0 size 2 = 1,
-        // CHECK:  UINT dma_acc_info_decompress_bitc_en at 4 size 1 = 1,
+        // CHECK:  UINT dma_cfg_fields_rwf_en at 33 size 1 = 1
+        // CHECK:  UINT dma_cfg_fields_rws_en at 34 size 1 = 0
+        // CHECK:  UINT dma_cfg_fields_acceleration_cfg at 42 size 2 = 2
+        // CHECK:  UINT dma_acc_info_decompress_dtype at 0 size 2 = 1
+        // CHECK:  UINT dma_acc_info_decompress_bitc_en at 4 size 1 = 1
       }
       ELF.CreateSection @task.dma.0.1 aligned(64) secType(SHT_PROGBITS) secFlags(SHF_ALLOC) {
         VPUASM.NNDMA @NNDMA_0_1_0 idx(!VPURegMapped.Index<0:1:0>) taskLocation(@program.DMA.cmx.0.1::@DeclareTaskBuffer_DMA_0_1_0) links(@program.DMA.cmx.0.1::@DeclareTaskBuffer_DMA_0_1_1)
@@ -85,11 +85,11 @@ module @OneDMAWithoutAttributes attributes {VPU.arch = #VPU.arch_kind<NPU40XX>} 
           {elfMemOffsetAttrKey = 0 : ui64}
         // CHECK-NOT:   VPUASM.NNDMA
         // CHECK:       NPUReg40XX.NNDMA
-        // CHECK:  UINT dma_cfg_fields_rwf_en at 33 size 1 = 0,
-        // CHECK:  UINT dma_cfg_fields_rws_en at 34 size 1 = 1,
-        // CHECK:  UINT dma_cfg_fields_acceleration_cfg at 42 size 2 = 1,
-        // CHECK:  UINT dma_acc_info_compress_dtype at 0 size 2 = 1,
-        // CHECK:  UINT dma_acc_info_compress_bitc_en at 4 size 1 = 1,
+        // CHECK:  UINT dma_cfg_fields_rwf_en at 33 size 1 = 0
+        // CHECK:  UINT dma_cfg_fields_rws_en at 34 size 1 = 1
+        // CHECK:  UINT dma_cfg_fields_acceleration_cfg at 42 size 2 = 1
+        // CHECK:  UINT dma_acc_info_compress_dtype at 0 size 2 = 1
+        // CHECK:  UINT dma_acc_info_compress_bitc_en at 4 size 1 = 1
 
         VPUASM.NNDMA @NNDMA_0_1_1 idx(!VPURegMapped.Index<0:1:1>) taskLocation(@program.DMA.cmx.0.1::@DeclareTaskBuffer_DMA_0_1_1)
           input(@buffer.CMX_NN.0::@DeclareBuffer5) outputs([@io.NetworkOutput0::@DeclareBuffer1])
@@ -98,7 +98,7 @@ module @OneDMAWithoutAttributes attributes {VPU.arch = #VPU.arch_kind<NPU40XX>} 
           acceleration_mode(<DISABLE>) {elfMemOffsetAttrKey = 224 : ui64}
         // CHECK-NOT:   VPUASM.NNDMA
         // CHECK:       NPUReg40XX.NNDMA
-        // CHECK:  UINT dma_cfg_fields_acceleration_cfg at 42 size 2 = 0,
+        // CHECK:  UINT dma_cfg_fields_acceleration_cfg at 42 size 2 = 0
       }
     }
     return

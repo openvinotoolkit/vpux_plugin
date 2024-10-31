@@ -100,28 +100,21 @@ func.func @ParallelUpdateBarriers() -> memref<1x16x1x1xf16, #NHWC, @DDR> {
     //      3
     //      |
     //     bar3
-    //      |
-    //      4
-    //      |
-    //     bar4
-    //      |
-    //      5
+    //      /\
+    //     4  5
 
     // CHECK: [[BAR0:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
     // CHECK: [[BAR1:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
     // CHECK: [[BAR2:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
     // CHECK: [[BAR3:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
-    // CHECK: [[BAR4:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
     // CHECK-NOT: VPURT.DeclareVirtual
 
     // CHECK: VPURT.Task updates([[BAR0]] : !VPURT.Barrier) attributes {idx = 0 : i64}
-
     // CHECK: VPURT.Task waits([[BAR0]] : !VPURT.Barrier) updates([[BAR1]] : !VPURT.Barrier) attributes {idx = 1 : i64}
     // CHECK: VPURT.Task waits([[BAR1]] : !VPURT.Barrier) updates([[BAR2]] : !VPURT.Barrier) attributes {idx = 2 : i64}
     // CHECK: VPURT.Task waits([[BAR2]] : !VPURT.Barrier) updates([[BAR3]] : !VPURT.Barrier) attributes {idx = 3 : i64}
-    // CHECK: VPURT.Task waits([[BAR3]] : !VPURT.Barrier) updates([[BAR4]] : !VPURT.Barrier) attributes {idx = 4 : i64}
-
-    // CHECK: VPURT.Task waits([[BAR4]] : !VPURT.Barrier) attributes {idx = 5 : i64}
+    // CHECK: VPURT.Task waits([[BAR3]] : !VPURT.Barrier) attributes {idx = 4 : i64}
+    // CHECK: VPURT.Task waits([[BAR3]] : !VPURT.Barrier) attributes {idx = 5 : i64}
 }
 
 // -----
@@ -217,28 +210,22 @@ func.func @MergeParallelOutputPathsFromSharedBarrier() -> memref<1x16x1x1xf16, #
     //      3
     //      |
     //     bar3
-    //      |
-    //      4
-    //      |
-    //     bar4
-    //      |
-    //      5
+    //      /\
+    //     4  5
+    //      
 
     // CHECK: [[BAR0:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
     // CHECK: [[BAR1:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
     // CHECK: [[BAR2:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
     // CHECK: [[BAR3:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
-    // CHECK: [[BAR4:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
     // CHECK-NOT: VPURT.DeclareVirtual
 
     // CHECK: VPURT.Task updates([[BAR0]] : !VPURT.Barrier) attributes {idx = 0 : i64}
-
     // CHECK: VPURT.Task waits([[BAR0]] : !VPURT.Barrier) updates([[BAR1]] : !VPURT.Barrier) attributes {idx = 1 : i64}
     // CHECK: VPURT.Task waits([[BAR1]] : !VPURT.Barrier) updates([[BAR2]] : !VPURT.Barrier) attributes {idx = 2 : i64}
     // CHECK: VPURT.Task waits([[BAR2]] : !VPURT.Barrier) updates([[BAR3]] : !VPURT.Barrier) attributes {idx = 3 : i64}
-    // CHECK: VPURT.Task waits([[BAR3]] : !VPURT.Barrier) updates([[BAR4]] : !VPURT.Barrier) attributes {idx = 4 : i64}
-
-    // CHECK: VPURT.Task waits([[BAR4]] : !VPURT.Barrier) attributes {idx = 5 : i64}
+    // CHECK: VPURT.Task waits([[BAR3]] : !VPURT.Barrier) attributes {idx = 4 : i64}
+    // CHECK: VPURT.Task waits([[BAR3]] : !VPURT.Barrier) attributes {idx = 5 : i64}
 }
 
 // -----
@@ -348,30 +335,23 @@ func.func @LinearizeBarrierWithMultipleConsumers() -> memref<1x16x1x1xf16, #NHWC
     //    4    5
     //    \    /
     //     bar3
-    //      |
-    //      6
-    //      |
-    //     bar4
-    //      |
-    //      7
+    //    /    \
+    //    6    7
 
     // CHECK: [[BAR0:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
     // CHECK: [[BAR1:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
     // CHECK: [[BAR2:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
     // CHECK: [[BAR3:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
-    // CHECK: [[BAR4:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
     // CHECK-NOT: VPURT.DeclareVirtual
 
     // CHECK: VPURT.Task updates([[BAR0]] : !VPURT.Barrier) attributes {idx = 0 : i64}
-
     // CHECK: VPURT.Task waits([[BAR0]] : !VPURT.Barrier) updates([[BAR1]] : !VPURT.Barrier) attributes {idx = 1 : i64}
     // CHECK: VPURT.Task waits([[BAR1]] : !VPURT.Barrier) updates([[BAR2]] : !VPURT.Barrier) attributes {idx = 2 : i64}
     // CHECK: VPURT.Task waits([[BAR1]] : !VPURT.Barrier) updates([[BAR2]] : !VPURT.Barrier) attributes {idx = 3 : i64}
     // CHECK: VPURT.Task waits([[BAR2]] : !VPURT.Barrier) updates([[BAR3]] : !VPURT.Barrier) attributes {idx = 4 : i64}
     // CHECK: VPURT.Task waits([[BAR2]] : !VPURT.Barrier) updates([[BAR3]] : !VPURT.Barrier) attributes {idx = 5 : i64}
-    // CHECK: VPURT.Task waits([[BAR3]] : !VPURT.Barrier) updates([[BAR4]] : !VPURT.Barrier) attributes {idx = 6 : i64}
-
-    // CHECK: VPURT.Task waits([[BAR4]] : !VPURT.Barrier) attributes {idx = 7 : i64}
+    // CHECK: VPURT.Task waits([[BAR3]] : !VPURT.Barrier) attributes {idx = 6 : i64}
+    // CHECK: VPURT.Task waits([[BAR3]] : !VPURT.Barrier) attributes {idx = 7 : i64}
 }
 
 // -----
@@ -510,7 +490,6 @@ func.func @LinearizeBarrierWithMultipleConsumersAndProducers() -> memref<1x16x1x
     // CHECK-NOT: VPURT.DeclareVirtual
 
     // CHECK: VPURT.Task updates([[BAR0]] : !VPURT.Barrier) attributes {idx = 0 : i64}
-
     // CHECK: VPURT.Task waits([[BAR0]] : !VPURT.Barrier) updates([[BAR1]] : !VPURT.Barrier) attributes {idx = 1 : i64}
     // CHECK: VPURT.Task waits([[BAR1]] : !VPURT.Barrier) updates([[BAR2]] : !VPURT.Barrier) attributes {idx = 2 : i64}
     // CHECK: VPURT.Task waits([[BAR1]] : !VPURT.Barrier) updates([[BAR2]] : !VPURT.Barrier) attributes {idx = 3 : i64}
@@ -518,7 +497,6 @@ func.func @LinearizeBarrierWithMultipleConsumersAndProducers() -> memref<1x16x1x
     // CHECK: VPURT.Task waits([[BAR2]] : !VPURT.Barrier) updates([[BAR3]] : !VPURT.Barrier) attributes {idx = 5 : i64}
     // CHECK: VPURT.Task waits([[BAR3]] : !VPURT.Barrier) updates([[BAR4]] : !VPURT.Barrier) attributes {idx = 6 : i64}
     // CHECK: VPURT.Task waits([[BAR3]] : !VPURT.Barrier) updates([[BAR4]] : !VPURT.Barrier) attributes {idx = 7 : i64}
-
     // CHECK: VPURT.Task waits([[BAR4]] : !VPURT.Barrier) attributes {idx = 8 : i64}
     // CHECK: VPURT.Task waits([[BAR4]] : !VPURT.Barrier) attributes {idx = 9 : i64}
 }
@@ -622,43 +600,36 @@ func.func @LinearizeBarriersWithMultipleConsumersVariousOrder() -> memref<1x16x1
     //      1
     //      |
     //     bar1
-    //      |
-    //      2
-    //      |
-    //     bar2
     //    /    \
-    //    3    4
+    //    2    3
     //    \    /
+    //     bar2
+    //      |
+    //      4
+    //      |
     //     bar3
     //      |
     //      5
     //      |
-    //     bar5
-    //      |
-    //      6
-    //      |
-    //     bar6
-    //      |
-    //      7
+    //     bar4
+    //    /    \
+    //    6    7
 
     // CHECK: [[BAR0:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
     // CHECK: [[BAR1:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
     // CHECK: [[BAR2:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
     // CHECK: [[BAR3:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
     // CHECK: [[BAR4:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
-    // CHECK: [[BAR5:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
     // CHECK-NOT: VPURT.DeclareVirtual
 
     // CHECK: VPURT.Task updates([[BAR0]] : !VPURT.Barrier) attributes {idx = 0 : i64}
-
     // CHECK: VPURT.Task waits([[BAR0]] : !VPURT.Barrier) updates([[BAR1]] : !VPURT.Barrier) attributes {idx = 1 : i64}
     // CHECK: VPURT.Task waits([[BAR1]] : !VPURT.Barrier) updates([[BAR2]] : !VPURT.Barrier) attributes {idx = 2 : i64}
-    // CHECK: VPURT.Task waits([[BAR2]] : !VPURT.Barrier) updates([[BAR3]] : !VPURT.Barrier) attributes {idx = 3 : i64}
+    // CHECK: VPURT.Task waits([[BAR1]] : !VPURT.Barrier) updates([[BAR2]] : !VPURT.Barrier) attributes {idx = 3 : i64}
     // CHECK: VPURT.Task waits([[BAR2]] : !VPURT.Barrier) updates([[BAR3]] : !VPURT.Barrier) attributes {idx = 4 : i64}
     // CHECK: VPURT.Task waits([[BAR3]] : !VPURT.Barrier) updates([[BAR4]] : !VPURT.Barrier) attributes {idx = 5 : i64}
-    // CHECK: VPURT.Task waits([[BAR4]] : !VPURT.Barrier) updates([[BAR5]] : !VPURT.Barrier) attributes {idx = 6 : i64}
-
-    // CHECK: VPURT.Task waits([[BAR5]] : !VPURT.Barrier) attributes {idx = 7 : i64}
+    // CHECK: VPURT.Task waits([[BAR4]] : !VPURT.Barrier) attributes {idx = 6 : i64}
+    // CHECK: VPURT.Task waits([[BAR4]] : !VPURT.Barrier) attributes {idx = 7 : i64}
 }
 
 // -----
@@ -770,12 +741,10 @@ func.func @ParallelWaitBarriers() -> memref<1x16x1x1xf16, #NHWC, @DDR> {
     // CHECK-NOT: VPURT.DeclareVirtual
 
     // CHECK: VPURT.Task updates([[BAR0]] : !VPURT.Barrier) attributes {idx = 0 : i64}
-
     // CHECK: VPURT.Task waits([[BAR0]] : !VPURT.Barrier) updates([[BAR1]] : !VPURT.Barrier) attributes {idx = 1 : i64}
     // CHECK: VPURT.Task waits([[BAR1]] : !VPURT.Barrier) updates([[BAR2]] : !VPURT.Barrier) attributes {idx = 2 : i64}
     // CHECK: VPURT.Task waits([[BAR2]] : !VPURT.Barrier) updates([[BAR3]] : !VPURT.Barrier) attributes {idx = 3 : i64}
     // CHECK: VPURT.Task waits([[BAR3]] : !VPURT.Barrier) updates([[BAR4]] : !VPURT.Barrier) attributes {idx = 4 : i64}
-
     // CHECK: VPURT.Task waits([[BAR4]] : !VPURT.Barrier) attributes {idx = 5 : i64}
 }
 
@@ -864,18 +833,14 @@ func.func @MergeParallelInputPathsFromSharedBarrier() -> memref<1x16x1x1xf16, #N
     //      1
     //      |
     //     bar1
-    //      |
-    //      2
-    //      |
+    //    /    \
+    //    2    3
+    //    \    /
     //     bar2
-    //      |
-    //      3
-    //      |
-    //     bar3
     //      |
     //      4
     //      |
-    //     bar4
+    //     bar3
     //      |
     //      5
 
@@ -883,17 +848,14 @@ func.func @MergeParallelInputPathsFromSharedBarrier() -> memref<1x16x1x1xf16, #N
     // CHECK: [[BAR1:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
     // CHECK: [[BAR2:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
     // CHECK: [[BAR3:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
-    // CHECK: [[BAR4:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
     // CHECK-NOT: VPURT.DeclareVirtual
 
     // CHECK: VPURT.Task updates([[BAR0]] : !VPURT.Barrier) attributes {idx = 0 : i64}
-
     // CHECK: VPURT.Task waits([[BAR0]] : !VPURT.Barrier) updates([[BAR1]] : !VPURT.Barrier) attributes {idx = 1 : i64}
     // CHECK: VPURT.Task waits([[BAR1]] : !VPURT.Barrier) updates([[BAR2]] : !VPURT.Barrier) attributes {idx = 2 : i64}
-    // CHECK: VPURT.Task waits([[BAR2]] : !VPURT.Barrier) updates([[BAR3]] : !VPURT.Barrier) attributes {idx = 3 : i64}
-    // CHECK: VPURT.Task waits([[BAR3]] : !VPURT.Barrier) updates([[BAR4]] : !VPURT.Barrier) attributes {idx = 4 : i64}
-
-    // CHECK: VPURT.Task waits([[BAR4]] : !VPURT.Barrier) attributes {idx = 5 : i64}
+    // CHECK: VPURT.Task waits([[BAR1]] : !VPURT.Barrier) updates([[BAR2]] : !VPURT.Barrier) attributes {idx = 3 : i64}
+    // CHECK: VPURT.Task waits([[BAR2]] : !VPURT.Barrier) updates([[BAR3]] : !VPURT.Barrier) attributes {idx = 4 : i64}
+    // CHECK: VPURT.Task waits([[BAR3]] : !VPURT.Barrier) attributes {idx = 5 : i64}
 }
 
 // -----
@@ -995,18 +957,14 @@ func.func @LinearizeBarriersWithMultipleProducers() -> memref<1x16x1x1xf16, #NHW
     //    2    3
     //    \    /
     //     bar1
-    //      |
-    //      4
-    //      |
+    //    /    \
+    //    4    5
+    //    \    /
     //     bar2
-    //      |
-    //      5
-    //      |
-    //     bar3
     //      |
     //      6
     //      |
-    //     bar4
+    //     bar3
     //      |
     //      7
 
@@ -1014,19 +972,16 @@ func.func @LinearizeBarriersWithMultipleProducers() -> memref<1x16x1x1xf16, #NHW
     // CHECK: [[BAR1:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
     // CHECK: [[BAR2:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
     // CHECK: [[BAR3:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
-    // CHECK: [[BAR4:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
     // CHECK-NOT: VPURT.DeclareVirtual
 
     // CHECK: VPURT.Task updates([[BAR0]] : !VPURT.Barrier) attributes {idx = 0 : i64}
     // CHECK: VPURT.Task updates([[BAR0]] : !VPURT.Barrier) attributes {idx = 1 : i64}
-
     // CHECK: VPURT.Task waits([[BAR0]] : !VPURT.Barrier) updates([[BAR1]] : !VPURT.Barrier) attributes {idx = 2 : i64}
     // CHECK: VPURT.Task waits([[BAR0]] : !VPURT.Barrier) updates([[BAR1]] : !VPURT.Barrier) attributes {idx = 3 : i64}
     // CHECK: VPURT.Task waits([[BAR1]] : !VPURT.Barrier) updates([[BAR2]] : !VPURT.Barrier) attributes {idx = 4 : i64}
-    // CHECK: VPURT.Task waits([[BAR2]] : !VPURT.Barrier) updates([[BAR3]] : !VPURT.Barrier) attributes {idx = 5 : i64}
-    // CHECK: VPURT.Task waits([[BAR3]] : !VPURT.Barrier) updates([[BAR4]] : !VPURT.Barrier) attributes {idx = 6 : i64}
-
-    // CHECK: VPURT.Task waits([[BAR4]] : !VPURT.Barrier) attributes {idx = 7 : i64}
+    // CHECK: VPURT.Task waits([[BAR1]] : !VPURT.Barrier) updates([[BAR2]] : !VPURT.Barrier) attributes {idx = 5 : i64}
+    // CHECK: VPURT.Task waits([[BAR2]] : !VPURT.Barrier) updates([[BAR3]] : !VPURT.Barrier) attributes {idx = 6 : i64}
+    // CHECK: VPURT.Task waits([[BAR3]] : !VPURT.Barrier) attributes {idx = 7 : i64}
 }
 
 // -----
@@ -1121,29 +1076,25 @@ func.func @ExtremeLinearization() -> memref<1x16x1x1xf16, #NHWC, @DDR> {
 
     return %buf1 : memref<1x16x1x1xf16, #NHWC, @DDR>
 
-    //      0
-    //      |
-    //     bar0
-    //    /    \
-    //    1    2
+    //    0    1
     //    \    /
+    //     bar0
+    //      |
+    //      2
+    //      |
     //     bar1
     //      |
     //      3
     //      |
     //     bar2
-    //      |
-    //      4
-    //      |
+    //    /    \
+    //    4    5
+    //    \    /
     //     bar3
-    //      |
-    //      5
-    //      |
-    //     bar4
     //      |
     //      6
     //      |
-    //     bar5
+    //     bar4
     //      |
     //      7
 
@@ -1152,19 +1103,16 @@ func.func @ExtremeLinearization() -> memref<1x16x1x1xf16, #NHWC, @DDR> {
     // CHECK: [[BAR2:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
     // CHECK: [[BAR3:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
     // CHECK: [[BAR4:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
-    // CHECK: [[BAR5:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
     // CHECK-NOT: VPURT.DeclareVirtual
 
     // CHECK: VPURT.Task updates([[BAR0]] : !VPURT.Barrier) attributes {idx = 0 : i64}
-
-    // CHECK: VPURT.Task waits([[BAR0]] : !VPURT.Barrier) updates([[BAR1]] : !VPURT.Barrier) attributes {idx = 1 : i64}
+    // CHECK: VPURT.Task updates([[BAR0]] : !VPURT.Barrier) attributes {idx = 1 : i64}
     // CHECK: VPURT.Task waits([[BAR0]] : !VPURT.Barrier) updates([[BAR1]] : !VPURT.Barrier) attributes {idx = 2 : i64}
     // CHECK: VPURT.Task waits([[BAR1]] : !VPURT.Barrier) updates([[BAR2]] : !VPURT.Barrier) attributes {idx = 3 : i64}
     // CHECK: VPURT.Task waits([[BAR2]] : !VPURT.Barrier) updates([[BAR3]] : !VPURT.Barrier) attributes {idx = 4 : i64}
-    // CHECK: VPURT.Task waits([[BAR3]] : !VPURT.Barrier) updates([[BAR4]] : !VPURT.Barrier) attributes {idx = 5 : i64}
-    // CHECK: VPURT.Task waits([[BAR4]] : !VPURT.Barrier) updates([[BAR5]] : !VPURT.Barrier) attributes {idx = 6 : i64}
-
-    // CHECK: VPURT.Task waits([[BAR5]] : !VPURT.Barrier) attributes {idx = 7 : i64}
+    // CHECK: VPURT.Task waits([[BAR2]] : !VPURT.Barrier) updates([[BAR3]] : !VPURT.Barrier) attributes {idx = 5 : i64}
+    // CHECK: VPURT.Task waits([[BAR3]] : !VPURT.Barrier) updates([[BAR4]] : !VPURT.Barrier) attributes {idx = 6 : i64}
+    // CHECK: VPURT.Task waits([[BAR4]] : !VPURT.Barrier) attributes {idx = 7 : i64}
 }
 
 // -----
@@ -1248,18 +1196,14 @@ func.func @TwoPaths() -> memref<1x16x1x1xf16, #NHWC, @DDR> {
     //      1
     //      |
     //     bar1
-    //      |
-    //      2
-    //      |
+    //    /    \
+    //    2    3
+    //    \    /
     //     bar2
-    //      |
-    //      3
-    //      |
-    //     bar3
     //      |
     //      4
     //      |
-    //     bar4
+    //     bar3
     //      |
     //      5
 
@@ -1267,17 +1211,14 @@ func.func @TwoPaths() -> memref<1x16x1x1xf16, #NHWC, @DDR> {
     // CHECK: [[BAR1:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
     // CHECK: [[BAR2:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
     // CHECK: [[BAR3:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
-    // CHECK: [[BAR4:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
     // CHECK-NOT: VPURT.DeclareVirtual
 
     // CHECK: VPURT.Task updates([[BAR0]] : !VPURT.Barrier) attributes {idx = 0 : i64}
-
     // CHECK: VPURT.Task waits([[BAR0]] : !VPURT.Barrier) updates([[BAR1]] : !VPURT.Barrier) attributes {idx = 1 : i64}
     // CHECK: VPURT.Task waits([[BAR1]] : !VPURT.Barrier) updates([[BAR2]] : !VPURT.Barrier) attributes {idx = 2 : i64}
-    // CHECK: VPURT.Task waits([[BAR2]] : !VPURT.Barrier) updates([[BAR3]] : !VPURT.Barrier) attributes {idx = 3 : i64}
-    // CHECK: VPURT.Task waits([[BAR3]] : !VPURT.Barrier) updates([[BAR4]] : !VPURT.Barrier) attributes {idx = 4 : i64}
-
-    // CHECK: VPURT.Task waits([[BAR4]] : !VPURT.Barrier) attributes {idx = 5 : i64}
+    // CHECK: VPURT.Task waits([[BAR1]] : !VPURT.Barrier) updates([[BAR2]] : !VPURT.Barrier) attributes {idx = 3 : i64}
+    // CHECK: VPURT.Task waits([[BAR2]] : !VPURT.Barrier) updates([[BAR3]] : !VPURT.Barrier) attributes {idx = 4 : i64}
+    // CHECK: VPURT.Task waits([[BAR3]] : !VPURT.Barrier) attributes {idx = 5 : i64}
 }
 
 // -----
@@ -1392,14 +1333,10 @@ func.func @ThreeOutputPathsFromSharedBarrier() -> memref<1x16x1x1xf16, #NHWC, @D
     //      4
     //      |
     //     bar4
-    //      |
-    //      5
-    //      |
+    //    /    \
+    //    5    6
+    //    \    /
     //     bar5
-    //      |
-    //      6
-    //      |
-    //     bar6
     //      |
     //      7
 
@@ -1411,17 +1348,14 @@ func.func @ThreeOutputPathsFromSharedBarrier() -> memref<1x16x1x1xf16, #NHWC, @D
     // CHECK: [[BAR3:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
     // CHECK: [[BAR4:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
     // CHECK: [[BAR5:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
-    // CHECK: [[BAR6:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
     // CHECK-NOT: VPURT.DeclareVirtual
 
     // CHECK: VPURT.Task updates([[BAR0]] : !VPURT.Barrier) attributes {idx = 0 : i64}
-
     // CHECK: VPURT.Task waits([[BAR0]] : !VPURT.Barrier) updates([[BAR1]] : !VPURT.Barrier) attributes {idx = 1 : i64}
     // CHECK: VPURT.Task waits([[BAR1]] : !VPURT.Barrier) updates([[BAR2]] : !VPURT.Barrier) attributes {idx = 2 : i64}
     // CHECK: VPURT.Task waits([[BAR2]] : !VPURT.Barrier) updates([[BAR3]] : !VPURT.Barrier) attributes {idx = 3 : i64}
     // CHECK: VPURT.Task waits([[BAR3]] : !VPURT.Barrier) updates([[BAR4]] : !VPURT.Barrier) attributes {idx = 4 : i64}
     // CHECK: VPURT.Task waits([[BAR4]] : !VPURT.Barrier) updates([[BAR5]] : !VPURT.Barrier) attributes {idx = 5 : i64}
-    // CHECK: VPURT.Task waits([[BAR5]] : !VPURT.Barrier) updates([[BAR6]] : !VPURT.Barrier) attributes {idx = 6 : i64}
-
-    // CHECK: VPURT.Task waits([[BAR6]] : !VPURT.Barrier) attributes {idx = 7 : i64}
+    // CHECK: VPURT.Task waits([[BAR4]] : !VPURT.Barrier) updates([[BAR5]] : !VPURT.Barrier) attributes {idx = 6 : i64}
+    // CHECK: VPURT.Task waits([[BAR5]] : !VPURT.Barrier) attributes {idx = 7 : i64}
 }

@@ -69,7 +69,7 @@ func.func @UnrollNNDMA(%input: memref<1x16x33x32xf16>, %output: memref<1x16x33x3
     // Reorder input
 
     VPURT.Task updates(%bar0: !VPURT.Barrier) {
-        VPUIP.PermuteUPA {order_value = #NHWC}
+        VPUIP.PermuteDMA {dst_order = #NHWC, mem_perm = #NHWC}
             inputs(%input: memref<1x16x33x32xf16>)
             outputs(%parent_in: !Input_DDR)
             -> !Input_DDR
@@ -103,7 +103,7 @@ func.func @UnrollNNDMA(%input: memref<1x16x33x32xf16>, %output: memref<1x16x33x3
     // Reorder output
 
     VPURT.Task waits(%bar3: !VPURT.Barrier) {
-        VPUIP.PermuteUPA {order_value = #NCHW}
+        VPUIP.PermuteDMA {dst_order = #NCHW, mem_perm = #NCHW}
             inputs(%parent_out: !Output_DDR)
             outputs(%output: memref<1x16x33x32xf16>)
             -> memref<1x16x33x32xf16>

@@ -7,6 +7,7 @@
 
 #include "vpux/compiler/core/attributes/shape.hpp"
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
+#include "vpux/compiler/dialect/VPU/utils/sibling_ops_analysis.hpp"
 
 #include "vpux/utils/core/mem_size.hpp"
 
@@ -15,6 +16,8 @@ namespace VPU {
 
 constexpr int64_t SINGLE_BATCH = 1;
 constexpr size_t RANK_REQUIRED_FOR_TILING = 4;
+
+int64_t getNumTiles(mlir::Operation* op);
 
 // Each cluster should compute at least one output line. Therefore in order for a layer to be SOH
 // compatible it must have an output height of at least the number of clusters
@@ -50,7 +53,8 @@ bool isOperationSplitOverGroupCompatible(mlir::Operation* op, const vpux::TileIn
 
 bool checkMCRestrictions(mlir::Operation*);
 
-bool doesLayerFitIntoCMX(mlir::Operation* op, VPU::MultiClusterStrategy strategy, Byte reservedMem);
+bool doesLayerFitIntoCMX(mlir::Operation* op, VPU::MultiClusterStrategy strategy, SiblingOpsAnalysis& siblingsAnalysis,
+                         Byte reservedMem);
 
 }  // namespace VPU
 }  // namespace vpux

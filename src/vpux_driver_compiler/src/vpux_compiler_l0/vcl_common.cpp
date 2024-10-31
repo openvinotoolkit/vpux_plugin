@@ -14,6 +14,7 @@
 #include <utility>
 
 #include "intel_npu/al/config/compiler.hpp"
+#include "npu_driver_compiler.h"
 #include "vcl_compiler.hpp"
 
 namespace {
@@ -191,67 +192,8 @@ vcl_result_t BuildInfo::parseIOOption(const std::vector<std::string>& ioInfoOpti
     return VCL_RESULT_SUCCESS;
 }
 
-vcl_result_t BuildInfo::prepareBuildFlags(const std::string& descOptions) {
-    /// Find the location of special separator in descOptions, the separator helps us to find input options, output
-    /// options, config options
-    std::size_t inputPrecisionSeparator = descOptions.find(KEY_INPUTS_PRECISIONS);
-    std::size_t inputLayoutSeparator = descOptions.find(KEY_INPUTS_LAYOUTS);
-    std::size_t inputModelLayoutSeparator = descOptions.find(KEY_INPUTS_MODEL_LAYOUTS);
-    std::size_t outputPrecisionSeparator = descOptions.find(KEY_OUTPUTS_PRECISIONS);
-    std::size_t outputLayoutSeparator = descOptions.find(KEY_OUTPUTS_LAYOUTS);
-    std::size_t outputModelLayoutSeparator = descOptions.find(KEY_OUTPUTS_MODEL_LAYOUTS);
-    std::size_t configSeparator = descOptions.find(KEY_CONFIGS);
-
-    /// Parse the options for input && output
-    std::vector<std::string> ioInfoOptions;
-    if (inputPrecisionSeparator != std::string::npos && inputLayoutSeparator != std::string::npos &&
-        outputPrecisionSeparator != std::string::npos && outputLayoutSeparator != std::string::npos) {
-        /// Separate ioInfo to different section
-        ioInfoOptions.push_back(descOptions.substr(inputPrecisionSeparator, inputLayoutSeparator));
-        if (inputModelLayoutSeparator != std::string::npos) {
-            ioInfoOptions.push_back(
-                    descOptions.substr(inputLayoutSeparator, inputModelLayoutSeparator - inputLayoutSeparator));
-            ioInfoOptions.push_back(descOptions.substr(inputModelLayoutSeparator,
-                                                       outputPrecisionSeparator - inputModelLayoutSeparator));
-        } else {
-            ioInfoOptions.push_back(
-                    descOptions.substr(inputLayoutSeparator, outputPrecisionSeparator - inputLayoutSeparator));
-        }
-        ioInfoOptions.push_back(
-                descOptions.substr(outputPrecisionSeparator, outputLayoutSeparator - outputPrecisionSeparator));
-        if (configSeparator != std::string::npos) {
-            if (outputModelLayoutSeparator != std::string::npos) {
-                ioInfoOptions.push_back(
-                        descOptions.substr(outputLayoutSeparator, outputModelLayoutSeparator - outputLayoutSeparator));
-                ioInfoOptions.push_back(
-                        descOptions.substr(outputModelLayoutSeparator, configSeparator - outputModelLayoutSeparator));
-            } else {
-                ioInfoOptions.push_back(
-                        descOptions.substr(outputLayoutSeparator, configSeparator - outputLayoutSeparator));
-            }
-        } else {
-            if (outputModelLayoutSeparator != std::string::npos) {
-                ioInfoOptions.push_back(
-                        descOptions.substr(outputLayoutSeparator, outputModelLayoutSeparator - outputLayoutSeparator));
-                ioInfoOptions.push_back(descOptions.substr(outputModelLayoutSeparator));
-            } else {
-                ioInfoOptions.push_back(descOptions.substr(outputLayoutSeparator));
-            }
-        }
-    } else {
-        /// Return error if the mandatory ioInfo options are not passed
-        /// Skip ioInfo missing if is used for debug.
-        bool skipIOInfo = false;
-#if defined(VPUX_DEVELOPER_BUILD)
-        if (const auto env = std::getenv("IE_VPUX_VCL_SKIP_IOINFO")) {
-            skipIOInfo = std::stoi(env);
-        }
-#endif
-        if (skipIOInfo == false) {
-            logger->outputError(formatv("Mandatory ioInfo options are missing! DescOptions: {0}", descOptions));
-            return VCL_RESULT_ERROR_INVALID_ARGUMENT;
-        }
-    }
+vcl_result_t BuildInfo::prepareConfig(const std::string& descOptions) {
+    const std::size_t configSeparator = descOptions.find(KEY_CONFIGS);
 
     /// Parse the compilation options
     std::vector<std::string> options;
@@ -362,6 +304,17 @@ vcl_result_t BuildInfo::prepareBuildFlags(const std::string& descOptions) {
     /// Foce to use MLIR compiler.
     config[ov::intel_npu::compiler_type.name()] = "MLIR";
 
+    // If platform exists, check if it has a valid value
+    if (config.find(ov::intel_npu::platform.name()) != config.end()) {
+        const auto standardizedPlatform = ov::intel_npu::Platform::standardize(config[ov::intel_npu::platform.name()]);
+        if (ov::intel_npu::Platform::NPU3720 != standardizedPlatform &&
+            ov::intel_npu::Platform::NPU4000 != standardizedPlatform &&
+            "AUTO_DETECT" != config[ov::intel_npu::platform.name()]) {
+            logger->outputError("Unknown value for platform: " + config[ov::intel_npu::platform.name()]);
+            return VCL_RESULT_ERROR_INVALID_ARGUMENT;
+        }
+    }
+
     // Use platform information provided by driver if platform config is either not found or set on AUTO_DETECT
     if (config.find(ov::intel_npu::platform.name()) == config.end() ||
         "AUTO_DETECT" == config[ov::intel_npu::platform.name()]) {
@@ -403,13 +356,93 @@ vcl_result_t BuildInfo::prepareBuildFlags(const std::string& descOptions) {
     if (iter != config.end()) {
         logger->setLevel(getLogLevel(parsedConfig));
     }
+    return VCL_RESULT_SUCCESS;
+}
+
+vcl_result_t BuildInfo::prepareBuildFlags(const std::string& descOptions) {
+    /// Find the location of special separator in descOptions, the separator helps us to find input options, output
+    /// options, config options
+    std::size_t inputPrecisionSeparator = descOptions.find(KEY_INPUTS_PRECISIONS);
+    std::size_t inputLayoutSeparator = descOptions.find(KEY_INPUTS_LAYOUTS);
+    std::size_t inputModelLayoutSeparator = descOptions.find(KEY_INPUTS_MODEL_LAYOUTS);
+    std::size_t outputPrecisionSeparator = descOptions.find(KEY_OUTPUTS_PRECISIONS);
+    std::size_t outputLayoutSeparator = descOptions.find(KEY_OUTPUTS_LAYOUTS);
+    std::size_t outputModelLayoutSeparator = descOptions.find(KEY_OUTPUTS_MODEL_LAYOUTS);
+    std::size_t configSeparator = descOptions.find(KEY_CONFIGS);
+
+    /// Parse the options for input && output
+    std::vector<std::string> ioInfoOptions;
+    if (inputPrecisionSeparator != std::string::npos && inputLayoutSeparator != std::string::npos &&
+        outputPrecisionSeparator != std::string::npos && outputLayoutSeparator != std::string::npos) {
+        /// Separate ioInfo to different section
+        ioInfoOptions.push_back(descOptions.substr(inputPrecisionSeparator, inputLayoutSeparator));
+        if (inputModelLayoutSeparator != std::string::npos) {
+            ioInfoOptions.push_back(
+                    descOptions.substr(inputLayoutSeparator, inputModelLayoutSeparator - inputLayoutSeparator));
+            ioInfoOptions.push_back(descOptions.substr(inputModelLayoutSeparator,
+                                                       outputPrecisionSeparator - inputModelLayoutSeparator));
+        } else {
+            ioInfoOptions.push_back(
+                    descOptions.substr(inputLayoutSeparator, outputPrecisionSeparator - inputLayoutSeparator));
+        }
+        ioInfoOptions.push_back(
+                descOptions.substr(outputPrecisionSeparator, outputLayoutSeparator - outputPrecisionSeparator));
+        if (configSeparator != std::string::npos) {
+            if (outputModelLayoutSeparator != std::string::npos) {
+                ioInfoOptions.push_back(
+                        descOptions.substr(outputLayoutSeparator, outputModelLayoutSeparator - outputLayoutSeparator));
+                ioInfoOptions.push_back(
+                        descOptions.substr(outputModelLayoutSeparator, configSeparator - outputModelLayoutSeparator));
+            } else {
+                ioInfoOptions.push_back(
+                        descOptions.substr(outputLayoutSeparator, configSeparator - outputLayoutSeparator));
+            }
+        } else {
+            if (outputModelLayoutSeparator != std::string::npos) {
+                ioInfoOptions.push_back(
+                        descOptions.substr(outputLayoutSeparator, outputModelLayoutSeparator - outputLayoutSeparator));
+                ioInfoOptions.push_back(descOptions.substr(outputModelLayoutSeparator));
+            } else {
+                ioInfoOptions.push_back(descOptions.substr(outputLayoutSeparator));
+            }
+        }
+    } else {
+        /// Return error if the mandatory ioInfo options are not passed
+        /// Skip ioInfo missing if is used for debug.
+        bool skipIOInfo = false;
+#if defined(VPUX_DEVELOPER_BUILD)
+        if (const auto env = std::getenv("IE_VPUX_VCL_SKIP_IOINFO")) {
+            skipIOInfo = std::stoi(env);
+        }
+#endif
+        if (skipIOInfo == false) {
+            logger->outputError(formatv("Mandatory ioInfo options are missing! DescOptions: {0}", descOptions));
+            return VCL_RESULT_ERROR_INVALID_ARGUMENT;
+        }
+    }
+
+    /// Parse and update config
+    vcl_result_t ret = VCL_RESULT_SUCCESS;
+    try {
+        ret = prepareConfig(descOptions);
+    } catch (const std::exception& error) {
+        logger->outputError(error.what());
+        ret = VCL_RESULT_ERROR_INVALID_ARGUMENT;
+    } catch (...) {
+        logger->outputError(
+                formatv("Internal exception! Can't parse and update config! DescOptions: {0}", descOptions));
+        ret = VCL_RESULT_ERROR_INVALID_ARGUMENT;
+    }
+    if (ret != VCL_RESULT_SUCCESS) {
+        logger->outputError(formatv("Failed to parse and update config! DescOptions: {0}", descOptions));
+        return ret;
+    }
 
     /// Show compiler ID which helps to find the commit of compiler
     logger->info("Current driver compiler ID: {0}", pvc->getCompilerProp().id);
     logger->info("Current build flags: {0}", descOptions);
 
     /// Parse precision and layout info of input && output from user
-    vcl_result_t ret = VCL_RESULT_SUCCESS;
     try {
         ret = parseIOOption(ioInfoOptions);
     } catch (const std::exception& error) {
@@ -486,8 +519,11 @@ vcl_result_t BuildInfo::prepareModel(const uint8_t* modelIR, uint64_t modelIRSiz
     /// The pointer to model weight
     const uint8_t* weights = modelIR + weightsOffset;
     /// Deserialize the model
+    size_t modelHash;
     try {
         std::string modelData(buffer, buffer + bufferSize);
+        modelHash = std::hash<std::string>()(modelData);
+
         ov::Tensor weightsTensor;
         if (weightsSize > 0)
             weightsTensor = ov::Tensor(ov::element::u8, {weightsSize}, const_cast<uint8_t*>(weights));
@@ -510,6 +546,25 @@ vcl_result_t BuildInfo::prepareModel(const uint8_t* modelIR, uint64_t modelIRSiz
     } catch (...) {
         logger->outputError("Internal exception! Could not deserialize the model!");
         return VCL_RESULT_ERROR_UNKNOWN;
+    }
+
+    const std::string hashOption = "model-hash=" + std::to_string(modelHash);
+    std::string compilationOptions = hashOption;
+    if (parsedConfig.has<intel_npu::COMPILATION_MODE_PARAMS>()) {
+        const auto existingOptions = parsedConfig.get<intel_npu::COMPILATION_MODE_PARAMS>();
+        compilationOptions = existingOptions + " " + hashOption;
+    }
+    std::map<std::string, std::string> config = {{ov::intel_npu::compilation_mode_params.name(), compilationOptions}};
+
+    /// Update default compilation config options with the new values we parsed from user descriptions
+    try {
+        parsedConfig.update(config, intel_npu::OptionMode::CompileTime);
+    } catch (const std::exception& error) {
+        logger->outputError(error.what());
+        return VCL_RESULT_ERROR_INVALID_ARGUMENT;
+    } catch (...) {
+        logger->outputError(formatv("Internal exception! Can not update config!"));
+        return VCL_RESULT_ERROR_INVALID_ARGUMENT;
     }
 
     return VCL_RESULT_SUCCESS;

@@ -18,7 +18,7 @@ namespace ConstantFusing {
 using ConstantVector = SmallVector<std::pair<VPUIP::CopyOp, Const::DeclareOp>>;
 
 constexpr StringLiteral constantsFused = "constantsFused";
-constexpr int8_t numberOfConstantsToFuse = 4;
+constexpr int8_t numberOfConstantsToFuse = 3;
 
 ///
 /// \brief Get underlying DeclareOp and Op for passed constant

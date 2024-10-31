@@ -99,38 +99,6 @@ module @TwoInOuts {
 
 // -----
 
-module @WithReshapeNoChanges {
-    IE.CNNNetwork entryPoint : @main
-    inputsInfo : {
-        DataInfo "input" : tensor<1x512xf16>
-    } outputsInfo : {
-        DataInfo "output" : tensor<1x512xf16>
-    }
-
-    //CHECK: func.func @main([[ARG0:%.+]]: memref<1x512xf16, @DDR>, [[ARG1:%.+]]: memref<1x512xf16, @DDR>)
-    func.func @main(%arg0: memref<1x512xf16, @DDR>, %arg1: memref<1x512xf16, @DDR>) -> memref<1x512xf16, @DDR> {
-        %1 = VPURT.DeclareBuffer <NetworkInput> [0] <0> -> memref<1x512x1x1xf16, @DDR>
-        %2 = VPURT.DeclareBuffer <NetworkOutput> [0] <0> -> memref<1x512x1x1xf16, @DDR>
-        VPURT.Task {
-          %3 = VPUIP.SoftMaxUPA {axisInd = 1 : i64} inputs(%1 : memref<1x512x1x1xf16, @DDR>)
-                outputs(%2 : memref<1x512x1x1xf16, @DDR>) -> memref<1x512x1x1xf16, @DDR>
-        }
-        return %arg1 : memref<1x512xf16, @DDR>
-
-        //CHECK-DAG:    [[IN:%.+]] = VPURT.DeclareBuffer <NetworkInput> [0] <0> -> memref<1x512x1x1xf16, @DDR>
-        //CHECK-DAG:    [[OUT:%.+]] = VPURT.DeclareBuffer <NetworkOutput> [0] <0> -> memref<1x512x1x1xf16, @DDR>
-
-        //CHECK:    VPURT.Task
-        //CHECK:    VPUIP.SoftMaxUPA
-        //CHECK-SAME:    inputs([[IN]] : memref<1x512x1x1xf16, @DDR>)
-        //CHECK-SAME:    outputs([[OUT]] : memref<1x512x1x1xf16, @DDR>)
-
-        //CHECK:    return [[ARG1]] : memref<1x512xf16, @DDR>
-    }
-}
-
-// -----
-
 // CHECK-LABEL: @TwoFunctions
 module @TwoFunctions {
     IE.CNNNetwork entryPoint : @main

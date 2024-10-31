@@ -10,9 +10,9 @@
 #include "vpux/compiler/core/profiling_metadata.hpp"
 #include "vpux/compiler/dialect/ELFNPU37XX/ops.hpp"
 #include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
-#include "vpux/compiler/dialect/VPUIP/graph-schema/blob_writer.hpp"
 #include "vpux/compiler/dialect/VPUIP/utils/convert_to_dma_utils.hpp"
 #include "vpux/compiler/dialect/VPUIP/utils/sw_utils.hpp"
+#include "vpux/compiler/dialect/VPUMI37XX/blob_writer.hpp"
 #include "vpux/compiler/dialect/VPUMI37XX/kernel_params_utils.hpp"
 #include "vpux/compiler/dialect/VPUMI37XX/ops.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
@@ -138,7 +138,7 @@ private:
 
     void replaceVPURTTaskOpWithNNDMAOp(mlir::MLIRContext*, mlir::ModuleOp& moduleOp, mlir::func::FuncOp& funcOp,
                                        Logger _log) {
-        _log.info("VPUIP_VPUMI37XX pass: replaceVPURTTaskOpWithNNDMAOp()");
+        _log.trace("VPUIP_VPUMI37XX pass: replaceVPURTTaskOpWithNNDMAOp()");
 
         const auto dmaExecCount = IE::getAvailableExecutor(moduleOp, VPU::ExecutorKind::DMA_NN).getCount();
 
@@ -354,7 +354,7 @@ private:
             }
         }
 
-        _log.info("VPUIP_VPUMI37XX pass: replaceVPURTTaskOpWithNNDMAOp() -- end");
+        _log.trace("VPUIP_VPUMI37XX pass: replaceVPURTTaskOpWithNNDMAOp() -- end");
     }
 
     void createComputeOpSwKernel(
@@ -489,7 +489,7 @@ private:
 
     void replaceVPURTTaskOpWithKernelOps(mlir::MLIRContext* ctx, mlir::ModuleOp moduleOp, mlir::func::FuncOp funcOp,
                                          Logger _log) {
-        _log.info("VPUIP_VPUMI37XX pass: replaceVPURTTaskOpWithKernelOps()");
+        _log.trace("VPUIP_VPUMI37XX pass: replaceVPURTTaskOpWithKernelOps()");
 
         auto shave_task_count = 0;
         llvm::DenseMap<mlir::StringAttr, std::pair<VPUMI37XX::DeclareKernelTextOp, VPUMI37XX::DeclareKernelEntryOp>>
@@ -597,8 +597,8 @@ private:
                         op.getWeightTable(), op.getParentInput(), op.getParentInputSparsityMap(),
                         op.getParentInputStorageElementTable(), op.getParentOutput(), op.getParentOutputSparsityMap(),
                         dpuResults, op.getOutputSparsityMapBuff(), op.getProfilingData(), op.getTaskTypeAttr(),
-                        mpe_freq_mode, op.getKernelSizeAttr(), op.getKernelStridesAttr(), op.getKernelPaddingAttr(),
-                        op.getActivationWindowChannelLengthAttr(), op.getIsContinuedAttr(), op.getCmSpPatternAttr(),
+                        op.getEltwiseTypeAttr(), mpe_freq_mode, op.getKernelSizeAttr(), op.getKernelStridesAttr(),
+                        op.getKernelPaddingAttr(), op.getIsContinuedAttr(), op.getCmSpPatternAttr(),
                         op.getIsSegmentedAttr(), op.getInputChannelsCompressionAttr(), op.getOutChannelOffsetAttr(),
                         op.getIsSuperdenseAttr(), op.getIsInplaceAttr(), op.getInputSeSizeAttr(),
                         op.getOutputSeSizeAttr(), op.getIsPermuteQuantizeAttr(), wait_barriers, update_barriers,
@@ -671,7 +671,7 @@ private:
 
     void createMappedInferenceOp(mlir::MLIRContext* ctx, mlir::ModuleOp& moduleOp, mlir::func::FuncOp& funcOp,
                                  Logger _log) {
-        _log.info("VPUIP_VPUMI37XX pass: createMappedInferenceOp()");
+        _log.trace("VPUIP_VPUMI37XX pass: createMappedInferenceOp()");
 
         const auto dmaExecCount = IE::getAvailableExecutor(moduleOp, VPU::ExecutorKind::DMA_NN).getCount();
 

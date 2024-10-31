@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation
+// Copyright (C) 2022-2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -56,7 +56,6 @@ class FakeQuantizeLayerTest_HW_NPU3720 : public FakeQuantizeLayerTestCommon {};
 
 class FakeQuantizeLayerTest_SW_NPU4000 : public FakeQuantizeLayerTest_SW_NPU3720 {};
 
-// ------ NPU3720 ------
 TEST_P(FakeQuantizeLayerTest_SW_NPU3720, SW) {
     const auto tol = 1.6;                       // To cope with cpu/npu 'limits' diffs
     rel_threshold = fabs(rel_threshold) * tol;  // E#77437
@@ -70,7 +69,6 @@ TEST_P(FakeQuantizeLayerTest_HW_NPU3720, HW) {
     run(Platform::NPU3720);
 }
 
-// ------ NPU4000 ------
 TEST_P(FakeQuantizeLayerTest_SW_NPU4000, SW) {
     const auto tol = 1.6;                       // To cope with cpu/npu 'limits' diffs
     rel_threshold = fabs(rel_threshold) * tol;  // E#77437
@@ -118,7 +116,6 @@ const auto hw_fqParamsND =
         ::testing::Combine(::testing::ValuesIn(hw_levels), ::testing::ValuesIn(constShapesND),
                            ::testing::Values(fqArgs), ::testing::Values(ov::op::AutoBroadcastType::NUMPY));
 
-/* ================================= NPU3720/NPU4000 ================================= */
 // Per-Tensor
 const std::vector<size_t> u8qLevels = {256};
 

@@ -15,6 +15,7 @@ func.func @SplitNCEConvOverC(%arg0: tensor<1x32x64x48xf16, {order = #NHWC}>) -> 
     %weights_table = const.Declare tensor<256x1x1x4xsi32> = dense<1> : tensor<256x1x1x4xsi32>
 
     %0 = VPU.NCE.Convolution(%arg0, %weights, %weights_table) {
+        opaque_ppe = #VPU.PPEStub<>,
         pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
         rawFilterShape = [256, 32, 3, 3],
         strides = [1, 1]
@@ -48,10 +49,11 @@ func.func @SplitNCEConvOverC(%arg0: tensor<1x32x64x48xf16, {order = #NHWC}>) -> 
 // CHECK-LABEL:   @SplitQuantNCEConvOverW
 // CHECK-SAME:          [[INPUT:%arg[0-9]]]: tensor<1x32x64x64x!qElemType, {order = #NHWC}>
 func.func @SplitQuantNCEConvOverW(%arg0: tensor<1x32x64x64x!qElemType, {order = #NHWC}>) -> tensor<1x512x64x64x!qElemType1, {order = #NHWC}> {
-    %weights = const.Declare tensor<512x32x3x3x!qElemType2, {order = #NHWC}> = dense<1.000000e+00> : tensor<512x32x3x3xf16>, [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType2>, #const.Reorder<#NHWC>]
+    %weights = const.Declare tensor<512x32x3x3x!qElemType2, {order = #NHWC}> = dense<1.000000e+00> : tensor<512x32x3x3xf16>, [#const.CastElemType<ui8>, #const.CastElemType<!qElemType2>, #const.Reorder<#NHWC>]
     %weights_table = const.Declare tensor<512x1x1x4xsi32, {order = #NCHW}> = dense<10> : tensor<512x1x1x4xsi32>
 
     %0 = VPU.NCE.Convolution(%arg0, %weights, %weights_table) {
+        opaque_ppe = #VPU.PPEStub<>,
         pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
         rawFilterShape = [512, 32, 3, 3],
         strides = [1, 1]
@@ -60,7 +62,7 @@ func.func @SplitQuantNCEConvOverW(%arg0: tensor<1x32x64x64x!qElemType, {order = 
     return %0 : tensor<1x512x64x64x!qElemType1, {order = #NHWC}>
 
     // CHECK-DAG:        [[WEIGHTS:%.+]] = const.Declare tensor<512x32x3x3x!qElemType2, {order = #NHWC}> = dense<1.000000e+00>
-    // CHECK-SAME:      : tensor<512x32x3x3xf16>, [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType2>, #const.Reorder<#NHWC>]
+    // CHECK-SAME:      : tensor<512x32x3x3xf16>, [#const.CastElemType<ui8>, #const.CastElemType<!qElemType2>, #const.Reorder<#NHWC>]
 
     // CHECK-DAG:        [[WEIGHTS_TABLE:%.+]] = const.Declare tensor<512x1x1x4xsi32, {order = #NCHW}> = dense<10>
     // CHECK-SAME:      : tensor<512x1x1x4xsi32>
@@ -82,6 +84,7 @@ func.func @SplitQuantNCEConvOverW(%arg0: tensor<1x32x64x64x!qElemType, {order = 
 // CHECK-SAME:      [[INPUT:%arg[0-9]]]: tensor<1x16x200x200xf16, {order = #NHWC}>)
 func.func @SplitNCEMaxPoolOverW(%arg0: tensor<1x16x200x200xf16, {order = #NHWC}>) -> tensor<1x16x200x200xf16, {order = #NHWC}> {
     %0 = VPU.NCE.MaxPool(%arg0) {
+        opaque_ppe = #VPU.PPEStub<>,
         kernel_size = [3, 3],
         pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
         strides = [1, 1]
@@ -110,9 +113,7 @@ func.func @SplitNCEEltwiseAddOverW(
             -> tensor<1x1024x24x16xf16, {order = #NHWC}> {
     %0 = VPU.NCE.Eltwise(%arg0, %arg1) {
         op_type = #VPU.eltwise_type<ADD>,
-        ppe = #VPU.PPETask<clamp_high = 2147483647 : i64, clamp_low = -2147483648 : i64, lrelu_mult = 1 : i64,
-               lrelu_shift = 0 : i64,
-               mode = <ADD>>
+        opaque_ppe = #VPU.PPEStub<>
     } -> tensor<1x1024x24x16xf16, {order = #NHWC}>
 
     return %0 : tensor<1x1024x24x16xf16, {order = #NHWC}>
@@ -134,9 +135,7 @@ func.func @SplitNCEEltwiseAddOverW(
 func.func @SplitNCEEltwiseAddSameInput(%arg0: tensor<1x2048x14x14xf16, {order = #NHWC}>) -> tensor<1x2048x14x14xf16, {order = #NHWC}> {
     %0 = VPU.NCE.Eltwise(%arg0, %arg0) {
         op_type = #VPU.eltwise_type<ADD>,
-        ppe = #VPU.PPETask<clamp_high = 2147483647 : i64, clamp_low = -2147483648 : i64, lrelu_mult = 1 : i64,
-               lrelu_shift = 0 : i64,
-               mode = <ADD>>
+        opaque_ppe = #VPU.PPEStub<>
     } -> tensor<1x2048x14x14xf16, {order = #NHWC}>
 
     return %0 : tensor<1x2048x14x14xf16, {order = #NHWC}>
@@ -161,7 +160,7 @@ func.func @SplitNCEEltwiseAddSameInput(%arg0: tensor<1x2048x14x14xf16, {order = 
 // CHECK-LABEL:   @SplitSparseQuantNCEConvOverC
 // CHECK-SAME:          [[INPUT:%arg[0-9]]]: tensor<1x32x80x80x!qElemType, {order = #NHWC}>
 func.func @SplitSparseQuantNCEConvOverC(%arg0: tensor<1x32x80x80x!qElemType, {order = #NHWC}>) -> tensor<1x320x80x80x!qElemType1, {order = #NHWC}> {
-    %weights = const.Declare tensor<320x32x3x3x!qElemType2, {order = #NHWC}> = dense<1.000000e+00> : tensor<320x32x3x3xf16>, [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType2>, #const.Reorder<#NHWC>, #const.Sparsify<false>]
+    %weights = const.Declare tensor<320x32x3x3x!qElemType2, {order = #NHWC}> = dense<1.000000e+00> : tensor<320x32x3x3xf16>, [#const.CastElemType<ui8>, #const.CastElemType<!qElemType2>, #const.Reorder<#NHWC>, #const.Sparsify<false>]
     %weights_sm = const.Declare tensor<320x1x1x384xi1> = dense<1.000000e+00> : tensor<320x32x3x3xf16>, [#const.Reorder<#NHWC>, #const.GetSparsityMap]
     %weights_sparse = VPU.GroupSparseTensor(%weights, %weights_sm) {sparsity_compression = #VPU.SparsityCompression<axis = 0 : i64, numElems = dense<1> : tensor<320xi64>, alignment = 16 : i64>, is_weights}
         -> !VPU.SparseTensor<data=tensor<320x32x3x3x!qElemType2, {order = #NHWC}>, sparsity_map=tensor<320x1x1x384xi1>, is_weights, #VPU.SparsityCompression<axis = 0 : i64, numElems = dense<1> : tensor<320xi64>, alignment = 16 : i64>>
@@ -169,6 +168,7 @@ func.func @SplitSparseQuantNCEConvOverC(%arg0: tensor<1x32x80x80x!qElemType, {or
 
     %0 = VPU.NCE.Convolution(%arg0, %weights_sparse, %weights_table) {
         pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
+        opaque_ppe = #VPU.PPEStub<>,
         rawFilterShape = [320, 32, 3, 3],
         strides = [1, 1]
     } -> tensor<1x320x80x80x!qElemType1, {order = #NHWC}>
@@ -176,7 +176,7 @@ func.func @SplitSparseQuantNCEConvOverC(%arg0: tensor<1x32x80x80x!qElemType, {or
     return %0 : tensor<1x320x80x80x!qElemType1, {order = #NHWC}>
 
     // CHECK-DAG:        [[WEIGHTS:%.+]] = const.Declare tensor<320x32x3x3x!qElemType2, {order = #NHWC}> = dense<1.000000e+00>
-    // CHECK-SAME:      : tensor<320x32x3x3xf16>, [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType2>, #const.Reorder<#NHWC>, #const.Sparsify<false>]
+    // CHECK-SAME:      : tensor<320x32x3x3xf16>, [#const.CastElemType<ui8>, #const.CastElemType<!qElemType2>, #const.Reorder<#NHWC>, #const.Sparsify<false>]
 
     // CHECK-DAG:        [[WEIGHTS_SM:%.+]] = const.Declare tensor<320x1x1x384xi1> = dense<1.000000e+00>
     // CHECK-SAME:      : tensor<320x32x3x3xf16>, [#const.Reorder<#NHWC>, #const.GetSparsityMap]
@@ -194,4 +194,32 @@ func.func @SplitSparseQuantNCEConvOverC(%arg0: tensor<1x32x80x80x!qElemType, {or
     // CHECK-SAME:          -> tensor<1x320x80x80x!qElemType1, {order = #NHWC}>
 
     // CHECK:        return [[OUTPUT]] : tensor<1x320x80x80x!qElemType1, {order = #NHWC}>
+}
+
+// -----
+
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
+// CHECK-LABEL: @NotSplitNCEConvAtOneDim
+// CHECK-SAME:      [[INPUT:%.+]]: tensor<1x256x512x512xf16, {order = #NHWC}>
+func.func @NotSplitNCEConvAtOneDim(%arg0: tensor<1x256x512x512xf16, {order = #NHWC}>) -> tensor<1x256x512x512xf16, {order = #NHWC}> {
+    %cst = const.Declare tensor<256x256x3x3xf16, {order = #NHWC}> = dense<0.1> : tensor<256x256x3x3xf16, {order = #NHWC}>
+    %cst_0 = const.Declare tensor<256x1x1x4xsi32> = dense<1> : tensor<256x1x1x4xsi32>
+    %0 = VPU.NCE.Convolution(%arg0, %cst, %cst_0) {
+            multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
+            pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
+            opaque_ppe = #VPU.PPEStub<>, rawFilterShape = [256, 256, 3, 3], strides = [1, 1]
+        } -> tensor<1x256x512x512xf16, {order = #NHWC}>
+
+    return %0 : tensor<1x256x512x512xf16, {order = #NHWC}>
+
+    // CHECK-DAG:   [[WEIGHTS:%.+]] = const.Declare tensor<256x256x3x3xf16, {order = #NHWC}> = dense<9.997550e-02> : tensor<256x256x3x3xf16, {order = #NHWC}>
+    // CHECK-DAG:   [[WEIGHTS_TABLE:%.+]] = const.Declare tensor<256x1x1x4xsi32> = dense<1> : tensor<256x1x1x4xsi32>
+    // CHECK:       [[CONV:%.+]] = VPU.NCE.Convolution([[INPUT]], [[WEIGHTS]], [[WEIGHTS_TABLE]]) {
+    // CHECK-SAME:          multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
+    // CHECK-SAME:          pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
+    // CHECK-SAME:          rawFilterShape = [256, 256, 3, 3], strides = [1, 1], tilingStrategy = [1, 6, 47, 1]
+    // CHECK-SAME:      } -> tensor<1x256x512x512xf16, {order = #NHWC}>
+
+    // CHECK:       return [[CONV]]
 }

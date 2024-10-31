@@ -5,6 +5,7 @@
 
 //
 
+#include "vpux/compiler/dialect/VPUIP/IR/dialect.hpp"
 #include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPUIP/IR/types.hpp"
 #include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
@@ -160,9 +161,9 @@ TEST_F(MLIR_ITIUnrollTest, getPerClusterOutputHaloBuffers_SOH) {
     const auto pads = VPU::PaddingAttr::get(&ctx, getIntAttr(&ctx, 1), getIntAttr(&ctx, 1), getIntAttr(&ctx, 1),
                                             getIntAttr(&ctx, 1));
     const auto kernelStrides = getIntArrayAttr(&ctx, SmallVector<int64_t>({1, 1}));
-    const auto distributedAttr = VPU::DistributedTensorAttr::get(&ctx, distributionModeAttr, numTilesAttr, kernel, pads,
-                                                                 kernelStrides, numClustersAttr, nullptr, nullptr,
-                                                                 nullptr, nullptr, nullptr, nullptr, nullptr);
+    const auto distributedAttr = VPU::DistributionInfoAttr::get(&ctx, distributionModeAttr, numTilesAttr, kernel, pads,
+                                                                kernelStrides, numClustersAttr, nullptr, nullptr,
+                                                                nullptr, nullptr, nullptr, nullptr, nullptr);
     const auto distributedBufferType =
             VPUIP::DistributedBufferType::get(&ctx, shape, elemType, layout, dimsSpace, distributedAttr);
     auto ndType = distributedBufferType.cast<NDTypeInterface>();
@@ -317,9 +318,9 @@ TEST_F(MLIR_ITIUnrollTest, getPerClusterOutputHaloBuffers_SOK) {
 
     const auto dimsSpace = vpux::IndexedSymbolAttr::get(&ctx, CMX_NAME);
 
-    const auto distributedAttr = VPU::DistributedTensorAttr::get(&ctx, distributionModeAttr, numTilesAttr, nullptr,
-                                                                 nullptr, nullptr, numClustersAttr, nullptr, nullptr,
-                                                                 nullptr, nullptr, nullptr, nullptr, nullptr);
+    const auto distributedAttr = VPU::DistributionInfoAttr::get(&ctx, distributionModeAttr, numTilesAttr, nullptr,
+                                                                nullptr, nullptr, numClustersAttr, nullptr, nullptr,
+                                                                nullptr, nullptr, nullptr, nullptr, nullptr);
     const auto distributedBufferType =
             VPUIP::DistributedBufferType::get(&ctx, shape, elemType, layout, dimsSpace, distributedAttr);
     auto ndType = distributedBufferType.cast<NDTypeInterface>();
@@ -506,9 +507,9 @@ TEST_F(MLIR_ITIUnrollTest, getPerClusterOutputHaloBuffers_HKSwitch) {
 
     const auto dimsSpace = vpux::IndexedSymbolAttr::get(&ctx, CMX_NAME);
 
-    const auto distributedAttr = VPU::DistributedTensorAttr::get(&ctx, distributionModeAttr, numTilesAttr, nullptr,
-                                                                 nullptr, nullptr, numClustersAttr, nullptr, nullptr,
-                                                                 nullptr, nullptr, nullptr, nullptr, nullptr);
+    const auto distributedAttr = VPU::DistributionInfoAttr::get(&ctx, distributionModeAttr, numTilesAttr, nullptr,
+                                                                nullptr, nullptr, numClustersAttr, nullptr, nullptr,
+                                                                nullptr, nullptr, nullptr, nullptr, nullptr);
     const auto distributedBufferType =
             VPUIP::DistributedBufferType::get(&ctx, shape, elemType, layout, dimsSpace, distributedAttr);
     auto ndType = distributedBufferType.cast<NDTypeInterface>();

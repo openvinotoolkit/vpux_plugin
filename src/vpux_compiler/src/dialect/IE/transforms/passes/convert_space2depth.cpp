@@ -8,6 +8,7 @@
 
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
+#include "vpux/compiler/utils/rewriter.hpp"
 
 #include <mlir/Transforms/DialectConversion.h>
 
@@ -103,13 +104,13 @@ mlir::LogicalResult ConvertSpace2DepthLayerPass::Space2DepthLayerConverter::matc
             outShape.size() == shapeEnd.size() && std::equal(shapeEnd.begin(), shapeEnd.end(), outShape.begin()),
             "Replacing failed due to output shape mismatch: original '{0}', new '{1}'", outShape, shapeEnd);
 
-    auto reshapeBegin = rewriter.create<IE::ReshapeOp>(origOp->getLoc(), origOp.getInput(), nullptr, false,
-                                                       getIntArrayAttr(ctx, shapeBegin));
+    auto reshapeBegin = rewriter.create<IE::ReshapeOp>(takeOpLoc(origOp, "reshape_in"), origOp.getInput(), nullptr,
+                                                       false, getIntArrayAttr(ctx, shapeBegin));
     auto transpose =
-            rewriter.create<IE::TransposeOp>(origOp->getLoc(), reshapeBegin.getOutput(), nullptr,
+            rewriter.create<IE::TransposeOp>(takeOpLoc(origOp, "transpose_in"), reshapeBegin.getOutput(), nullptr,
                                              mlir::AffineMapAttr::get(mlir::AffineMap::getPermutationMap(order, ctx)));
-    auto reshapeEnd = rewriter.create<IE::ReshapeOp>(origOp->getLoc(), transpose.getOutput(), nullptr, false,
-                                                     getIntArrayAttr(ctx, shapeEnd));
+    auto reshapeEnd = rewriter.create<IE::ReshapeOp>(takeOpLoc(origOp, "reshape_out"), transpose.getOutput(), nullptr,
+                                                     false, getIntArrayAttr(ctx, shapeEnd));
     rewriter.replaceOp(origOp, reshapeEnd.getOutput());
 
     return mlir::success();

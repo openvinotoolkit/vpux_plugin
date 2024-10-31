@@ -52,8 +52,10 @@ int main(int argc, char* argv[]) {
         Logger::setGlobalLevel(LogLevel::LOG_DEBUG);
     }
 
-    VPUXLoader loader();
-    HostParsedInference hpi();
+    // FIXME: lines below are treated as function declaration, these classes don't have default ctor
+    // test were testing nothing in practice
+    // VPUXLoader loader();
+    // HostParsedInference hpi();
     VPUX_ELF_LOG(LogLevel::LOG_DEBUG, "loaderTest : DEBUG : Just checking if we can use VPUXLoader headers");
     VPUX_ELF_LOG(LogLevel::LOG_INFO, "loaderTest : INFO : Just checking if we can use VPUXLoader headers");
 

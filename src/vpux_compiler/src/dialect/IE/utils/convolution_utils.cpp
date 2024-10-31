@@ -6,6 +6,7 @@
 #include "vpux/compiler/dialect/IE/utils/convolution_utils.hpp"
 #include "vpux/compiler/dialect/IE/utils/const_attributes.hpp"
 #include "vpux/compiler/dialect/VPU/utils/conv_utils.hpp"
+#include "vpux/compiler/dialect/VPU/utils/max_kernel_size_utils.hpp"
 #include "vpux/compiler/dialect/VPUIP/interfaces/nce_invariant.hpp"
 #include "vpux/utils/core/logger.hpp"
 
@@ -63,7 +64,6 @@ mlir::LogicalResult canConvertGroupConvToConv(IE::GroupConvolutionOp groupconv, 
     // GroupConv with large kernels, padding, or strides may benefit from being converted to Convolution
     // to efficiently handle these parameters
     if (isAttrCheckEnabled) {
-        const auto arch = vpux::VPU::getArch(groupconv.getOperation());
         const auto KY = filterShape[Dims4D::Filter::KY];
         const auto KX = filterShape[Dims4D::Filter::KX];
 
@@ -72,8 +72,8 @@ mlir::LogicalResult canConvertGroupConvToConv(IE::GroupConvolutionOp groupconv, 
         const auto SY = kernelStridesShape[Dims4D::Strides::Y];
         const auto SX = kernelStridesShape[Dims4D::Strides::X];
         const auto pads = PadInfo(groupconv.getPadsBegin(), groupconv.getPadsEnd());
-        if (!VPU::NCEInvariant::isAttrsSupported(arch, KY, KX, SY, SX, pads.top, pads.bottom, pads.left, pads.right,
-                                                 logCb)) {
+        if (!VPU::NCEInvariant::isAttrsSupported(groupconv, KY, KX, SY, SX, pads.top, pads.bottom, pads.left,
+                                                 pads.right, logCb)) {
             return mlir::failure();
         }
     }
@@ -82,6 +82,9 @@ mlir::LogicalResult canConvertGroupConvToConv(IE::GroupConvolutionOp groupconv, 
 }
 
 bool groupConvIsEltwise(IE::GroupConvolutionOp convOp) {
+    if (convOp == nullptr) {
+        return false;
+    }
     // check kernel size is 1x1
     auto filterShape = getShape(convOp.getFilter());
     if (filterShape[Dims4D::Filter::KX] != 1 || filterShape[Dims4D::Filter::KY] != 1 ||
@@ -183,7 +186,8 @@ mlir::LogicalResult FuseConvAndBias::matchAndRewrite(IE::ScaleShiftOp biasOp, ml
                 transposedConv.getLoc(), transposedConv.getInput(), transposedConv.getFilter(),
                 transposedConv.getOutputShape(), biasOp.getBiases(), transposedConv.getStrides(),
                 transposedConv.getPadsBegin(), transposedConv.getPadsEnd(), transposedConv.getDilations(),
-                transposedConv.getOutputPaddingAttr(), transposedConv.getPostOpAttr(), transposedConv.getClampAttr());
+                transposedConv.getOutputPaddingAttr(), transposedConv.getPostOpAttr(), transposedConv.getClampAttr(),
+                transposedConv.getOutputChannelsAttr(), transposedConv.getInputChannelsAttr());
 
         rewriter.replaceOp(biasOp, newTransposedConv->getOpResults());
     } else {

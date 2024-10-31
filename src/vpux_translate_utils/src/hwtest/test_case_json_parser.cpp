@@ -120,22 +120,22 @@ std::string nb::to_string(nb::DType dtype) {
     }
 }
 
-MVCNN::Permutation nb::to_odu_permutation(StringRef str) {
+vpux::VPUIP::Permutation nb::to_odu_permutation(StringRef str) {
     if (isEqual(str, "NHWC"))
-        return MVCNN::Permutation::Permutation_ZXY;
+        return vpux::VPUIP::Permutation::Permutation_ZXY;
     if (isEqual(str, "NWHC"))
-        return MVCNN::Permutation::Permutation_ZYX;
+        return vpux::VPUIP::Permutation::Permutation_ZYX;
     if (isEqual(str, "NWCH"))
-        return MVCNN::Permutation::Permutation_YZX;
+        return vpux::VPUIP::Permutation::Permutation_YZX;
     if (isEqual(str, "NCWH"))
-        return MVCNN::Permutation::Permutation_YXZ;
+        return vpux::VPUIP::Permutation::Permutation_YXZ;
     if (isEqual(str, "NHCW"))
-        return MVCNN::Permutation::Permutation_XZY;
+        return vpux::VPUIP::Permutation::Permutation_XZY;
     if (isEqual(str, "NCHW"))
-        return MVCNN::Permutation::Permutation_XYZ;
+        return vpux::VPUIP::Permutation::Permutation_XYZ;
     throw std::runtime_error("ODUPermutation value not supported: " + str.str());
 
-    return MVCNN::Permutation::Permutation_MIN;
+    return vpux::VPUIP::Permutation::Permutation_MIN;
 }
 
 nb::MemoryLocation nb::to_memory_location(StringRef str) {
@@ -440,6 +440,10 @@ std::string nb::to_string(nb::SegmentationType segmentationType) {
         return "SOHW";
     case nb::SegmentationType::SOHK:
         return "SOHK";
+    case nb::SegmentationType::SOHK3:
+        return "SOHK3";
+    case nb::SegmentationType::SOHW3:
+        return "SOHW3";
     default:
         return "Unknown";
     }
@@ -543,11 +547,10 @@ nb::HaloParams nb::TestCaseJsonDescriptor::loadHaloTaskParams(llvm::json::Object
         params.taskClusters[i] = (*jsonTaskClusters)[i].getAsInteger().value();
     }
 
-    const std::unordered_map<llvm::StringRef, SegmentationType> segmentOptions = {{"SOK", SegmentationType::SOK},
-                                                                                  {"SOH", SegmentationType::SOH},
-                                                                                  {"SOW", SegmentationType::SOW},
-                                                                                  {"SOHW", SegmentationType::SOHW},
-                                                                                  {"SOHK", SegmentationType::SOHK}};
+    const std::unordered_map<llvm::StringRef, SegmentationType> segmentOptions = {
+            {"SOK", SegmentationType::SOK},    {"SOH", SegmentationType::SOH},   {"SOW", SegmentationType::SOW},
+            {"SOHW", SegmentationType::SOHW},  {"SOHK", SegmentationType::SOHK}, {"SOHK3", SegmentationType::SOHK3},
+            {"SOHW3", SegmentationType::SOHW3}};
 
     auto segmentation = taskParams->getString("segmentation");
     VPUX_THROW_UNLESS(segmentation.has_value() && segmentOptions.find(segmentation.value()) != segmentOptions.end(),
@@ -555,7 +558,8 @@ nb::HaloParams nb::TestCaseJsonDescriptor::loadHaloTaskParams(llvm::json::Object
 
     params.segmentation = segmentOptions.at(segmentation.value().str());
 
-    if (params.segmentation == SegmentationType::SOHW || params.segmentation == SegmentationType::SOHK) {
+    if (params.segmentation == SegmentationType::SOHW || params.segmentation == SegmentationType::SOHK ||
+        params.segmentation == SegmentationType::SOHK3 || params.segmentation == SegmentationType::SOHW3) {
         const auto* jsonClustersPerDim = taskParams->getArray("clusters_per_dim");
         VPUX_THROW_UNLESS(jsonClustersPerDim != nullptr,
                           "loadHaloTaskParams: cannot find clusters_per_dim config param");
@@ -822,9 +826,10 @@ nb::EltwiseLayer nb::TestCaseJsonDescriptor::loadEltwiseLayer(llvm::json::Object
 
     result.seSize = op->getInteger("se_size").value_or(0);
 
-    const std::unordered_map<llvm::StringRef, vpux::VPU::PPEMode> eltwiseOptions = {{"ADD", vpux::VPU::PPEMode::ADD},
-                                                                                    {"SUB", vpux::VPU::PPEMode::SUB},
-                                                                                    {"MULT", vpux::VPU::PPEMode::MULT}};
+    const std::unordered_map<llvm::StringRef, vpux::VPU::EltwiseType> eltwiseOptions = {
+            {"ADD", vpux::VPU::EltwiseType::ADD},
+            {"SUB", vpux::VPU::EltwiseType::SUBTRACT},
+            {"MULT", vpux::VPU::EltwiseType::MULTIPLY}};
 
     auto mode = op->getString("mode");
     VPUX_THROW_UNLESS(mode.has_value() && eltwiseOptions.find(mode.value()) != eltwiseOptions.end(),
@@ -1053,6 +1058,27 @@ nb::WLMParams nb::TestCaseJsonDescriptor::loadWLMParams(llvm::json::Object* json
     return wlmParams;
 }
 
+nb::ActShaveBroadcastingParams nb::TestCaseJsonDescriptor::loadActShaveBroadcastingParams(llvm::json::Object* jsonObj) {
+    nb::ActShaveBroadcastingParams result;
+
+    auto srcMemLoc = jsonObj->getString("src_memory_location");
+    VPUX_THROW_UNLESS(srcMemLoc.has_value(), "Source memory location not provided");
+    result.srcLocation = to_memory_location(srcMemLoc.value());
+
+    const auto* jsonDstMemLocations = jsonObj->getArray("dst_memory_location");
+    VPUX_THROW_UNLESS(jsonDstMemLocations != nullptr, "Destination memory location(s) not provided");
+
+    result.dstLocations.resize(jsonDstMemLocations->size());
+    for (size_t i = 0; i < jsonDstMemLocations->size(); i++) {
+        auto memLoc = (*jsonDstMemLocations)[i].getAsString();
+        VPUX_THROW_UNLESS(memLoc.has_value(), "Error processing destination memory locations");
+        result.dstLocations[i] = to_memory_location(memLoc.value());
+    }
+    VPUX_THROW_UNLESS(!result.dstLocations.empty(), "No destination memory location was provided");
+
+    return result;
+}
+
 nb::TestCaseJsonDescriptor::TestCaseJsonDescriptor(StringRef jsonString) {
     if (!jsonString.empty()) {
         parse(parse2JSON(jsonString));
@@ -1069,11 +1095,10 @@ void nb::TestCaseJsonDescriptor::parse(llvm::json::Object json_obj) {
         throw std::runtime_error{"Failed to get architecture"};
     }
 
-    const auto architectureSymbol = vpux::VPU::symbolizeArchKind(architecture.value());
+    std::optional<vpux::VPU::ArchKind> architectureSymbol = ::std::nullopt;
+    auto archValue = architecture.value();
 
-    if (!architectureSymbol.has_value()) {
-        throw std::runtime_error{"Failed to parse architecture"};
-    }
+    architectureSymbol = vpux::VPU::symbolizeArchKind(archValue);
     architecture_ = architectureSymbol.value();
 
     auto case_type = json_obj.getString("case_type");
@@ -1251,6 +1276,7 @@ void nb::TestCaseJsonDescriptor::parse(llvm::json::Object json_obj) {
         break;
     }
     case CaseType::ActShave: {
+        actShaveBroadcastingParams_ = loadActShaveBroadcastingParams(&json_obj);
         profilingParams_ = loadProfilingParams(&json_obj);
         break;
     }

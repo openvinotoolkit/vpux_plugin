@@ -1,6 +1,6 @@
 
 //
-// Copyright (C) 2022 Intel Corporation
+// Copyright (C) 2022-2024 Intel Corporation
 // SPDX-License-Identifier: Apache 2.0.
 //
 
@@ -12,5 +12,6 @@
 include "mlir/IR/OpBase.td"
 
 def Bool8 : I<8>;
+def I4 : I<4>;
 
 #endif

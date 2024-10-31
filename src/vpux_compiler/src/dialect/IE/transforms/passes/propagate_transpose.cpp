@@ -162,7 +162,7 @@ mlir::LogicalResult MoveThroughSlice::matchAndRewrite(IE::SliceOp origOp, mlir::
     auto orderAttr = origTransposeOp.getOrderValueAttr();
     const auto origPermuteInputOrder = DimsOrder::fromValue(origTransposeOp.getInput());
 
-    for (auto op : origTransposeOp.getOutput().getUsers()) {
+    for (auto op : llvm::make_early_inc_range(origTransposeOp.getOutput().getUsers())) {
         if (auto slice = mlir::dyn_cast_or_null<IE::SliceOp>(op)) {
             auto staticSizes = slice.getStaticSizesAttr();
             auto staticOffsets = slice.getStaticOffsetsAttr();
@@ -277,14 +277,67 @@ mlir::LogicalResult MoveTransposeThroughMultiply::matchAndRewrite(IE::MultiplyOp
     auto input2 = transpose2Op.getInput();
     auto origOutputType = origOp.getOutput().getType().cast<vpux::NDTypeInterface>();
     auto newOutputType = origOutputType.changeShape(getShape(input1));
-    auto newMultiplyOp = rewriter.create<IE::MultiplyOp>(origOp.getLoc(), newOutputType, input1, input2,
-                                                         origOp.getAutoBroadcastAttr(), origOp.getPostOpAttr(),
-                                                         origOp.getClampAttr());
+    auto newMultiplyOp = rewriter.create<IE::MultiplyOp>(
+            origOp.getLoc(), newOutputType, input1, input2, origOp.getAutoBroadcastAttr(), origOp.getPostOpAttr(),
+            origOp.getClampAttr(), origOp.getOutputChannelsAttr(), origOp.getInputChannelsAttr());
 
     rewriter.replaceOpWithNewOp<IE::TransposeOp>(origOp, newMultiplyOp.getOutput(), transpose1Op.getOrder(),
                                                  transpose1Op.getOrderValueAttr());
     rewriter.eraseOp(transpose1Op);
     rewriter.eraseOp(transpose2Op);
+    return mlir::success();
+}
+
+//
+// MoveThroughOneInputEltwise
+//
+
+class MoveThroughOneInputEltwise final : public mlir::OpTraitRewritePattern<IE::EltwiseOp> {
+public:
+    MoveThroughOneInputEltwise(mlir::MLIRContext* ctx, Logger log)
+            : mlir::OpTraitRewritePattern<IE::EltwiseOp>(ctx), _log(log) {
+        this->setDebugName("MoveThroughOneInputEltwise");
+    }
+
+private:
+    mlir::LogicalResult matchAndRewrite(mlir::Operation* eltwiseOp, mlir::PatternRewriter& rewriter) const final;
+
+private:
+    Logger _log;
+};
+
+mlir::LogicalResult MoveThroughOneInputEltwise::matchAndRewrite(mlir::Operation* eltwiseOp,
+                                                                mlir::PatternRewriter& rewriter) const {
+    _log.trace("[{0}] Got '{1}' at '{2}'", this->getDebugName(), eltwiseOp->getName(), eltwiseOp->getLoc());
+
+    if (eltwiseOp->getNumOperands() != 1 || eltwiseOp->getNumResults() != 1) {
+        return matchFailed(_log, rewriter, eltwiseOp, "EltwiseOp is not a single input & output operation");
+    }
+
+    auto transposeOp = eltwiseOp->getOperand(0).getDefiningOp<IE::TransposeOp>();
+    if (transposeOp == nullptr || !transposeOp->hasOneUse()) {
+        return matchFailed(_log, rewriter, eltwiseOp, "TransposeOp not found or has multiple uses");
+    }
+
+    // No benefit to propagate TransposeOp through , e.g., ConvertOp {f16 -> f32}
+    const auto srcType = eltwiseOp->getOperand(0).getType();
+    const auto dstElemType = eltwiseOp->getResult(0).getType();
+    if (getElemTypeSize(srcType) < getElemTypeSize(dstElemType)) {
+        return matchFailed(_log, rewriter, eltwiseOp,
+                           "Input element type size is smaller than output element type size");
+    }
+
+    _log.trace("[{0}] Propagate '{1}' at '{2}' through  '{3}' at '{4}'", this->getDebugName(), transposeOp->getName(),
+               transposeOp->getLoc(), eltwiseOp->getName(), eltwiseOp->getLoc());
+
+    mlir::IRMapping eltwiseMapper;
+    eltwiseMapper.map(eltwiseOp->getOperand(0), transposeOp.getInput());
+    auto newEltwiseOp = rewriter.clone(*eltwiseOp, eltwiseMapper);
+    vpux::inferReturnTypes(newEltwiseOp, vpux::InferShapedTypeMode::SHAPE);
+
+    rewriter.replaceOpWithNewOp<IE::TransposeOp>(eltwiseOp, newEltwiseOp->getResult(0), transposeOp.getOrder(),
+                                                 transposeOp.getOrderValueAttr());
+
     return mlir::success();
 }
 
@@ -337,43 +390,13 @@ void PropagateTransposePass::safeRunOnFunc() {
         return true;
     };
 
-    const auto verifyConvert = [](mlir::Operation* op) {
-        if (auto convertOp = mlir::dyn_cast<IE::ConvertOp>(op)) {
-            auto transposeOp = convertOp.getInput().getDefiningOp<IE::TransposeOp>();
-            if (transposeOp == nullptr || !transposeOp->hasOneUse()) {
-                return false;
-            }
-            const auto inOrder = DimsOrder::fromValue(transposeOp.getInput());
-            const auto inShape = getShape(transposeOp.getInput());
-            const auto inMemShape = inOrder.toMemoryOrder(inShape);
-            const auto perm = transposeOp.getOrderValue();
-            if (perm.has_value() && isTrivialPermute(inMemShape, perm.value())) {
-                return true;
-            }
-
-            const auto srcType = convertOp.getInput().getType();
-            const auto dstElemType = convertOp.getDstElemType();
-            if (getElemTypeSize(srcType) < getElemTypeSize(dstElemType)) {
-                return false;
-            }
-
-            // If ConvertOp is the last op to return, there is no benefit to move transpose through it
-            return !llvm::any_of(convertOp->getUsers(), [](auto user) {
-                return mlir::isa<mlir::func::ReturnOp>(user);
-            });
-        }
-        return false;
-    };
-
     mlir::RewritePatternSet patterns(&ctx);
     patterns.add<MoveThroughSoftmax>(&ctx, _log);
     patterns.add<MoveThroughSlice>(&ctx, _log);
-    patterns.add<MoveThroughEltwiseGeneric<IE::GeluOp>>(&ctx, _log);
-    patterns.add<MoveThroughEltwiseGeneric<IE::SwishOp>>(&ctx, _log);
     patterns.add<MoveThroughEltwiseGeneric<IE::AvgPoolOp>>(&ctx, _log, verifyAvgPool);
-    patterns.add<MoveThroughEltwiseGeneric<IE::ConvertOp>>(&ctx, _log, verifyConvert);
     patterns.add<IE::MoveTransposeAffineReshapeThroughAdd>(&ctx, vpux::benefitHigh, _log);
     patterns.add<MoveTransposeThroughMultiply>(&ctx, _log);
+    patterns.add<MoveThroughOneInputEltwise>(&ctx, _log);
 
     if (mlir::failed(mlir::applyPatternsAndFoldGreedily(func, std::move(patterns), getDefaultGreedyRewriteConfig()))) {
         signalPassFailure();

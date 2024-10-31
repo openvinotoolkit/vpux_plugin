@@ -19,13 +19,6 @@ namespace {
 // Common Utils
 //
 
-NDTypeInterface inferNewTypeWithMemPerm(NDTypeInterface oldType, mlir::AffineMap memPerm, const DimsOrder& dstOrder) {
-    const auto oldMemShape = oldType.getMemShape();
-    const auto newMemShape = applyPerm(oldMemShape, memPerm);
-    const auto newShape = dstOrder.toLogicalOrder(newMemShape);
-    return oldType.changeDimsOrder(dstOrder).changeShape(newShape);
-}
-
 mlir::Operation* getSupportedInputPermuteLikeOp(mlir::Value input) {
     auto inputOp = input.getDefiningOp();
     if (mlir::isa_and_nonnull<IE::MemPermuteOp, IE::PermuteQuantizeOp>(inputOp) && inputOp->hasOneUse()) {

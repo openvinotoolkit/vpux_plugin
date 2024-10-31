@@ -33,9 +33,26 @@ bool isEltwisePooling(ConcreteOp poolingOp) {
            llvm::all_of(padsEnd, isZero);
 }
 
+inline bool doesPoolingHaveNonOneStaticScaleAttr(mlir::Operation* op) {
+    if (auto avgPool = mlir::dyn_cast<IE::AvgPoolOp>(op)) {
+        const auto scaleAttr = avgPool.getStaticScaleAttr().dyn_cast_or_null<mlir::FloatAttr>();
+        if (scaleAttr == nullptr) {
+            return false;
+        }
+        const auto scaleValue = scaleAttr.getValueAsDouble();
+        return !isDoubleEqual(scaleValue, 1.0f);
+    }
+
+    return false;
+}
+
 template <typename ConcreteOp>
 bool isIdentityPooling(ConcreteOp poolingOp) {
     if (!isEltwisePooling<ConcreteOp>(poolingOp)) {
+        return false;
+    }
+
+    if (doesPoolingHaveNonOneStaticScaleAttr(poolingOp.getOperation())) {
         return false;
     }
 

@@ -67,9 +67,8 @@ void UseUserPrecisionPass::safeRunOnModule() {
         newResultTypes[ind] = newType;
     }
 
-    const auto cvtOpBuilder = [](mlir::OpBuilder& builder, mlir::Location, mlir::Value val,
+    const auto cvtOpBuilder = [](mlir::OpBuilder& builder, mlir::Location baseLoc, mlir::Value val,
                                  vpux::NDTypeInterface newType) -> mlir::Operation* {
-        const auto baseLoc = IE::getValueLocation(val);
         const auto dstType = mlir::TypeAttr::get(newType.getElementType());
         const auto newLocation = appendLoc(baseLoc, "converted_to_{0}", dstType);
         return builder.create<IE::ConvertOp>(newLocation, newType, val, dstType);

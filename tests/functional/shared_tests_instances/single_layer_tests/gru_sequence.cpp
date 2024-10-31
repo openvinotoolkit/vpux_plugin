@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -29,15 +29,12 @@ class GRUSequenceLayerTestCommon : public GRUSequenceTest, virtual public VpuOv2
     }
 };
 
-class GRUSequenceLayerTest_NPU3720 : public GRUSequenceLayerTestCommon {};
-class GRUSequenceLayerTest_NPU4000 : public GRUSequenceLayerTestCommon {};
-
-TEST_P(GRUSequenceLayerTest_NPU3720, HW) {
+TEST_P(GRUSequenceLayerTestCommon, NPU3720_HW) {
     setDefaultHardwareMode();
     run(Platform::NPU3720);
 }
 
-TEST_P(GRUSequenceLayerTest_NPU4000, HW) {
+TEST_P(GRUSequenceLayerTestCommon, NPU4000_HW) {
     setDefaultHardwareMode();
     // TODO: E129229
     configuration["NPU_BACKEND_COMPILATION_PARAMS"] = "enable-partial-workload-management=false";
@@ -143,46 +140,24 @@ const auto gruSequenceParam3Bi = testing::Combine(
         ::testing::ValuesIn(directionModeBi), ::testing::Values(InputLayerType::CONSTANT),
         ::testing::Values(modelTypes), ::testing::Values(DEVICE_NPU));
 
-//    NPU3720
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_GRUSequence, GRUSequenceLayerTest_NPU3720, gruSequenceParam0,
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_GRUSequence, GRUSequenceLayerTestCommon, gruSequenceParam0,
                          GRUSequenceTest::getTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_GRUSequence_Tiling, GRUSequenceLayerTest_NPU3720, gruSequenceParam1,
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_GRUSequence_Tiling, GRUSequenceLayerTestCommon, gruSequenceParam1,
                          GRUSequenceTest::getTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_GRUSequence_Split, GRUSequenceLayerTest_NPU3720, gruSequenceParam2,
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_GRUSequence_Split, GRUSequenceLayerTestCommon, gruSequenceParam2,
                          GRUSequenceTest::getTestCaseName);
 
-// BIDIRECTIONAL NPU3720
+// BIDIRECTIONAL
 
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_GRUSequence_BI, GRUSequenceLayerTest_NPU3720, gruSequenceParam0Bi,
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_GRUSequence_BI, GRUSequenceLayerTestCommon, gruSequenceParam0Bi,
                          GRUSequenceTest::getTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_GRUSequence_Tiling_BI, GRUSequenceLayerTest_NPU3720, gruSequenceParam1Bi,
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_GRUSequence_Tiling_BI, GRUSequenceLayerTestCommon, gruSequenceParam1Bi,
                          GRUSequenceTest::getTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_GRUSequence_Split_BI, GRUSequenceLayerTest_NPU3720, gruSequenceParam2Bi,
-                         GRUSequenceTest::getTestCaseName);
-
-//    NPU4000
-
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_GRUSequence, GRUSequenceLayerTest_NPU4000, gruSequenceParam0,
-                         GRUSequenceTest::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_GRUSequence_Tiling, GRUSequenceLayerTest_NPU4000, gruSequenceParam1,
-                         GRUSequenceTest::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_GRUSequence_Split, GRUSequenceLayerTest_NPU4000, gruSequenceParam3,
-                         GRUSequenceTest::getTestCaseName);
-// BIDIRECTIONAL NPU4000
-
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_GRUSequence_BI, GRUSequenceLayerTest_NPU4000, gruSequenceParam0Bi,
-                         GRUSequenceTest::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_GRUSequence_Tiling_BI, GRUSequenceLayerTest_NPU4000, gruSequenceParam1Bi,
-                         GRUSequenceTest::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_GRUSequence_Split_BI, GRUSequenceLayerTest_NPU4000, gruSequenceParam3Bi,
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_GRUSequence_Split_BI, GRUSequenceLayerTestCommon, gruSequenceParam2Bi,
                          GRUSequenceTest::getTestCaseName);
 
 }  // namespace

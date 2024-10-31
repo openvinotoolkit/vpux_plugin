@@ -21,7 +21,6 @@ module @dual_tile attributes {VPU.arch = #VPU.arch_kind<NPU37XX>, VPU.compilatio
 
   IE.MemoryResource 31457280 bytes of @DDR {VPU.bandwidth = 8, VPU.derateFactor = 6.000000e-01}
   IE.TileResource 1 of @NCE  {
-    IE.ExecutorResource 1 of @SHAVE_UPA
     IE.MemoryResource 2097152 bytes of @CMX_NN {VPU.bandwidth = 32, VPU.derateFactor = 1.000000e+00}
     IE.ExecutorResource 1 of @DPU
   }
@@ -32,7 +31,7 @@ module @dual_tile attributes {VPU.arch = #VPU.arch_kind<NPU37XX>, VPU.compilatio
         %output_arg: memref<2x16x16x16xf16, #NHWC, @DDR>
       ) -> memref<2x16x16x16xf16, #NHWC, @DDR> {
     %weights_constant = const.Declare memref<16x4x8x16x!qtype, #NHWC, @DDR> =
-      dense<1> : tensor<16x4x8x16xui8>, [#const.QuantCast<!qtype>, #const.Reorder<#NHWC>]
+      dense<1> : tensor<16x4x8x16xui8>, [#const.CastElemType<!qtype>, #const.Reorder<#NHWC>]
     %weights0 = VPURT.DeclareBuffer <CMX_NN> [0] <12544>
       -> memref<16x4x8x16x!qtype, #NHWC, [@CMX_NN, 0]>
     %weights1 = VPURT.DeclareBuffer <CMX_NN> [1] <12544>
@@ -194,6 +193,7 @@ module @dual_tile attributes {VPU.arch = #VPU.arch_kind<NPU37XX>, VPU.compilatio
 }
 
 // CHECK:   Input size - 4.00 KB Output size - 16.00 KB
+// CHECK:   DDR heap size - 16.00 KB
 // CHECK:   VPUIP tasks statistics:
 // CHECK:   VPUIP Tasks - 11 ops
 // CHECK:     VPUIP.NNDMA - 7 ops : Size - 40.50 KB

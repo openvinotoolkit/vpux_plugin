@@ -22,7 +22,8 @@ public:
     static sw_params::DataType getDataTypeFromMlirType(mlir::Type type);
 
 private:
-    static void addTensorArgToVector(SmallVector<uint8_t>& vec, mlir::Value value, bool isDynamic);
+    static void addTensorArgToVector(SmallVector<uint8_t>& vec, std::optional<uint32_t> tileMaskForBroadcast,
+                                     mlir::Value value, bool isDynamic);
     static void addAttrsToVector(SmallVector<uint8_t>& vec, mlir::Attribute attr);
     static void addBasicAttrToVector(SmallVector<uint8_t>& vec, mlir::Attribute attr);
 

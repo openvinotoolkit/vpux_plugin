@@ -8,7 +8,7 @@
 #include "vpux/compiler/core/attributes/shape.hpp"
 #include "vpux/compiler/dialect/IE/IR/ops_interfaces.hpp"
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
-#include "vpux/compiler/dialect/VPU/IR/native_attributes/distributed_tensor_native.hpp"
+#include "vpux/compiler/dialect/VPU/IR/native_attributes/distribution_info.hpp"
 #include "vpux/compiler/dialect/VPU/IR/types.hpp"
 #include "vpux/compiler/dialect/VPU/utils/clustered_op_interface_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_invariant.hpp"
@@ -45,8 +45,7 @@ void setLayerMultiClusterStrategy(ConcreteOp mainOp, VPU::MultiClusterStrategy s
     mainOp.setMultiClusterStrategyAttr(multiClusterStrategyAttr);
 }
 
-mlir::IntegerAttr getOptimalNumClusters(mlir::Operation* operation, ShapeRef outputShape,
-                                        VPU::MultiClusterStrategy strategy);
+int64_t getOptimalNumClusters(mlir::Operation* operation, ShapeRef outputShape, VPU::MultiClusterStrategy strategy);
 
 namespace details {
 

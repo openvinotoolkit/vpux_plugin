@@ -18,8 +18,7 @@ mlir::LogicalResult isBeneficialConvertScaleShiftToDW(IE::ScaleShiftOp scaleShif
         }
     }
 
-    // If ScaleShift after input and first conv can use C-major, It is better not convert to DWConv.
-    // More general, if sub-graph like: input -> UPAs -> ScaleShift -> Conv. It is better not convert to DWConv.
+    // If sub-graph like: input -> SHAVEs -> ScaleShift -> Conv. It is better not convert to DWConv.
     // If layer before ScaleShift is NCE op or with NHWC layout. It should convert to DWConv.
     auto onlySupportNHWCLayout = [&](mlir::Operation* op) -> bool {
         if (auto iface = mlir::dyn_cast_or_null<IE::LayoutInfoOpInterface>(op)) {

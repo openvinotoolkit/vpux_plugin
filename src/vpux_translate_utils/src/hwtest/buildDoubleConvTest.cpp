@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -10,6 +10,7 @@
 #include <mlir/Dialect/Quant/QuantTypes.h>
 
 #include "vpux/compiler/dialect/IE/utils/resources.hpp"
+#include "vpux/compiler/dialect/VPU/transforms/factories/nce_sparsity_converters.hpp"
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_sparsity.hpp"
 #include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
@@ -57,6 +58,17 @@ namespace hwtest {
 
 void buildDoubleConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp module, mlir::OpBuilder builder,
                      Logger& log, mlir::Type inputType, mlir::Type weightsType, mlir::Type outputType) {
+    // set runtime resources
+    std::optional<vpux::Byte> availableCMXMemory = std::nullopt;
+
+    mlir::PassManager pmBuilderInit(module->getName(), mlir::OpPassManager::Nesting::Implicit);
+    auto initCompilerOptions = VPU::InitCompilerOptions(testDesc.getArchitecture(), VPU::CompilationMode::DefaultHW);
+    initCompilerOptions.numberOfDPUGroups = 1;
+    initCompilerOptions.setAvailableCMXMemory(availableCMXMemory);
+
+    VPU::buildInitCompilerPipeline(pmBuilderInit, initCompilerOptions, log);
+    VPUX_THROW_UNLESS(mlir::succeeded(pmBuilderInit.run(module)), "Init compilation failed");
+
     auto* ctx = builder.getContext();
     const auto int32 = builder.getIntegerType(32, true);
 
@@ -227,9 +239,7 @@ void buildDoubleConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp 
     const auto getWeightsAttribute = [&builder, &weightsType, &ctx](llvm::SmallVector<std::int64_t> weightsShape,
                                                                     const char* weightsFileName) {
         const auto weightsValues = generateWeights(builder, weightsShape, weightsType, ctx, weightsFileName);
-        auto weightsAttribute = vpux::Const::ContentAttr::get(weightsValues);
-        weightsAttribute = weightsAttribute.reorder(vpux::DimsOrder::OYXI);
-        return weightsAttribute;
+        return vpux::Const::ContentAttr::transform(weightsValues).reorder(vpux::DimsOrder::OYXI).get();
     };
 
     // Weights 0
@@ -238,8 +248,8 @@ void buildDoubleConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp 
     const auto weightsDDRType0 =
             getMemRefType(VPURT::BufferSection::Constant, weights0Shape, weightsType, DimsOrder::NHWC);
     auto weights0Strides = weightsDDRType0.cast<vpux::NDTypeInterface>().getStrides();
-    auto weightsDDR0 =
-            functionBuilder.create<vpux::Const::DeclareOp>(builder.getUnknownLoc(), weightsDDRType0, weights0Attribute);
+    auto weightsDDR0 = functionBuilder.create<vpux::Const::DeclareOp>(builder.getUnknownLoc(), weightsDDRType0,
+                                                                      std::move(weights0Attribute));
 
     // Weights 1
 
@@ -247,8 +257,8 @@ void buildDoubleConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp 
     const auto weightsDDRType1 =
             getMemRefType(VPURT::BufferSection::Constant, weights1Shape, weightsType, DimsOrder::NHWC);
     auto weights1Strides = weightsDDRType1.cast<vpux::NDTypeInterface>().getStrides();
-    auto weightsDDR1 =
-            functionBuilder.create<vpux::Const::DeclareOp>(builder.getUnknownLoc(), weightsDDRType1, weights1Attribute);
+    auto weightsDDR1 = functionBuilder.create<vpux::Const::DeclareOp>(builder.getUnknownLoc(), weightsDDRType1,
+                                                                      std::move(weights1Attribute));
 
     // Input padding
 
@@ -335,18 +345,21 @@ void buildDoubleConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp 
                                                 vpux::Bit weightsOutputChannelStrideInBits) {
         const auto weightsTableDDRType = mlir::RankedTensorType::get(weightsTableShape, int32);
         const auto sparsityPtrStep = 0;
+        const auto ppeConverter = VPU::NCESparsity::getPPEConverterCb(testDesc.getArchitecture());
+        const auto biasConverter = VPU::NCESparsity::getBiasConverterCb(testDesc.getArchitecture());
         const auto weightsTable = VPU::NCESparsity::getWeightsTable(
                 inputType, outputType, static_cast<std::int32_t>(WEIGHTS_CMX_OFFSET),
                 static_cast<std::int32_t>(weightsOutputChannelStrideInBits.count() / CHAR_BIT),
-                VPU::NCESparsity::SPARSITY_PTR_WHEN_NO_SPARSITY, sparsityPtrStep, testDesc.getArchitecture(),
+                VPU::NCESparsity::SPARSITY_PTR_WHEN_NO_SPARSITY, sparsityPtrStep, ppeConverter, biasConverter,
                 outputShape[1], weightsType);
         const auto weightsTableDDRMemRef =
                 getMemRefType(VPURT::BufferSection::Constant, weightsTableShape, int32, DimsOrder::NHWC);
         const auto weightsTableValues =
                 mlir::DenseElementsAttr::get(weightsTableDDRType, llvm::ArrayRef<std::int32_t>(weightsTable));
-        auto weightsTableContentAttr = vpux::Const::ContentAttr::get(weightsTableValues).reorder(vpux::DimsOrder::NHWC);
+        auto weightsTableContentAttr =
+                vpux::Const::ContentAttr::transform(weightsTableValues).reorder(vpux::DimsOrder::NHWC).get();
         auto weightsTableDDR = functionBuilder.create<vpux::Const::DeclareOp>(
-                builder.getUnknownLoc(), weightsTableDDRMemRef, weightsTableContentAttr);
+                builder.getUnknownLoc(), weightsTableDDRMemRef, std::move(weightsTableContentAttr));
         return weightsTableDDR;
     };
 
@@ -410,7 +423,6 @@ void buildDoubleConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp 
             /*weightsTable=*/weights0TableCMX.getBuffer(),
             /*instruction_table_list=*/nullptr,
             /*spr_lookup_table=*/nullptr,
-            /*activation_window=*/nullptr,
             /*parent_input=*/paddedInputCMX.getBuffer(),
             /*parent_input_sparsity_map=*/nullptr,
             /*parent_input_storage_element_table=*/nullptr,
@@ -421,7 +433,6 @@ void buildDoubleConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp 
             /*profiling_data=*/nullptr, VPUIP::NCETaskType::CONV,
             /*kernel_size=*/kernelSize, /*kernel_strides*/ strides,
             /*kernel_padding=*/kernelPaddings,
-            /*activation_window_channel_length=*/nullptr,
             /*is_continued=*/nullptr, /*cm_sp_pattern=*/nullptr, /*is_segmented=*/nullptr,
             /*out_channel_offset=*/vpux::getIntAttr(builder.getContext(), sparsityPattern),
             /*input_channels_compression*/ inputChannelsCompression,
@@ -458,7 +469,6 @@ void buildDoubleConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp 
             /*weightsTable=*/weights1TableCMX.getBuffer(),
             /*instruction_table_list=*/nullptr,
             /*spr_lookup_table=*/nullptr,
-            /*activation_window=*/nullptr,
             /*parent_input=*/input1CMX.getBuffer(),
             /*parent_input_sparsity_map=*/output0SMBuffer,
             /*parent_input_storage_element_table=*/nullptr,
@@ -469,7 +479,6 @@ void buildDoubleConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp 
             /*profiling_data=*/nullptr, VPUIP::NCETaskType::CONV,
             /*kernel_size=*/kernelSize, /*kernel_strides*/ strides,
             /*kernel_padding=*/kernelPaddings,
-            /*activation_window_channel_length=*/nullptr,
             /*is_continued=*/nullptr, /*cm_sp_pattern=*/nullptr, /*is_segmented=*/nullptr,
             /*out_channel_offset=*/nullptr, /*input_channels_compression*/ nullptr,
             /*is_superdense=*/nullptr,
@@ -483,21 +492,14 @@ void buildDoubleConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp 
 
     module.dump();
 
-    // set runtime resources
-    std::optional<vpux::Byte> availableCMXMemory = std::nullopt;
-
-    mlir::PassManager pm(module->getName(), mlir::OpPassManager::Nesting::Implicit);
-    auto initCompilerOptions = VPU::InitCompilerOptions(testDesc.getArchitecture(), VPU::CompilationMode::DefaultHW);
-    initCompilerOptions.numberOfDPUGroups = 1;
-    initCompilerOptions.setAvailableCMXMemory(availableCMXMemory);
-    VPU::buildInitCompilerPipeline(pm, initCompilerOptions, log);
+    mlir::PassManager pmBuilderEnd(module->getName(), mlir::OpPassManager::Nesting::Implicit);
     if (conv.compress) {
-        pm.addPass(VPUIP::createCompressWeightsBTCPass(log));
+        pmBuilderEnd.addPass(VPUIP::createCompressWeightsBTCPass(log));
     }
     if (conv.act_sparsity) {
-        pm.addPass(VPUIP::createComputeSESizesPass(/*onlyInputsConcatOverC=*/false, log));
+        pmBuilderEnd.addPass(VPUIP::createComputeSESizesPass(/*onlyInputsConcatOverC=*/false, log));
     }
-    VPUX_THROW_UNLESS(mlir::succeeded(pm.run(module)), "Compilation failed");
+    VPUX_THROW_UNLESS(mlir::succeeded(pmBuilderEnd.run(module)), "Compilation failed");
 
     buildCNNOp(builder, function.getName(),
                {getTensorType(ShapeRef(inputShape), inputType, vpux::DimsOrder::NHWC, nullptr)},

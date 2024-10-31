@@ -64,7 +64,8 @@ bool AvgPoolToConv::isEligibleConvertAvgPoolToConv(IE::AvgPoolOp origOp) const {
 
     const auto inputShape = inputType.getShape();
     const int64_t IC = inputShape[Dims4D::Act::C];
-    const auto alignment = VPU::NCEInvariant::getAlignment(inputElementType);
+    auto channelIface = mlir::cast<IE::AlignedChannelsOpInterface>(origOp.getOperation());
+    const auto alignment = channelIface.getInputChannelAlignment();
     if (IC % alignment == 0) {
         _log.nest().trace("[{0}] Channel number is aligned already", getDebugName());
         return false;
@@ -86,9 +87,10 @@ bool AvgPoolToConv::isEligibleConvertAvgPoolToConv(IE::AvgPoolOp origOp) const {
     const auto strides = parseIntArrayAttr<int64_t>(origOp.getStrides());
     const auto KX = kernelSize[Dims4D::Kernel::X.ind()];
     const auto SX = strides[Dims4D::Strides::X.ind()];
+    const auto SY = strides[Dims4D::Strides::Y.ind()];
 
     // Ensure strides of converted Convolution can be folded
-    if (!IE::isEligibleToFoldStrideKernel(inputType, outputType, KX, SX, alignment, alignment, _log)) {
+    if (!IE::isEligibleToFoldStrideKernel(inputType, outputType, KX, SX, SY, alignment, alignment, _log)) {
         return false;
     }
 
@@ -139,10 +141,11 @@ mlir::LogicalResult AvgPoolToConv::matchAndRewrite(IE::AvgPoolOp origOp, mlir::P
     auto reorderFilter = rewriter.createOrFold<IE::ReorderOp>(origOp->getLoc(), reorderType, filter, orderMap);
 
     const auto dilations = getIntArrayAttr(ctx, SmallVector<int64_t>{1, 1});
-    auto newConv = rewriter.create<IE::ConvolutionOp>(origOp.getLoc(), origOp.getOutput().getType(), origOp.getInput(),
-                                                      reorderFilter, nullptr, origOp.getStridesAttr(),
-                                                      origOp.getPadsBeginAttr(), origOp.getPadsEndAttr(), dilations,
-                                                      origOp.getPostOpAttr(), origOp.getClampAttr(), nullptr);
+    auto newConv = rewriter.create<IE::ConvolutionOp>(
+            origOp.getLoc(), origOp.getOutput().getType(), origOp.getInput(), reorderFilter, nullptr,
+            origOp.getStridesAttr(), origOp.getPadsBeginAttr(), origOp.getPadsEndAttr(), dilations,
+            origOp.getPostOpAttr(), origOp.getClampAttr(), origOp.getStaticScaleAttr(), origOp.getOutputChannelsAttr(),
+            origOp.getInputChannelsAttr());
 
     rewriter.replaceOp(origOp, newConv);
 

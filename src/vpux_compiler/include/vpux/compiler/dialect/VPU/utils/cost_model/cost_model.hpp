@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022 Intel Corporation
+// Copyright (C) 2022-2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -33,12 +33,11 @@ void printVPUNNWorkloadConfig(const VPUNN::DPUWorkload& wl, LogCb logCb = global
 float getWeightsSparsityRatio(mlir::Value weights);
 VPUNN::VPUDevice getVPUDeviceType(VPU::ArchKind archKind);
 bool isVPUNNSupportedElementType(mlir::Type type);
-VPUNN::DataType getVPUNNElementType(mlir::Type type);
+std::optional<VPUNN::DataType> getVPUNNElementType(mlir::Type type);
 VPUNN::Layout getVPUNNLayout(VPUIPDPU::ODUPermuteDataMode oduPermutation);
 VPUNN::VPUTensor getVPUTensor(ShapeRef shape, mlir::Type elemType,
                               VPUIPDPU::ODUPermuteDataMode oduPermutation = VPUIPDPU::ODUPermuteDataMode::PERMUTE_ZXY);
 VPUNN::ExecutionMode getExecutionMode(VPU::MPEMode mpeMode);
-VPUNN::ActivationFunction getVPUNNActivationFunction(VPU::PPETaskAttr ppeTask);
 VPUNN::VPULayerStrategy getVPULayerStrategy(VPU::MultiClusterStrategy, size_t nDPUs, size_t nTiles, size_t nSHVs = 1,
                                             bool prefetching = false);
 VPUNN::DPULayer getDPULayer(const VPUIP::WorkloadCostParams& params);

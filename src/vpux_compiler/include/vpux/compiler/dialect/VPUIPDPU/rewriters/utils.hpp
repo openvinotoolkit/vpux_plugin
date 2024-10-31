@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2023-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -50,10 +50,26 @@ mlir::BlockArgument getInvBlockArg(BlockArg invBlockArg, mlir::Block* invBlock,
 mlir::Type getBaseType(mlir::Type type);
 
 mlir::LogicalResult getQuantConfig(const Logger&, mlir::Type type, SmallVector<int64_t>& quantMult,
-                                   SmallVector<int64_t>& quantShift, SmallVector<uint8_t>& quantZero,
-                                   VPU::ArchKind arch);
+                                   SmallVector<int64_t>& quantShift, SmallVector<uint8_t>& quantZero);
 
 mlir::IntegerAttr getI64IntegerAttrOrNull(mlir::OpBuilder& builder, const std::optional<int64_t>& attr);
 
+VPUIPDPU::ODUDataBitWidth getDataBitWidth(mlir::Type outActType);
+
+template <typename TRegField_target_width_lsbType, typename TRegField_target_width_msbType>
+void computeLsbAndMsbFromTargetWidth(int64_t targetWidth, uint64_t& msbWidth, uint64_t& lsbWidth) {
+    auto lsbBitWidth = TRegField_target_width_lsbType::getRegFieldWidth();
+    auto msbBitWidth = TRegField_target_width_msbType::getRegFieldWidth();
+
+    auto bitMask = (1 << (lsbBitWidth + msbBitWidth)) - 1;
+    VPUX_THROW_WHEN(targetWidth & ~bitMask, "target_width value {0} is too big for {1} bits", targetWidth,
+                    lsbBitWidth + msbBitWidth);
+
+    auto bitMaskLsb = (1 << lsbBitWidth) - 1;
+    lsbWidth = targetWidth & bitMaskLsb;
+
+    auto bitMaskMsb = ((1 << msbBitWidth) - 1) << lsbBitWidth;
+    msbWidth = (targetWidth & bitMaskMsb) >> lsbBitWidth;
+}
 }  // namespace VPUIPDPU
 }  // namespace vpux

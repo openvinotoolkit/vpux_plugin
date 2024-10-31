@@ -6,6 +6,8 @@
 #include "vpux/compiler/dialect/IE/transforms/rewriters/propagate_transpose_affine_reshape_common.hpp"
 #include <mlir/Support/LLVM.h>
 #include <optional>
+#include <tuple>
+#include <utility>
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
 #include "vpux/compiler/utils/attributes_utils.hpp"
@@ -103,33 +105,164 @@ std::optional<int64_t> getNewSoftmaxAxisAfterSwappingWithAffineReshape(IE::SoftM
     return newSoftmaxAxis;
 }
 
-bool MoveTransposeAffineReshapeThroughAdd::isBeneficialConversion(IE::AddOp origOp, bool sharingInput) const {
+std::tuple<MoveTransposeAffineReshapeThroughAdd::InputsMode, IE::TransposeOp, IE::AffineReshapeOp>
+MoveTransposeAffineReshapeThroughAdd::checkAddInputsMode(IE::AddOp origOp) const {
+    auto input1Op = origOp.getInput1().getDefiningOp();
+    auto input2Op = origOp.getInput2().getDefiningOp();
+    if (input1Op == nullptr || input2Op == nullptr || getShape(origOp.getInput1()) != getShape(origOp.getInput2())) {
+        return {InputsMode::Unsupported, nullptr, nullptr};
+    }
+
+    auto getTransposeAndReshape =
+            [](mlir::Operation* inputOp) -> std::optional<std::pair<IE::TransposeOp, IE::AffineReshapeOp>> {
+        auto reshapeOp = mlir::dyn_cast_or_null<IE::AffineReshapeOp>(inputOp);
+        if (reshapeOp == nullptr) {
+            return std::nullopt;
+        }
+
+        auto transposeOp = reshapeOp.getInput().getDefiningOp<IE::TransposeOp>();
+        if (transposeOp == nullptr || !transposeOp->hasOneUse()) {
+            return std::nullopt;
+        }
+
+        return std::make_pair(transposeOp, reshapeOp);
+    };
+
+    // Two inputs of add are from the same affineReshape
+    //      Transpose
+    //          |
+    //    AffineReshapeOp
+    //         | |
+    //         Add
+    //          |
+    auto checkInputsHaveTheSameParent =
+            [&](mlir::Operation* input1Op,
+                mlir::Operation* input2Op) -> mlir::FailureOr<std::pair<IE::TransposeOp, IE::AffineReshapeOp>> {
+        if (input1Op == input2Op &&
+            static_cast<size_t>(std::distance(input1Op->getUsers().begin(), input1Op->getUsers().end())) == 2) {
+            auto getOps = getTransposeAndReshape(input1Op);
+            if (getOps.has_value()) {
+                return getOps.value();
+            }
+        }
+
+        return mlir::failure();
+    };
+    auto inputsHaveTheSameParent = checkInputsHaveTheSameParent(input1Op, input2Op);
+    if (mlir::succeeded(inputsHaveTheSameParent)) {
+        return {InputsMode::Symmetry, inputsHaveTheSameParent.value().first, inputsHaveTheSameParent.value().second};
+    }
+
+    // Each input of Add has Transpose and AffineReshape, and these Transpose / AffineReshape ops are the same
+    //      Transpose       Transpose
+    //          |               |
+    //    AffineReshape    AffineReshape
+    //          \               /
+    //                 Add
+    //                  |
+    auto checkSymmetricalInputsWithTheSameTransposeAndReshape =
+            [&](mlir::Operation* input1Op,
+                mlir::Operation* input2Op) -> mlir::FailureOr<std::pair<IE::TransposeOp, IE::AffineReshapeOp>> {
+        auto getOps1 = getTransposeAndReshape(input1Op);
+        if (!getOps1.has_value()) {
+            return mlir::failure();
+        }
+
+        auto getOps2 = getTransposeAndReshape(input2Op);
+        if (!getOps2.has_value()) {
+            return mlir::failure();
+        }
+
+        auto reshape1 = getOps1.value().second;
+        auto reshape2 = getOps2.value().second;
+        if (!reshape1->hasOneUse() || !reshape2->hasOneUse()) {
+            return mlir::failure();
+        }
+
+        auto areTheSameReshapeOps = reshape1.getInput().getType() == reshape2.getInput().getType() &&
+                                    reshape1.getOutput().getType() == reshape2.getOutput().getType();
+        if (!areTheSameReshapeOps) {
+            return mlir::failure();
+        }
+
+        auto tranpose1 = getOps1.value().first;
+        auto tranpose2 = getOps2.value().first;
+        if (!tranpose1.getOrderValue().has_value() || !tranpose2.getOrderValue().has_value()) {
+            return mlir::failure();
+        }
+
+        auto areTheSameTransposeOps = tranpose1.getInput().getType() == tranpose2.getInput().getType() &&
+                                      tranpose1.getOrderValue().value() == tranpose2.getOrderValue().value();
+        if (!areTheSameTransposeOps) {
+            return mlir::failure();
+        }
+
+        return getOps1.value();
+    };
+
+    auto symmetricalInputs = checkSymmetricalInputsWithTheSameTransposeAndReshape(input1Op, input2Op);
+    if (mlir::succeeded(symmetricalInputs)) {
+        return {InputsMode::Symmetry, symmetricalInputs.value().first, symmetricalInputs.value().second};
+    }
+
+    // Check asymmetrical inputs
+    const auto isSupportedNonAffineReshapeInput = [](mlir::Operation* inputOp) {
+        return mlir::isa_and_nonnull<IE::SelectOp, IE::ConvertOp, Const::DeclareOp>(inputOp);
+    };
+    auto checkAsymmetricalInputs =
+            [&](mlir::Operation* input1Op,
+                mlir::Operation* input2Op) -> mlir::FailureOr<std::pair<IE::TransposeOp, IE::AffineReshapeOp>> {
+        auto getOps1 = getTransposeAndReshape(input1Op);
+        auto getOps2 = getTransposeAndReshape(input2Op);
+        if (getOps1.has_value() && !getOps2.has_value() && input1Op->hasOneUse() &&
+            isSupportedNonAffineReshapeInput(input2Op)) {
+            return getOps1.value();
+        }
+
+        if (!getOps1.has_value() && getOps2.has_value() && input2Op->hasOneUse() &&
+            isSupportedNonAffineReshapeInput(input1Op)) {
+            return getOps2.value();
+        }
+
+        return mlir::failure();
+    };
+    auto asymmetricalInputs = checkAsymmetricalInputs(input1Op, input2Op);
+    if (mlir::succeeded(asymmetricalInputs)) {
+        return {InputsMode::Asymmetry, asymmetricalInputs.value().first, asymmetricalInputs.value().second};
+    }
+
+    // Unsupported case
+    return {InputsMode::Unsupported, nullptr, nullptr};
+}
+
+bool MoveTransposeAffineReshapeThroughAdd::isBeneficialConversion(IE::AddOp origOp, InputsMode mode) const {
     if (!origOp->hasOneUse()) {
         return false;
     }
 
     /*
-        For sharing input case, no need to check output given no additional transpose is introduced in.
+        For AddOp with symmetrical Transpose & AffineReshape inputs cases, no need to check output given no additional
+       transpose is introduced in.
 
-        Transpose
-            |
-        AffineReshape
-           | |
-           Add
-            |
+        Transpose                     Transpose       Transpose
+            |                             |               |
+        AffineReshape       and     AffineReshape    AffineReshape
+           | |                            \               /
+           Add                                   Add
+            |                                     |
 
         will be converted into:
 
-         Operand
-           | |
-           Add
-            |
-        Transpose
-            |
-        AffineReshape
-            |
+         Operand                        Operand     Operand
+           | |                              \           /
+           Add                                   Add
+            |               and                   |
+        Transpose                             Transpose
+            |                                     |
+        AffineReshape                       AffineReshape
+            |                                     |
     */
-    if (sharingInput) {
+    if (mode == InputsMode::Symmetry) {
         return true;
     }
 
@@ -256,45 +389,17 @@ mlir::LogicalResult MoveTransposeAffineReshapeThroughAdd::matchAndRewrite(IE::Ad
         return mlir::failure();
     }
 
-    const auto isSupportedNonAffineReshapeInput = [](mlir::Operation* inputOp) {
-        return mlir::isa_and_nonnull<IE::SelectOp, IE::ConvertOp, Const::DeclareOp>(inputOp);
-    };
-    auto getAffineReshapeOp = [&](mlir::Operation* op1, mlir::Operation* op2,
-                                  bool& sharingInput) -> std::optional<IE::AffineReshapeOp> {
-        if (mlir::isa<IE::AffineReshapeOp>(op1)) {
-            if (isSupportedNonAffineReshapeInput(op2) && op1->hasOneUse()) {
-                return mlir::cast<IE::AffineReshapeOp>(op1);
-            }
-
-            // Two inputs of add are from the same affineReshape
-            if (op1 == op2 && static_cast<size_t>(std::distance(op1->getUsers().begin(), op1->getUsers().end())) == 2) {
-                sharingInput = true;
-                return mlir::cast<IE::AffineReshapeOp>(op1);
-            }
-        }
-
-        if (mlir::isa<IE::AffineReshapeOp>(op2) && isSupportedNonAffineReshapeInput(op1) && op2->hasOneUse()) {
-            return mlir::cast<IE::AffineReshapeOp>(op2);
-        }
-
-        return std::nullopt;
-    };
-
-    bool sharingInput = false;
-    auto affineReshapeOpt = getAffineReshapeOp(input1Op, input2Op, sharingInput);
-    if (!affineReshapeOpt.has_value()) {
+    InputsMode inputsMode = InputsMode::Unsupported;
+    IE::TransposeOp transposeOp;
+    IE::AffineReshapeOp affineReshapeOp;
+    std::tie(inputsMode, transposeOp, affineReshapeOp) = checkAddInputsMode(origOp);
+    if (inputsMode == InputsMode::Unsupported) {
         return mlir::failure();
     }
-    auto affineReshapeOp = affineReshapeOpt.value();
 
     const auto reshapeInput = getShape(affineReshapeOp.getInput());
     const auto addInput = getShape(origOp.getInput1());
     if (reshapeInput.size() != addInput.size()) {
-        return mlir::failure();
-    }
-
-    auto transposeOp = affineReshapeOp.getInput().getDefiningOp<IE::TransposeOp>();
-    if (transposeOp == nullptr || !transposeOp->hasOneUse()) {
         return mlir::failure();
     }
 
@@ -305,7 +410,7 @@ mlir::LogicalResult MoveTransposeAffineReshapeThroughAdd::matchAndRewrite(IE::Ad
         return mlir::failure();
     }
 
-    if (!isBeneficialConversion(origOp, sharingInput)) {
+    if (!isBeneficialConversion(origOp, inputsMode)) {
         return mlir::failure();
     }
 
@@ -313,12 +418,31 @@ mlir::LogicalResult MoveTransposeAffineReshapeThroughAdd::matchAndRewrite(IE::Ad
             vpux::getPermutationFromOrders(DimsOrder::fromAffineMap(transposeOp.getOrderValueAttr().getValue()),
                                            DimsOrder::NCHW, rewriter.getContext()));
     auto getInputValue = [&](mlir::Operation* op) -> mlir::Value {
-        if (!isSupportedNonAffineReshapeInput(op)) {
+        if (inputsMode == InputsMode::Symmetry) {
+            auto reshapeOp = mlir::dyn_cast<IE::AffineReshapeOp>(op);
+            VPUX_THROW_WHEN(reshapeOp == nullptr, "Can't find AffineReshapeOp");
+            auto transposeOp = reshapeOp.getInput().getDefiningOp<IE::TransposeOp>();
+            VPUX_THROW_WHEN(transposeOp == nullptr, "Can't find TransposeOp");
+
             return transposeOp.getInput();
         }
-        auto constReshape = rewriter.createOrFold<IE::ReshapeOp>(origOp.getLoc(), op->getResult(0), nullptr, false,
-                                                                 getIntArrayAttr(rewriter.getContext(), reshapeInput));
-        return rewriter.create<IE::TransposeOp>(origOp.getLoc(), constReshape, nullptr, orderValueAttr).getResult();
+
+        // For asymmetrical inputs:
+        // If there are no Transpose - AffineReshape on the original input, then build Reshape - Transpose on this as
+        // the new Add's input.
+        // If there are Transpose - AffineReshape already, return the original TranposeOp input directly as the new
+        // Add's input.
+        auto reshapeOp = mlir::dyn_cast<IE::AffineReshapeOp>(op);
+        if (reshapeOp == nullptr) {
+            auto constReshape =
+                    rewriter.createOrFold<IE::ReshapeOp>(origOp.getLoc(), op->getResult(0), nullptr, false,
+                                                         getIntArrayAttr(rewriter.getContext(), reshapeInput));
+            return rewriter.create<IE::TransposeOp>(origOp.getLoc(), constReshape, nullptr, orderValueAttr).getResult();
+        } else {
+            auto transposeOp = reshapeOp.getInput().getDefiningOp<IE::TransposeOp>();
+            VPUX_THROW_WHEN(transposeOp == nullptr, "Can't find TransposeOp");
+            return transposeOp.getInput();
+        }
     };
 
     auto input1 = getInputValue(input1Op);
@@ -329,7 +453,8 @@ mlir::LogicalResult MoveTransposeAffineReshapeThroughAdd::matchAndRewrite(IE::Ad
     newAddOutType = newAddOutType.changeDimsOrder(origOutputType.getDimsOrder());
     auto outputVal =
             rewriter.create<IE::AddOp>(origOp.getLoc(), newAddOutType, input1, input2, origOp.getAutoBroadcastAttr(),
-                                       origOp.getPostOpAttr(), origOp.getClampAttr())
+                                       origOp.getPostOpAttr(), origOp.getClampAttr(), origOp.getOutputChannelsAttr(),
+                                       origOp.getInputChannelsAttr())
                     .getOutput();
 
     auto postQuantizeCastOp = mlir::dyn_cast<IE::QuantizeCastOp>(*origOp.getOutput().user_begin());

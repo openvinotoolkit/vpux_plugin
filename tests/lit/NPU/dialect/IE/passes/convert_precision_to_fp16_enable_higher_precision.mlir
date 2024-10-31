@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
-// RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --convert-precision-to-fp16="compute-layers-with-higher-precision=SoftMax,ReLU,Subtract" %s | FileCheck %s
+// RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --convert-precision-to-fp16="compute-layers-with-higher-precision=SoftMax,ReLU,Subtract,RandomUniform" %s | FileCheck %s
 // REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 // CHECK-LABEL: @NotConvertSoftMaxToFP16
@@ -103,4 +103,26 @@ IE.CNNNetwork
         return %res : tensor<1x1000xf32>
         // CHECK: return %[[OUT]]
     }
+}
+
+// -----
+
+// CHECK-LABEL: func.func @NotConvertRandomUniformToFP16
+func.func @NotConvertRandomUniformToFP16() -> tensor<1x4x64x64xf32> {
+    %cst = const.Declare tensor<1xf32> = dense<0.0> : tensor<1xf32>
+    %cst_0 = const.Declare tensor<1xf32> = dense<1.0> : tensor<1xf32>
+    %0 = IE.RandomUniform(%cst, %cst_0) {
+            global_seed = 0 : i64, op_seed = 3393080 : i64, outputType = f32, output_shape = [1, 4, 64, 64]
+        } : tensor<1xf32>, tensor<1xf32> -> tensor<1x4x64x64xf32>
+
+    return %0 : tensor<1x4x64x64xf32>
+
+    // CHECK-DAG:   [[CST:%.+]] = const.Declare tensor<1xf32> = dense<0.000000e+00> : tensor<1xf32>
+    // CHECK-DAG:   [[CST_0:%.+]] = const.Declare tensor<1xf32> = dense<1.000000e+00> : tensor<1xf32>
+    // CHECK:       [[RANDOMUNIFORM:%.+]] =  IE.RandomUniform([[CST]], [[CST_0]]) {
+    // CHECK-SAME:              global_seed = 0 : i64, op_seed = 3393080 : i64, outputType = f32, output_shape = [1, 4, 64, 64]
+    // CHECK-SAME:        } : tensor<1xf32>, tensor<1xf32> -> tensor<1x4x64x64xf32>
+    // CHECK:       [[CONVERT:%.+]] = IE.Convert([[RANDOMUNIFORM]]) {dstElemType = f16} : tensor<1x4x64x64xf32> -> tensor<1x4x64x64xf16>
+
+    // CHECK:       return [[CONVERT]]
 }

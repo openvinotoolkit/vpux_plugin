@@ -772,13 +772,16 @@ void FeasibleMemoryScheduler::prefetchOps(ArrayRef<std::pair<operationIdxType, s
             continue;
         }
         lastScheduledOp = std::max(lastScheduledOp, scheduledOp.first);
-        lastScheduledLevel = std::max(lastScheduledLevel, _opLevelVec[lastScheduledOp]);
+        lastScheduledLevel = std::max(lastScheduledLevel, _opLevelVec[scheduledOp.first]);
         if (operationCycleCost(scheduledOp.first) <= 1) {
             // avoid comparing invalid cycles
             continue;
         }
         lastScheduledCycle = std::max(lastScheduledCycle, scheduledOp.second);
     }
+
+    // limit prefetching candidates to defined level limit
+    const auto currLevelLimit = lastScheduledLevel + _prefetchingLevelLimit;
 
     // find data ops before last scheduled op, IR is reordered such that
     // prefetch data ops are before compute op, sort prefetch candidates based on level
@@ -787,22 +790,28 @@ void FeasibleMemoryScheduler::prefetchOps(ArrayRef<std::pair<operationIdxType, s
         if (dataOp > lastScheduledOp) {
             continue;
         }
-
+        const auto opLevel = getOperationLevel(dataOp);
+        if (opLevel > currLevelLimit) {
+            continue;
+        }
         _log.nest().trace("Prefetch candidate: '{0}'", dataOp);
-        sortedCandidates[getOperationLevel(dataOp)].insert(dataOp);
+        sortedCandidates[opLevel].insert(dataOp);
     }
 
     // also consider prefetching spill candidates
     for (auto& spillOp : _readySpilledOps) {
-        if (_scan.handler().isAlive(spillOp.first)) {
-            continue;
-        }
         if (spillOp.second > lastScheduledOp) {
             continue;
         }
-
+        const auto opLevel = getOperationLevel(spillOp.second, true);
+        if (opLevel > currLevelLimit) {
+            continue;
+        }
+        if (_scan.handler().isAlive(spillOp.first)) {
+            continue;
+        }
         _log.nest().trace("Prefetch spill candidate: '{0}'", spillOp.second);
-        sortedCandidates[getOperationLevel(spillOp.second, true)].insert(spillOp.second);
+        sortedCandidates[opLevel].insert(spillOp.second);
     }
 
     // try to allocate and schedule prefetch ops
@@ -814,13 +823,20 @@ void FeasibleMemoryScheduler::prefetchOps(ArrayRef<std::pair<operationIdxType, s
                 operationBuffers = getBuffersToAllocateForOp(opIdx);
                 scheduleCycle = getCurrentCycleAndExecutorInstanceMask(opIdx).cycle;
             } else {
-                VPUX_THROW_UNLESS(_spillBufferMap.find(opIdx) != _spillBufferMap.end(),
-                                  "Failed to find spill candidate '{0}'", opIdx);
-                operationBuffers = _spillBufferMap[opIdx];
-                for (auto& val : operationBuffers) {
-                    const auto queueAndCycle =
-                            getCurrentCycleAndExecutorInstanceMaskForSpill(val, EOpType::IMPLICIT_SPILL_READ_OP);
-                    scheduleCycle = std::max(scheduleCycle, queueAndCycle.cycle);
+                if (_spillBufferMap.find(opIdx) == _spillBufferMap.end()) {
+                    bool wasScheduledBefore =
+                            std::any_of(_cycleBeginHeap.begin(), _cycleBeginHeap.end(), [=](const HeapElement& elem) {
+                                return elem.op_ == opIdx;
+                            });
+                    VPUX_THROW_UNLESS(wasScheduledBefore, "Failed to find spill candidate '{0}'", opIdx);
+                    _log.nest(2).trace("Prefetch '{0}' has been already scheduled", opIdx);
+                } else {
+                    operationBuffers = _spillBufferMap[opIdx];
+                    for (auto& val : operationBuffers) {
+                        const auto queueAndCycle =
+                                getCurrentCycleAndExecutorInstanceMaskForSpill(val, EOpType::IMPLICIT_SPILL_READ_OP);
+                        scheduleCycle = std::max(scheduleCycle, queueAndCycle.cycle);
+                    }
                 }
             }
 

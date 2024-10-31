@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 
 #ifndef COMMON_TYPES_H_
@@ -67,32 +67,12 @@ typedef enum : uint64_t {
     W    = 0x1,
     FULL_ORDER = 0xFEDCBA987654321,
     FULL_NHWC = 0xFEDCBA987652431,
-
-// These ND_ layouts are used in kernels just for jtag tests.
-// A  clean up will be done in this ticket:E#39088.
-    ND_NHWC = 0x1342,
-    ND_NHCW = 0x1324,
-    ND_NCHW = 0x1234,
-    ND_NCWH = 0x1243,
-    ND_NWHC = 0x1432,
-    ND_NWCH = 0x1423,
-    ND_HWC  = 0x231,
-    ND_CHW  = 0x123,
-    ND_WHC  = 0x321,
-    ND_HCW  = 0x213,
-    ND_WCH  = 0x312,
-    ND_CWH  = 0x132,
-    ND_NC   = 0x12,
-    ND_CN   = 0x21,
-    ND_C    = 0x1,
-    ND_H    = 0x1,
-    ND_W    = 0x1,
     FULL_ND_ORDER = 0x123456789ABCDEF,
     FULL_ND_NHWC = 0x123456789ABCEFD
 } NDFrequentlyUsedOrders;
 // clang-format on
 
-enum Location : uint32_t { NONE, DDR, NN_CMX, UPA_CMX };
+enum Location : uint32_t { NONE, DDR, NN_CMX };
 
 // clang-format off
 #ifdef __cplusplus
@@ -118,13 +98,6 @@ struct MemRefData {
     uint32_t dataType;   // An enum, which should be aligned between kernels and the compiler.
     uint64_t dimsOrder;  // Packed permutation array.
     enum Location location;
-};
-
-struct ALIGN_AS(64) BaseKernelParams {
-    int32_t inputsOffset;
-    uint32_t numInputs;
-    int32_t outputsOffset;
-    uint32_t numOutputs;
 };
 
 #pragma pack(pop)
@@ -164,6 +137,19 @@ static inline uint32_t getBpp(uint32_t type) {
 
     return bpp;
 }
+
+static inline uint32_t countMemrefs(uint32_t layerParams, uint32_t maxCount) {
+    auto memrefIt = reinterpret_cast<MemRefData*>(layerParams);
+    for (uint32_t memrefCount = 0; memrefCount < maxCount; memrefCount++) {
+        auto memrefOffset = memrefIt + memrefCount;
+        auto head = reinterpret_cast<int64_t*>(memrefOffset);
+        if (*head == INT64_MAX) {
+            return memrefCount;
+        }
+    }
+    return maxCount;
+}
+
 #endif
 
 #ifdef __cplusplus

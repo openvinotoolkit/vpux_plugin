@@ -21,10 +21,10 @@ namespace details {
 // list of transformations (e.g. if it should be the last transformation)
 //
 
-enum class PositionRequirement {
-    NONE,            // can be anywhere in the list
-    PREFERRED_LAST,  // will be last unless a transformation with LAST requirement is present
-    LAST             // will be the last transformation in the list
+enum class PositionRequirement : int {
+    NONE = 0,            // can be anywhere in the list
+    PREFERRED_LAST = 1,  // will be last unless a transformation with LAST requirement is present
+    LAST = 2             // will be the last transformation in the list
 };
 
 }  // namespace details

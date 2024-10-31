@@ -10,7 +10,11 @@
 
 namespace vpux {
 
-void registerDialects(mlir::DialectRegistry& registry);
-void registerCommonInterfaces(mlir::DialectRegistry& registry, bool enableDummyOp = false);
+// TODO: needs refactoring. Ticket: E#50937
+// Dummy op interfaces will end up being deleted if we properly refactor this dummy op feature
+enum class DummyOpMode { ENABLED = 0, DISABLED = 1 };
+
+// instantiates mlir::DialectRegistry and registers interfaces that are common across generations
+mlir::DialectRegistry createDialectRegistry(DummyOpMode = DummyOpMode::DISABLED);
 
 }  // namespace vpux

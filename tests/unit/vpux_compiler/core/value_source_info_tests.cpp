@@ -60,7 +60,7 @@ TEST_F(MLIR_ValueSourceInfo, RegionBranch) {
                         DPUTask {outEnd = [103, 103, 63], mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, outStart = [0, 0, 0]}
                     }
                     PPE : {
-                        PPETask <LPRELU> {clamp_high = 255 : i64, clamp_low = 0 : i64, fp_prelu_alpha = 0.099609375 : f64, lrelu_mult = 102 : i64, lrelu_shift = 10 : i64}
+                        PPETask {opaque_ppe = #VPU.PPEStub<>}
                     }
                 async.yield %8 : !IpOp_Stub
                 }
@@ -111,9 +111,16 @@ TEST_F(MLIR_ValueSourceInfo, FuncArguments) {
 
     constexpr llvm::StringLiteral inputIR = R"(
         module @test {
+            module @VPU.SW  {
+                func.func private @builtin_Softmax(memref<*xf16>, memref<*xf16>) attributes {VPU.kernel_code = "softmax.cpp", VPU.kernel_entry = "softmax"}
+                func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
+            }
             func.func @main(%arg0: memref<1x512xf16>, %arg1: memref<1x512xf16>) -> memref<1x512xf16> {
                 %0 = memref.alloc() : memref<1x512xf16>
-                %1 = VPUIP.SoftMaxUPA {axisInd = 1 : i32} inputs(%arg0 : memref<1x512xf16>) outputs(%0 : memref<1x512xf16>) -> memref<1x512xf16>
+                %1 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>}
+                @VPU.SW::@builtin_Softmax inputs(%arg0 as %arg2: memref<1x512xf16>) outputs(%0 as %arg3: memref<1x512xf16>) on tile 0 -> memref<1x512xf16>  {
+                    VPUIP.SW.Kernel.run {attrs = [1]}(%arg2, %arg3) : memref<1x512xf16>, memref<1x512xf16>
+                }
                 %2 = VPUIP.Copy inputs(%1 : memref<1x512xf16>) outputs(%arg1 : memref<1x512xf16>) -> memref<1x512xf16>
                 memref.dealloc %0 : memref<1x512xf16>
                 return %2 : memref<1x512xf16>

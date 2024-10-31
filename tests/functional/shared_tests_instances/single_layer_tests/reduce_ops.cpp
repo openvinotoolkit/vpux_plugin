@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation
+// Copyright (C) 2022-2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -17,7 +17,6 @@
 using namespace ov::test::utils;
 
 namespace ov {
-
 namespace test {
 class ReduceLayerTestCommon : public ReduceOpsLayerTest, virtual public VpuOv2LayerTest {
     void generate_inputs(const std::vector<ov::Shape>& targetInputStaticShapes) override {
@@ -68,7 +67,7 @@ class ReduceLayerTestCommon : public ReduceOpsLayerTest, virtual public VpuOv2La
     }
 };  // namespace test
 
-// FP16/FP32 for 3720/4000 platforms
+// FP16/FP32
 class ReduceLayerTest_HW_FP16 : public ReduceLayerTestCommon {};
 class ReduceLayerTest_SW_FP16 : public ReduceLayerTestCommon {};
 class ReduceLayerTest_FP32 : public ReduceLayerTestCommon {
@@ -79,7 +78,6 @@ class ReduceLayerTest_FP32 : public ReduceLayerTestCommon {
 };
 
 /// FP16 SW/HW
-// NPU3720
 TEST_P(ReduceLayerTest_HW_FP16, NPU3720) {
     VpuOv2LayerTest::setDefaultHardwareMode();
     VpuOv2LayerTest::run(Platform::NPU3720);
@@ -90,33 +88,28 @@ TEST_P(ReduceLayerTest_SW_FP16, NPU3720) {
     VpuOv2LayerTest::run(Platform::NPU3720);
 }
 
-// NPU4000
 TEST_P(ReduceLayerTest_SW_FP16, NPU4000) {
     VpuOv2LayerTest::setReferenceSoftwareMode();
     VpuOv2LayerTest::run(Platform::NPU4000);
 }
 
 /// FP32 HW
-// NPU3720
 TEST_P(ReduceLayerTest_FP32, NPU3720_HW) {
     VpuOv2LayerTest::setDefaultHardwareMode();
     VpuOv2LayerTest::run(Platform::NPU3720);
 }
 
-// NPU4000
 TEST_P(ReduceLayerTest_FP32, NPU4000_HW) {
     VpuOv2LayerTest::setDefaultHardwareMode();
     VpuOv2LayerTest::run(Platform::NPU4000);
 }
 
 /// FP32 SW
-// NPU3720
 TEST_P(ReduceLayerTest_FP32, NPU3720_SW) {
     VpuOv2LayerTest::setReferenceSoftwareMode();
     VpuOv2LayerTest::run(Platform::NPU3720);
 }
 
-// NPU4000
 TEST_P(ReduceLayerTest_FP32, NPU4000_SW) {
     VpuOv2LayerTest::setReferenceSoftwareMode();
     VpuOv2LayerTest::run(Platform::NPU4000);
@@ -131,7 +124,6 @@ class ReduceOpsLayerWithSpecificInputTestCommon :
 };
 
 }  // namespace test
-
 }  // namespace ov
 
 using namespace ov::test;
@@ -150,10 +142,6 @@ const std::vector<std::vector<size_t>> inputShapes = {
 };
 
 const std::vector<std::vector<int>> axes = {{1}, {2}, {1, 3}, {2, 3}, {1, -1}};
-
-//
-// NPU3720/4000 Instantiation
-//
 
 const std::vector<ReductionType> reduceOperations = {
         ReductionType::Mean, ReductionType::Max, ReductionType::Min, ReductionType::Sum,
@@ -201,17 +189,15 @@ const auto paramsHWFP16 = testing::Combine(
 // FP32
 const auto paramsFP32 = testing::Combine(
         testing::ValuesIn(decltype(axes){{2, 3}}), testing::Values(OpType::VECTOR), testing::ValuesIn(keepDims),
-        testing::Values(ReductionType::Mean, ReductionType::Sum), testing::Values(ov::element::f32),
+        testing::Values(ReductionType::Mean, ReductionType::Sum, ReductionType::L2), testing::Values(ov::element::f32),
         testing::Values(std::vector<size_t>{1, 1024, 7, 7}), testing::Values(DEVICE_NPU));
 
 //
-// NPU3720 Instantiation
 // FP16 HW
 INSTANTIATE_TEST_SUITE_P(smoke_precommit_Reduce, ReduceLayerTest_HW_FP16, paramsHWFP16,
                          ReduceLayerTest_HW_FP16::getTestCaseName);
 
 //
-// NPU3720/4000 Instantiation
 // FP16 SW
 
 // Passing on master branch. Please reenable when backmerge

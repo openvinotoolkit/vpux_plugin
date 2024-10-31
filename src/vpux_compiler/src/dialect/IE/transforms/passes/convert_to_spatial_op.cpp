@@ -123,7 +123,8 @@ mlir::LogicalResult TransposeInterpolation::matchAndRewrite(IE::InterpolateOp or
     }
 
     const auto inOrderMap = mlir::AffineMap::getPermutationMap(inMemPerm, ctx);
-    auto inTranspose = createInputTranspose(inOrderMap, origOp.getInput(), origOp.getLoc(), rewriter, _log);
+    auto inTranspose =
+            createInputTranspose(inOrderMap, origOp.getInput(), takeOpLoc(origOp, "transpose_in"), rewriter, _log);
 
     // Create new Interpolate
     auto origAxesValue = parseIntArrayAttr<int64_t>(origOp.getAxesAttrAttr());
@@ -162,8 +163,8 @@ mlir::LogicalResult TransposeInterpolation::matchAndRewrite(IE::InterpolateOp or
             origOp.getInitialOutputDimsAttrAttr(), origOp.getAttr());
 
     // Create output Transpose
-    auto outTransposeOutput =
-            createOutTranspose(inOrderMap, newInterpolate.getOutput(), origOp.getLoc(), rewriter, _log);
+    auto outTransposeOutput = createOutTranspose(inOrderMap, newInterpolate.getOutput(),
+                                                 takeOpLoc(origOp, "transpose_out"), rewriter, _log);
 
     _log.trace("Finished replacement at {0}", origOp->getLoc());
     rewriter.replaceOp(origOp, outTransposeOutput);
@@ -243,7 +244,8 @@ mlir::LogicalResult TransposeRoll::matchAndRewrite(IE::RollOp origOp, mlir::Patt
         return mlir::failure();
     }
 
-    const auto newRollInput = createInputTranspose(newInAffineMap, origOp.getData(), origOp.getLoc(), rewriter, _log);
+    const auto newRollInput =
+            createInputTranspose(newInAffineMap, origOp.getData(), takeOpLoc(origOp, "transpose_in"), rewriter, _log);
 
     const auto newAxes = axes.size() == 1 ? SmallVector<int32_t>{Dims4D::Act::H.ind()}
                                           : SmallVector<int32_t>{Dims4D::Act::H.ind(), Dims4D::Act::W.ind()};
@@ -259,8 +261,8 @@ mlir::LogicalResult TransposeRoll::matchAndRewrite(IE::RollOp origOp, mlir::Patt
 
     _log.trace("new Roll {0}", newRollOp);
 
-    const auto outTransposeOutput =
-            createOutTranspose(newInAffineMap, newRollOp.getOutput(), origOp.getLoc(), rewriter, _log);
+    const auto outTransposeOutput = createOutTranspose(newInAffineMap, newRollOp.getOutput(),
+                                                       takeOpLoc(origOp, "transpose_out"), rewriter, _log);
     rewriter.replaceOp(origOp, outTransposeOutput);
 
     return mlir::success();

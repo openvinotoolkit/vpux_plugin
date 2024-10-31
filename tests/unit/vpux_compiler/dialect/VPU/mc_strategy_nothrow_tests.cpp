@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 #include "common/utils.hpp"
+#include "vpux/compiler/dialect/VPU/utils/sibling_ops_analysis.hpp"
 #include "vpux/compiler/dialect/VPU/utils/strategy_manager/strategy_manager.hpp"
 
 #include <mlir/IR/MLIRContext.h>
@@ -64,8 +65,8 @@ TEST_F(MLIR_VPU_ClusteringStrategyNoThrow, SWLayer_ClusteringStrategy) {
         %pow_u16 = VPU.Power(%power_u16_in, %power_u16_pow) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x16x256x256xui16>, tensor<1x16x1x1xui16> -> tensor<1x16x256x256xui16>
         %pow_u32 = VPU.Power(%power_u32_in, %power_u32_pow) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x16x256x256xui32>, tensor<1x16x1x1xui32> -> tensor<1x16x256x256xui32>
         %pow_i32 = VPU.Power(%power_i32_in, %power_i32_pow) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x16x256x256xsi32>, tensor<1x16x1x1xsi32> -> tensor<1x16x256x256xsi32>
-        %mvn_f16 = VPU.MVN6(%mvn_f16_in) {axes = [1, 3], eps = 9.9999997473787516E-6 : f64, eps_mode = #IE.mvn_eps_mode<INSIDE_SQRT>, normalize_variance = true} : tensor<1x32x15x64xf16> -> tensor<1x32x15x64xf16>
-        %mvn_f32 = VPU.MVN6(%mvn_f32_in) {axes = [1, 3], eps = 9.9999997473787516E-6 : f64, eps_mode = #IE.mvn_eps_mode<INSIDE_SQRT>, normalize_variance = true} : tensor<1x32x15x64xf32> -> tensor<1x32x15x64xf32>
+        %mvn_f16 = VPU.MVN6(%mvn_f16_in) {axes = [1, 3], eps = 9.9999997473787516E-6 : f64, eps_mode = #IE.mvn_eps_mode<INSIDE_SQRT>, normalize_variance = true, operandSegmentSizes = array<i32: 1, 0, 0>} : tensor<1x32x15x64xf16> -> tensor<1x32x15x64xf16>
+        %mvn_f32 = VPU.MVN6(%mvn_f32_in) {axes = [1, 3], eps = 9.9999997473787516E-6 : f64, eps_mode = #IE.mvn_eps_mode<INSIDE_SQRT>, normalize_variance = true, operandSegmentSizes = array<i32: 1, 0, 0>} : tensor<1x32x15x64xf32> -> tensor<1x32x15x64xf32>
         %div_f16 = VPU.Divide(%div_f16_0, %div_f16_1) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x16x256x256xf16>, tensor<1x16x1x1xf16> -> tensor<1x16x256x256xf16>
         %div_f32 = VPU.Divide(%div_f32_0, %div_f32_1) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x16x256x256xf32>, tensor<1x16x1x1xf32> -> tensor<1x16x256x256xf32>
         %div_u8  = VPU.Divide(%div_u8_0, %div_u8_1) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x16x256x256xui8>, tensor<1x16x1x1xui8> -> tensor<1x16x256x256xui8>
@@ -95,6 +96,8 @@ TEST_F(MLIR_VPU_ClusteringStrategyNoThrow, SWLayer_ClusteringStrategy) {
     VPUX_THROW_UNLESS(tileOp.getCount() > 1, "Cannot assign multi-cluster strategy to single-cluster module ops");
     bool enablePrefetchTiling = true;
 
-    vpux::VPU::StrategyManager strategyManager(func, tileOp.getCount(), enablePrefetchTiling, vpux::Logger::global());
+    auto siblingsOpsAnalysis = vpux::VPU::SiblingOpsAnalysis(func);
+    vpux::VPU::StrategyManager strategyManager(func, tileOp.getCount(), enablePrefetchTiling, vpux::Logger::global(),
+                                               siblingsOpsAnalysis);
     EXPECT_NO_THROW(strategyManager.assignMultiClusterStrategy(true));
 }

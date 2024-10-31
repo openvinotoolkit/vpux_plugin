@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -66,15 +66,17 @@ std::optional<double> getWeightsSparsityThreshold(const DoubleOption& weightsSpa
 void vpux::VPU::buildInitCompilerPipeline(mlir::OpPassManager& pm, const VPU::InitCompilerOptions& options,
                                           Logger log) {
     log.info("InitCompilerOptions:\n arch = {0}\n DPU groups = {1}\n DMA ports = {2}\n"
-             " compilation mode = {3}\n WLM rollback = {4}",
+             " compilation mode = {3}\n WLM rollback = {4}\n PPE version = {5}",
              options.arch, options.numberOfDPUGroups, options.numberOfDMAPorts, options.compilationMode,
-             options.wlmRollback);
+             options.wlmRollback, options.ppeVersion);
 
     pm.addPass(VPU::createInitResourcesPass(options, log));
     pm.addPass(VPU::createSetupPipelineOptionsPass(options, log));
+    pm.addPass(VPU::createSetupMaxKernelSizePass(options, log));
     pm.addPass(VPU::createSetupPerBarrierVariantConstraintPass(options, log));
     pm.addPass(VPU::createSetupChannelsAutoPaddingPass(options, log));
     pm.addPass(VPU::createSetupIsReduceSupportedPass(options, log));
+    pm.addPass(VPU::createSetupEnableFP16CompressedConvPass(options, log));
 }
 
 //
@@ -94,7 +96,7 @@ void vpux::VPU::buildActivationSparsityPipeline(mlir::OpPassManager& pm, const V
         pm.addPass(VPU::createFuseSparsityOpsPass(/*fuseSparsify=*/false, log));
     }
 
-    pm.addPass(VPU::createAndInitOptimizeSparsifyDesparsifyPairsPass(options.actSparsityProfile, log));
+    pm.addPass(VPU::createOptimizeSparsifyDesparsifyPairsPass(options, log));
     pm.addPass(VPU::createFuseSparsityOpsPass(/*fuseSparsify=*/true, log));
     pm.addPass(VPU::createOptimizeSparsityOpsPass(profileCallback, log));
     pm.addPass(VPU::createAddSparsityMapToSparseActivationsPass(log));
@@ -144,7 +146,8 @@ void vpux::VPU::buildTilingPipeline(mlir::OpPassManager& pm, const VPU::TilingOp
     // We call this as part of VF Pipeline, no need to call it here in such case
     if (!options.enableVerticalFusion) {
         pm.addPass(VPU::createManualStrategyUtilsPass(options.writeStrategyToJson, writeStrategyFileLocation,
-                                                      options.readStrategyFromJson, readStrategyFileLocation, log));
+                                                      options.readStrategyFromJson, readStrategyFileLocation,
+                                                      /*enableMCSideLoadDump*/ false, options.modelHash, log));
     }
     pm.addPass(VPU::createEfficientIROrderPass(log));
     if (options.enableVerticalFusion) {
@@ -155,7 +158,8 @@ void vpux::VPU::buildTilingPipeline(mlir::OpPassManager& pm, const VPU::TilingOp
         pm.addPass(VPU::createOutputPipelineTilingPass(options.enablePrefetchTiling, log));
         pm.addPass(VPU::createManualStrategyUtilsPass(options.writeStrategyToJson, writeStrategyFileLocation,
                                                       options.readStrategyFromJson, readStrategyFileLocation,
-                                                      /*updateStrategyForOutputPipelining*/ true, log));
+                                                      /*updateStrategyForOutputPipelining*/ true,
+                                                      /*enableMCSideLoadDump*/ false, options.modelHash, log));
     }
     // manual strategy debug configuration
 
@@ -172,9 +176,11 @@ void vpux::VPU::buildVFPipeline(mlir::OpPassManager& pm, const VPU::TilingOption
     pm.addPass(VPU::createMoveViewOpsToVerticalFusionPass(log));
     pm.addPass(
             VPU::createMergeVfSubgraphsPass(options.enableVerticalFusionPipelining, options.enablePrefetchTiling, log));
+    pm.addPass(VPU::createEfficientIROrderPass(log));
     pm.addPass(VPU::createUnrollUnusedVerticalFusionRegionPass(log));
     pm.addPass(VPU::createManualStrategyUtilsPass(options.writeStrategyToJson, writeStrategyFileLocation,
-                                                  options.readStrategyFromJson, readStrategyFileLocation, log));
+                                                  options.readStrategyFromJson, readStrategyFileLocation,
+                                                  /*enableMCSideLoadDump*/ false, options.modelHash, log));
     pm.addPass(VPU::createVfTilingPass(options.enableVerticalFusionPipelining, log));
 }
 
@@ -191,10 +197,13 @@ void vpux::VPU::buildSMPipeline(mlir::OpPassManager& pm, const vpux::MCAndTiling
     // We have already dumped the strategies in above pipeline
     if (!options.enableVerticalFusion) {
         pm.addPass(VPU::createManualStrategyUtilsPass(options.writeStrategyToJson, writeStrategyFileLocation,
-                                                      options.readStrategyFromJson, readStrategyFileLocation, log));
+                                                      options.readStrategyFromJson, readStrategyFileLocation,
+                                                      /*enableMCSideLoadDump*/ false, options.modelHash, log));
     }
     pm.addPass(VPU::createApplyTilingPass(log));
-    pm.addPass(VPU::createMakeOpsWithDistributedTensorPass(options.enableExplicitDistributedTensorAttr, log));
+    pm.addPass(VPU::createMakeOpsWithDistributedTensorPass(options.enableExplicitDistributionInfoAttr, log));
     pm.addPass(VPU::createAdjustDistributedTensorAroundOpsPass(log));
-    pm.addPass(VPU::createWrapDistributedOpsInNCEClusterTiling(log));
+
+    // Ensure the nce op size requirements are met
+    pm.addPass(VPU::createEnsureNCEOpsSizeRequirementsPass(log));
 }

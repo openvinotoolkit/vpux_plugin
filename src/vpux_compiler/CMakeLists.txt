@@ -24,10 +24,10 @@ set(gen_base_dst_include_dir "src/vpux_compiler/include/vpux/compiler")
 # SCHEMA target
 #
 if(ENABLE_NPU_MONO)
-    if(NOT DEFINED ELF_SUBMODULE_PATH)
-        message(FATAL_ERROR "Elf submodule path is not set while `npu_mono` was activated")
+    if(NOT DEFINED GRAPHFILE_SCHEMA_SUBMODULE_PATH)
+        message(FATAL_ERROR "Graphfile schema submodule path is not set while `npu_mono` was activated")
     endif()
-    set(SCHEMA_SOURCE_DIR ${ELF_SUBMODULE_PATH}/src/schema)
+    set(SCHEMA_SOURCE_DIR ${GRAPHFILE_SCHEMA_SUBMODULE_PATH}/src/schema)
 else()
     set(SCHEMA_SOURCE_DIR ${IE_MAIN_VPUX_PLUGIN_SOURCE_DIR}/thirdparty/elf/src/schema) # Legacy path
 endif(ENABLE_NPU_MONO)
@@ -116,7 +116,7 @@ function(add_src_target name)
     list(APPEND lib_list $<BUILD_INTERFACE:${name}>)
     set_property(GLOBAL PROPERTY VPU_SRC_LIB_LIST "${lib_list}")
     # Ensure generated headers are built before compiler code
-    # graph-schema/schema.hpp
+    # elf/schema.hpp
     add_dependencies(${name} npu_mlir_compiler_schema)
     # vpunn_generated.h
     add_dependencies(${name} cpp_schema)

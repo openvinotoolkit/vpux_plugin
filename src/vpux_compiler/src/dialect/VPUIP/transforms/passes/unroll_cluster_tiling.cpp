@@ -268,8 +268,6 @@ void VPUIP::ClusterNCEBaseRewriter::matchAndRewrite(VPUIP::NCEClusterTaskOp nceT
             _ctx, loc, "weightsSparsityMap", nceTask.getWeightsSparsityMap(), numClusters, builder);
     auto weightTableBuffs =
             VPUIP::getPerClusterMemoryBuffers(_ctx, loc, "weightTable", nceTask.getWeightTable(), numClusters, builder);
-    auto activationWindowBuffs = VPUIP::getPerClusterMemoryBuffers(_ctx, loc, "activationWindow",
-                                                                   nceTask.getActivationWindow(), numClusters, builder);
     auto instructionListTableBuffs = VPUIP::getPerClusterMemoryBuffers(
             _ctx, loc, "instructionListTable", nceTask.getInstructionListTable(), numClusters, builder);
     auto sprLookupTableBuffs = VPUIP::getPerClusterMemoryBuffers(_ctx, loc, "sprLookupTable",
@@ -335,15 +333,15 @@ void VPUIP::ClusterNCEBaseRewriter::matchAndRewrite(VPUIP::NCEClusterTaskOp nceT
                 outputSparsityMapType, profilingOutputType, inputBuffs[clusterId], inputSparsityMapBuffs[clusterId],
                 inputSETableBuffs[clusterId], weightsBuffs[clusterId], weightsSparsityMapBuffs[clusterId],
                 weightTableBuffs[clusterId], instructionListTableBuffs[clusterId], sprLookupTableBuffs[clusterId],
-                activationWindowBuffs[clusterId], parentInputBuffs[clusterId], parentInputSparsityMap[clusterId],
-                parentInputSETable[clusterId], parentOutputBuffs[clusterId], parentOutputSparsityMap[clusterId],
+                parentInputBuffs[clusterId], parentInputSparsityMap[clusterId], parentInputSETable[clusterId],
+                parentOutputBuffs[clusterId], parentOutputSparsityMap[clusterId],
                 mlir::ValueRange(outputItiBuffs[clusterId]), outputBuffs[clusterId], outputSparsityMap, profilingData,
                 nceTask.getTaskType(), nceTask.getKernelSizeAttr(), nceTask.getKernelStridesAttr(),
-                padAttrForCluster[clusterId], nceTask.getActivationWindowChannelLengthAttr(),
-                nceTask.getIsContinuedAttr(), nceTask.getCmSpPatternAttr(), isSegmentedNCETask(parentInputType),
-                outChannelOffsets[clusterId], nceTask.getInputChannelsCompressionAttr(), nceTask.getIsSuperdenseAttr(),
-                nceTask.getIsInplaceAttr(), nceTask.getInputSeSizeAttr(), nceTask.getOutputSeSizeAttr(),
-                nceTask.getIsPermuteQuantizeAttr());
+                padAttrForCluster[clusterId], nceTask.getIsContinuedAttr(), nceTask.getCmSpPatternAttr(),
+                isSegmentedNCETask(parentInputType), outChannelOffsets[clusterId],
+                nceTask.getInputChannelsCompressionAttr(), nceTask.getIsSuperdenseAttr(), nceTask.getIsInplaceAttr(),
+                nceTask.getInputSeSizeAttr(), nceTask.getOutputSeSizeAttr(), nceTask.getIsPermuteQuantizeAttr(),
+                nullptr, nceTask.getEltwiseTypeAttr());
 
         {
             mlir::OpBuilder::InsertionGuard guard(builder);

@@ -33,10 +33,11 @@ void vpux::arch40xx::buildLowerVPUIP2ELFPipeline(mlir::OpPassManager& pm,
              "  enablePartialWorkloadManagement = {0}\n"
              "  wlmOptimizationThreshold = {1}\n"
              "  enableMemorySideCache = {2}\n"
-             "  enableDMAProfiling = {3}\n",
+             "  enableDMAProfiling = {3}\n"
+             "  enableShaveDDRAccessOptimization = {4}\n",
              backendCompilationOptions.enablePartialWorkloadManagement,
              backendCompilationOptions.wlmOptimizationThreshold, backendCompilationOptions.enableMemorySideCache,
-             backendCompilationOptions.enableDMAProfiling);
+             backendCompilationOptions.enableDMAProfiling, backendCompilationOptions.enableShaveDDRAccessOptimization);
 
     pm.addPass(createConvertVPUIP2VPUMI40XXPass(log, backendCompilationOptions.enableMemorySideCache));
     auto dmaProfilingMode =
@@ -44,7 +45,7 @@ void vpux::arch40xx::buildLowerVPUIP2ELFPipeline(mlir::OpPassManager& pm,
     pm.addPass(VPUMI40XX::createSetupProfilingVPUMI40XXPass(dmaProfilingMode, log));
     pm.addPass(mlir::createCanonicalizerPass());
 
-    elfSubsetPipeline(pm, backendCompilationOptions, log);
+    elfSubsetPipeline(pm, backendCompilationOptions.enablePartialWorkloadManagement, log);
 
     pm.addPass(ELF::createAddABIVersionPass(log, NPUReg40XX::ABI_VERSION_MAJOR, NPUReg40XX::ABI_VERSION_MINOR,
                                             NPUReg40XX::ABI_VERSION_PATCH));
@@ -55,13 +56,12 @@ void vpux::arch40xx::buildLowerVPUIP2ELFPipeline(mlir::OpPassManager& pm,
     pm.addPass(ELF::createAddNetworkMetadataPass(log));
     pm.addPass(VPUASM::createAddProfilingSectionPass(log));
     pm.addPass(VPUIPDPU::createExpandDPUConfigPass(log));
-
+    pm.addPass(ELF::createUpdateELFSectionFlagsPass(log, backendCompilationOptions.enableShaveDDRAccessOptimization));
     pm.addPass(
             createConvertVPUASM2NPUReg40XXRelocsPass(log, backendCompilationOptions.enablePartialWorkloadManagement));
     pm.addPass(createConvertVPUIPDPU2NPUReg40XXPass(log, dpuDryRunMode));
     pm.addPass(ELF::createSetOpOffsetsPass(log, backendCompilationOptions.enablePartialWorkloadManagement));
     pm.addPass(ELF::createAddELFRelocationsPass(log));
-    pm.addPass(ELF::createUpdateELFSectionFlagsPass(log));
     pm.addPass(createConvertVPUASM2NPUReg40XXPass(log));
     pm.addPass(ELF::createRemoveEmptyELFSectionsPass(log));
 }
@@ -70,9 +70,9 @@ void vpux::arch40xx::buildLowerVPUIP2ELFPipeline(mlir::OpPassManager& pm,
 // buildElfSubsetPipeline
 //
 
-void vpux::arch40xx::elfSubsetPipeline(mlir::OpPassManager& pm,
-                                       const BackendCompilationOptions40XX& backendCompilationOptions, Logger log) {
-    if (!backendCompilationOptions.enablePartialWorkloadManagement) {
+void vpux::arch40xx::elfSubsetPipeline(mlir::OpPassManager& pm, bool enablePartialWorkloadManagement,
+                                       const Logger& log) {
+    if (!enablePartialWorkloadManagement) {
         pm.addPass(VPUMI40XX::createBarrierComputationPass(log));
         pm.addPass(VPUMI40XX::createLinkAllOpsPass(log));
         pm.addPass(VPUASM::createHoistInputOutputsPass(log));
@@ -82,8 +82,7 @@ void vpux::arch40xx::elfSubsetPipeline(mlir::OpPassManager& pm,
     } else {
         pm.addPass(VPUMI40XX::reorderMappedInferenceOpsPass(log));
 
-        pm.addPass(VPUMI40XX::createBarrierTopologicalMappingPass(backendCompilationOptions.wlmOptimizationThreshold,
-                                                                  log));
+        pm.addPass(VPUMI40XX::createBarrierTopologicalMappingPass(log));
         pm.addPass(VPUMI40XX::createGroupExecutionOpsPass(log));
         pm.addPass(VPUMI40XX::createWorkloadManagementPass(log));
         pm.addPass(VPUMI40XX::createResolveWLMTaskLocationPass(log));

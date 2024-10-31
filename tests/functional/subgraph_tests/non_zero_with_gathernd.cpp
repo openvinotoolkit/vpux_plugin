@@ -61,7 +61,7 @@ protected:
         auto convert = std::make_shared<ov::op::v0::Convert>(gatherND, type);
 
         auto results = ov::ResultVector();
-        for (size_t i = 0; i < transpose->get_output_size(); i++) {
+        for (size_t i = 0; i < convert->get_output_size(); i++) {
             results.push_back(std::make_shared<ov::opset3::Result>(convert->output(i)));
         }
 
@@ -69,8 +69,9 @@ protected:
     }
 };
 
-TEST_P(NonZeroWithGatherNDNPUTest, VPU3720_HW) {
+TEST_P(NonZeroWithGatherNDNPUTest, VPU3720_HW_TestKindSubgraph) {
     abs_threshold = 0.0f;
+    setMLIRCompilerType();
     setDefaultHardwareMode();
     run(Platform::NPU3720);
 }

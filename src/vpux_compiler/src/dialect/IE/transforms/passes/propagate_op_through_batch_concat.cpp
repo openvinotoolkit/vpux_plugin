@@ -149,12 +149,12 @@ mlir::LogicalResult PropagateSoftmax::matchAndRewrite(IE::SoftMaxOp origOp, mlir
             auto newAddOp = rewriter.create<IE::AddOp>(
                     takeOpLoc(maybeAddOp, llvm::StringLiteral("slice_{0}"), concatInput.index()), concatInput.value(),
                     maybeAddOp.getInput2(), maybeAddOp.getAutoBroadcastAttr(), maybeAddOp.getPostOpAttr(),
-                    maybeAddOp.getClampAttr());
+                    maybeAddOp.getClampAttr(), maybeAddOp.getOutputChannelsAttr(), maybeAddOp.getInputChannelsAttr());
             sliceSoftmaxInput = newAddOp.getOutput();
         }
 
         auto sliceSoftmaxOp =
-                rewriter.create<IE::SoftMaxOp>(takeOpLoc(origOp, llvm::StringLiteral("slice_{0}"), concatInput.index()),
+                rewriter.create<IE::SoftMaxOp>(takeOpLoc(origOp, StringLiteral("slice_{0}"), concatInput.index()),
                                                sliceSoftmaxInput, origOp.getAxisIndAttr(), origOp.getPadSizeAttr());
         newConcatInputs.push_back(sliceSoftmaxOp.getOutput());
     }
@@ -226,13 +226,14 @@ mlir::LogicalResult PropagateReshape<ReshapeT>::matchAndRewrite(ReshapeT origOp,
     SmallVector<mlir::Value> newConcatInputs;
     for (const auto& concatInput : concatInputs) {
         auto sliceReshape4D = rewriter.create<IE::ReshapeOp>(
-                takeOpLoc(origOp, llvm::StringLiteral("slice_{0}_reshape"), newConcatInputs.size()), concatInput,
-                nullptr, false, sliceOutShape4DAttr);
+                takeOpLoc(origOp, StringLiteral("slice_{0}_reshape"), newConcatInputs.size()), concatInput, nullptr,
+                false, sliceOutShape4DAttr);
         _log.nest(2).trace("Inserted ReshapeOp: {0}", sliceReshape4D);
         newConcatInputs.push_back(sliceReshape4D.getOutput());
     }
 
-    auto newConcatOp = rewriter.create<IE::ConcatOp>(concatOp->getLoc(), newConcatInputs, batchDim.value());
+    auto newConcatOp = rewriter.create<IE::ConcatOp>(takeOpLoc(concatOp, StringLiteral("out_concat")), newConcatInputs,
+                                                     batchDim.value());
     rewriter.replaceOp(origOp, newConcatOp.getOutput());
 
     return mlir::success();
@@ -290,9 +291,9 @@ mlir::LogicalResult PropagateFakeQuantize::matchAndRewrite(IE::FakeQuantizeOp or
         auto sliceFQInput = concatInput.value();
 
         auto sliceFQOp = rewriter.create<IE::FakeQuantizeOp>(
-                takeOpLoc(origOp, llvm::StringLiteral("slice_{0}"), concatInput.index()), sliceFQInput,
-                origOp.getInputLow(), origOp.getInputHigh(), origOp.getOutputLow(), origOp.getOutputHigh(),
-                origOp.getLevelsAttr(), origOp.getLowFpTypeAttr(), origOp.getAutoBroadcastAttr());
+                takeOpLoc(origOp, StringLiteral("slice_{0}"), concatInput.index()), sliceFQInput, origOp.getInputLow(),
+                origOp.getInputHigh(), origOp.getOutputLow(), origOp.getOutputHigh(), origOp.getLevelsAttr(),
+                origOp.getLowFpTypeAttr(), origOp.getAutoBroadcastAttr());
         concatOp.setOperand(checked_cast<uint32_t>(concatInput.index()), sliceFQOp.getOutput());
     }
 

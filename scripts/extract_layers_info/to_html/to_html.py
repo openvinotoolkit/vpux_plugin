@@ -21,18 +21,19 @@ def setOutDir(newOutDir):
     outDir = newOutDir
 
 
-def printUsage(desc = False):
+def printUsage(desc=False):
     if desc:
         print("Searches the directory tree (starting from 'SOURCE_DIRECTORY') the xml files with OpenVINO IRs,\n",
-            "    should be run in the directory where it lies,\n",
-            "    prepares the layers information from IRs into Markdown formatted files with layers lists and pivot table,\n",
-            "    places the results in 'OUTPUT_DIRECTORY'.\n")
+              "    should be run in the directory where it lies,\n",
+              "    prepares the layers information from IRs into Markdown formatted files with layers lists and pivot table,\n",
+              "    places the results in 'OUTPUT_DIRECTORY'.\n")
     print("Usage: \n",
-    "    python info.py <SOURCE_DIRECTORY> [<OUTPUT_DIRECTORY>('./' as default)])")
+          "    python info.py <SOURCE_DIRECTORY> [<OUTPUT_DIRECTORY>('./' as default)])")
 
 
 def writeCrossTable(networks, layers):
-    htmlMain = writehtml.startHtml(file_name = outDir + '/LAYERS_NETWORKS' + ".html", title='Networks to layers correspondence', styles = ["body.css", "table1.css"])
+    htmlMain = writehtml.startHtml(file_name=outDir + '/LAYERS_NETWORKS' + ".html",
+                                   title='Networks to layers correspondence', styles=["body.css", "table1.css"])
     networkList = sorted(networks.keys())
     layerSet = set(layers.keys())
     htmlRows = [" "]
@@ -44,11 +45,12 @@ def writeCrossTable(networks, layers):
 
     nCols = len(htmlRows)
     nRows = 1
-    for layer in sorted(list(layerSet), key = helpers.sortLayers):
+    for layer in sorted(list(layerSet), key=helpers.sortLayers):
         htmlRow = ["<b>" + writehtml.htmlRef(layer, "./mdlayers/" + layer + ".html") + "</b>"]
         for network in networkList:
             if layer in networks[network]["layerTypes"]:
-                htmlRow.append("<b>" + writehtml.htmlRef("+", "./mdnetworks/" + networks[network]["netName"] + ".html#" + layer) + "</b>")
+                htmlRow.append("<b>" + writehtml.htmlRef("+", "./mdnetworks/" +
+                               networks[network]["netName"] + ".html#" + layer) + "</b>")
             else:
                 htmlRow.append(" ")
         nRows += 1
@@ -57,28 +59,31 @@ def writeCrossTable(networks, layers):
     writehtml.writeHtmlFile(htmlMain)
 
 
-def layerDataForTable(layers, layerType, manyNets = False):
+def layerDataForTable(layers, layerType, manyNets=False):
     layerData = layers[layerType]
     listOfLayers = list(set(layerData.keys()) - set(["FOUND_ATTRIBUTES"]))
-    listOfAttr = sorted(list(layerData["FOUND_ATTRIBUTES"]), key = helpers.sortKey)
+    listOfAttr = sorted(list(layerData["FOUND_ATTRIBUTES"]), key=helpers.sortKey)
     htmlRows = list(listOfAttr)
     htmlRows.append("ids")
     nCols = len(htmlRows)
     nRows = 1
     for layerKey in listOfLayers:
         for attr in listOfAttr:
-            htmlRows.append(str(layerData[layerKey]["attribs"][attr] if attr in layerData[layerKey]["attribs"] else " "))
+            htmlRows.append(str(layerData[layerKey]["attribs"][attr]
+                            if attr in layerData[layerKey]["attribs"] else " "))
         ids = ""
         delimiter0 = ""
         for net in layerData[layerKey]["ids"]:
             if manyNets:
-                ids = ids + delimiter0 + writehtml.htmlRef(net, "../mdnetworks/" + net + ".html#" + layerType) + " &nbsp;ids&nbsp;:&nbsp; "
+                ids = ids + delimiter0 + \
+                    writehtml.htmlRef(net, "../mdnetworks/" + net + ".html#" + layerType) + " &nbsp;ids&nbsp;:&nbsp; "
                 delimiter0 = "<br>"
             else:
                 ids = "ids&nbsp;:&nbsp;&nbsp; "
             delimiter1 = ""
             for id in layerData[layerKey]["ids"][net]["ids"]:
-                ids = ids + delimiter1 + writehtml.htmlRef(id, "../mdnetworks/" + net + "_xml.html#" + helpers.get_anchor_id(id))
+                ids = ids + delimiter1 + \
+                    writehtml.htmlRef(id, "../mdnetworks/" + net + "_xml.html#" + helpers.get_anchor_id(id))
                 delimiter1 = ", "
         htmlRows.append(ids)
         nRows = nRows + 1
@@ -101,7 +106,8 @@ IR of network
 IR of network
 </p1>
     """, file=output_file)
-    print(writehtml.htmlRef("... to 'Networks to layers correspondence'", "../LAYERS_NETWORKS.html") + "<xmp>", file=output_file)
+    print(writehtml.htmlRef("... to 'Networks to layers correspondence'",
+          "../LAYERS_NETWORKS.html") + "<xmp>", file=output_file)
 
     with xmlFile.open() as file:
         for line in file:
@@ -118,26 +124,30 @@ IR of network
     """, file=output_file)
     output_file.close()
 
-    htmlNetwork = writehtml.startHtml(outDir + "/mdnetworks/" + htmlFileName + ".html", "Layers info for " + htmlFileName, styles = ["../body.css", "../table4.css"])
+    htmlNetwork = writehtml.startHtml(outDir + "/mdnetworks/" + htmlFileName + ".html",
+                                      "Layers info for " + htmlFileName, styles=["../body.css", "../table4.css"])
     networkIrName = network["irNetName"]
     if networkIrName != None:
         writehtml.htmlWrite(htmlNetwork, "<h1>Network name from IR: " + networkIrName + "</h1>\n")
-    writehtml.htmlWrite(htmlNetwork, writehtml.htmlRef("... to 'Networks to layers correspondence'", "../LAYERS_NETWORKS.html"))
+    writehtml.htmlWrite(htmlNetwork, writehtml.htmlRef(
+        "... to 'Networks to layers correspondence'", "../LAYERS_NETWORKS.html"))
     layerTypes = network["layerTypes"]
-    for layerType in sorted(list(layerTypes), key = helpers.sortLayers):
+    for layerType in sorted(list(layerTypes), key=helpers.sortLayers):
         htmlRows, nRows, nCols = layerDataForTable(layerTypes, layerType, False)
 
         writehtml.htmlWrite(htmlNetwork, '<a href id="' + layerType + '"></a>\n')
         writehtml.htmlWrite(htmlNetwork, "<h1>" + layerType + "</h1> of " + htmlFileName)
-        writehtml.htmlWrite(htmlNetwork, writehtml.htmlRef(" (... to all " + layerType + " s)", "../mdlayers/" + layerType + ".html#" + htmlFileName))
+        writehtml.htmlWrite(htmlNetwork, writehtml.htmlRef(" (... to all " + layerType + " s)",
+                            "../mdlayers/" + layerType + ".html#" + htmlFileName))
         writehtml.htmlTable(htmlNetwork, columns=nCols, rows=nRows, text=htmlRows)
     writehtml.writeHtmlFile(htmlNetwork)
 
 
 def writeLayer(layers, layerType):
     htmlLayer = writehtml.startHtml(outDir + "/mdlayers/" + layerType + ".html", 'All layers"' + layerType + '"',
-                                      styles=["../body.css", "../table4.css"])
-    writehtml.htmlWrite(htmlLayer, writehtml.htmlRef("... to 'Networks to layers correspondence'", "../LAYERS_NETWORKS.html"))
+                                    styles=["../body.css", "../table4.css"])
+    writehtml.htmlWrite(htmlLayer, writehtml.htmlRef(
+        "... to 'Networks to layers correspondence'", "../LAYERS_NETWORKS.html"))
     htmlRows, nRows, nCols = layerDataForTable(layers, layerType, True)
     writehtml.htmlTable(htmlLayer, columns=nCols, rows=nRows, text=htmlRows)
     writehtml.writeHtmlFile(htmlLayer)

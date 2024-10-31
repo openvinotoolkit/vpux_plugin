@@ -49,8 +49,8 @@ const auto params0 = testing::Combine(testing::ValuesIn(shuffleParameters), test
 INSTANTIATE_TEST_CASE_P(smoke_ShuffleChannels, ShuffleChannelsLayerTest_NPU3720, params0,
                         ShuffleChannelsLayerTest_NPU3720::getTestCaseName);
 
-INSTANTIATE_TEST_CASE_P(smoke_ShuffleChannels, ShuffleChannelsLayerTest_NPU4000, params0,
-                        ShuffleChannelsLayerTest_NPU4000::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_ShuffleChannels, ShuffleChannelsLayerTest_NPU4000, params0,
+                         ShuffleChannelsLayerTest_NPU4000::getTestCaseName);
 
 }  // namespace
 
@@ -76,18 +76,18 @@ const auto precommit_params = testing::Combine(testing::ValuesIn(shParams), test
 
 // --------- NPU3720 ---------
 
-INSTANTIATE_TEST_CASE_P(conform_ShuffleChannels, ShuffleChannelsLayerTest_NPU3720, params1,
-                        ShuffleChannelsLayerTest_NPU3720::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(conform_ShuffleChannels, ShuffleChannelsLayerTest_NPU3720, params1,
+                         ShuffleChannelsLayerTest_NPU3720::getTestCaseName);
 
-INSTANTIATE_TEST_CASE_P(conform_precommit_ShuffleChannels, ShuffleChannelsLayerTest_NPU3720, precommit_params,
-                        ShuffleChannelsLayerTest_NPU3720::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(conform_precommit_ShuffleChannels, ShuffleChannelsLayerTest_NPU3720, precommit_params,
+                         ShuffleChannelsLayerTest_NPU3720::getTestCaseName);
 
 // --------- NPU4000 ---------
 
-INSTANTIATE_TEST_CASE_P(conform_ShuffleChannels, ShuffleChannelsLayerTest_NPU4000, params1,
-                        ShuffleChannelsLayerTest_NPU4000::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(conform_ShuffleChannels, ShuffleChannelsLayerTest_NPU4000, params1,
+                         ShuffleChannelsLayerTest_NPU4000::getTestCaseName);
 
-INSTANTIATE_TEST_CASE_P(conform_precommit_ShuffleChannels, ShuffleChannelsLayerTest_NPU4000, precommit_params,
-                        ShuffleChannelsLayerTest_NPU4000::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(conform_precommit_ShuffleChannels, ShuffleChannelsLayerTest_NPU4000, precommit_params,
+                         ShuffleChannelsLayerTest_NPU4000::getTestCaseName);
 
 }  // namespace

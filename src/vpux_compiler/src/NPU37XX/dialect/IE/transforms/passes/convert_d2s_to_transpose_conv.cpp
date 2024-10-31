@@ -11,6 +11,7 @@
 #include "vpux/compiler/dialect/IE/transforms/passes.hpp"
 
 #include "vpux/compiler/dialect/VPU/utils/const_utils.hpp"
+#include "vpux/compiler/dialect/VPU/utils/max_kernel_size_utils.hpp"
 
 #include "vpux/compiler/utils/error.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
@@ -85,9 +86,9 @@ mlir::Value createDepthFirstWeightsConst(mlir::MLIRContext* ctx, IE::DepthToSpac
 
     auto dataStorageTensorAttr = vpux::getTensorAttr(ctx, DimsOrder::OYXI, nullptr);
     auto dataStorageType = mlir::RankedTensorType::get(filterShape.raw(), getUInt8Type(ctx), dataStorageTensorAttr);
-    return Const::createConst(rewriter, d2sOp.getLoc(), dataStorageType, ArrayRef(weights),
-                              [&](Const::ContentAttr attr) {
-                                  return attr.convertElemType(mlir::Float16Type::get(ctx)).reorder(DimsOrder::OIYX);
+    return Const::createConst(rewriter, takeOpLoc(d2sOp, "depth_first"), dataStorageType, ArrayRef(weights),
+                              [&](Const::ContentSetup& setup) {
+                                  return setup.castElemType(mlir::Float16Type::get(ctx)).reorder(DimsOrder::OIYX);
                               });
 }
 
@@ -108,8 +109,8 @@ IE::FakeQuantizeOp createBinaryFakeQuantize(mlir::MLIRContext* ctx, IE::DepthToS
     auto broadcast = vpux::IE::AutoBroadcastTypeAttr::get(ctx, IE::AutoBroadcastType::NUMPY);
 
     // lowFpType is ignored (nullptr), only levels are given
-    return rewriter.create<IE::FakeQuantizeOp>(d2sOp->getLoc(), inputOp, fqLow, fqHigh, fqLow, fqHigh, levels, nullptr,
-                                               broadcast);
+    return rewriter.create<IE::FakeQuantizeOp>(takeOpLoc(d2sOp, "fq_in"), inputOp, fqLow, fqHigh, fqLow, fqHigh, levels,
+                                               nullptr, broadcast);
 }
 
 //
@@ -150,9 +151,8 @@ mlir::LogicalResult convertDepthFirstOp(mlir::MLIRContext* ctx, IE::DepthToSpace
     auto filterShape = Shape{outputChannels, inputChannels, filterHeight, filterWidth};
 
     // Check if conv parameters supported on hardware
-    if (auto isValid = VPU::NCEInvariant::verifyKernel(d2sOp->getLoc(), filterHeight, filterWidth, strideY, strideX,
-                                                       padTop, padBottom, padLeft, padRight,
-                                                       VPU::getArch(d2sOp->getParentOfType<mlir::ModuleOp>()), log);
+    if (auto isValid = VPU::NCEInvariant::verifyKernel(d2sOp, filterHeight, filterWidth, strideY, strideX, padTop,
+                                                       padBottom, padLeft, padRight, log);
         isValid.failed()) {
         return isValid;
     }
@@ -181,8 +181,10 @@ mlir::LogicalResult convertDepthFirstOp(mlir::MLIRContext* ctx, IE::DepthToSpace
                                                                               /* dilations = */ dilations,
                                                                               /* outputPadding = */ outputPadding,
                                                                               /* postOp = */ nullptr,
-                                                                              /* clamp = */ nullptr);
-
+                                                                              /* clamp = */ nullptr,
+                                                                              /* outputChannels = */ nullptr,
+                                                                              /* inputChannels = */ nullptr);
+    extendOpLoc(transConv, "as_transcov");
     log.trace("transposed conv: '{0}'", transConv);
     return mlir::success();
 }

@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -16,10 +16,10 @@ module @TwoFunctions {
         DataInfo "output" : tensor<1x48x60x60xf16>
     }
 
-    // CHECK: func.func @foo1([[ARG0:%.+]]: tensor<1x3x62x62xf16>) -> tensor<1x48x60x60xf16>
+   // CHECK: func.func @foo1([[ARG0:%.+]]: tensor<1x3x62x62xf16>) -> tensor<1x48x60x60xf16>
     func.func @foo1(%arg0: tensor<1x3x62x62xf16>) -> tensor<1x48x60x60xf16> {
         %cst = const.Declare tensor<48x16x3x3xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<48x3x3x3xf32>,
-                    [#const.ConvertElemType<f16>, #const.Reorder<#NHWC>, #const.PadWithZero<[0, 0, 0, 0], [0, 13, 0, 0]>]
+                    [#const.CastElemType<f16>, #const.Reorder<#NHWC>, #const.PadWithZero<[0, 0, 0, 0], [0, 13, 0, 0]>]
         %0 = IE.Expand(%arg0) {pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 2]} : tensor<1x3x62x62xf16> -> tensor<1x3x62x64xf16>
         %1 = IE.PermuteQuantize(%0) {dstElemType = f16, dst_order = #NHWC, mem_perm = #NHWC, pads_begin = [0, 0, 0, 0], pads_end = [0, 13, 0, 0]} :
                     tensor<1x3x62x64xf16> -> tensor<1x16x62x64xf16, {order = #NHWC}>
@@ -32,11 +32,13 @@ module @TwoFunctions {
         // CHECK-DAG:       [[WEIGHTS:%.+]] = const.Declare tensor<48x16x3x3xf16, {order = #NHWC}>
 
         // CHECK:       [[EXPAND:%.+]] = VPU.Expand([[ARG0]]) {pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 2]} : tensor<1x3x62x62xf16> -> tensor<1x3x62x64xf16>
-        // CHECK:       [[NCE_PERM:%.+]] = VPU.NCE.Permute([[EXPAND]]) {dstElemType = f16, dstOrder = #NHWC, expandedChannels = 16 : i64} -> tensor<1x16x62x64xf16, {order = #NHWC}>
+        // CHECK:       [[NCE_PERM:%.+]] = VPU.NCE.Permute([[EXPAND]]) {dstElemType = f16, dstOrder = #NHWC, expandedChannels = 16 : i64,
+        // CHECK-SAME:      opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>} -> tensor<1x16x62x64xf16, {order = #NHWC}>
         // CHECK:       [[SLICE:%.+]] = VPU.Slice %1 [0, 0, 0, 0] [1, 16, 62, 62] : tensor<1x16x62x64xf16, {order = #NHWC}> to tensor<1x16x62x62xf16, {order = #NHWC}>
         // CHECK:       [[OUT:%.+]] = VPU.NCE.Convolution([[SLICE]], [[WEIGHTS]], [[MAP]])
-        // CHECK-SAME:        {pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, rawFilterShape = [48, 16, 3, 3], strides = [1, 1]}
-        // CHECK-SAME:         -> tensor<1x48x60x60xf16>
+        // CHECK-SAME:      {opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>,
+        // CHECK-SAME:      pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, rawFilterShape = [48, 16, 3, 3], strides = [1, 1]}
+        // CHECK-SAME:      -> tensor<1x48x60x60xf16>
         // CHECK:       return [[OUT]] : tensor<1x48x60x60xf16>
     }
 
@@ -77,7 +79,7 @@ module @RepeatingBlocks  {
 
     // CHECK: func.func private @main_fn1([[ARG0:%.+]]: tensor<1x48x60x60xf16>) -> tensor<1x48x60x60xf16>
     func.func private @main_fn1(%arg0: tensor<1x48x60x60xf16>) -> tensor<1x48x60x60xf16> {
-        %cst = const.Declare tensor<48x48x3x3xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<48x48x3x3xf32>, [#const.ConvertElemType<f16>, #const.Reorder<#NHWC>]
+        %cst = const.Declare tensor<48x48x3x3xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<48x48x3x3xf32>, [#const.CastElemType<f16>, #const.Reorder<#NHWC>]
         %shape_cast1 = IE.ShapeCast {shape = [1, 48, 225, 16]} inputs(%arg0 : tensor<1x48x60x60xf16>) -> tensor<1x48x225x16xf16>
         %permute_quantize = IE.PermuteQuantize(%shape_cast1) {dstElemType = f16, dst_order = #NHWC, mem_perm = #NHWC, pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 0]} : tensor<1x48x225x16xf16> -> tensor<1x48x225x16xf16, {order = #NHWC}>
         %shape_cast2 = IE.ShapeCast {shape = [1, 48, 60, 60]} inputs(%permute_quantize : tensor<1x48x225x16xf16, {order = #NHWC}>) -> tensor<1x48x60x60xf16, {order = #NHWC}>
@@ -85,15 +87,16 @@ module @RepeatingBlocks  {
         return %conv : tensor<1x48x60x60xf16>
 
         // CHECK-DAG:   [[CST_WEIGHTS_TABLE:%.+]] = const.Declare tensor<48x1x1x4xsi32>
-        // CHECK-DAG:   [[CST_WEIGHTS:%.+]] = const.Declare tensor<48x48x3x3xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<48x48x3x3xf32>, [#const.ConvertElemType<f16>, #const.Reorder<#NHWC>]
+        // CHECK-DAG:   [[CST_WEIGHTS:%.+]] = const.Declare tensor<48x48x3x3xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<48x48x3x3xf32>, [#const.CastElemType<f16>, #const.Reorder<#NHWC>]
 
         // CHECK:       [[SHAPE_CAST1:%.+]] = VPU.ShapeCast {shape = [1, 48, 225, 16]} inputs([[ARG0]] : tensor<1x48x60x60xf16>) -> tensor<1x48x225x16xf16>
-        // CHECK:       [[PERMUTE_QUANT:%.+]] = VPU.NCE.Permute([[SHAPE_CAST1]]) {dstElemType = f16, dstOrder = #NHWC, expandedChannels = 48 : i64} -> tensor<1x48x225x16xf16, {order = #NHWC}>
+        // CHECK:       [[PERMUTE_QUANT:%.+]] = VPU.NCE.Permute([[SHAPE_CAST1]]) {dstElemType = f16, dstOrder = #NHWC, expandedChannels = 48 : i64,
+        // CHECK-SAME:      opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>} -> tensor<1x48x225x16xf16, {order = #NHWC}>
         // CHECK:       [[SHAPE_CAST2:%.+]] = VPU.ShapeCast {shape = [1, 48, 60, 60]} inputs([[PERMUTE_QUANT]] : tensor<1x48x225x16xf16, {order = #NHWC}>) -> tensor<1x48x60x60xf16, {order = #NHWC}>
 
         // CHECK:       [[CONV:%.+]] = VPU.NCE.Convolution([[SHAPE_CAST2]], [[CST_WEIGHTS]], [[CST_WEIGHTS_TABLE]]) {
+        // CHECK-DAG:      opaque_ppe = #VPU.PPEInt<mode = <LRELU>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>,
         // CHECK-SAME:      pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
-        // CHECK-SAME:      ppe = #VPU.PPETask<mode = <LRELU>, clamp_low = 0 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64>,
         // CHECK-SAME:      rawFilterShape = [48, 48, 3, 3],
         // CHECK-SAME:      strides = [1, 1]
         // CHECK-SAME:  } -> tensor<1x48x60x60xf16>

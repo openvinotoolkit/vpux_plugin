@@ -38,13 +38,13 @@ bool vpux::VPU::SinOp::checkStrategyCompatibility(VPU::MultiClusterStrategy stra
            strategy == VPU::MultiClusterStrategy::SplitOverWidth;
 }
 
-vpux::VPU::DistributedTensorNative vpux::VPU::SinOp::getExplicitDistributedTensorAttr(
+vpux::VPU::DistributionInfo vpux::VPU::SinOp::getExplicitDistributionInfoAttr(
         vpux::ShapeRef shape, vpux::VPU::DistributionMode distributionMode, ArrayRef<int64_t> numTiles,
         const int64_t numClusters, ArrayRef<int64_t> alignment, const bool uniformDistributedSegments,
         const vpux::VPU::OverlapDistributionParams& overlapParams) {
-    return VPU::getSWExplicitDistributedTensorNative(mlir::dyn_cast<VPU::SWOpInterface>(getOperation()), shape,
-                                                     distributionMode, numTiles, numClusters, alignment,
-                                                     uniformDistributedSegments, overlapParams);
+    return VPU::getSWExplicitDistributionInfo(mlir::dyn_cast<VPU::SWOpInterface>(getOperation()), shape,
+                                              distributionMode, numTiles, numClusters, alignment,
+                                              uniformDistributedSegments, overlapParams);
 }
 
 //

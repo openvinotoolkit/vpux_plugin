@@ -6,6 +6,7 @@
 //
 
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
+#include "vpux/compiler/dialect/VPU/IR/dialect.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPU/IR/types.hpp"
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
@@ -23,15 +24,15 @@
 using namespace vpux;
 
 void testDType(mlir::MLIRContext* ctx, VPU::ClusteredOpInterface clusteredOp,
-               VPU::DistributedTensorAttr expectedDistributedAttr, mlir::IntegerAttr numClusters, bool isAct,
+               VPU::DistributionInfoAttr expectedDistributedAttr, mlir::IntegerAttr numClusters, bool isAct,
                NDTypeInterface tiledInput = nullptr, NDTypeInterface tiledOutput = nullptr) {
     auto inputType = tiledInput != nullptr ? tiledInput : clusteredOp->getOperand(0).getType().cast<NDTypeInterface>();
     auto outputType =
             tiledOutput != nullptr ? tiledOutput : clusteredOp->getResult(0).getType().cast<NDTypeInterface>();
 
     auto distributedIf =
-            isAct ? VPU::getDistributedActivationTypeFromOp(clusteredOp, inputType, numClusters, outputType)
-                  : VPU::getDistributedOutputTypeFromOp(clusteredOp, outputType, numClusters, inputType);
+            isAct ? VPU::getDistributedActivationTypeFromOp(clusteredOp, inputType, numClusters.getInt(), outputType)
+                  : VPU::getDistributedOutputTypeFromOp(clusteredOp, outputType, numClusters.getInt(), {inputType});
     auto distributedType = distributedIf.getDistributedTypes().front().cast<VPU::DistributedTensorType>();
 
     const auto memSpace = IndexedSymbolAttr::get(ctx, stringifyEnum(VPU::MemoryKind::CMX_NN));
@@ -61,11 +62,8 @@ TEST_F(MLIR_GetDistributedTypeFromOpSOKAlignmentTest, SWOpSOKAlignmentDuringTili
                    = dense<1.0> : tensor<144x16x1x1xf16, {order = #NHWC}>
                 %0 = VPU.NCE.Convolution(%arg0, %cst0, %cst1) {
                     multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverKernel>,
+                    opaque_ppe = #VPU.PPEStub<>,
                     pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-                    ppe = #VPU.PPETask<mode = <NOOP>,
-                    clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                    lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-                    fp_prelu_alpha = 1.000000e+00 : f64>,
                     rawFilterShape = [144, 144, 1, 1],
                     strides = [1, 1]}
                         -> tensor<1x144x16x16xf16, {order = #NHWC}>
@@ -77,11 +75,8 @@ TEST_F(MLIR_GetDistributedTypeFromOpSOKAlignmentTest, SWOpSOKAlignmentDuringTili
                         -> tensor<1x144x16x16xf16, {order = #NHWC}>
                 %2 = VPU.NCE.DepthConvolution(%1, %cst2, %cst1) {
                     multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverKernel>,
+                    opaque_ppe = #VPU.PPEStub<>,
                     pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-                    ppe = #VPU.PPETask<mode = <NOOP>,
-                    clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                    lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-                    fp_prelu_alpha = 1.000000e+00 : f64>,
                     rawFilterShape = [144, 1, 1, 1],
                     strides = [1, 1]}
                         -> tensor<1x144x16x16xf16, {order = #NHWC}>
@@ -103,14 +98,14 @@ TEST_F(MLIR_GetDistributedTypeFromOpSOKAlignmentTest, SWOpSOKAlignmentDuringTili
     const vpux::Shape size({1, 50, 16, 16});
 
     auto expectedAlignment = getIntArrayAttr(&ctx, SmallVector<int64_t>({1, 16, 1, 1}));
-    auto expectedDistribution = VPU::DistributedTensorAttr::get(
-            &ctx, VPU::DistributionModeAttr::get(&ctx, VPU::DistributionMode::SEGMENTED), numTiles, nullptr, nullptr,
-            nullptr, numClusters, expectedAlignment, mlir::UnitAttr::get(&ctx), nullptr, nullptr, nullptr, nullptr,
-            nullptr);
-    auto expectedTiledDistribution = VPU::DistributedTensorAttr::get(
-            &ctx, VPU::DistributionModeAttr::get(&ctx, VPU::DistributionMode::SEGMENTED), numTiles, nullptr, nullptr,
-            nullptr, numClusters, /*alignment=*/nullptr, mlir::UnitAttr::get(&ctx), nullptr, nullptr, nullptr, nullptr,
-            nullptr);
+    auto expectedDistribution =
+            VPU::DistributionInfoAttr::get(&ctx, VPU::DistributionModeAttr::get(&ctx, VPU::DistributionMode::SEGMENTED),
+                                           numTiles, nullptr, nullptr, nullptr, numClusters, expectedAlignment,
+                                           mlir::UnitAttr::get(&ctx), nullptr, nullptr, nullptr, nullptr, nullptr);
+    auto expectedTiledDistribution =
+            VPU::DistributionInfoAttr::get(&ctx, VPU::DistributionModeAttr::get(&ctx, VPU::DistributionMode::SEGMENTED),
+                                           numTiles, nullptr, nullptr, nullptr, numClusters, /*alignment=*/nullptr,
+                                           mlir::UnitAttr::get(&ctx), nullptr, nullptr, nullptr, nullptr, nullptr);
 
     func.walk([&](VPU::SWOpInterface op) {
         auto clusteredOp = mlir::cast<VPU::ClusteredOpInterface>(op.getOperation());
@@ -131,6 +126,52 @@ TEST_F(MLIR_GetDistributedTypeFromOpSOKAlignmentTest, SWOpSOKAlignmentDuringTili
     });
 }
 
+using MLIR_GetDistributedTypeFromSOKConcatOpTest = vpux::VPU::arch40xx::UnitTest;
+
+TEST_F(MLIR_GetDistributedTypeFromSOKConcatOpTest, SOKConcatOpSmallChannelNum) {
+    constexpr llvm::StringLiteral inputIR = R"(
+        #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+        module @test {
+            IE.TileResource 4 of @NCE at 6.000000e+02 MHz
+            func.func @main(%arg0: tensor<1x3x32x32xf16, {order = #NHWC}>,
+                            %arg1: tensor<1x3x32x32xf16, {order = #NHWC}>)
+                    -> tensor<1x3x64x32xf16, {order = #NHWC}> {
+                %0 = VPU.Concat(%arg0, %arg1) {
+                    multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverKernel>,
+                    static_offsets = [[0, 0, 0, 0], [0, 0, 32, 0]]
+                } : tensor<1x3x32x32xf16, {order = #NHWC}>,
+                    tensor<1x3x32x32xf16, {order = #NHWC}>
+                        -> tensor<1x3x64x32xf16, {order = #NHWC}>
+
+                return %0 : tensor<1x3x64x32xf16, {order = #NHWC}>
+            }
+        }
+    )";
+
+    auto module = mlir::parseSourceString<mlir::ModuleOp>(inputIR, &ctx);
+    ASSERT_TRUE(module.get() != nullptr);
+
+    auto func = module.get().lookupSymbol<mlir::func::FuncOp>("main");
+    ASSERT_TRUE(func != nullptr);
+
+    const auto numTiles = getIntArrayAttr(&ctx, SmallVector<int64_t>({1, 3, 1, 1}));
+    const auto numClusters = getIntAttr(&ctx, 3);
+
+    for (auto& op : func.getOps()) {
+        if (mlir::isa<VPU::ConcatOp>(op)) {
+            auto clusteredOp = mlir::cast<VPU::ClusteredOpInterface>(op);
+
+            auto expectedDistribution = VPU::DistributionInfoAttr::get(
+                    &ctx, VPU::DistributionModeAttr::get(&ctx, VPU::DistributionMode::SEGMENTED), numTiles, nullptr,
+                    nullptr, nullptr, numClusters, nullptr, mlir::UnitAttr::get(&ctx), nullptr, nullptr, nullptr,
+                    nullptr, nullptr);
+
+            testDType(&ctx, clusteredOp, expectedDistribution, numClusters, true);   // test activation distributed type
+            testDType(&ctx, clusteredOp, expectedDistribution, numClusters, false);  // test output distributed type
+        }
+    }
+}
+
 TEST_F(MLIR_GetDistributedTypeFromOpSOKAlignmentTest, SWOpSOKAlignmentAfterSlice1) {
     constexpr llvm::StringLiteral inputIR = R"(
         #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
@@ -142,11 +183,8 @@ TEST_F(MLIR_GetDistributedTypeFromOpSOKAlignmentTest, SWOpSOKAlignmentAfterSlice
                 %cst1 = const.Declare tensor<128x1x1x4xsi32> = dense<1> : tensor<128x1x1x4xsi32>
                 %0 = VPU.NCE.Convolution(%arg0, %cst0, %cst1) {
                     multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverKernel>,
+                    opaque_ppe = #VPU.PPEStub<>,
                     pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-                    ppe = #VPU.PPETask<mode = <NOOP>,
-                    clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                    lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-                    fp_prelu_alpha = 1.000000e+00 : f64>,
                     rawFilterShape = [128, 128, 1, 1],
                     strides = [1, 1]}
                         -> tensor<1x128x16x16xf16, {order = #NHWC}>
@@ -180,7 +218,7 @@ TEST_F(MLIR_GetDistributedTypeFromOpSOKAlignmentTest, SWOpSOKAlignmentAfterSlice
         if (mlir::isa<VPU::SWOpInterface>(op)) {
             auto clusteredOp = mlir::cast<VPU::ClusteredOpInterface>(op);
 
-            auto expectedDistribution = VPU::DistributedTensorAttr::get(
+            auto expectedDistribution = VPU::DistributionInfoAttr::get(
                     &ctx, VPU::DistributionModeAttr::get(&ctx, VPU::DistributionMode::SEGMENTED), numTiles, nullptr,
                     nullptr, nullptr, numClusters, expectedAlignment, mlir::UnitAttr::get(&ctx), nullptr, nullptr,
                     nullptr, nullptr, nullptr);
@@ -195,7 +233,7 @@ TEST_F(MLIR_GetDistributedTypeFromOpSOKAlignmentTest, SWOpSOKAlignmentAfterSlice
         if (mlir::isa<VPU::NCEConvolutionOp>(op)) {
             auto clusteredOp = mlir::cast<VPU::ClusteredOpInterface>(op);
 
-            auto expectedDistribution = VPU::DistributedTensorAttr::get(
+            auto expectedDistribution = VPU::DistributionInfoAttr::get(
                     &ctx, VPU::DistributionModeAttr::get(&ctx, VPU::DistributionMode::SEGMENTED), numTiles, nullptr,
                     nullptr, nullptr, numClusters, expectedAlignment, mlir::UnitAttr::get(&ctx), nullptr, nullptr,
                     nullptr, nullptr, nullptr);
@@ -216,11 +254,8 @@ TEST_F(MLIR_GetDistributedTypeFromOpSOKAlignmentTest, SWOpSOKAlignmentAfterSlice
                 %cst1 = const.Declare tensor<160x1x1x4xsi32> = dense<1> : tensor<160x1x1x4xsi32>
                 %0 = VPU.NCE.Convolution(%arg0, %cst0, %cst1) {
                     multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverKernel>,
+                    opaque_ppe = #VPU.PPEStub<>,
                     pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-                    ppe = #VPU.PPETask<mode = <NOOP>,
-                    clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                    lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-                    fp_prelu_alpha = 1.000000e+00 : f64>,
                     rawFilterShape = [160, 160, 1, 1],
                     strides = [1, 1]}
                         -> tensor<1x160x16x16xf16, {order = #NHWC}>
@@ -250,10 +285,10 @@ TEST_F(MLIR_GetDistributedTypeFromOpSOKAlignmentTest, SWOpSOKAlignmentAfterSlice
     const auto numClusters = getIntAttr(&ctx, 3);
 
     auto expectedAlignment = getIntArrayAttr(&ctx, SmallVector<int64_t>({1, 16, 1, 1}));
-    auto expectedAlignedDistribution = VPU::DistributedTensorAttr::get(
-            &ctx, VPU::DistributionModeAttr::get(&ctx, VPU::DistributionMode::SEGMENTED), numTiles, nullptr, nullptr,
-            nullptr, numClusters, expectedAlignment, mlir::UnitAttr::get(&ctx), nullptr, nullptr, nullptr, nullptr,
-            nullptr);
+    auto expectedAlignedDistribution =
+            VPU::DistributionInfoAttr::get(&ctx, VPU::DistributionModeAttr::get(&ctx, VPU::DistributionMode::SEGMENTED),
+                                           numTiles, nullptr, nullptr, nullptr, numClusters, expectedAlignment,
+                                           mlir::UnitAttr::get(&ctx), nullptr, nullptr, nullptr, nullptr, nullptr);
 
     for (auto& op : func.getOps()) {
         if (mlir::isa<VPU::MVNOp>(op)) {
@@ -300,9 +335,7 @@ TEST_P(GetDistributedTypeFromSOKOpTests, SegmentedOverChannelsDistribution) {
     const llvm::StringLiteral inputIR = params.inputIR;
     const bool isSwOpOutputDistributionAligned = params.isSwOpOutputDistributionAligned;
 
-    mlir::DialectRegistry registry;
-    vpux::registerDialects(registry);
-    vpux::registerCommonInterfaces(registry);
+    auto registry = vpux::createDialectRegistry();
     auto interfacesRegistry = vpux::createInterfacesRegistry(vpux::VPU::ArchKind::NPU37XX);
     interfacesRegistry->registerInterfaces(registry);
 
@@ -318,15 +351,15 @@ TEST_P(GetDistributedTypeFromSOKOpTests, SegmentedOverChannelsDistribution) {
     const auto numClusters = getIntAttr(&ctx, 3);
 
     auto expectedAlignment = getIntArrayAttr(&ctx, SmallVector<int64_t>({1, 16, 1, 1}));
-    auto expectedAlignedDistribution = VPU::DistributedTensorAttr::get(
-            &ctx, VPU::DistributionModeAttr::get(&ctx, VPU::DistributionMode::SEGMENTED), numTiles, nullptr, nullptr,
-            nullptr, numClusters, expectedAlignment, mlir::UnitAttr::get(&ctx), nullptr, nullptr, nullptr, nullptr,
-            nullptr);
+    auto expectedAlignedDistribution =
+            VPU::DistributionInfoAttr::get(&ctx, VPU::DistributionModeAttr::get(&ctx, VPU::DistributionMode::SEGMENTED),
+                                           numTiles, nullptr, nullptr, nullptr, numClusters, expectedAlignment,
+                                           mlir::UnitAttr::get(&ctx), nullptr, nullptr, nullptr, nullptr, nullptr);
 
-    auto expectedUnalignedDistribution = VPU::DistributedTensorAttr::get(
-            &ctx, VPU::DistributionModeAttr::get(&ctx, VPU::DistributionMode::SEGMENTED), numTiles, nullptr, nullptr,
-            nullptr, numClusters, /*alignment*/ nullptr, mlir::UnitAttr::get(&ctx), nullptr, nullptr, nullptr, nullptr,
-            nullptr);
+    auto expectedUnalignedDistribution =
+            VPU::DistributionInfoAttr::get(&ctx, VPU::DistributionModeAttr::get(&ctx, VPU::DistributionMode::SEGMENTED),
+                                           numTiles, nullptr, nullptr, nullptr, numClusters, /*alignment*/ nullptr,
+                                           mlir::UnitAttr::get(&ctx), nullptr, nullptr, nullptr, nullptr, nullptr);
 
     auto expectedSwOpDistribution =
             isSwOpOutputDistributionAligned ? expectedAlignedDistribution : expectedUnalignedDistribution;
@@ -366,11 +399,8 @@ std::vector<DistributedTypeFromSOKOpParams> verticalFusionWrappingParams = {
                 -> tensor<1x144x16x16xf16, {order = #NHWC}> {
                 %0 = VPU.NCE.Convolution(%arg1, %arg2, %arg3) {
                     multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverKernel>,
+                    opaque_ppe = #VPU.PPEStub<>,
                     pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-                    ppe = #VPU.PPETask<mode = <NOOP>,
-                    clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                    lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-                    fp_prelu_alpha = 1.000000e+00 : f64>,
                     rawFilterShape = [144, 144, 1, 1],
                     strides = [1, 1]}
                         -> tensor<1x144x16x16xf16, {order = #NHWC}>
@@ -404,11 +434,8 @@ std::vector<DistributedTypeFromSOKOpParams> verticalFusionWrappingParams = {
                 -> tensor<1x144x16x16xf16, {order = #NHWC}> {
                 %0 = VPU.NCE.Convolution(%arg1, %arg2, %arg3) {
                     multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverKernel>,
+                    opaque_ppe = #VPU.PPEStub<>,
                     pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-                    ppe = #VPU.PPETask<mode = <NOOP>,
-                    clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                    lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-                    fp_prelu_alpha = 1.000000e+00 : f64>,
                     rawFilterShape = [144, 144, 1, 1],
                     strides = [1, 1]}
                         -> tensor<1x144x16x16xf16, {order = #NHWC}>
@@ -442,12 +469,8 @@ std::vector<DistributedTypeFromSOKOpParams> segmentedAvgPoolParams = {
             %2 = VPU.NCE.AveragePool(%1) {
                 kernel_size = [1, 1],
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverKernel>,
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-                ppe = #VPU.PPETask<mode = <LPRELU>,
-                clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                lrelu_mult = 1311 : i64, lrelu_shift = 17 : i64,
-                quant_scale = [1.000000e+00],
-                fp_prelu_alpha = 0.01000213623046875 : f64>,
                 strides = [1, 1]}
                     -> tensor<1x144x8x16xf16, {order = #NHWC}>
             return %2 : tensor<1x144x8x16xf16, {order = #NHWC}>
@@ -480,12 +503,8 @@ std::vector<DistributedTypeFromSOKOpParams> segmentedAvgPoolParams = {
             %4 = VPU.NCE.AveragePool(%3) {
                 kernel_size = [1, 1],
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverKernel>,
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-                ppe = #VPU.PPETask<mode = <LPRELU>,
-                clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                lrelu_mult = 1311 : i64, lrelu_shift = 17 : i64,
-                quant_scale = [1.000000e+00],
-                fp_prelu_alpha = 0.01000213623046875 : f64>,
                 strides = [1, 1]}
                     -> tensor<1x96x8x16xf16, {order = #NHWC}>
             %5 = VPU.Slice %2 [0, 0, 8, 0] [1, 96, 8, 16]
@@ -493,12 +512,8 @@ std::vector<DistributedTypeFromSOKOpParams> segmentedAvgPoolParams = {
             %6 = VPU.NCE.AveragePool(%5) {
                 kernel_size = [1, 1],
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverKernel>,
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-                ppe = #VPU.PPETask<mode = <LPRELU>,
-                clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                lrelu_mult = 1311 : i64, lrelu_shift = 17 : i64,
-                quant_scale = [1.000000e+00],
-                fp_prelu_alpha = 0.01000213623046875 : f64>,
                 strides = [1, 1]}
                     -> tensor<1x96x8x16xf16, {order = #NHWC}>
             return %4, %6 : tensor<1x96x8x16xf16, {order = #NHWC}>, tensor<1x96x8x16xf16, {order = #NHWC}>
@@ -554,7 +569,7 @@ TEST_F(MLIR_GetDistributedTypeFromSwOpTest, OverlappedSingleInputSWOpDuringTilin
     auto expectedOffsetsAttr = getIntArrayOfArray(&ctx, expectedOffsets);
 
     const auto overlapDistributionMode = VPU::DistributionModeAttr::get(&ctx, VPU::DistributionMode::OVERLAPPED);
-    auto expectedDistribution = VPU::DistributedTensorAttr::get(
+    auto expectedDistribution = VPU::DistributionInfoAttr::get(
             &ctx, overlapDistributionMode, numTiles, nullptr, nullptr, nullptr, numClusters, /*alignment=*/nullptr,
             mlir::UnitAttr::get(&ctx), expectedShapesAttr, expectedOffsetsAttr, expectedShapesAttr, expectedOffsetsAttr,
             nullptr);
@@ -569,7 +584,7 @@ TEST_F(MLIR_GetDistributedTypeFromSwOpTest, OverlappedSingleInputSWOpDuringTilin
                                                                     {0, 0, 193, 0}};
     auto expectedTiledShapesAttr = getIntArrayOfArray(&ctx, expectedTiledShapes);
     auto expectedTiledOffsetsAttr = getIntArrayOfArray(&ctx, expectedTiledOffsets);
-    auto expectedTiledDistribution = VPU::DistributedTensorAttr::get(
+    auto expectedTiledDistribution = VPU::DistributionInfoAttr::get(
             &ctx, overlapDistributionMode, numTiles, nullptr, nullptr, nullptr, numClusters, /*alignment=*/nullptr,
             mlir::UnitAttr::get(&ctx), expectedTiledShapesAttr, expectedTiledOffsetsAttr, expectedTiledShapesAttr,
             expectedTiledOffsetsAttr, nullptr);
@@ -650,7 +665,7 @@ TEST_F(MLIR_GetDistributedTypeFromSwOpTest, DISABLED_OverlappedMultiInputSWOpDur
     auto expectedOffsetsAttr = getIntArrayOfArray(&ctx, expectedOffsets);
 
     const auto overlapDistributionMode = VPU::DistributionModeAttr::get(&ctx, VPU::DistributionMode::OVERLAPPED);
-    auto expectedDistribution = VPU::DistributedTensorAttr::get(
+    auto expectedDistribution = VPU::DistributionInfoAttr::get(
             &ctx, overlapDistributionMode, numTiles, nullptr, nullptr, nullptr, numClusters, /*alignment=*/nullptr,
             mlir::UnitAttr::get(&ctx), expectedShapesAttr, expectedOffsetsAttr, expectedShapesAttr, expectedOffsetsAttr,
             nullptr);
@@ -665,7 +680,7 @@ TEST_F(MLIR_GetDistributedTypeFromSwOpTest, DISABLED_OverlappedMultiInputSWOpDur
                                                                     {0, 0, 24, 0}};
     auto expectedTiledShapesAttr = getIntArrayOfArray(&ctx, expectedTiledShapes);
     auto expectedTiledOffsetsAttr = getIntArrayOfArray(&ctx, expectedTiledOffsets);
-    auto expectedTiledDistribution = VPU::DistributedTensorAttr::get(
+    auto expectedTiledDistribution = VPU::DistributionInfoAttr::get(
             &ctx, overlapDistributionMode, numTiles, nullptr, nullptr, nullptr, numClusters, /*alignment=*/nullptr,
             mlir::UnitAttr::get(&ctx), expectedTiledShapesAttr, expectedTiledOffsetsAttr, expectedTiledShapesAttr,
             expectedTiledOffsetsAttr, nullptr);
@@ -703,16 +718,18 @@ TEST_F(MLIR_GetDistributedTypeFromDepthwiseOpTest, MaxPoolOpWithODUPermuteToNCXX
                 %0 = VPU.NCE.MaxPool(%arg0) {
                     kernel_size = [1, 1],
                     multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverKernel>,
+                    opaque_ppe = #VPU.PPEStub<>,
                     pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, strides = [1, 1]
-                } -> tensor<1x3136x4x32xf16> 
+                } -> tensor<1x3136x4x32xf16>
                 %1 = VPU.AffineReshape(%0) {dim_mapping = [[0], [1], [1], [2, 3]], shape_value = [1, 784, 4, 128]} : tensor<1x3136x4x32xf16> -> tensor<1x784x4x128xf16>
                 %2 = VPU.PermuteCast(%1) {dst_order = #NHWC, mem_perm = #NCHW} : tensor<1x784x4x128xf16> -> tensor<1x128x784x4xf16, {order = #NHWC}>
                 %3 = VPU.NCE.Convolution(%2, %cst_0, %cst) {
                     multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
+                    opaque_ppe = #VPU.PPEStub<>,
                     pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
                     rawFilterShape = [128, 128, 1, 1],
                     strides = [1, 1]
-                } -> tensor<1x128x784x4xf16, {order = #NHWC}> 
+                } -> tensor<1x128x784x4xf16, {order = #NHWC}>
                 return %3 : tensor<1x128x784x4xf16, {order = #NHWC}>
             }
         }
@@ -728,10 +745,10 @@ TEST_F(MLIR_GetDistributedTypeFromDepthwiseOpTest, MaxPoolOpWithODUPermuteToNCXX
     const auto numClusters = getIntAttr(&ctx, 6);
 
     auto expectedAlignment = getIntArrayAttr(&ctx, SmallVector<int64_t>({1, 16, 1, 1}));
-    auto expectedDistribution = VPU::DistributedTensorAttr::get(
-            &ctx, VPU::DistributionModeAttr::get(&ctx, VPU::DistributionMode::SEGMENTED), numTiles, nullptr, nullptr,
-            nullptr, numClusters, expectedAlignment, mlir::UnitAttr::get(&ctx), nullptr, nullptr, nullptr, nullptr,
-            nullptr);
+    auto expectedDistribution =
+            VPU::DistributionInfoAttr::get(&ctx, VPU::DistributionModeAttr::get(&ctx, VPU::DistributionMode::SEGMENTED),
+                                           numTiles, nullptr, nullptr, nullptr, numClusters, expectedAlignment,
+                                           mlir::UnitAttr::get(&ctx), nullptr, nullptr, nullptr, nullptr, nullptr);
 
     func.walk([&](VPU::NCEMaxPoolOp op) {
         auto clusteredOp = mlir::cast<VPU::ClusteredOpInterface>(op.getOperation());

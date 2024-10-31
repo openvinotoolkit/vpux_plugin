@@ -139,6 +139,25 @@ SmallVector<int64_t> vpux::inferMaxPoolOutputShape(ArrayRef<int64_t> inDataShape
                            }));
 }
 
+SmallVector<int64_t> vpux::inferMaxPool8OutputShape(ArrayRef<int64_t> inDataShape, ArrayRef<int64_t> windowStrides,
+                                                    ArrayRef<int64_t> windowDilations,
+                                                    ArrayRef<int64_t> dataPaddingBelow,
+                                                    ArrayRef<int64_t> dataPaddingAbove, ArrayRef<int64_t> windowShape,
+                                                    IE::RoundingType roundingType) {
+    const auto padsBegin = ov::Shape(dataPaddingBelow.begin(), dataPaddingBelow.end());
+    const auto padsEnd = ov::Shape(dataPaddingAbove.begin(), dataPaddingAbove.end());
+    const auto ovOp = ov::op::v8::MaxPool(std::make_shared<ov::op::v0::Parameter>(
+                                                  ov::element::i32, ov::Shape(inDataShape.begin(), inDataShape.end())),
+                                          ov::Strides(windowStrides.begin(), windowStrides.end()),
+                                          ov::Strides(windowDilations.begin(), windowDilations.end()), padsBegin,
+                                          padsEnd, ov::Shape(windowShape.begin(), windowShape.end()),
+                                          static_cast<ov::op::RoundingType>(roundingType), ov::op::PadType::EXPLICIT,
+                                          ov::element::i64, 0);
+    return to_small_vector(ovOp.get_output_shape(0) | transformed([](size_t val) {
+                               return checked_cast<int64_t>(val);
+                           }));
+}
+
 ov::PartialShape getConvBackpropOutputShape(ArrayRef<int64_t> inputShape, ArrayRef<int64_t> filterShape,
                                             ArrayRef<int64_t> windowStrides, ArrayRef<int64_t> dataPaddingBelow,
                                             ArrayRef<int64_t> dataPaddingAbove, ArrayRef<int64_t> windowDilations,

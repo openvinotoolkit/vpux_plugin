@@ -35,7 +35,7 @@ static_assert(sizeof(LayerInfo) == 368);
 struct TaskInfo {
     char name[256];
     char layer_type[50];
-    enum class ExecType { NONE, DPU, SW, DMA, UPA, M2I };
+    enum class ExecType { NONE, DPU, SW, DMA, M2I };
     ExecType exec_type;
     uint64_t start_time_ns;
     uint64_t duration_ns;

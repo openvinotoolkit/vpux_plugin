@@ -1,11 +1,12 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 
 #include <numeric>
 
 #include <mlir/Dialect/Quant/QuantTypes.h>
 
+#include "vpux/compiler/dialect/VPU/transforms/factories/nce_sparsity_converters.hpp"
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_invariant.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_sparsity.hpp"
@@ -65,9 +66,9 @@ VPURT::DeclareBufferOp createBuffer(mlir::MLIRContext* ctx, mlir::OpBuilder& bui
 
         const auto numClustersAttr = getIntAttr(ctx, clusters.size());
 
-        auto distrTensorAttr = VPU::DistributedTensorAttr::get(ctx, duplicatedDistrModeAttr, nullptr, nullptr, nullptr,
-                                                               nullptr, numClustersAttr, nullptr, nullptr, nullptr,
-                                                               nullptr, nullptr, nullptr, nullptr);
+        auto distrTensorAttr = VPU::DistributionInfoAttr::get(ctx, duplicatedDistrModeAttr, nullptr, nullptr, nullptr,
+                                                              nullptr, numClustersAttr, nullptr, nullptr, nullptr,
+                                                              nullptr, nullptr, nullptr, nullptr);
 
         auto distributedCMXType = VPUIP::DistributedBufferType::get(ctx, tensorShape, tensorTypeIf.getElementType(),
                                                                     layout, dimsSpace, distrTensorAttr);
@@ -120,13 +121,13 @@ public:
         return haloShape[dim] != fullShape[dim];
     }
 
-    void handleConstants(Const::ContentAttr weightsContent, VPU::ArchKind arch, mlir::Type inputType,
+    void handleConstants(Const::ContentAttr&& weightsContent, VPU::ArchKind arch, mlir::Type inputType,
                          mlir::Type outputType, std::size_t& offset, VPURT::ConfigureBarrierOp updateBarrier,
                          mlir::ValueRange waitBarrier) {
         const auto alignment = Byte(16);
 
         // Create Weights Const.DeclareOp, segment it if necessary, create CMX buffers and DMAs bringing data from DDR
-        handleWeights(weightsContent, offset, updateBarrier, waitBarrier);
+        handleWeights(std::move(weightsContent), offset, updateBarrier, waitBarrier);
         offset += opBuffers_.front().weights.getType().cast<NDTypeInterface>().getTotalAllocSize().count();
         offset = vpux::alignValUp(offset, static_cast<std::size_t>(alignment.count()));
 
@@ -167,7 +168,7 @@ public:
     virtual void createOutputItiBuffers(ArrayRef<mlir::Type> outputTypes, std::size_t& offset) = 0;
 
 protected:
-    void dmaDuplicatedWeightsBuffers(Const::ContentAttr weightsContent, const std::size_t& offset,
+    void dmaDuplicatedWeightsBuffers(Const::ContentAttr&& weightsContent, const std::size_t& offset,
                                      VPURT::ConfigureBarrierOp updateBarrier, mlir::ValueRange waitBarrier) {
         auto* ctx = builder_.getContext();
         const auto numClusters = clusters_.size();
@@ -184,7 +185,7 @@ protected:
         // Create DDR buffer for weights
         const auto weightsDDRType = getMemRefType(VPURT::BufferSection::Constant, weightsShape.raw(),
                                                   weightsElementType, weightsTypeIf.getDimsOrder());
-        auto weightsDDRBuffer = builder_.create<vpux::Const::DeclareOp>(loc, weightsDDRType, weightsContent);
+        auto weightsDDRBuffer = builder_.create<vpux::Const::DeclareOp>(loc, weightsDDRType, std::move(weightsContent));
 
         VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(builder_, waitBarrier, mlir::ValueRange(updateBarrier.getBarrier()), loc,
                                               weightsDDRBuffer, weightsBuffer, 0);
@@ -224,17 +225,20 @@ protected:
         const auto wtableDDRType = getMemRefType(VPURT::BufferSection::Constant, wtableShape, int32, DimsOrder::NHWC);
 
         // Create weights table content
+        const auto ppeConverter = VPU::NCESparsity::getPPEConverterCb(arch);
+        const auto biasConverter = VPU::NCESparsity::getBiasConverterCb(arch);
         const auto weightsTable = VPU::NCESparsity::getWeightsTable(
                 inputType, outputType, 0,
                 static_cast<std::int32_t>(weightsOutputChannelsStrideInBits.to<Byte>().count()),
-                VPU::NCESparsity::SPARSITY_PTR_WHEN_NO_SPARSITY, sparsityPtrStep, arch,
+                VPU::NCESparsity::SPARSITY_PTR_WHEN_NO_SPARSITY, sparsityPtrStep, ppeConverter, biasConverter,
                 wtableShape[vpux::Dims4D::Filter::OC.ind()], weightsElemType);
         auto wtableTensorType = mlir::RankedTensorType::get(wtableShape, int32);
         const auto weightsTableValues =
                 mlir::DenseElementsAttr::get(wtableTensorType, llvm::ArrayRef<std::int32_t>(weightsTable));
 
         auto weightsDDRBuffer = builder_.create<vpux::Const::DeclareOp>(
-                loc, wtableDDRType, vpux::Const::ContentAttr::get(weightsTableValues).reorder(vpux::DimsOrder::NHWC));
+                loc, wtableDDRType,
+                vpux::Const::ContentAttr::transform(weightsTableValues).reorder(vpux::DimsOrder::NHWC).get());
 
         VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(builder_, mlir::ValueRange(),
                                               mlir::ValueRange(updateBarrier.getBarrier()), loc, weightsDDRBuffer,
@@ -314,7 +318,7 @@ protected:
         offset += largestSliceSize;
     }
 
-    virtual void handleWeights(Const::ContentAttr weightsContent, std::size_t& offset,
+    virtual void handleWeights(Const::ContentAttr&& weightsContent, std::size_t& offset,
                                VPURT::ConfigureBarrierOp updateBarrier, mlir::ValueRange waitBarrier) = 0;
     virtual void handleWeightsTable(VPU::ArchKind arch, mlir::Type inputType, mlir::Type outputType,
                                     std::size_t& offset, VPURT::ConfigureBarrierOp updateBarrier) = 0;
@@ -433,9 +437,9 @@ public:
     }
 
 private:
-    void handleWeights(Const::ContentAttr weightsContent, std::size_t& offset, VPURT::ConfigureBarrierOp updateBarrier,
-                       mlir::ValueRange waitBarrier) override {
-        dmaDuplicatedWeightsBuffers(weightsContent, offset, updateBarrier, waitBarrier);
+    void handleWeights(Const::ContentAttr&& weightsContent, std::size_t& offset,
+                       VPURT::ConfigureBarrierOp updateBarrier, mlir::ValueRange waitBarrier) override {
+        dmaDuplicatedWeightsBuffers(std::move(weightsContent), offset, updateBarrier, waitBarrier);
     }
 
     void handleWeightsTable(VPU::ArchKind arch, mlir::Type inputType, mlir::Type outputType, std::size_t& offset,
@@ -563,8 +567,8 @@ public:
 
 private:
     // Weights are split over Output Channels (K) dim, with a slice in each tile
-    void handleWeights(Const::ContentAttr weightsContent, std::size_t& offset, VPURT::ConfigureBarrierOp updateBarrier,
-                       mlir::ValueRange waitBarrier) override {
+    void handleWeights(Const::ContentAttr&& weightsContent, std::size_t& offset,
+                       VPURT::ConfigureBarrierOp updateBarrier, mlir::ValueRange waitBarrier) override {
         auto* ctx = builder_.getContext();
         const auto numClusters = clusters_.size();
         auto loc = builder_.getUnknownLoc();
@@ -596,7 +600,8 @@ private:
 
             // Create weights slice by using subview on the full weights content
             auto weightsDDRBuffer = builder_.create<vpux::Const::DeclareOp>(
-                    loc, weightsDDRMemRefType, weightsContent.subview(weightsOffset, perClusterShape));
+                    loc, weightsDDRMemRefType,
+                    weightsContent.transform().subview(weightsOffset, perClusterShape).get());
 
             VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(builder_, waitBarrier, mlir::ValueRange(updateBarrier.getBarrier()),
                                                   loc, weightsDDRBuffer, weightsBuffer, 0);
@@ -636,18 +641,20 @@ private:
                     getMemRefType(VPURT::BufferSection::Constant, wtableShape, int32, DimsOrder::NHWC);
 
             // Create weights table content for each weights table chunck
+            const auto ppeConverter = VPU::NCESparsity::getPPEConverterCb(arch);
+            const auto biasConverter = VPU::NCESparsity::getBiasConverterCb(arch);
             const auto weightsTable = VPU::NCESparsity::getWeightsTable(
                     inputType, outputType, 0,
                     static_cast<std::int32_t>(weightsOutputChannelsStrideInBits.count() / CHAR_BIT),
-                    VPU::NCESparsity::SPARSITY_PTR_WHEN_NO_SPARSITY, sparsityPtrStep, arch, outChannels,
-                    weightsElemType);
+                    VPU::NCESparsity::SPARSITY_PTR_WHEN_NO_SPARSITY, sparsityPtrStep, ppeConverter, biasConverter,
+                    outChannels, weightsElemType);
             auto wtableTensorType = mlir::RankedTensorType::get(wtableShape, int32);
             const auto weightsTableValues =
                     mlir::DenseElementsAttr::get(wtableTensorType, llvm::ArrayRef<std::int32_t>(weightsTable));
 
             auto wtableDDRBuffer = builder_.create<vpux::Const::DeclareOp>(
                     loc, wtableDDRType,
-                    vpux::Const::ContentAttr::get(weightsTableValues).reorder(vpux::DimsOrder::NHWC));
+                    vpux::Const::ContentAttr::transform(weightsTableValues).reorder(vpux::DimsOrder::NHWC).get());
 
             auto wtableCMXBuffer =
                     createBuffer(ctx, builder_, int32, wtableShape, DimsOrder::NHWC, clusters_[idx], offset);
@@ -662,6 +669,328 @@ private:
                                                                  VPURT::BufferSection::CMX_NN, clusters_[idx], offset);
         }
     }
+};
+
+class SoHW3Strategy final : public Strategy {
+public:
+    SoHW3Strategy(mlir::OpBuilder& builder, ArrayRef<int64_t> clusters, int64_t splitNum, const int64_t heightHaloSz,
+                  const int64_t widthHaloSz)
+            : Strategy(builder, clusters), splitNum_(splitNum), heightHaloSz_(heightHaloSz), widthHaloSz_(widthHaloSz) {
+    }
+
+    // This Enum is to track for each cluster where we already inserted a halo for each axis
+    enum class HaloPosition : size_t { AFTER, BEFORE };
+
+    bool isHaloDim(const llvm::ArrayRef<int64_t> fullShape, llvm::SmallVector<int64_t> haloShape, size_t dim) override {
+        return haloShape[dim] != fullShape[dim] &&
+               ((haloShape[dim] == heightHaloSz_ && static_cast<std::int32_t>(dim) == Dims4D::Act::H.ind()) ||
+                (haloShape[dim] == widthHaloSz_ && static_cast<std::int32_t>(dim) == Dims4D::Act::W.ind()));
+    }
+
+    void insertHaloBefore(SmallVector<SmallVector<VPUIP::HaloRegionAttr>>& inwardHalosPerCluster,
+                          SmallVector<SmallVector<VPUIP::OutwardHaloRegionAttr>>& outwardHalosPerCluster,
+                          llvm::ArrayRef<mlir::Type> outputTypes, const size_t currentIdx, const size_t beforeIdx,
+                          const Dim& axis, const int64_t haloSz, const int64_t haloCornerSz = 0,
+                          const int64_t haloNumPerCluster = 1) {
+        SmallVector<int64_t> haloShape = llvm::to_vector(
+                outputTypes[axis == Dims4D::Act::W ? beforeIdx : currentIdx].cast<NDTypeInterface>().getShape());
+
+        haloShape[axis.ind()] = haloSz;
+        Dim axisSOHW = axis;
+
+        if (axis == Dims4D::Act::H) {
+            axisSOHW = Dims4D::Act::W;
+            haloShape[axisSOHW.ind()] -= haloCornerSz * haloNumPerCluster;
+        } else {
+            axisSOHW = Dims4D::Act::H;
+        }
+
+        const auto haloShapeAttr = getIntArrayAttr(builder_, haloShape);
+        const auto clusterAttr = builder_.getI64IntegerAttr(clusters_[currentIdx]);
+
+        // offset in producer cluster
+        SmallVector<int64_t> perDimOffset = {0, 0, 0, 0};
+        auto* ctx = builder_.getContext();
+        perDimOffset[axis.ind()] = haloSz;
+        if ((axis == Dims4D::Act::W) && (beforeIdx == 1)) {
+            perDimOffset[Dims4D::Act::H.ind()] =
+                    outputTypes[beforeIdx].cast<NDTypeInterface>().getShape()[Dims4D::Act::H] - 2 * haloCornerSz;
+        }
+
+        const auto neighbourCluster = builder_.getI64IntegerAttr(clusters_[beforeIdx]);
+        // offset in the halo's target cluster
+        SmallVector<int64_t> neighbourOffset = {0, 0, 0, 0};
+        neighbourOffset[axis.ind()] = outputTypes[beforeIdx].cast<NDTypeInterface>().getShape()[axis] - haloSz;
+
+        const auto offsetAttr = getIntArrayAttr(builder_, perDimOffset);
+
+        const auto neigbourHaloOffsetAttr = getIntArrayAttr(builder_, neighbourOffset);
+        auto neighbourInwardHalo =
+                VPUIP::HaloRegionAttr::get(ctx, haloShapeAttr, neigbourHaloOffsetAttr, neighbourCluster);
+
+        const auto inwardHaloAttr = builder_.getArrayAttr({neighbourInwardHalo});
+        auto outwardHalo =
+                VPUIP::OutwardHaloRegionAttr::get(ctx, haloShapeAttr, offsetAttr, clusterAttr, inwardHaloAttr);
+
+        inwardHalosPerCluster[beforeIdx].push_back(neighbourInwardHalo);
+        outwardHalosPerCluster[currentIdx].push_back(outwardHalo);
+    }
+
+    void insertHaloAfter(SmallVector<SmallVector<VPUIP::HaloRegionAttr>>& inwardHalosPerCluster,
+                         SmallVector<SmallVector<VPUIP::OutwardHaloRegionAttr>>& outwardHalosPerCluster,
+                         llvm::ArrayRef<mlir::Type> outputTypes, const size_t currentIdx, const size_t afterIdx,
+                         const Dim& axis, const int64_t haloSz, const int64_t haloCornerSz = 0,
+                         const int64_t haloNumPerCluster = 1, const bool haloBefore = false) {
+        SmallVector<int64_t> haloShape = llvm::to_vector(outputTypes[currentIdx].cast<NDTypeInterface>().getShape());
+
+        haloShape[axis.ind()] = haloSz;
+        const Dim axisSOHW = axis == Dims4D::Act::H ? Dims4D::Act::W : Dims4D::Act::H;
+
+        // In case of SOHW we need to subtract the other axis halo size.
+        // Also it is posible to have multiple Halos for the other axis, and we need to take in consideration this.
+        haloShape[axisSOHW.ind()] -= haloCornerSz * haloNumPerCluster;
+
+        const auto haloShapeAttr = getIntArrayAttr(builder_, haloShape);
+        auto ddrOutputType = outputTypes[currentIdx].cast<NDTypeInterface>();
+        const auto clusterAttr = builder_.getI64IntegerAttr(clusters_[currentIdx]);
+
+        // offset in producer cluster
+        SmallVector<int64_t> perDimOffset = {0, 0, 0, 0};
+        auto* ctx = builder_.getContext();
+
+        perDimOffset[axis.ind()] = ddrOutputType.getShape()[axis] - 2 * haloSz;
+
+        const auto neighbourCluster = builder_.getI64IntegerAttr(clusters_[afterIdx]);
+        // offset in the halo's target cluster
+        SmallVector<int64_t> neighbourOffset = {0, 0, 0, 0};
+        if (haloBefore) {
+            // If we inserted a halo before we must start the offset from that position.
+            perDimOffset[axisSOHW.ind()] = haloCornerSz;
+            neighbourOffset[axisSOHW.ind()] = ddrOutputType.getShape()[axis] - haloSz;
+        }
+
+        const auto offsetAttr = getIntArrayAttr(builder_, perDimOffset);
+        const auto neigbourHaloOffsetAttr = getIntArrayAttr(builder_, neighbourOffset);
+        auto neighbourInwardHalo =
+                VPUIP::HaloRegionAttr::get(ctx, haloShapeAttr, neigbourHaloOffsetAttr, neighbourCluster);
+
+        const auto inwardHaloAttr = builder_.getArrayAttr({neighbourInwardHalo});
+        auto outwardHalo =
+                VPUIP::OutwardHaloRegionAttr::get(ctx, haloShapeAttr, offsetAttr, clusterAttr, inwardHaloAttr);
+
+        inwardHalosPerCluster[afterIdx].push_back(neighbourInwardHalo);
+        outwardHalosPerCluster[currentIdx].push_back(outwardHalo);
+    }
+
+    void createOutputItiBuffers(ArrayRef<mlir::Type> outputTypes, std::size_t& offset) override {
+        auto* ctx = builder_.getContext();
+        const auto numClusters = clusters_.size();
+        VPUX_THROW_UNLESS(numClusters == 3, "SOHW3 PSS tests supports only 3 clusters.");
+
+        SmallVector<SmallVector<VPUIP::HaloRegionAttr>> inwardHalosPerCluster(numClusters);
+        SmallVector<SmallVector<VPUIP::OutwardHaloRegionAttr>> outwardHalosPerCluster(numClusters);
+
+        // Conditions to insert halo BEFORE or AFTER over height or width for each cluster
+        auto insertAfterWidth = [&](int64_t idx) -> bool {
+            return idx < splitNum_;
+        };
+        auto insertBeforeWidth = [&](int64_t idx) -> bool {
+            return idx == splitNum_;
+        };
+        auto insertAfterHeight = [&](int64_t idx) -> bool {
+            return idx == 0;
+        };
+        auto insertBeforeHeight = [&](int64_t idx) -> bool {
+            return idx == 1;
+        };
+
+        // Create outward halos for all clusters and add them to the neighbouring clusters' inward halos
+        for (std::size_t idx = 0; idx < numClusters; idx++) {
+            // These 2 variables are needed to calculate the Halo height in case of multiple width Halos, also Halo
+            // width in case of multiple height Halos
+            SmallVector<HaloPosition> heightHaloInserted;
+            SmallVector<HaloPosition> widthHaloInserted;
+            // haloBeforeFlag it is needed to calculate the offsets for the current cluster
+            auto haloBeforeFlagW = false;
+            auto haloBeforeFlagH = false;
+
+            if (insertAfterWidth(static_cast<std::int64_t>(idx))) {
+                widthHaloInserted.push_back(HaloPosition::AFTER);
+            }
+            if (insertBeforeWidth(static_cast<std::int64_t>(idx))) {
+                widthHaloInserted.push_back(HaloPosition::BEFORE);
+                haloBeforeFlagW = true;
+            }
+            if (insertAfterHeight(static_cast<std::int64_t>(idx))) {
+                heightHaloInserted.push_back(HaloPosition::AFTER);
+            }
+            if (insertBeforeHeight(static_cast<std::int64_t>(idx))) {
+                heightHaloInserted.push_back(HaloPosition::BEFORE);
+                haloBeforeFlagH = true;
+            }
+
+            // Insert width halo after
+            if (insertAfterWidth(static_cast<std::int64_t>(idx))) {
+                insertHaloAfter(inwardHalosPerCluster, outwardHalosPerCluster, outputTypes, idx, splitNum_,
+                                Dims4D::Act::W, widthHaloSz_, heightHaloSz_, heightHaloInserted.size(),
+                                haloBeforeFlagH);
+            }
+
+            // Insert width halo before
+            // Tile2(up) - Tile0
+            // Tile2(down) - Tile1
+            if (insertBeforeWidth(static_cast<std::int64_t>(idx))) {
+                for (auto idxBeforeW = 0; idxBeforeW < splitNum_; idxBeforeW++) {
+                    insertHaloBefore(inwardHalosPerCluster, outwardHalosPerCluster, outputTypes, idx, idxBeforeW,
+                                     Dims4D::Act::W, widthHaloSz_, heightHaloSz_, heightHaloInserted.size());
+                }
+            }
+
+            // Insert height halo after
+            if (insertAfterHeight(static_cast<std::int64_t>(idx))) {
+                insertHaloAfter(inwardHalosPerCluster, outwardHalosPerCluster, outputTypes, idx, idx + 1,
+                                Dims4D::Act::H, heightHaloSz_, widthHaloSz_, widthHaloInserted.size(), haloBeforeFlagW);
+            }
+
+            // Insert height halo before
+            if (insertBeforeHeight(static_cast<std::int64_t>(idx))) {
+                insertHaloBefore(inwardHalosPerCluster, outwardHalosPerCluster, outputTypes, idx, idx - 1,
+                                 Dims4D::Act::H, heightHaloSz_, widthHaloSz_, widthHaloInserted.size());
+            }
+        }
+
+        int64_t largestSliceSize = 0;
+        for (std::size_t idx = 0; idx < numClusters; idx++) {
+            SmallVector<HaloPosition> heightHaloInserted;
+            SmallVector<HaloPosition> widthHaloInserted;
+            auto ddrOutputType = outputTypes[idx].cast<NDTypeInterface>();
+
+            opBuffers_[idx].output =
+                    createITIBuffer(ctx, builder_, ddrOutputType.getElementType(), ddrOutputType.getShape().raw(),
+                                    ddrOutputType.getDimsOrder(), clusters_[idx], inwardHalosPerCluster[idx],
+                                    outwardHalosPerCluster[idx], offset);
+
+            if (insertAfterWidth(static_cast<std::int64_t>(idx))) {
+                opBuffers_[splitNum_].outputIti.push_back(opBuffers_[idx].output);
+            }
+
+            if (insertBeforeWidth(static_cast<std::int64_t>(idx))) {
+                // Tile2(up) - Tile0
+                // Tile2(down) - Tile1
+                for (auto idxBeforeW = 0; idxBeforeW < splitNum_; idxBeforeW++) {
+                    opBuffers_[idxBeforeW].outputIti.push_back(opBuffers_[idx].output);
+                }
+            }
+
+            if (insertAfterHeight(static_cast<std::int64_t>(idx))) {
+                opBuffers_[idx + 1].outputIti.push_back(opBuffers_[idx].output);
+            }
+
+            if (insertBeforeHeight(static_cast<std::int64_t>(idx))) {
+                opBuffers_[idx - 1].outputIti.push_back(opBuffers_[idx].output);
+            }
+
+            const auto outputSliceSize =
+                    opBuffers_[idx].output.getBuffer().getType().cast<NDTypeInterface>().getCompactAllocSize().count();
+            if (largestSliceSize < outputSliceSize) {
+                largestSliceSize = outputSliceSize;
+            }
+        }
+
+        offset += largestSliceSize;
+    }
+
+    // Tile0 Tile2(up)
+    // Tile1 Tile2(down)
+    void createInputBuffers(mlir::Value ddrInput, ArrayRef<int64_t> fullOutputShape, ArrayRef<int64_t> weightsShape,
+                            mlir::ArrayAttr strides, VPU::PaddingAttr padding, std::size_t& offset,
+                            VPURT::ConfigureBarrierOp updateBarrier,
+                            const llvm::SmallVector<int64_t> /*clustersPerDim*/) override {
+        auto ctx = builder_.getContext();
+        auto loc = builder_.getUnknownLoc();
+        const auto origInputTypeIf = ddrInput.getType().cast<NDTypeInterface>();
+        const auto origInputShape = origInputTypeIf.getShape();
+        auto outputPerClusterShape = Shape(fullOutputShape);
+
+        const auto outStepHeight = divUp(outputPerClusterShape[Dims4D::Act::H], static_cast<int64_t>(splitNum_));
+        const auto outStepWidth = divUp(outputPerClusterShape[Dims4D::Act::W], static_cast<int64_t>(splitNum_));
+        Shape outputOffsets{0, 0, 0, 0};
+        Shape divAxis{1, 1, splitNum_, splitNum_};
+
+        const auto inputStrides = origInputTypeIf.getStrides();
+        const auto paddingInfo = PadInfo(padding.getLeft().getInt(), padding.getRight().getInt(),
+                                         padding.getTop().getInt(), padding.getBottom().getInt());
+
+        for (auto clusterIdx = 0; clusterIdx < static_cast<int64_t>(clusters_.size()); clusterIdx++) {
+            switch (clusterIdx) {
+            case 0:
+                outputPerClusterShape[Dims4D::Act::H] = outStepHeight;
+                outputPerClusterShape[Dims4D::Act::W] = outStepWidth;
+                outputOffsets[Dims4D::Act::W] = 0;
+                outputOffsets[Dims4D::Act::H] = 0;
+                break;
+            case 1:
+                outputPerClusterShape[Dims4D::Act::H] = fullOutputShape[Dims4D::Act::H.ind()] - outStepHeight;
+                outputPerClusterShape[Dims4D::Act::W] = outStepWidth;
+                outputOffsets[Dims4D::Act::W] = 0;
+                outputOffsets[Dims4D::Act::H] = outStepHeight;
+                break;
+            case 2:
+                outputPerClusterShape[Dims4D::Act::H] = fullOutputShape[Dims4D::Act::H.ind()];
+                outputPerClusterShape[Dims4D::Act::W] = fullOutputShape[Dims4D::Act::W.ind()] - outStepWidth;
+                outputOffsets[Dims4D::Act::W] = outStepWidth;
+                outputOffsets[Dims4D::Act::H] = 0;
+                break;
+            }
+
+            // Use the shape of the output tile to back-infer the necessary slice of input to compute it
+            // That is the slice of input that needs to be DMA'd to CMX, since inter-tile reads are not possible
+            const TileInfo outputTile(outputPerClusterShape, outputOffsets, divAxis);
+            const auto tilingSolution = vpux::backInferConvTile(outputTile, origInputShape, Shape(weightsShape),
+                                                                Shape(), strides, paddingInfo);
+            const auto inputTile = tilingSolution.tiles.front();
+
+            const Byte inSliceOffset =
+                    inputTile.offsets[Dims4D::Act::H] * static_cast<Byte>(inputStrides[Dims4D::Act::H]) +
+                    inputTile.offsets[Dims4D::Act::W] * static_cast<Byte>(inputStrides[Dims4D::Act::W]);
+            auto networkInputBuffer = createDeclareTensorOp(builder_, VPURT::BufferSection::NetworkInput,
+                                                            inputTile.shape.raw(), origInputTypeIf.getElementType(),
+                                                            origInputTypeIf.getDimsOrder(), inputStrides,
+                                                            /*locale=*/0, inSliceOffset.count());
+
+            opBuffers_[clusterIdx].input =
+                    createBuffer(ctx, builder_, origInputTypeIf.getElementType(), inputTile.shape.raw(),
+                                 origInputTypeIf.getDimsOrder(), {clusters_[clusterIdx]}, offset);
+
+            VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(builder_, mlir::ValueRange(),
+                                                  mlir::ValueRange(updateBarrier.getBarrier()), loc, networkInputBuffer,
+                                                  opBuffers_[clusterIdx].input, 0);
+        }
+
+        // Tile2 will have all the height and implicitly largest slice size
+        auto lastClusterIdx = clusters_.size() - 1;
+        offset += opBuffers_[lastClusterIdx]
+                          .input.getBuffer()
+                          .getType()
+                          .cast<NDTypeInterface>()
+                          .getCompactAllocSize()
+                          .count();
+    }
+
+private:
+    void handleWeights(Const::ContentAttr&& weightsContent, std::size_t& offset,
+                       VPURT::ConfigureBarrierOp updateBarrier, mlir::ValueRange waitBarrier) override {
+        dmaDuplicatedWeightsBuffers(std::move(weightsContent), offset, updateBarrier, waitBarrier);
+    }
+
+    void handleWeightsTable(VPU::ArchKind arch, mlir::Type inputType, mlir::Type outputType, std::size_t& offset,
+                            VPURT::ConfigureBarrierOp updateBarrier) override {
+        dmaDuplicatedWeightsTableBuffers(arch, inputType, outputType, offset, updateBarrier);
+    }
+
+    int64_t splitNum_;
+    int64_t heightHaloSz_;
+    int64_t widthHaloSz_;
 };
 
 class SoHWStrategy final : public Strategy {
@@ -1074,9 +1403,9 @@ public:
     }
 
 private:
-    void handleWeights(Const::ContentAttr weightsContent, std::size_t& offset, VPURT::ConfigureBarrierOp updateBarrier,
-                       mlir::ValueRange waitBarrier) override {
-        dmaDuplicatedWeightsBuffers(weightsContent, offset, updateBarrier, waitBarrier);
+    void handleWeights(Const::ContentAttr&& weightsContent, std::size_t& offset,
+                       VPURT::ConfigureBarrierOp updateBarrier, mlir::ValueRange waitBarrier) override {
+        dmaDuplicatedWeightsBuffers(std::move(weightsContent), offset, updateBarrier, waitBarrier);
     }
 
     void handleWeightsTable(VPU::ArchKind arch, mlir::Type inputType, mlir::Type outputType, std::size_t& offset,
@@ -1406,8 +1735,8 @@ private:
     // clusters e.g. SOHK over 4 tiles (heightNumClusters = 2 and channelsNumClusters = 2)
     // Weights splitted over: Tile0 & Tile1
     // Weights replicated: Tile0 - Tile2 and Tile1 - Tile3
-    void handleWeights(Const::ContentAttr weightsContent, std::size_t& offset, VPURT::ConfigureBarrierOp updateBarrier,
-                       mlir::ValueRange waitBarrier) override {
+    void handleWeights(Const::ContentAttr&& weightsContent, std::size_t& offset,
+                       VPURT::ConfigureBarrierOp updateBarrier, mlir::ValueRange waitBarrier) override {
         auto* ctx = builder_.getContext();
         const auto heightNumClusters = clustersPerDim_[0];
         const auto channelsNumClusters = clustersPerDim_[1];
@@ -1447,7 +1776,8 @@ private:
 
             // Create weights slice by using subview on the full weights content
             auto weightsDDRBuffer = builder_.create<vpux::Const::DeclareOp>(
-                    loc, weightsDDRMemRefType, weightsContent.subview(weightsOffset, perClusterShape));
+                    loc, weightsDDRMemRefType,
+                    weightsContent.transform().subview(weightsOffset, perClusterShape).get());
 
             VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(builder_, waitBarrier, mlir::ValueRange(updateBarrier.getBarrier()),
                                                   loc, weightsDDRBuffer, weightsBuffer, 0);
@@ -1493,18 +1823,20 @@ private:
                     getMemRefType(VPURT::BufferSection::Constant, wtableShape, int32, DimsOrder::NHWC);
 
             // Create weights table content for each weights table chunck
+            const auto ppeConverter = VPU::NCESparsity::getPPEConverterCb(arch);
+            const auto biasConverter = VPU::NCESparsity::getBiasConverterCb(arch);
             const auto weightsTable = VPU::NCESparsity::getWeightsTable(
                     inputType, outputType, 0,
                     static_cast<std::int32_t>(weightsOutputChannelsStrideInBits.count() / CHAR_BIT),
-                    VPU::NCESparsity::SPARSITY_PTR_WHEN_NO_SPARSITY, sparsityPtrStep, arch, outChannels,
-                    weightsElemType);
+                    VPU::NCESparsity::SPARSITY_PTR_WHEN_NO_SPARSITY, sparsityPtrStep, ppeConverter, biasConverter,
+                    outChannels, weightsElemType);
             auto wtableTensorType = mlir::RankedTensorType::get(wtableShape, int32);
             const auto weightsTableValues =
                     mlir::DenseElementsAttr::get(wtableTensorType, llvm::ArrayRef<std::int32_t>(weightsTable));
 
             auto wtableDDRBuffer = builder_.create<vpux::Const::DeclareOp>(
                     loc, wtableDDRType,
-                    vpux::Const::ContentAttr::get(weightsTableValues).reorder(vpux::DimsOrder::NHWC));
+                    vpux::Const::ContentAttr::transform(weightsTableValues).reorder(vpux::DimsOrder::NHWC).get());
 
             SmallVector<int64_t> targetClusters;
             targetClusters.push_back(idxK);
@@ -1538,6 +1870,513 @@ private:
     }
 
     ArrayRef<int64_t> clustersPerDim_;
+    int64_t heightHaloSz_;
+};
+
+class SoHK3Strategy final : public Strategy {
+public:
+    SoHK3Strategy(mlir::OpBuilder& builder, ArrayRef<int64_t> clusters, int64_t splitNum, const int64_t heightHaloSz)
+            : Strategy(builder, clusters), splitNum_(splitNum), heightHaloSz_(heightHaloSz) {
+    }
+
+    bool isHaloDim(const llvm::ArrayRef<int64_t> /*fullShape*/, llvm::SmallVector<int64_t> haloShape,
+                   size_t dim) override {
+        return (static_cast<std::int32_t>(dim) == Dims4D::Act::H.ind() && haloShape[dim] == heightHaloSz_) ||
+               (static_cast<std::int32_t>(dim) == Dims4D::Act::C.ind() &&
+                haloShape[Dims4D::Act::H.ind()] != heightHaloSz_);
+    }
+
+    // Tile0 Tile2(up)
+    // Tile1 Tile2(down)
+    void insertHaloOverK(mlir::MLIRContext* ctx, SmallVector<SmallVector<VPUIP::HaloRegionAttr>>& inwardHalosPerCluster,
+                         SmallVector<SmallVector<VPUIP::OutwardHaloRegionAttr>>& outwardHalosPerCluster,
+                         llvm::ArrayRef<mlir::Type> outputTypes,
+                         SmallVector<std::pair<size_t, uint64_t>>& inwardHaloProducerTarget) {
+        const auto fullOutputChannelsNum = outputTypes.front().cast<NDTypeInterface>().getShape()[Dims4D::Act::C];
+        const auto channelSlice = divUp(fullOutputChannelsNum, static_cast<int64_t>(splitNum_));
+        SmallVector<int64_t> outChannelsPerCluster(splitNum_, channelSlice);
+        outChannelsPerCluster.back() = fullOutputChannelsNum - (splitNum_ - 1) * channelSlice;
+        const auto numClusters = clusters_.size();
+
+        // 4 sections: Section0 - Section1 - Section3 - Section4
+        // Tile0 - Section0
+        // Tile1 - Section1
+        // Tile2(up) - Section3
+        // Tile2(down) - Section4
+        const auto sections = splitNum_ * splitNum_;
+        const auto lastSectionIdx = sections - 1;
+        const auto lastClusterIdx = numClusters - 1;
+
+        for (auto sectionIdx = 0; sectionIdx < sections; sectionIdx++) {
+            auto clusterIdx = sectionIdx;
+            if (sectionIdx == lastSectionIdx)
+                clusterIdx = lastClusterIdx;
+
+            const auto idxK = sectionIdx / splitNum_;
+            const auto idxH = sectionIdx % splitNum_;
+            const auto clusterAttr = builder_.getI64IntegerAttr(clusters_[clusterIdx]);
+            // tile2 (tile2(up) & tile2(down)) has all tensor at output - full height
+            // tile0 & tile1 height is only half
+            // Means that:
+            // Halo over K received by tile0 from tile2 should have height of tile0 + the heightHaloSz
+            // Halo over K received by tile1 from tile2 should have height of tile1 + the heightHaloSz
+            const auto crtDdrInput = outputTypes[sectionIdx % splitNum_].cast<NDTypeInterface>();
+
+            SmallVector<int64_t> haloShape = llvm::to_vector(crtDdrInput.getShape());
+            haloShape[Dims4D::Act::C.ind()] = outChannelsPerCluster[idxK];
+            // Halo over K received by tile2 size won't include heightHaloSz
+            if (clusterIdx != static_cast<int8_t>(lastClusterIdx)) {
+                haloShape[Dims4D::Act::H.ind()] -= heightHaloSz_;
+            }
+
+            const auto haloShapeAttr = getIntArrayAttr(builder_, haloShape);
+
+            // channel offset in producer cluster & in halo's target clusters
+            const auto outChannelOffset =
+                    std::accumulate(outChannelsPerCluster.begin(), outChannelsPerCluster.begin() + idxK,
+                                    static_cast<int64_t>(0), [](const int64_t chOffset, const int64_t chSize) {
+                                        return chOffset + chSize;
+                                    });
+
+            SmallVector<int64_t> dimOffests = {0, outChannelOffset, 0, 0};
+            // For the upper part processing
+            // the offset in producer cluster will start from the top
+            if (idxH == 0) {
+                dimOffests[Dims4D::Act::H.ind()] = 0;
+            } else {
+                if (idxK == 0) {
+                    // Offset in producer cluster after heightHaloSz
+                    dimOffests[Dims4D::Act::H.ind()] = heightHaloSz_;
+                } else {
+                    // Since the outward halo over K for cluster 2 size will include also the heightHaloSz
+                    // the offset in producer cluster will be heightHaloSz above the size of tile0 height
+                    const auto prevDdrInput = outputTypes[0].cast<NDTypeInterface>();
+
+                    // prevShape is height + heightHaloSz
+                    SmallVector<int64_t> prevShape = llvm::to_vector(prevDdrInput.getShape());
+                    prevShape[Dims4D::Act::H.ind()] -= 2 * heightHaloSz_;
+                    dimOffests[Dims4D::Act::H.ind()] = prevShape[Dims4D::Act::H.ind()];
+                }
+            }
+
+            // Offset in producer cluster - used for outwardHalo
+            const auto offsetAttr = getIntArrayAttr(builder_, dimOffests);
+
+            // Offset in halo's target clusters - used for neighbourInwardHalo
+            SmallVector<int64_t> neighbourOffset = {0, 0, 0, 0};
+            neighbourOffset[Dims4D::Act::C.ind()] = dimOffests[Dims4D::Act::C.ind()];
+            // For the upper part processing
+            // the offset in target cluster will start from the top
+            if (idxH == 0) {
+                neighbourOffset[Dims4D::Act::H.ind()] = 0;
+            } else {
+                if (idxK == 0) {
+                    // After the Height of the tile0
+                    const auto prevDdrInput = outputTypes[0].cast<NDTypeInterface>();
+
+                    SmallVector<int64_t> prevShape = llvm::to_vector(prevDdrInput.getShape());
+                    prevShape[Dims4D::Act::H.ind()] -= heightHaloSz_;
+                    neighbourOffset[Dims4D::Act::H.ind()] = prevShape[Dims4D::Act::H.ind()];
+                } else {
+                    // Since halo over K received by tile1 should have height of tile1 + the heightHaloSz
+                    // means that offset will be at 0
+                    neighbourOffset[Dims4D::Act::H.ind()] = 0;
+                }
+            }
+
+            const auto neigbourHaloOffsetAttr = getIntArrayAttr(builder_, neighbourOffset);
+
+            auto inwardHalosVec = SmallVector<mlir::Attribute>();
+
+            auto targetIdx = (sectionIdx + splitNum_) % sections;
+            if (targetIdx == lastSectionIdx) {
+                targetIdx = lastClusterIdx;
+            }
+
+            const auto targetCluster = builder_.getI64IntegerAttr(clusters_[targetIdx]);
+            auto neighbourInwardHalo =
+                    VPUIP::HaloRegionAttr::get(ctx, haloShapeAttr, neigbourHaloOffsetAttr, targetCluster);
+
+            inwardHalosPerCluster[targetIdx].push_back(neighbourInwardHalo);
+            inwardHalosVec.push_back(neighbourInwardHalo);
+            inwardHaloProducerTarget.push_back(std::make_pair(clusterIdx, targetIdx));
+
+            const auto inwardHaloAttr = builder_.getArrayAttr(inwardHalosVec);
+            auto outwardHalo =
+                    VPUIP::OutwardHaloRegionAttr::get(ctx, haloShapeAttr, offsetAttr, clusterAttr, inwardHaloAttr);
+
+            outwardHalosPerCluster[clusterIdx].push_back(outwardHalo);
+        }
+    }
+
+    // Tile0 Tile2(up)
+    // Tile1 Tile2(down)
+    // only Tile0 & Tile1 have Halo over height
+    void insertHaloOverH(mlir::MLIRContext* ctx, SmallVector<SmallVector<VPUIP::HaloRegionAttr>>& inwardHalosPerCluster,
+                         SmallVector<SmallVector<VPUIP::OutwardHaloRegionAttr>>& outwardHalosPerCluster,
+                         llvm::ArrayRef<mlir::Type> outputTypes,
+                         SmallVector<std::pair<size_t, uint64_t>>& inwardHaloProducerTarget) {
+        const auto fullOutputChannelsNum = outputTypes.front().cast<NDTypeInterface>().getShape()[Dims4D::Act::C];
+        const auto channelSlice = divUp(fullOutputChannelsNum, static_cast<int64_t>(splitNum_));
+        SmallVector<int64_t> outChannelsPerCluster(splitNum_, channelSlice);
+        outChannelsPerCluster.back() = fullOutputChannelsNum - (splitNum_ - 1) * channelSlice;
+
+        SmallVector<int64_t> haloShape = llvm::to_vector(outputTypes.front().cast<NDTypeInterface>().getShape());
+        VPUX_THROW_UNLESS(std::size_t(Dims4D::Act::H.ind()) < haloShape.size(),
+                          "insertHaloOverH: SoHKStrategy's H axis goes beyond the halo's shape");
+
+        for (auto clusterIdx = 0; clusterIdx < splitNum_; clusterIdx++) {
+            const auto idxH = clusterIdx;
+            // only idxK 0 has halo over height
+            const auto idxK = 0;
+            const auto ddrOutputType = outputTypes[clusterIdx].cast<NDTypeInterface>();
+            const auto clusterAttr = builder_.getI64IntegerAttr(clusters_[clusterIdx]);
+
+            haloShape[Dims4D::Act::H.ind()] = heightHaloSz_;
+            haloShape[Dims4D::Act::C.ind()] = outChannelsPerCluster[idxK];
+            const auto haloShapeAttr = getIntArrayAttr(builder_, haloShape);
+
+            // Offset in producer cluster
+            SmallVector<int64_t> perDimOffset = {0, 0, 0, 0};
+            VPUX_THROW_UNLESS(std::size_t(Dims4D::Act::H.ind()) < perDimOffset.size(),
+                              "insertHaloOverH: SoHKStrategy's H axis goes beyond the perDimOffset's "
+                              "array length");
+
+            const auto outChannelOffset =
+                    std::accumulate(outChannelsPerCluster.begin(), outChannelsPerCluster.begin() + idxK,
+                                    static_cast<int64_t>(0), [](const int64_t chOffset, const int64_t chSize) {
+                                        return chOffset + chSize;
+                                    });
+
+            auto inwardHalosVec = SmallVector<mlir::Attribute>();
+            // All the clusters except the ones processing the upper part of the tensor will have a inward height
+            // halo at the top of the workload. This means that the offset in producer cluster will start after the
+            // heightHaloSz
+            if (idxH != 0) {
+                // Offset in producer cluster
+                perDimOffset[Dims4D::Act::H.ind()] = heightHaloSz_;
+                perDimOffset[Dims4D::Act::C.ind()] = outChannelOffset;
+
+                const auto offsetAttr = getIntArrayAttr(builder_, perDimOffset);
+
+                // Offset in halo's target clusters will be at the end of the workload
+                SmallVector<int64_t> neighbourOffset = {0, 0, 0, 0};
+                neighbourOffset[Dims4D::Act::C.ind()] = outChannelOffset;
+                neighbourOffset[Dims4D::Act::H.ind()] =
+                        outputTypes[(idxH - 1) * splitNum_].cast<NDTypeInterface>().getShape()[Dims4D::Act::H] -
+                        heightHaloSz_;
+                VPUX_THROW_UNLESS(std::size_t(Dims4D::Act::H.ind()) < neighbourOffset.size(),
+                                  "buildHaloMultiClusteringTest: SoHKStrategy's axis goes beyond the "
+                                  "neighbourOffset's array length");
+
+                const auto neigbourHaloOffsetAttr = getIntArrayAttr(builder_, neighbourOffset);
+
+                // Tile1: will write to Tile0 first K
+                auto targetIdx = clusterIdx - 1;
+
+                const auto neighbourCluster = builder_.getI64IntegerAttr(clusters_[targetIdx]);
+                auto neighbourInwardHalo =
+                        VPUIP::HaloRegionAttr::get(ctx, haloShapeAttr, neigbourHaloOffsetAttr, neighbourCluster);
+
+                inwardHalosPerCluster[targetIdx].push_back(neighbourInwardHalo);
+                inwardHalosVec.push_back(neighbourInwardHalo);
+                inwardHaloProducerTarget.push_back(std::make_pair(clusterIdx, targetIdx));
+
+                const auto inwardHaloAttr = builder_.getArrayAttr(inwardHalosVec);
+                auto outwardHalo =
+                        VPUIP::OutwardHaloRegionAttr::get(ctx, haloShapeAttr, offsetAttr, clusterAttr, inwardHaloAttr);
+
+                outwardHalosPerCluster[clusterIdx].push_back(outwardHalo);
+            }
+
+            inwardHalosVec = SmallVector<mlir::Attribute>();
+            // All the clusters except the ones processing the bottom part of the tensor will have a inward height
+            // halo at the bottom of the workload. This means that the offset in producer cluster will be 2 *
+            // heightHaloSz above the bottom of the workload
+            if (static_cast<std::int64_t>(idxH) != splitNum_ - 1) {
+                // Offset in producer cluster
+                perDimOffset[Dims4D::Act::H.ind()] = ddrOutputType.getShape()[Dims4D::Act::H] - 2 * heightHaloSz_;
+                perDimOffset[Dims4D::Act::C.ind()] = outChannelOffset;
+                const auto offsetAttr = getIntArrayAttr(builder_, perDimOffset);
+
+                // Offset in halo's target clusters will be at the top of the workload
+                SmallVector<int64_t> neighbourOffset = {0, 0, 0, 0};
+                neighbourOffset[Dims4D::Act::C.ind()] = outChannelOffset;
+                const auto neigbourHaloOffsetAttr = getIntArrayAttr(builder_, neighbourOffset);
+
+                // Tile0: will write to Tile1 first K
+                auto targetIdx = clusterIdx + 1;
+
+                const auto neighbourCluster = builder_.getI64IntegerAttr(clusters_[targetIdx]);
+                auto neighbourInwardHalo =
+                        VPUIP::HaloRegionAttr::get(ctx, haloShapeAttr, neigbourHaloOffsetAttr, neighbourCluster);
+                inwardHalosPerCluster[targetIdx].push_back(neighbourInwardHalo);
+                inwardHalosVec.push_back(neighbourInwardHalo);
+                inwardHaloProducerTarget.push_back(std::make_pair(clusterIdx, targetIdx));
+
+                const auto inwardHaloAttr = builder_.getArrayAttr(inwardHalosVec);
+                auto outwardHalo =
+                        VPUIP::OutwardHaloRegionAttr::get(ctx, haloShapeAttr, offsetAttr, clusterAttr, inwardHaloAttr);
+                outwardHalosPerCluster[clusterIdx].push_back(outwardHalo);
+            }
+        }
+    }
+
+    void createOutputItiBuffers(ArrayRef<mlir::Type> outputTypes, std::size_t& offset) override {
+        auto* ctx = builder_.getContext();
+        const auto numClusters = clusters_.size();
+
+        SmallVector<SmallVector<VPUIP::HaloRegionAttr>> inwardHalosPerCluster(numClusters);
+        SmallVector<SmallVector<VPUIP::OutwardHaloRegionAttr>> outwardHalosPerCluster(numClusters);
+
+        SmallVector<std::pair<size_t, uint64_t>> inwardHaloProducerTarget;
+
+        // Create outward halos over channels and add them to the neighbouring clusters' inward halos
+        insertHaloOverK(ctx, inwardHalosPerCluster, outwardHalosPerCluster, outputTypes, inwardHaloProducerTarget);
+
+        // Create outward halos over height and add them to the neighbouring clusters' inward halos
+        insertHaloOverH(ctx, inwardHalosPerCluster, outwardHalosPerCluster, outputTypes, inwardHaloProducerTarget);
+
+        for (size_t idx = 0; idx < numClusters; idx++) {
+            auto ddrOutputType = outputTypes[idx].cast<NDTypeInterface>();
+
+            opBuffers_[idx].output =
+                    createITIBuffer(ctx, builder_, ddrOutputType.getElementType(), ddrOutputType.getShape().raw(),
+                                    ddrOutputType.getDimsOrder(), clusters_[idx], inwardHalosPerCluster[idx],
+                                    outwardHalosPerCluster[idx], offset);
+
+            for (auto targetIdx : inwardHaloProducerTarget) {
+                if (targetIdx.second == idx) {
+                    opBuffers_[targetIdx.first].outputIti.push_back(opBuffers_[idx].output);
+                }
+            }
+        }
+
+        // last cluster will contain all tensor at output
+        offset += opBuffers_.back().output.getBuffer().getType().cast<NDTypeInterface>().getTotalAllocSize().count();
+    }
+
+    // Input activation:
+    // e.g. SOHK over 3 tiles
+    // Tile0 Tile2(up)
+    // Tile1 Tile2(down)
+    // Tile0 input: upper half of the tensor
+    // Tile1 input: bottom half of the tensor
+    // Tile2 input: all tensor
+    void createInputBuffers(mlir::Value ddrInput, ArrayRef<int64_t> fullOutputShape, ArrayRef<int64_t> weightsShape,
+                            mlir::ArrayAttr strides, VPU::PaddingAttr padding, std::size_t& offset,
+                            VPURT::ConfigureBarrierOp updateBarrier,
+                            const llvm::SmallVector<int64_t> /*clustersPerDim*/) override {
+        auto ctx = builder_.getContext();
+        auto loc = builder_.getUnknownLoc();
+        const auto origInputTypeIf = ddrInput.getType().cast<NDTypeInterface>();
+        const auto origInputShape = origInputTypeIf.getShape();
+        auto outputPerClusterShape = Shape(fullOutputShape);
+        const auto outStepHeight = divUp(outputPerClusterShape[Dims4D::Act::H], static_cast<int64_t>(splitNum_));
+
+        Shape outputOffsets{0, 0, 0, 0};
+        Shape divAxis{1, 1, 1, 1};
+        divAxis[Dims4D::Act::H] = splitNum_;
+        divAxis[Dims4D::Act::C] = splitNum_;
+
+        const auto inputStrides = origInputTypeIf.getStrides();
+        const auto paddingInfo = PadInfo(padding.getLeft().getInt(), padding.getRight().getInt(),
+                                         padding.getTop().getInt(), padding.getBottom().getInt());
+
+        // Tile0 input: upper half of the tensor
+        // Tile1 input: bottom half of the tensor
+        for (auto idxH = 0; idxH < splitNum_; idxH++) {
+            // splitting over height for the first 2 tiles
+            outputPerClusterShape[Dims4D::Act::H] =
+                    (idxH != splitNum_ - 1) ? outStepHeight
+                                            : fullOutputShape[Dims4D::Act::H.ind()] - idxH * outStepHeight;
+            outputOffsets[Dims4D::Act::H] = idxH * outStepHeight;
+
+            const auto clusterIdx = idxH;
+            // Use the shape of the output tile to back-infer the necessary slice of input to compute it
+            // That is the slice of input that needs to be DMA'd to CMX, since inter-tile reads are not possible
+            const TileInfo outputTile(outputPerClusterShape, outputOffsets, divAxis);
+            const auto tilingSolution = vpux::backInferConvTile(outputTile, origInputShape, Shape(weightsShape),
+                                                                Shape(), strides, paddingInfo);
+            const auto inputTile = tilingSolution.tiles.front();
+            const Byte inSliceOffset =
+                    inputTile.offsets[Dims4D::Act::H] * static_cast<Byte>(inputStrides[Dims4D::Act::H]);
+
+            auto networkInputBuffer = createDeclareTensorOp(builder_, VPURT::BufferSection::NetworkInput,
+                                                            inputTile.shape.raw(), origInputTypeIf.getElementType(),
+                                                            origInputTypeIf.getDimsOrder(), inputStrides,
+                                                            /*locale=*/0, inSliceOffset.count());
+
+            opBuffers_[clusterIdx].input =
+                    createBuffer(ctx, builder_, origInputTypeIf.getElementType(), inputTile.shape.raw(),
+                                 origInputTypeIf.getDimsOrder(), {clusters_[clusterIdx]}, offset);
+
+            VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(builder_, mlir::ValueRange(),
+                                                  mlir::ValueRange(updateBarrier.getBarrier()), loc, networkInputBuffer,
+                                                  opBuffers_[clusterIdx].input, 0);
+        }
+
+        const auto lastClusterIdx = clusters_.size() - 1;
+        // Tile2 input: all tensor
+        // The entire DDR input resides in one buffer in NetworkInput Section
+        auto networkInputBuffer = createDeclareTensorOp(
+                builder_, VPURT::BufferSection::NetworkInput, origInputTypeIf.getShape().raw(),
+                origInputTypeIf.getElementType(), origInputTypeIf.getDimsOrder(), origInputTypeIf.getStrides(),
+                /*locale=*/0, /*offset=*/0);
+
+        opBuffers_[lastClusterIdx].input =
+                createBuffer(ctx, builder_, origInputTypeIf.getElementType(), origInputTypeIf.getShape().raw(),
+                             origInputTypeIf.getDimsOrder(), {clusters_[lastClusterIdx]}, offset);
+
+        VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(builder_, mlir::ValueRange(),
+                                              mlir::ValueRange(updateBarrier.getBarrier()), loc, networkInputBuffer,
+                                              opBuffers_[lastClusterIdx].input, 0);
+
+        // largestSliceSize will be the lastClusterIdx size (the one with the whole tensor)
+        offset += opBuffers_[lastClusterIdx]
+                          .input.getBuffer()
+                          .getType()
+                          .cast<NDTypeInterface>()
+                          .getCompactAllocSize()
+                          .count();
+    }
+
+private:
+    // Weights are partially splitted: splitted over channels number of clusters and replicated over height number
+    // of clusters e.g. SOHK3 over 3 tiles
+    // Tile0 Tile2(up)
+    // Tile1 Tile2(down)
+    // Weights splitted over: Tile0 - Tile2
+    // Weights replicated: Tile0 - Tile1
+    void handleWeights(Const::ContentAttr&& weightsContent, std::size_t& offset,
+                       VPURT::ConfigureBarrierOp updateBarrier, mlir::ValueRange waitBarrier) override {
+        auto* ctx = builder_.getContext();
+        auto loc = builder_.getUnknownLoc();
+
+        const auto weightsTypeIf = weightsContent.getType();
+        const auto weightsShape = weightsTypeIf.getShape();
+        const auto weightsElementType = weightsTypeIf.getElementType();
+        const auto numClusters = clusters_.size();
+
+        // Divide the full OC by the number of clusters; round up if K is not a multiple of numClusters
+        const auto fullK = weightsShape[vpux::Dims4D::Filter::OC];
+        const auto kStep = divUp(fullK, static_cast<int64_t>(splitNum_));
+
+        for (auto clusterIdx = 0, indexK = 0; clusterIdx < static_cast<int>(numClusters); clusterIdx += 2, indexK++) {
+            SmallVector<int64_t> targetClusters;
+            const Shape weightsOffset{static_cast<int64_t>(indexK) * kStep, 0, 0, 0};
+
+            // Ensure the last cluster gets the reminder of output channels
+            const auto outputChannels =
+                    (indexK != static_cast<int>(splitNum_) - 1) ? kStep : fullK - (splitNum_ - 1) * kStep;
+            const auto perClusterShape =
+                    Shape{static_cast<int64_t>(outputChannels), weightsShape[vpux::Dims4D::Filter::IC],
+                          weightsShape[vpux::Dims4D::Filter::KY], weightsShape[vpux::Dims4D::Filter::KX]};
+
+            targetClusters.push_back(clusterIdx);
+            auto targetIdx = clusterIdx + 1;
+            if (targetIdx < splitNum_) {
+                targetClusters.push_back(targetIdx);
+            }
+
+            auto weightsBuffer = createBuffer(ctx, builder_, weightsElementType, perClusterShape.raw(), DimsOrder::OYXI,
+                                              targetClusters, offset);
+
+            // Create a DDR buffer for each slice of the weights
+            const auto weightsDDRMemRefType = getMemRefType(VPURT::BufferSection::Constant, perClusterShape.raw(),
+                                                            weightsElementType, weightsTypeIf.getDimsOrder());
+
+            // Create weights slice by using subview on the full weights content
+            auto weightsDDRBuffer = builder_.create<vpux::Const::DeclareOp>(
+                    loc, weightsDDRMemRefType,
+                    weightsContent.transform().subview(weightsOffset, perClusterShape).get());
+
+            VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(builder_, waitBarrier, mlir::ValueRange(updateBarrier.getBarrier()),
+                                                  loc, weightsDDRBuffer, weightsBuffer, 0);
+
+            opBuffers_[clusterIdx].weights = weightsBuffer;
+            // Replicated weights over height number of clusters
+            if (targetIdx < splitNum_) {
+                opBuffers_[targetIdx].weights = opBuffers_[clusterIdx].weights;
+            }
+        }
+    }
+
+    void handleWeightsTable(VPU::ArchKind arch, mlir::Type inputType, mlir::Type outputType, std::size_t& offset,
+                            VPURT::ConfigureBarrierOp updateBarrier) override {
+        auto loc = builder_.getUnknownLoc();
+        auto ctx = builder_.getContext();
+        auto int32 = builder_.getIntegerType(32, true);
+
+        const auto sparsityPtrStep = 0;
+        const auto weightsBuffType = opBuffers_.front().weights.getBuffer().getType().cast<NDTypeInterface>();
+        auto weightsOutputChannelsStrideInBits = weightsBuffType.getStrides()[vpux::Dims4D::Filter::OC];
+        const auto weightsElemType = weightsBuffType.getElementType();
+
+        const auto alignmentRequirement = 16;
+        const auto alignment =
+                (alignmentRequirement * static_cast<vpux::Bit>(getElemTypeSize(inputType)).count()) / CHAR_BIT;
+        if (weightsOutputChannelsStrideInBits.count() / CHAR_BIT < alignment) {
+            weightsOutputChannelsStrideInBits = vpux::Bit(alignment * CHAR_BIT);
+        }
+
+        for (auto clusterIdx = 0; clusterIdx < static_cast<int>(clusters_.size()); clusterIdx += 2) {
+            // Create weights table DDR buffer for each tile
+            const auto outChannels = opBuffers_[clusterIdx]
+                                             .weights.getBuffer()
+                                             .getType()
+                                             .cast<NDTypeInterface>()
+                                             .getShape()[Dims4D::Filter::OC];
+            const auto wtableShape = SmallVector<int64_t>({outChannels, 1, 1, 4});
+            const auto wtableDDRType =
+                    getMemRefType(VPURT::BufferSection::Constant, wtableShape, int32, DimsOrder::NHWC);
+
+            // Create weights table content for each weights table chunck
+            const auto ppeConverter = VPU::NCESparsity::getPPEConverterCb(arch);
+            const auto biasConverter = VPU::NCESparsity::getBiasConverterCb(arch);
+            const auto weightsTable = VPU::NCESparsity::getWeightsTable(
+                    inputType, outputType, 0,
+                    static_cast<std::int32_t>(weightsOutputChannelsStrideInBits.count() / CHAR_BIT),
+                    VPU::NCESparsity::SPARSITY_PTR_WHEN_NO_SPARSITY, sparsityPtrStep, ppeConverter, biasConverter,
+                    outChannels, weightsElemType);
+            auto wtableTensorType = mlir::RankedTensorType::get(wtableShape, int32);
+            const auto weightsTableValues =
+                    mlir::DenseElementsAttr::get(wtableTensorType, llvm::ArrayRef<std::int32_t>(weightsTable));
+
+            auto wtableDDRBuffer = builder_.create<vpux::Const::DeclareOp>(
+                    loc, wtableDDRType,
+                    vpux::Const::ContentAttr::transform(weightsTableValues).reorder(vpux::DimsOrder::NHWC).get());
+
+            SmallVector<int64_t> targetClusters;
+            targetClusters.push_back(clusterIdx);
+            auto targetIdx = clusterIdx + 1;
+            if (targetIdx < splitNum_) {
+                targetClusters.push_back(targetIdx);
+            }
+
+            auto wtableCMXBuffer =
+                    createBuffer(ctx, builder_, int32, wtableShape, DimsOrder::NHWC, targetClusters, offset);
+
+            VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(builder_, mlir::ValueRange(),
+                                                  mlir::ValueRange(updateBarrier.getBarrier()), loc, wtableDDRBuffer,
+                                                  wtableCMXBuffer, 0);
+
+            auto wtableCMXMemRefType = getMemRefType(VPURT::BufferSection::CMX_NN, clusters_[clusterIdx], wtableShape,
+                                                     int32, DimsOrder::NHWC);
+            opBuffers_[clusterIdx].weightsTable = createDeclareTensorOp(
+                    builder_, wtableCMXMemRefType, VPURT::BufferSection::CMX_NN, clusters_[clusterIdx], offset);
+
+            if (targetIdx < splitNum_) {
+                wtableCMXMemRefType = getMemRefType(VPURT::BufferSection::CMX_NN, clusters_[targetIdx], wtableShape,
+                                                    int32, DimsOrder::NHWC);
+
+                opBuffers_[targetIdx].weightsTable = createDeclareTensorOp(
+                        builder_, wtableCMXMemRefType, VPURT::BufferSection::CMX_NN, clusters_[targetIdx], offset);
+            }
+        }
+    }
+
+    int64_t splitNum_;
     int64_t heightHaloSz_;
 };
 
@@ -1596,7 +2435,8 @@ DenseMap<VPUIP::ITIBufferType, std::pair<mlir::ArrayAttr, mlir::ArrayAttr>> gene
             // 1. [0, n(0)] [n(0), n(1)] [n(1), n(2)] ... [n(m), n(m + 1)]
             //       => halos total range is [0, n(m + 1)]
             //       => actual workload is the last slice of the tensor along dim
-            //       => subtracting this from full tensor we get the actual output workload: [n(m+1), fullShape[dim]]
+            //       => subtracting this from full tensor we get the actual output workload: [n(m+1),
+            //       fullShape[dim]]
             // 2. [0, n(0)] [n(0), n(1)] ... [n(m), n(m + 1)] [n(p), n(p + 1)] [n(p + 1), n(p + 2)] ... [n(r),
             // fullShape[dim]]
             //       => merging the halos we get 2 ranges: [0, n(p + 2)] and [n(p), fullShape[dim]]
@@ -1644,8 +2484,9 @@ DenseMap<VPUIP::ITIBufferType, std::pair<mlir::ArrayAttr, mlir::ArrayAttr>> gene
                               "output begin/end for variant");
 
             if (mergedHalos.size() == 1) {
-                // mergedHalos[0].first == 0 => start of the halo is at the beginning of the tensor chunck, therefore
-                // the current workload starts at the end of the halo range and ends at the end of the full chunck
+                // mergedHalos[0].first == 0 => start of the halo is at the beginning of the tensor chunck,
+                // therefore the current workload starts at the end of the halo range and ends at the end of the
+                // full chunck
                 oduStartEnd[dim].first = mergedHalos[0].first == 0 ? mergedHalos[0].second : 0;
                 oduStartEnd[dim].second =
                         mergedHalos[0].first == 0 ? oduStartEnd[dim].second : mergedHalos[0].first - 1;
@@ -1793,6 +2634,13 @@ void buildHaloMultiClusteringTest(const nb::TestCaseJsonDescriptor& testDesc, ml
     VPUX_THROW_UNLESS(!weightsShape.empty(), "buildHaloMultiClusteringTest: Got empty weightsShape");
     VPUX_THROW_UNLESS(!weightsTableShape.empty(), "buildHaloMultiClusteringTest: Got empty weightsTableShape");
 
+    // set runtime resources
+    mlir::PassManager pmBuilderInit(module->getName(), mlir::OpPassManager::Nesting::Implicit);
+    auto initCompilerOptions = VPU::InitCompilerOptions(testDesc.getArchitecture(), VPU::CompilationMode::DefaultHW);
+    initCompilerOptions.numberOfDPUGroups = numClusters;
+    VPU::buildInitCompilerPipeline(pmBuilderInit, initCompilerOptions, log);
+    VPUX_THROW_UNLESS(mlir::succeeded(pmBuilderInit.run(module)), "Init compilation failed");
+
     const char* weightsFileName = "weights.dat";
 
     const auto inputParamType =
@@ -1832,14 +2680,17 @@ void buildHaloMultiClusteringTest(const nb::TestCaseJsonDescriptor& testDesc, ml
     auto functionInput = function.getArgument(0);
 
     const auto weightsValues = generateWeights(builder, weightsShape, weightsType, ctx, weightsFileName);
-    auto weightsAttribute = Const::ContentAttr::get(weightsValues);
-    weightsAttribute = weightsAttribute.reorder(DimsOrder::OYXI);
+    auto weightsAttributeSetup = Const::ContentAttr::transform(weightsValues);
+    weightsAttributeSetup = weightsAttributeSetup.reorder(DimsOrder::OYXI);
 
     if (auto qty = weightsType.dyn_cast<mlir::quant::QuantizedType>()) {
-        const auto quantizedType = vpux::changeStorageType(qty, weightsAttribute.getType().getElementType());
-        weightsAttribute = weightsAttribute.quantCast(quantizedType);
+        auto contentType = Const::inferFinalTypeAndSplat(weightsAttributeSetup.getBaseContent(),
+                                                         weightsAttributeSetup.getTransformations())
+                                   .first;
+        const auto quantizedType = vpux::changeStorageType(qty, contentType.getElementType());
+        weightsAttributeSetup = weightsAttributeSetup.quantCast(quantizedType);
         if (qty.getStorageType().isInteger(4)) {
-            weightsAttribute = weightsAttribute.bitPack(4);
+            weightsAttributeSetup = weightsAttributeSetup.bitPack(4);
         }
     }
 
@@ -1869,6 +2720,16 @@ void buildHaloMultiClusteringTest(const nb::TestCaseJsonDescriptor& testDesc, ml
                 new SoHKStrategy(functionBuilder, taskClusters, clustersPerDim, haloParams.heightHaloSize));
         break;
     }
+    case nb::SegmentationType::SOHK3: {
+        multiClusterStrategy.reset(
+                new SoHK3Strategy(functionBuilder, taskClusters, clustersPerDim[0], haloParams.heightHaloSize));
+        break;
+    }
+    case nb::SegmentationType::SOHW3: {
+        multiClusterStrategy.reset(new SoHW3Strategy(functionBuilder, taskClusters, clustersPerDim[0],
+                                                     haloParams.heightHaloSize, haloParams.widthHaloSize));
+        break;
+    }
     default: {
         VPUX_THROW("Segmentation type unsupported {0}", nb::to_string(segmentationType));
     }
@@ -1883,8 +2744,8 @@ void buildHaloMultiClusteringTest(const nb::TestCaseJsonDescriptor& testDesc, ml
     auto updateBarrier = functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(loc, freeBarrierId++);
 
     // Weights & Weights table segmentation & DMAs
-    multiClusterStrategy->handleConstants(weightsAttribute, testDesc.getArchitecture(), inputType, outputType,
-                                          offsetCMX, updateBarrier, waitWLMBarrier);
+    multiClusterStrategy->handleConstants(weightsAttributeSetup.get(), testDesc.getArchitecture(), inputType,
+                                          outputType, offsetCMX, updateBarrier, waitWLMBarrier);
 
     // Create output and output_iti buffs for each Conv
     multiClusterStrategy->createOutputItiBuffers(returnTypesVec, offsetCMX);
@@ -1931,14 +2792,12 @@ void buildHaloMultiClusteringTest(const nb::TestCaseJsonDescriptor& testDesc, ml
                 /*input_sparsity_map=*/nullptr, /*input_storage_element_table=*/nullptr, itiBuff.weights.getBuffer(),
                 /*weights_sparsity_map=*/nullptr, itiBuff.weightsTable.getBuffer(),
                 /*instruction_list_table=*/nullptr,
-                /*spr_lookup_table*/ nullptr,
-                /*activation_window=*/nullptr, itiBuff.input.getBuffer(), /*parent_input_sparsity_map=*/nullptr,
+                /*spr_lookup_table*/ nullptr, itiBuff.input.getBuffer(), /*parent_input_sparsity_map=*/nullptr,
                 /*parent_input_storage_element_table=*/nullptr, itiBuff.output.getBuffer(),
                 /*parent_output_sparsity_map=*/nullptr, mlir::ValueRange(outputItiBuffs), itiBuff.output.getBuffer(),
                 /*output_sparsity_map_buff=*/nullptr,
                 profilingParams.dpuProfilingEnabled ? itiBuff.profilingOutputCMX.getBuffer() : nullptr,
                 vpux::VPUIP::NCETaskType::CONV, kernelSize, kernelStrides, kernelPaddings,
-                /*activation_window_channel_length=*/nullptr,
                 /*is_continued=*/nullptr,
                 /*cm_sp_pattern=*/nullptr, /*is_segmented=*/nullptr, outChannelOffset,
                 /*input_channels_compression=*/nullptr);
@@ -1991,15 +2850,11 @@ void buildHaloMultiClusteringTest(const nb::TestCaseJsonDescriptor& testDesc, ml
 
     functionBuilder.create<mlir::func::ReturnOp>(loc, functionOutputs);
 
-    mlir::PassManager pm(module->getName(), mlir::OpPassManager::Nesting::Implicit);
-    auto initCompilerOptions = VPU::InitCompilerOptions(testDesc.getArchitecture(), VPU::CompilationMode::DefaultHW);
-    initCompilerOptions.numberOfDPUGroups = numClusters;
-    VPU::buildInitCompilerPipeline(pm, initCompilerOptions, log);
+    mlir::PassManager pmBuilderEnd(module->getName(), mlir::OpPassManager::Nesting::Implicit);
     if (conv.compress) {
-        pm.addPass(VPUIP::createCompressWeightsBTCPass(log));
+        pmBuilderEnd.addPass(VPUIP::createCompressWeightsBTCPass(log));
     }
-
-    VPUX_THROW_UNLESS(mlir::succeeded(pm.run(module)), "Compilation failed");
+    VPUX_THROW_UNLESS(mlir::succeeded(pmBuilderEnd.run(module)), "Compilation failed");
 
     SmallVector<mlir::Type> outputTensorTypesVec;
     for (std::size_t idx = 0; idx < numClusters; idx++) {

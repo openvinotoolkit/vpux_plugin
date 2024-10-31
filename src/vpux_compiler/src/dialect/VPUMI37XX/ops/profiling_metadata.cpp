@@ -27,7 +27,13 @@ void vpux::VPUMI37XX::ProfilingMetadataOp::serialize(elf::writer::BinaryDataSect
 }
 
 size_t vpux::VPUMI37XX::ProfilingMetadataOp::getBinarySize() {
-    return sizeof(ProfilingFB::ProfilingMeta);
+    // calculate size based on serialized form, instead of just sizeof(NetworkMetadata)
+    // serialization uses metadata that also gets stored in the blob and must be accounted for
+    // also for non-POD types (e.g. have vector as member) account for all data to be serialized
+    // (data owned by vector, instead of just pointer)
+    auto denseMetaAttr = getMetadata().dyn_cast<mlir::DenseElementsAttr>();
+    VPUX_THROW_UNLESS(denseMetaAttr != nullptr, "ProfilingMetadata's data is NULL");
+    return denseMetaAttr.getRawData().size();
 }
 
 size_t vpux::VPUMI37XX::ProfilingMetadataOp::getAlignmentRequirements() {

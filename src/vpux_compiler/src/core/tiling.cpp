@@ -7,10 +7,10 @@
 #include <llvm/Support/ThreadPool.h>
 #include <algorithm>
 #include <cmath>
-#include <optional>
 
 #include "vpux/compiler/core/layers.hpp"
 #include "vpux/compiler/core/tiling.hpp"
+#include "vpux/compiler/core/type_interfaces.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/utils/core/numeric.hpp"
 
@@ -250,6 +250,25 @@ mlir::FailureOr<OutputTiling> fillDividedTilesYuvToRgbOp(ShapeRef divisors, Shap
     return dividedTiles;
 }
 
+mlir::FailureOr<OutputTiling> fillDividedTilesMVN1MeanVarOp(mlir::Operation* op, ShapeRef divisors, ShapeRef shape) {
+    auto mvn1MeanVarOp = mlir::dyn_cast<VPU::MVN1MeanVarOp>(op);
+    VPUX_THROW_UNLESS(mvn1MeanVarOp != nullptr, "Only support MVN1MeanVarOp, but got {0}", op->getName());
+
+    std::optional<SmallVector<int64_t>> optionalAlignment = std::nullopt;
+    int64_t groupC = 1;
+    if (mvn1MeanVarOp.getInternalReshape().has_value()) {
+        const auto internalReshape = parseIntArrayAttr<int64_t>(mvn1MeanVarOp.getInternalReshape().value());
+        const auto origShape = parseIntArrayAttr<int64_t>(mvn1MeanVarOp.getOrigShape());
+        groupC = origShape[Dims4D::Act::C.ind()] / internalReshape[Dims4D::Act::C.ind()];
+
+        auto alignment = SmallVector<int64_t>(shape.size(), 1);
+        alignment[Dims4D::Act::C.ind()] = groupC;
+        optionalAlignment = std::move(alignment);
+    }
+
+    return vpux::fillDividedTiles(divisors, shape, optionalAlignment, /*unrollSpatialFirst = */ false);
+}
+
 mlir::FailureOr<OutputTiling> vpux::fillDividedTiles(ShapeRef divisors, ShapeRef shape,
                                                      std::optional<ArrayRef<int64_t>> alignment,
                                                      bool unrollSpatialFirst) {
@@ -327,7 +346,7 @@ std::optional<SmallVector<int64_t>> getAlignment(mlir::Operation* op, ShapeRef d
 
     auto alignment = SmallVector<int64_t>(shape.size(), 1);
 
-    if (op->hasTrait<VPU::EltwiseOp>()) {
+    if (op->hasTrait<VPU::EltwiseOp>() || mlir::isa<VPU::MemPermuteOp>(op)) {
         if (auto factor = getSubByteAlignmentFactor(); factor > 1) {
             std::transform(divisors.begin(), divisors.end(), alignment.begin(), [&factor](int x) {
                 return x > 1 ? factor : x;
@@ -349,14 +368,16 @@ std::optional<SmallVector<int64_t>> getAlignment(mlir::Operation* op, ShapeRef d
     return optionalAlignment;
 }
 
-std::optional<SmallVector<int64_t>> calculateAlignmentLCM(ArrayRef<SmallVector<int64_t>> alignments) {
+mlir::FailureOr<std::optional<SmallVector<int64_t>>> calculateAlignmentLCM(ArrayRef<SmallVector<int64_t>> alignments) {
     if (alignments.empty()) {
-        return std::nullopt;
+        return std::optional<SmallVector<int64_t>>(std::nullopt);
     }
 
     const auto numDimensions = alignments[0].size();
-    for (auto alignment : alignments) {
-        VPUX_THROW_UNLESS(alignment.size() == numDimensions, "All alignment must have the same size");
+    if (std::any_of(alignments.begin(), alignments.end(), [&](auto alignment) {
+            return alignment.size() != numDimensions;
+        })) {
+        return mlir::failure();
     }
 
     SmallVector<int64_t> alignmentLCM(numDimensions, 1);
@@ -366,12 +387,16 @@ std::optional<SmallVector<int64_t>> calculateAlignmentLCM(ArrayRef<SmallVector<i
         }
     }
 
-    return alignmentLCM;
+    return std::optional<SmallVector<int64_t>>(alignmentLCM);
 }
 
 mlir::FailureOr<OutputTiling> vpux::fillDividedTiles(mlir::Operation* op, ShapeRef divisors, ShapeRef shape) {
     if (mlir::isa<VPU::YuvToRgbOp>(op)) {
         return fillDividedTilesYuvToRgbOp(divisors, shape);
+    }
+
+    if (mlir::isa<VPU::MVN1MeanVarOp>(op)) {
+        return fillDividedTilesMVN1MeanVarOp(op, divisors, shape);
     }
 
     std::optional<SmallVector<int64_t>> optionalAlignment = std::nullopt;
@@ -384,7 +409,11 @@ mlir::FailureOr<OutputTiling> vpux::fillDividedTiles(mlir::Operation* op, ShapeR
                 alignments.emplace_back(currentAlignment.value());
             }
         }
-        optionalAlignment = calculateAlignmentLCM(alignments);
+        auto alignmentLCMResult = calculateAlignmentLCM(alignments);
+        if (mlir::failed(alignmentLCMResult)) {
+            return mlir::failure();
+        }
+        optionalAlignment = alignmentLCMResult.value();
     } else {
         optionalAlignment = getAlignment(op, divisors, shape);
     }
@@ -834,8 +863,6 @@ SmallVector<int64_t> backInferOffsetForInterpolate(
 InputTiling vpux::backInferInterpolateTile(const vpux::TileInfo& outputTile, ArrayRef<int64_t> initialInputDims,
                                            ArrayRef<int64_t> initialOutputDims, ArrayRef<int64_t> initialInputOffsets,
                                            ArrayRef<int64_t> initialOutputOffsets, ArrayRef<int64_t> currentInputDims,
-                                           std::optional<ArrayRef<int64_t>> coordinatesDims,
-                                           std::optional<ArrayRef<int64_t>> lambdasDims,
                                            vpux::IE::InterpolateMode interpolateMode,
                                            vpux::IE::InterpolateCoordMode coordMode,
                                            vpux::IE::InterpolateNearestMode nearestMode, vpux::Logger log) {
@@ -866,15 +893,13 @@ InputTiling vpux::backInferInterpolateTile(const vpux::TileInfo& outputTile, Arr
         inferedInputShape[ind] = inferedInputOffsetEnd[ind] - inferedInputOffsetBegin[ind] + 1;
     }
 
-    TileInfo inputTile(Shape(inferedInputShape), Shape(inferedInputOffsetBegin), outputTile.axis);
-    SmallVector<TileInfo> tiles({std::move(inputTile)});
-    if (coordinatesDims.has_value()) {
-        tiles.emplace_back(Shape(coordinatesDims.value()));
-    }
-    if (lambdasDims.has_value()) {
-        tiles.emplace_back(Shape(lambdasDims.value()));
-    }
-    return InputTiling{tiles};
+    TileInfo inputTile{inferedInputShape.size()};
+    inputTile.shape = Shape(inferedInputShape);
+    inputTile.offsets = Shape(inferedInputOffsetBegin);
+    inputTile.axis = outputTile.axis;
+    SmallVector<TileInfo> tiles(1, inputTile);
+    auto iTiling = InputTiling{tiles};
+    return iTiling;
 }
 
 //
@@ -883,13 +908,12 @@ InputTiling vpux::backInferInterpolateTile(const vpux::TileInfo& outputTile, Arr
 
 InputTiling vpux::backInferGatherTile(const vpux::TileInfo& outputTile, const ShapeRef& origInputShape,
                                       const ShapeRef& origIndicesShape, int64_t axisValue, int64_t batchDims,
-                                      bool hasAxisTensor, vpux::Logger log) {
+                                      bool hasAxisTensor, const int64_t indicesRank, vpux::Logger log) {
     log.trace("Try to back infer input tiling for Gather, output tile: {0}", outputTile);
     TileInfo inputTile(origInputShape);
     TileInfo indicesTile(origIndicesShape);
 
     auto inputRank = origInputShape.size();
-    auto indicesRank = origIndicesShape.size();
 
     for (int64_t i = 0; i < static_cast<int64_t>(inputRank); ++i) {
         if (i < axisValue) {
@@ -1240,6 +1264,10 @@ DimArr vpux::getTileDimOrder(mlir::Operation* op, TilingMode tilingMode, Logger 
             llvm::TypeSwitch<mlir::Operation*, DimArr>(op)
                     .Case<VPU::NCEConvolutionOp, VPU::NCECompressConvolutionOp>([&](mlir::Operation* op) {
                         log.nest(2).trace("Check tile Dim order for Op at {0}", op->getLoc());
+                        // This can be removed when VPUNN is upgraded to support INT4 data type, tracked in E#113316.
+                        if (VPU::isNCEWithInt4Weights(op)) {
+                            return getTileDimOrderByShape(op, Dims4D::Filter::OC, Dims4D::Act::H);
+                        }
                         return getTileDimOrderByShape(op, Dims4D::Filter::IC, Dims4D::Act::C);
                     })
                     .Case<VPU::NCEDepthConvolutionOp>([&](mlir::Operation* op) {
@@ -1410,7 +1438,7 @@ bool canSWLayerBeEvenlyUnrolled(mlir::Operation* op, const OutputTiling& tiles, 
             auto outDistributedType = VPU::getDistributedOutputTypeFromOp(clusteredOp, outputTileType, numClusters);
             auto dimIdx = VPUIP::getTilingDimIndex(outDistributedType);
             if (dimIdx.has_value() && dimIdx == targetDim.ind()) {
-                factor *= numClusters.getInt();
+                factor *= numClusters;
             }
         }
 
@@ -1544,13 +1572,25 @@ bool isSupportedTileSizeForHWLayer(mlir::Operation* op, ShapeRef nTilesOnDim, Ti
         return false;
     }
 
+    // For isolated tiling isSupportedTiling will check all of the tiles passed to it
+    // which results in a lot of time being spent checking identical tiles.
+    // Limiting the tiles to only those that have unique shape and will result
+    // in unique input tile speeds up compilation significantly.
+    // For prefetch and pipelining tiling isSupportedTiling will only check last tile
+    // so there is no need to limit number of tiles.
+    if (tilingMode == TilingMode::ISOLATED) {
+        auto tileCandidates = VPU::getUniqueShapeTilingCandidates(op, tiles.value(), log);
+        return isMultiClusterCompatibleForTiling(op, tileCandidates, log) &&
+               tilingInfo.isSupportedTiling(tileCandidates, tilingMode, log);
+    }
+
     return isMultiClusterCompatibleForTiling(op, tiles.value(), log) &&
            tilingInfo.isSupportedTiling(tiles.value(), tilingMode, log);
 }
 
 std::shared_future<bool> checkSupportedTilingAsync(mlir::Operation* op, ShapeRef nTilesOnDim, TilingMode tilingMode,
-                                                   llvm::ThreadPool& threadPool, Logger log) {
-    return threadPool.async([op, nTilesOnDim, tilingMode, log]() {
+                                                   llvm::ThreadPoolTaskGroup& taskGroup, Logger log) {
+    return taskGroup.async([op, nTilesOnDim, tilingMode, log]() {
         log.trace("[Async] Check tiling {0} for op {1}", nTilesOnDim, op->getLoc());
         return isSupportedTileSizeForHWLayer(op, nTilesOnDim, tilingMode, log);
     });
@@ -1667,7 +1707,18 @@ mlir::FailureOr<OutputTiling> vpux::getHWLayerTilingStrategyWithTileDimOrder(mli
                     op->getName());
 
     const auto outputType = op->getResult(0).getType().cast<vpux::NDTypeInterface>();
-    const auto outputShape = outputType.getShape();
+
+    // NB: bounds information is used for tiling when dynamic shape is passed
+    // TODO: E#113258 this logic can be put inside getShape impelementation
+    const auto outputShape = [&outputType] {
+        const auto origOutputShape = outputType.getShape();
+        if (origOutputShape.isDynamic()) {
+            const auto bounds =
+                    parseIntArrayAttr<int64_t>(outputType.dyn_cast<vpux::BoundedTypeInterface>().getBounds());
+            return vpux::Shape(bounds.begin(), bounds.end());
+        }
+        return vpux::Shape(origOutputShape.begin(), origOutputShape.end());
+    }();
 
     VPUX_THROW_UNLESS(outputShape.size() == 4 || outputShape.size() == DimsGroups5D::Act::numDims,
                       "Unsupported operation '{0}' at '{1}', it has non 4D/5D result", op->getName(), op->getLoc());
@@ -1729,6 +1780,7 @@ mlir::FailureOr<OutputTiling> vpux::getHWLayerTilingStrategyWithTileDimOrder(mli
 
         auto ctx = op->getContext();
         auto& threadPool = ctx->getThreadPool();
+        llvm::ThreadPoolTaskGroup taskGroup(threadPool);
 
         // check supported tiling asynchronously
         for (size_t i = 0; i < MAX_CONCURRENT_CHECKERS; i++) {
@@ -1737,16 +1789,13 @@ mlir::FailureOr<OutputTiling> vpux::getHWLayerTilingStrategyWithTileDimOrder(mli
             if (currTilesOnDim[dimToTile] <= maxNumTiles[dimToTile.ind()]) {
                 tilingCandidates.push_back(currTilesOnDim);
                 pendingCheckers.push_back(
-                        checkSupportedTilingAsync(op, tilingCandidates.back(), tilingMode, threadPool, log));
+                        checkSupportedTilingAsync(op, tilingCandidates.back(), tilingMode, taskGroup, log));
             }
 
             dimPlus(currTilesOnDim, dimToTile);
         }
 
-        // wait for all checking threads to complete
-        for (auto& thread : pendingCheckers) {
-            thread.wait();
-        }
+        taskGroup.wait();
 
         // synchronize the check results
         bool isSupported = false;

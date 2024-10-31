@@ -130,7 +130,7 @@ mlir::LogicalResult MatMulRewriter::matchAndRewrite(VPURT::TaskOp vpurtTask, mli
 
         auto newOp = mlir::cast<VPUIP::NCEClusterTaskOp>(rewriter.clone(*innerTask, mapper));
         newOp.getOutput().setType(typeTo4D(newOp.getOutput().getType()));
-        rewriter.replaceOp(innerTask, newOp.getOutput());
+        rewriter.replaceOp(innerTask, newOp.getOutputs());
     }
 
     // Erase original VPURT task

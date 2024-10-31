@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation
+// Copyright (C) 2022-2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -15,32 +15,28 @@ namespace ov {
 namespace test {
 
 class GroupConvolutionLayerTestCommon : public GroupConvolutionLayerTest, virtual public VpuOv2LayerTest {};
+class GroupConvolutionLayerTest_SW : public GroupConvolutionLayerTestCommon {};
+class GroupConvolutionLayerTest_HW : public GroupConvolutionLayerTestCommon {};
 
-using GroupConvolutionLayerTest_NPU3720_HW = GroupConvolutionLayerTestCommon;
-using GroupConvolutionLayerTest_NPU3720_SW = GroupConvolutionLayerTestCommon;
-
-class GroupConvolutionLayerTest_NPU4000_SW : public GroupConvolutionLayerTestCommon {};
-class GroupConvolutionLayerTest_NPU4000_HW : public GroupConvolutionLayerTestCommon {};
-
-TEST_P(GroupConvolutionLayerTest_NPU3720_HW, HW) {
+TEST_P(GroupConvolutionLayerTest_HW, NPU3720) {
     rel_threshold = 0.01;
     setDefaultHardwareMode();
     run(Platform::NPU3720);
 }
 
-TEST_P(GroupConvolutionLayerTest_NPU3720_SW, SW) {
+TEST_P(GroupConvolutionLayerTest_SW, NPU3720) {
     rel_threshold = 0.01;
     setReferenceSoftwareMode();
     run(Platform::NPU3720);
 }
 
-TEST_P(GroupConvolutionLayerTest_NPU4000_HW, HW) {
+TEST_P(GroupConvolutionLayerTest_HW, NPU4000) {
     rel_threshold = 0.01;
     setDefaultHardwareMode();
     run(Platform::NPU4000);
 }
 
-TEST_P(GroupConvolutionLayerTest_NPU4000_SW, SW) {
+TEST_P(GroupConvolutionLayerTest_SW, NPU4000) {
     rel_threshold = 0.01;
     setReferenceSoftwareMode();
     run(Platform::NPU4000);
@@ -84,19 +80,11 @@ const auto groupConv1D_AutoPadValid = testing::Combine(
         groupConv1DParams_AutoPadValid, ::testing::ValuesIn(modelTypes),
         ::testing::ValuesIn(static_shapes_to_test_representation(inputShapes1d)), ::testing::Values(DEVICE_NPU));
 
-// ------ NPU3720 ------
-INSTANTIATE_TEST_CASE_P(smoke_GroupConvolution1D_ExplicitPadding, GroupConvolutionLayerTest_NPU3720_SW,
-                        groupConv1D_ExplicitPadding, GroupConvolutionLayerTest::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_GroupConvolution1D_ExplicitPadding, GroupConvolutionLayerTest_SW,
+                         groupConv1D_ExplicitPadding, GroupConvolutionLayerTest::getTestCaseName);
 
-INSTANTIATE_TEST_CASE_P(smoke_GroupConvolution1D_AutoPadValid, GroupConvolutionLayerTest_NPU3720_SW,
-                        groupConv1D_AutoPadValid, GroupConvolutionLayerTest::getTestCaseName);
-
-// ------ NPU4000 ------
-INSTANTIATE_TEST_CASE_P(smoke_GroupConvolution1D_ExplicitPadding, GroupConvolutionLayerTest_NPU4000_SW,
-                        groupConv1D_ExplicitPadding, GroupConvolutionLayerTest::getTestCaseName);
-
-INSTANTIATE_TEST_CASE_P(smoke_precommit_GroupConvolution1D_AutoPadValid, GroupConvolutionLayerTest_NPU4000_SW,
-                        groupConv1D_AutoPadValid, GroupConvolutionLayerTest::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_GroupConvolution1D_AutoPadValid, GroupConvolutionLayerTest_SW, groupConv1D_AutoPadValid,
+                         GroupConvolutionLayerTest::getTestCaseName);
 
 /* ============= 2D GroupConvolution ============= */
 const std::vector<std::vector<size_t>> kernels = {{3, 3}};
@@ -133,25 +121,14 @@ const auto groupConv2D_LargeStrides = testing::Combine(
         groupConv2DParams_LargeStrides, ::testing::ValuesIn(modelTypes),
         ::testing::ValuesIn({static_shapes_to_test_representation({inputShapes[1]})}), ::testing::Values(DEVICE_NPU));
 
-// ------ NPU3720 ------
-INSTANTIATE_TEST_SUITE_P(smoke_GroupConvolution2D_ExplicitPadding, GroupConvolutionLayerTest_NPU3720_SW,
+INSTANTIATE_TEST_SUITE_P(smoke_GroupConvolution2D_ExplicitPadding, GroupConvolutionLayerTest_SW,
                          groupConv2D_ExplicitPadding, GroupConvolutionLayerTest::getTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(smoke_GroupConvolution2D_AutoPadValid, GroupConvolutionLayerTest_NPU3720_SW,
-                         groupConv2D_AutoPadValid, GroupConvolutionLayerTest::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_GroupConvolution2D_AutoPadValid, GroupConvolutionLayerTest_SW, groupConv2D_AutoPadValid,
+                         GroupConvolutionLayerTest::getTestCaseName);
 
-INSTANTIATE_TEST_CASE_P(smoke_GroupConvolution2D_LargeStrides, GroupConvolutionLayerTest_NPU3720_SW,
-                        groupConv2D_LargeStrides, GroupConvolutionLayerTest::getTestCaseName);
-
-// ------ NPU4000 ------
-INSTANTIATE_TEST_SUITE_P(smoke_GroupConvolution2D_ExplicitPadding, GroupConvolutionLayerTest_NPU4000_SW,
-                         groupConv2D_ExplicitPadding, GroupConvolutionLayerTest::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_GroupConvolution2D_AutoPadValid, GroupConvolutionLayerTest_NPU4000_SW,
-                         groupConv2D_AutoPadValid, GroupConvolutionLayerTest::getTestCaseName);
-
-INSTANTIATE_TEST_CASE_P(smoke_GroupConvolution2D_LargeStrides, GroupConvolutionLayerTest_NPU4000_SW,
-                        groupConv2D_LargeStrides, GroupConvolutionLayerTest::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_GroupConvolution2D_LargeStrides, GroupConvolutionLayerTest_SW, groupConv2D_LargeStrides,
+                         GroupConvolutionLayerTest::getTestCaseName);
 
 /* ============= 3D GroupConvolution ============= */
 const std::vector<std::vector<size_t>> kernels3d = {{3, 3, 3}};
@@ -170,17 +147,7 @@ const auto groupConv3DParams_AutoPadValid =
                            ::testing::Values(std::vector<ptrdiff_t>({0, 0, 0})), ::testing::ValuesIn(dilations3d),
                            ::testing::Values(4), ::testing::Values(2), ::testing::Values(ov::op::PadType::VALID));
 
-// ------ NPU3720 ------
-
-INSTANTIATE_TEST_SUITE_P(smoke_GroupConvolution3D_ExplicitPadding, GroupConvolutionLayerTest_NPU3720_HW,
-                         ::testing::Combine(groupConv3DParams_ExplicitPadding, ::testing::ValuesIn(modelTypes),
-                                            ::testing::ValuesIn(static_shapes_to_test_representation(inputShapes3d)),
-                                            ::testing::Values(DEVICE_NPU)),
-                         GroupConvolutionLayerTest::getTestCaseName);
-
-// ------ NPU4000 ------
-
-INSTANTIATE_TEST_SUITE_P(smoke_GroupConvolution3D_ExplicitPadding, GroupConvolutionLayerTest_NPU4000_HW,
+INSTANTIATE_TEST_SUITE_P(smoke_GroupConvolution3D_ExplicitPadding, GroupConvolutionLayerTest_HW,
                          ::testing::Combine(groupConv3DParams_ExplicitPadding, ::testing::ValuesIn(modelTypes),
                                             ::testing::ValuesIn(static_shapes_to_test_representation(inputShapes3d)),
                                             ::testing::Values(DEVICE_NPU)),

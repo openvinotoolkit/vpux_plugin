@@ -20,7 +20,6 @@ func.func @OptimizeParallelNonConstCopies(
         %output2: memref<1x16x112x112xf16, #NHWC, @DDR>)
          -> (memref<1x16x112x112xf16, #NHWC, @DDR>, memref<1x16x112x112xf16, #NHWC, @DDR>){
     %wt = const.Declare memref<16x1x1x4xsi32, @CMX_NN> = dense<1> : tensor<16x1x1x4xsi32>
-    %act_win = const.Declare memref<1x1x1x16xui8, @CMX_NN> = dense<1> : tensor<1x1x1x16xui8>
     %0 = memref.alloc() : memref<1x16x112x112xf16, #NHWC, @DDR>
 
     %1 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>}
@@ -34,7 +33,6 @@ func.func @OptimizeParallelNonConstCopies(
              -> memref<1x16x112x112xf16, #NHWC, @CMX_NN>
     %4 = memref.alloc() : memref<1x16x112x112xf16, #NHWC, @CMX_NN>
     %5 = VPUIP.NCEClusterTask {
-            activation_window_channel_length = 27 : i64,
             kernel_padding = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
             kernel_size = [1, 1],
             kernel_strides = [1, 1],
@@ -42,7 +40,6 @@ func.func @OptimizeParallelNonConstCopies(
         }
         input(%3 : memref<1x16x112x112xf16, #NHWC, @CMX_NN>)
         weight_table(%wt : memref<16x1x1x4xsi32, @CMX_NN>)
-        activation_window(%act_win : memref<1x1x1x16xui8, @CMX_NN>)
         parent_input(%3 : memref<1x16x112x112xf16, #NHWC, @CMX_NN>)
         parent_output(%4 : memref<1x16x112x112xf16, #NHWC, @CMX_NN>)
         outputs(%4 : memref<1x16x112x112xf16, #NHWC, @CMX_NN>) -> memref<1x16x112x112xf16, #NHWC, @CMX_NN>
@@ -64,7 +61,6 @@ func.func @OptimizeParallelNonConstCopies(
              -> memref<1x16x112x112xf16, #NHWC, @CMX_NN>
     %9 = memref.alloc() : memref<1x16x112x112xf16, #NHWC, @CMX_NN>
     %10 = VPUIP.NCEClusterTask {
-            activation_window_channel_length = 27 : i64,
             kernel_padding = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
             kernel_size = [1, 1],
             kernel_strides = [1, 1],
@@ -72,7 +68,6 @@ func.func @OptimizeParallelNonConstCopies(
         }
         input(%8 : memref<1x16x112x112xf16, #NHWC, @CMX_NN>)
         weight_table(%wt : memref<16x1x1x4xsi32, @CMX_NN>)
-        activation_window(%act_win : memref<1x1x1x16xui8, @CMX_NN>)
         parent_input(%8 : memref<1x16x112x112xf16, #NHWC, @CMX_NN>)
         parent_output(%9 : memref<1x16x112x112xf16, #NHWC, @CMX_NN>)
         outputs(%9 : memref<1x16x112x112xf16, #NHWC, @CMX_NN>) -> memref<1x16x112x112xf16, #NHWC, @CMX_NN>
@@ -120,7 +115,6 @@ func.func @OptimizeParallelSubViewPatternCopies(
         %output2: memref<1x16x112x112xf16, #NHWC, @DDR>)
          -> (memref<1x16x112x112xf16, #NHWC, @DDR>, memref<1x16x112x112xf16, #NHWC, @DDR>){
     %wt = const.Declare memref<16x1x1x4xsi32, @CMX_NN> = dense<1> : tensor<16x1x1x4xsi32>
-    %act_win = const.Declare memref<1x1x1x16xui8, @CMX_NN> = dense<1> : tensor<1x1x1x16xui8>
     %0 = memref.alloc() : memref<1x16x112x113xf16, #NHWC, @DDR>
 
     %1 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>}
@@ -136,7 +130,6 @@ func.func @OptimizeParallelSubViewPatternCopies(
              -> memref<1x16x112x112xf16, #NHWC, @CMX_NN>
     %5 = memref.alloc() : memref<1x16x112x112xf16, #NHWC, @CMX_NN>
     %6 = VPUIP.NCEClusterTask {
-            activation_window_channel_length = 27 : i64,
             kernel_padding = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
             kernel_size = [1, 1],
             kernel_strides = [1, 1],
@@ -144,7 +137,6 @@ func.func @OptimizeParallelSubViewPatternCopies(
         }
         input(%4 : memref<1x16x112x112xf16, #NHWC, @CMX_NN>)
         weight_table(%wt : memref<16x1x1x4xsi32, @CMX_NN>)
-        activation_window(%act_win : memref<1x1x1x16xui8, @CMX_NN>)
         parent_input(%4 : memref<1x16x112x112xf16, #NHWC, @CMX_NN>)
         parent_output(%5 : memref<1x16x112x112xf16, #NHWC, @CMX_NN>)
         outputs(%5 : memref<1x16x112x112xf16, #NHWC, @CMX_NN>) -> memref<1x16x112x112xf16, #NHWC, @CMX_NN>
@@ -168,7 +160,6 @@ func.func @OptimizeParallelSubViewPatternCopies(
              -> memref<1x16x112x112xf16, #NHWC, @CMX_NN>
     %11 = memref.alloc() : memref<1x16x112x112xf16, #NHWC, @CMX_NN>
     %12 = VPUIP.NCEClusterTask {
-            activation_window_channel_length = 27 : i64,
             kernel_padding = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
             kernel_size = [1, 1],
             kernel_strides = [1, 1],
@@ -176,7 +167,6 @@ func.func @OptimizeParallelSubViewPatternCopies(
         }
         input(%10 : memref<1x16x112x112xf16, #NHWC, @CMX_NN>)
         weight_table(%wt : memref<16x1x1x4xsi32, @CMX_NN>)
-        activation_window(%act_win : memref<1x1x1x16xui8, @CMX_NN>)
         parent_input(%10 : memref<1x16x112x112xf16, #NHWC, @CMX_NN>)
         parent_output(%11 : memref<1x16x112x112xf16, #NHWC, @CMX_NN>)
         outputs(%11 : memref<1x16x112x112xf16, #NHWC, @CMX_NN>) -> memref<1x16x112x112xf16, #NHWC, @CMX_NN>
@@ -224,7 +214,7 @@ func.func @NotOptimizeConstCopyForCompressedConv(%arg0: memref<1x16x224x224x!qEl
     %cst = const.Declare memref<64x1x1x4xsi32> = dense<1> : tensor<64x1x1x4xsi32>
     %cst_0 = const.Declare memref<64x1x1x4xsi32> = dense<1> : tensor<64x1x1x4xsi32>
     %cst_1 = const.Declare memref<64x1x1x208x!qElemType, #NHWC> = dense<1.0> :
-        tensor<64x3x7x7xf16>, [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType>,
+        tensor<64x3x7x7xf16>, [#const.CastElemType<ui8>, #const.CastElemType<!qElemType>,
         #const.PadWithZero<[0, 0, 0, 0], [0, 1, 0, 0]>, #const.Reorder<#NHWC>, #const.Reorder<#NCHW>,
         #const.Reshape<[64, 1, 1, 196]>, #const.PadWithZero<[0, 0, 0, 0], [0, 0, 0, 12]>, #const.Reorder<#NHWC>]
     %2 = memref.alloc() : memref<64x1x1x208x!qElemType, #NHWC, [@CMX_NN, 0]>
@@ -293,7 +283,7 @@ func.func @NotOptimizeConstCopyForCompressedConv(%arg0: memref<1x16x224x224x!qEl
     return %NCEOp_0, %NCEOp_1 : memref<1x64x112x112x!qElemType3, #NHWC, [@CMX_NN, 0]>, memref<1x64x112x112x!qElemType3, #NHWC, [@CMX_NN, 0]>
 
     //CHECK-DAG:    [[CST:%.*]] = const.Declare memref<64x1x1x4xsi32> = dense<1> : tensor<64x1x1x4xsi32>
-    //CHECK-DAG:    [[CST_0:%.*]] = const.Declare memref<64x1x1x208x!qElemType2, #NHWC> = dense<1.000000e+00> : tensor<64x3x7x7xf16>, [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType2>, #const.PadWithZero<[0, 0, 0, 0], [0, 1, 0, 0]>, #const.Reorder<#NHWC>, #const.Reorder<#NCHW>, #const.Reshape<[64, 1, 1, 196]>, #const.PadWithZero<[0, 0, 0, 0], [0, 0, 0, 12]>, #const.Reorder<#NHWC>]
+    //CHECK-DAG:    [[CST_0:%.*]] = const.Declare memref<64x1x1x208x!qElemType2, #NHWC> = dense<1.000000e+00> : tensor<64x3x7x7xf16>, [#const.CastElemType<ui8>, #const.CastElemType<!qElemType2>, #const.PadWithZero<[0, 0, 0, 0], [0, 1, 0, 0]>, #const.Reorder<#NHWC>, #const.Reorder<#NCHW>, #const.Reshape<[64, 1, 1, 196]>, #const.PadWithZero<[0, 0, 0, 0], [0, 0, 0, 12]>, #const.Reorder<#NHWC>]
     //CHECK:        [[BUF0:%.*]] = memref.alloc() : memref<64x1x1x208x!qElemType2, #NHWC, [@CMX_NN, 0]>
     //CHECK:        [[WEIGHTS:%.*]] = VPUIP.Copy inputs([[CST_0]] : memref<64x1x1x208x!qElemType2, #NHWC>) outputs([[BUF0]] : memref<64x1x1x208x!qElemType2, #NHWC, [@CMX_NN, 0]>) -> memref<64x1x1x208x!qElemType2, #NHWC, [@CMX_NN, 0]>
     //CHECK:        [[BUF1:%.*]] = memref.alloc() : memref<64x1x1x4xsi32, [@CMX_NN, 0]>

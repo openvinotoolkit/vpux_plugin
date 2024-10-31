@@ -1,11 +1,12 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 
 #include <numeric>
 
 #include <mlir/Dialect/Quant/QuantTypes.h>
 
+#include "vpux/compiler/dialect/VPU/transforms/factories/nce_sparsity_converters.hpp"
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_sparsity.hpp"
 #include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
@@ -49,6 +50,16 @@ void buildDifferentClustersDPUTest(const nb::TestCaseJsonDescriptor& testDesc, m
     VPUX_THROW_UNLESS(!outputShape.empty(), "buildDifferentClustersDPUTest: Got empty outputShape");
     VPUX_THROW_UNLESS(!weightsShape.empty(), "buildDifferentClustersDPUTest: Got empty weightsShape");
     VPUX_THROW_UNLESS(!weightsTableShape.empty(), "buildDifferentClustersDPUTest: Got empty weightsTableShape");
+
+    // set runtime resources
+
+    mlir::PassManager pmBuilderInit(module->getName(), mlir::OpPassManager::Nesting::Implicit);
+    const auto maxClusterOutput = static_cast<size_t>(*std::max_element(outputClusters.begin(), outputClusters.end()));
+    const auto numTiles = std::max({inputCluster, weightsCluster, weightsTableCluster, maxClusterOutput}) + 1;
+    auto initCompilerOptions = VPU::InitCompilerOptions(testDesc.getArchitecture(), VPU::CompilationMode::DefaultHW);
+    initCompilerOptions.setNumberOfDPUGroups(numTiles);
+    VPU::buildInitCompilerPipeline(pmBuilderInit, initCompilerOptions, log);
+    VPUX_THROW_UNLESS(mlir::succeeded(pmBuilderInit.run(module)), "Init compilation failed");
 
     const char* weightsFileName = "weights.dat";
 
@@ -99,7 +110,7 @@ void buildDifferentClustersDPUTest(const nb::TestCaseJsonDescriptor& testDesc, m
     auto functionInput = function.getArgument(0);
 
     const auto weightsValues = generateWeights(builder, weightsShape, weightsType, ctx, weightsFileName);
-    const auto weightsAttribute = generateDefaultWeightsAttr(weightsValues, weightsType);
+    auto weightsAttribute = generateDefaultWeightsAttr(weightsValues, weightsType);
 
     const auto weightsDDRType =
             getMemRefType(VPURT::BufferSection::Constant, weightsShape, weightsType, DimsOrder::NHWC);
@@ -112,7 +123,7 @@ void buildDifferentClustersDPUTest(const nb::TestCaseJsonDescriptor& testDesc, m
     auto inputCMX = createDeclareTensorOp(functionBuilder, VPURT::BufferSection::CMX_NN, inputShape, inputType,
                                           DimsOrder::NHWC, inputStrides, inputCluster, INPUT_CMX_OFFSET);
 
-    auto weightsDDR = functionBuilder.create<vpux::Const::DeclareOp>(loc, weightsDDRType, weightsAttribute);
+    auto weightsDDR = functionBuilder.create<vpux::Const::DeclareOp>(loc, weightsDDRType, std::move(weightsAttribute));
 
     auto& weightsOutputChannelsStrideInBits = weightsStrides[vpux::Dims4D::Filter::OC];
 
@@ -122,10 +133,12 @@ void buildDifferentClustersDPUTest(const nb::TestCaseJsonDescriptor& testDesc, m
 
     const auto weightsTableDDRType = mlir::RankedTensorType::get(weightsTableShape, int32);
     const auto sparsityPtrStep = 0;
+    const auto ppeConverter = VPU::NCESparsity::getPPEConverterCb(testDesc.getArchitecture());
+    const auto biasConverter = VPU::NCESparsity::getBiasConverterCb(testDesc.getArchitecture());
     const auto weightsTable = VPU::NCESparsity::getWeightsTable(
             inputType, outputType, static_cast<std::int32_t>(WEIGHTS_CMX_OFFSET),
             static_cast<std::int32_t>(weightsOutputChannelsStrideInBits.count() / CHAR_BIT),
-            VPU::NCESparsity::SPARSITY_PTR_WHEN_NO_SPARSITY, sparsityPtrStep, testDesc.getArchitecture(),
+            VPU::NCESparsity::SPARSITY_PTR_WHEN_NO_SPARSITY, sparsityPtrStep, ppeConverter, biasConverter,
             output.shape[1], weightsType);
 
     const auto weightsTableDDRMemRef =
@@ -134,7 +147,7 @@ void buildDifferentClustersDPUTest(const nb::TestCaseJsonDescriptor& testDesc, m
             mlir::DenseElementsAttr::get(weightsTableDDRType, llvm::ArrayRef<std::int32_t>(weightsTable));
     auto weightsTableDDR = functionBuilder.create<vpux::Const::DeclareOp>(
             loc, weightsTableDDRMemRef,
-            vpux::Const::ContentAttr::get(weightsTableValues).reorder(vpux::DimsOrder::NHWC));
+            vpux::Const::ContentAttr::transform(weightsTableValues).reorder(vpux::DimsOrder::NHWC).get());
 
     auto weightsTableCMX = createDeclareTensorOp(functionBuilder, VPURT::BufferSection::CMX_NN, weightsTableShape,
                                                  int32, DimsOrder::NHWC, weightsTableCluster, WEIGHTSTABLE_CMX_OFFSET);
@@ -156,9 +169,9 @@ void buildDifferentClustersDPUTest(const nb::TestCaseJsonDescriptor& testDesc, m
         // Create distributed buffer for CMX output
         const auto distributionModeAttr = VPU::DistributionModeAttr::get(ctx, VPU::DistributionMode::DUPLICATED);
         const auto numClustersAttr = getIntAttr(ctx, outputClusters.size());
-        const auto distributedAttr = VPU::DistributedTensorAttr::get(
-                ctx, distributionModeAttr, nullptr, nullptr, nullptr, nullptr, numClustersAttr, nullptr, nullptr,
-                nullptr, nullptr, nullptr, nullptr, nullptr);
+        const auto distributedAttr = VPU::DistributionInfoAttr::get(ctx, distributionModeAttr, nullptr, nullptr,
+                                                                    nullptr, nullptr, numClustersAttr, nullptr, nullptr,
+                                                                    nullptr, nullptr, nullptr, nullptr, nullptr);
 
         const auto orderAttr = mlir::AffineMapAttr::get(outputTypeIf.getDimsOrder().toAffineMap(ctx));
         const auto elemStrides = to_small_vector(outputTypeIf.getStrides() | transformed([&](Bit stride) {
@@ -205,9 +218,9 @@ void buildDifferentClustersDPUTest(const nb::TestCaseJsonDescriptor& testDesc, m
     auto nceTask = VPURT::wrapIntoTaskOp<VPUIP::NCEClusterTaskOp>(
             functionBuilder, mlir::ValueRange(waitBarrier.getBarrier()), mlir::ValueRange(updateBarrier.getBarrier()),
             loc, inputCMX.getBuffer(), weightsCMX.getBuffer(), weightsTableCMX.getBuffer(),
-            /*instruction_table_list=*/nullptr, /*spr_lookup_table=*/nullptr,
-            /*activation_window=*/nullptr, inputCMX.getBuffer(), nceClusterTaskOutBuffer, nceClusterTaskOutBuffer,
-            vpux::VPUIP::NCETaskType::CONV, kernelSize, strides, kernelPaddings, nullptr, nullptr);
+            /*instruction_table_list=*/nullptr, /*spr_lookup_table=*/nullptr, inputCMX.getBuffer(),
+            nceClusterTaskOutBuffer, nceClusterTaskOutBuffer, vpux::VPUIP::NCETaskType::CONV, kernelSize, strides,
+            kernelPaddings, nullptr, nullptr);
 
     const auto start = getIntArrayAttr(ctx, std::vector<std::int64_t>{0, 0, 0});
     const auto outEnd =
@@ -237,18 +250,12 @@ void buildDifferentClustersDPUTest(const nb::TestCaseJsonDescriptor& testDesc, m
 
     module.dump();
 
-    mlir::PassManager pm(module->getName(), mlir::OpPassManager::Nesting::Implicit);
-
-    const auto maxClusterOutput = static_cast<size_t>(*std::max_element(outputClusters.begin(), outputClusters.end()));
-    const auto numTiles = std::max({inputCluster, weightsCluster, weightsTableCluster, maxClusterOutput}) + 1;
-    auto initCompilerOptions = VPU::InitCompilerOptions(testDesc.getArchitecture(), VPU::CompilationMode::DefaultHW);
-    initCompilerOptions.setNumberOfDPUGroups(numTiles);
-    VPU::buildInitCompilerPipeline(pm, initCompilerOptions, log);
+    mlir::PassManager pmBuilderEnd(module->getName(), mlir::OpPassManager::Nesting::Implicit);
     if (conv.compress) {
-        pm.addPass(VPUIP::createCompressWeightsBTCPass(log));
+        pmBuilderEnd.addPass(VPUIP::createCompressWeightsBTCPass(log));
     }
 
-    VPUX_THROW_UNLESS(mlir::succeeded(pm.run(module)), "Compilation failed");
+    VPUX_THROW_UNLESS(mlir::succeeded(pmBuilderEnd.run(module)), "Compilation failed");
 
     auto outputTensorType = getTensorType(ShapeRef(outputShape), outputType, vpux::DimsOrder::NHWC, nullptr);
     const auto outputTensorTypesVec = SmallVector<mlir::Type>(outputClusters.size(), outputTensorType);

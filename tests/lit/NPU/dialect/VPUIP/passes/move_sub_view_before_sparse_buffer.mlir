@@ -108,8 +108,9 @@ func.func @MoveSubviewUp(%arg0: memref<1x64x4x4xf16, #NHWC>,
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 
 // CHECK-LABEL: @MoveSubviewUpCheckReinfer
+// CHECK-SAME:     ([[ARG0:%.+]]: memref<1x64x4x4xf16, #NHWC>, [[ARG1:%.+]]: memref<1x64x3x4xf16, #NHWC>)
 func.func @MoveSubviewUpCheckReinfer(%arg0: memref<1x64x4x4xf16, #NHWC>,
-                                   %arg1: memref<1x64x3x4xf16, #NHWC>)
+                                     %arg1: memref<1x64x3x4xf16, #NHWC>)
     -> memref<1x64x3x4xf16, #NHWC> {
     // Constant sparsity map
     %cst_sm = const.Declare memref<1x64x9x9xi1, {order = #NHWC}> = dense<true> : tensor<1x64x9x9xi1, {order = #NHWC}>
@@ -144,10 +145,10 @@ func.func @MoveSubviewUpCheckReinfer(%arg0: memref<1x64x4x4xf16, #NHWC>,
 
     return %result : memref<1x64x3x4xf16, #NHWC>
 
-    // CHECK-NOT:    VPUIP.GroupSparseBuffer
-    // CHECK-NOT:    VPUIP.UngroupSparseBuffer
-    // CHECK:       [[SUBVIEW:%.*]] = VPUIP.SubView %arg0 [0, 0, 0, 0] [1, 64, 3, 4] : memref<1x64x4x4xf16, #NHWC> to memref<1x64x3x4xf16, {order = #NHWC, strides = [1024, 1, 256, 64]}>
-    // CHECK:       [[COPY:%.*]] = VPUIP.Copy inputs([[SUBVIEW]] : memref<1x64x3x4xf16, {order = #NHWC, strides = [1024, 1, 256, 64]}>) outputs(%arg1 : memref<1x64x3x4xf16, #NHWC>) -> memref<1x64x3x4xf16, #NHWC>
+    // CHECK:       [[SUBVIEW:%.+]] = VPUIP.SubView [[ARG0]] [0, 0, 0, 0] [1, 64, 3, 4] : memref<1x64x4x4xf16, #NHWC> to memref<1x64x3x4xf16, {order = #NHWC, strides = [1024, 1, 256, 64]}>
+    // CHECK:       [[GROUP:%.+]] = VPUIP.GroupSparseBuffer([[SUBVIEW]]
+    // CHECK:       [[DATA:%.+]], [[SM:%.+]], [[SE:%.+]] = VPUIP.UngroupSparseBuffer([[GROUP]])
+    // CHECK:       [[COPY:%.+]] = VPUIP.Copy inputs([[DATA]] : memref<1x64x3x4xf16, {order = #NHWC, strides = [1024, 1, 256, 64]}>) outputs([[ARG1]] : memref<1x64x3x4xf16, #NHWC>) -> memref<1x64x3x4xf16, #NHWC>
     // CHECK:       return [[COPY]] : memref<1x64x3x4xf16, #NHWC>
 }
 

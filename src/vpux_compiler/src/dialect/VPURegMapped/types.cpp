@@ -39,6 +39,35 @@ void vpux::VPURegMapped::VPURegMappedDialect::registerTypes() {
 // Dialect hooks
 //
 
+namespace {
+mlir::ParseResult parseRequiredMiVersion(mlir::AsmParser& parser, uint32_t& major, uint32_t& minor, uint32_t& patch) {
+    if (mlir::succeeded(parser.parseOptionalKeyword("requires"))) {
+        if (mlir::failed(parser.parseInteger(major))) {
+            return mlir::failure();
+        }
+        if (mlir::failed(parser.parseColon())) {
+            return mlir::failure();
+        }
+        if (mlir::failed(parser.parseInteger(minor))) {
+            return mlir::failure();
+        }
+        if (mlir::failed(parser.parseColon())) {
+            return mlir::failure();
+        }
+        if (mlir::failed(parser.parseInteger(patch))) {
+            return mlir::failure();
+        }
+        return mlir::success();
+    }
+    return mlir::failure();
+}
+}  // namespace
+
+llvm::hash_code elf::hash_value(const elf::Version& version) {
+    return llvm::hash_combine(llvm::hash_value(version.getMajor()), llvm::hash_value(version.getMinor()),
+                              llvm::hash_value(version.getPatch()));
+}
+
 //
 // IndexType
 //
@@ -96,7 +125,7 @@ mlir::Type VPURegMapped::IndexType::parse(mlir::AsmParser& parser) {
 
 mlir::LogicalResult vpux::VPURegMapped::RegFieldType::verify(
         ::llvm::function_ref<::mlir::InFlightDiagnostic()> emitError, uint32_t width, uint32_t pos, uint64_t value,
-        std::string name, vpux::VPURegMapped::RegFieldDataType /*dataType*/) {
+        std::string name, vpux::VPURegMapped::RegFieldDataType /*dataType*/, elf::Version /*requiredMIVersion*/) {
 #ifdef NDEBUG
     VPUX_UNUSED(emitError);
     VPUX_UNUSED(width);
@@ -129,8 +158,14 @@ llvm::FormattedNumber getFormattedValue(uint64_t value) {
 }
 
 void VPURegMapped::RegFieldType::print(mlir::AsmPrinter& printer) const {
+    auto requiredMiVersion = getRequiredMIVersion();
     printer << VPURegMapped::stringifyEnum(getDataType()) << " " << getName() << " at " << getPos() << " size "
             << getWidth() << " = " << getFormattedValue(getValue());
+
+    if (requiredMiVersion.checkValidity()) {
+        printer << " requires " << requiredMiVersion.getMajor() << ":" << requiredMiVersion.getMinor() << ":"
+                << requiredMiVersion.getPatch();
+    }
 }
 
 mlir::Type VPURegMapped::RegFieldType::parse(mlir::AsmParser& parser) {
@@ -138,6 +173,7 @@ mlir::Type VPURegMapped::RegFieldType::parse(mlir::AsmParser& parser) {
     uint64_t value;
     std::string name;
     std::string dataType;
+    uint32_t vMajor{}, vMinor{}, vPatch{};
 
     if (parser.parseKeywordOrString(&dataType)) {
         return {};
@@ -167,9 +203,12 @@ mlir::Type VPURegMapped::RegFieldType::parse(mlir::AsmParser& parser) {
     if (parser.parseInteger(value)) {
         return {};
     }
+    auto requiredMiVersion = mlir::succeeded(parseRequiredMiVersion(parser, vMajor, vMinor, vPatch))
+                                     ? elf::Version(vMajor, vMinor, vPatch)
+                                     : elf::Version();
 
     return get(parser.getContext(), width, pos, value, name,
-               VPURegMapped::symbolizeEnum<RegFieldDataType>(dataType).value());
+               VPURegMapped::symbolizeEnum<RegFieldDataType>(dataType).value(), requiredMiVersion);
 }
 
 //
@@ -211,6 +250,18 @@ vpux::VPURegMapped::RegFieldType vpux::VPURegMapped::RegisterType::getField(cons
     return fieldIter->cast<VPURegMapped::RegisterFieldAttr>().getRegField();
 }
 
+elf::Version vpux::VPURegMapped::RegisterType::getRequiredMIVersion() const {
+    auto fieldsAttrs = getRegFields().getValue();
+
+    elf::Version maxVersion;
+    llvm::for_each(fieldsAttrs, [&maxVersion](mlir::Attribute fieldAttr) {
+        auto currVersion = fieldAttr.cast<VPURegMapped::RegisterFieldAttr>().getRegField().getRequiredMIVersion();
+        maxVersion = std::max(maxVersion, currVersion);
+    });
+
+    return maxVersion;
+}
+
 mlir::LogicalResult vpux::VPURegMapped::RegisterType::verify(
         ::llvm::function_ref<::mlir::InFlightDiagnostic()> emitError, uint32_t size, std::string name, uint32_t address,
         ::mlir::ArrayAttr regFields, bool allowOverlap) {
@@ -241,6 +292,7 @@ mlir::LogicalResult vpux::VPURegMapped::RegisterType::verify(
         auto name = fieldAttr.cast<VPURegMapped::RegisterFieldAttr>().getRegField().getName();
         auto dataType = fieldAttr.cast<VPURegMapped::RegisterFieldAttr>().getRegField().getDataType();
         auto currentFieldMap = fieldAttr.cast<VPURegMapped::RegisterFieldAttr>().getRegField().getMap();
+        auto requiredMiVersion = fieldAttr.cast<VPURegMapped::RegisterFieldAttr>().getRegField().getRequiredMIVersion();
         totalWidth += width;
 
         // check overlaping
@@ -257,7 +309,8 @@ mlir::LogicalResult vpux::VPURegMapped::RegisterType::verify(
         }
         wholeRegisterMap[name] = currentFieldMap;
 
-        if (mlir::failed(vpux::VPURegMapped::RegFieldType::verify(emitError, width, pos, value, name, dataType))) {
+        if (mlir::failed(vpux::VPURegMapped::RegFieldType::verify(emitError, width, pos, value, name, dataType,
+                                                                  requiredMiVersion))) {
             return printTo(emitError(), "RegisterType - invalid.");
         }
 
@@ -285,6 +338,11 @@ void VPURegMapped::RegisterType::print(mlir::AsmPrinter& printer) const {
     if (getName() == firstRegField.getName() && getSize() == firstRegField.getWidth()) {
         printer << " = " << VPURegMapped::stringifyEnum(firstRegField.getDataType()) << " "
                 << getFormattedValue(firstRegField.getValue());
+        auto requiredMiVersion = firstRegField.getRequiredMIVersion();
+        if (requiredMiVersion.checkValidity()) {
+            printer << " requires " << requiredMiVersion.getMajor() << ":" << requiredMiVersion.getMinor() << ":"
+                    << requiredMiVersion.getPatch();
+        }
         return;
     }
     printer << " {";
@@ -333,6 +391,7 @@ mlir::Type VPURegMapped::RegisterType::parse(mlir::AsmParser& parser) {
     if (mlir::succeeded(parser.parseOptionalEqual())) {
         std::string dataType;
         uint64_t value;
+        uint32_t vMajor{}, vMinor{}, vPatch{};
 
         if (parser.parseKeywordOrString(&dataType)) {
             return {};
@@ -341,9 +400,13 @@ mlir::Type VPURegMapped::RegisterType::parse(mlir::AsmParser& parser) {
         if (parser.parseInteger(value)) {
             return {};
         }
+        auto requiredMiVersion = mlir::succeeded(parseRequiredMiVersion(parser, vMajor, vMinor, vPatch))
+                                         ? elf::Version(vMajor, vMinor, vPatch)
+                                         : elf::Version();
 
-        auto regFieldType = RegFieldType::get(parser.getContext(), size, 0, value, name,
-                                              VPURegMapped::symbolizeEnum<RegFieldDataType>(dataType).value());
+        auto regFieldType =
+                RegFieldType::get(parser.getContext(), size, 0, value, name,
+                                  VPURegMapped::symbolizeEnum<RegFieldDataType>(dataType).value(), requiredMiVersion);
         auto regFieldAttr = RegisterFieldAttr::get(parser.getContext(), regFieldType);
         regFields = parser.getBuilder().getArrayAttr(regFieldAttr);
     } else {
@@ -406,6 +469,18 @@ vpux::VPURegMapped::RegisterType vpux::VPURegMapped::RegMappedType::getRegister(
     VPUX_THROW_UNLESS(regIter != regsAttrs.end(), "Register with name {0} is not found in Mapped Register {1}", name,
                       this->getName());
     return regIter->cast<VPURegMapped::RegisterAttr>().getReg();
+}
+
+elf::Version vpux::VPURegMapped::RegMappedType::getRequiredMIVersion() const {
+    auto regsAttrs = getRegs().getValue();
+
+    elf::Version maxVersion;
+    llvm::for_each(regsAttrs, [&maxVersion](mlir::Attribute fieldAttr) {
+        auto currVersion = fieldAttr.cast<VPURegMapped::RegisterAttr>().getReg().getRequiredMIVersion();
+        maxVersion = std::max(maxVersion, currVersion);
+    });
+
+    return maxVersion;
 }
 
 mlir::LogicalResult vpux::VPURegMapped::RegMappedType::verify(

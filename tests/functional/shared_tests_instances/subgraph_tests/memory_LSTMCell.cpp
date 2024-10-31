@@ -44,9 +44,13 @@ std::vector<size_t> hiddenSizes = {
 
 ov::AnyMap additionalConfig = {};
 
-INSTANTIATE_TEST_SUITE_P(smoke_MemoryLSTMCellTest, MemoryLSTMCellTest,
-                         ::testing::Combine(::testing::ValuesIn(transformation), ::testing::Values(utils::DEVICE_NPU),
-                                            ::testing::Values(ov::element::f32), ::testing::ValuesIn(inputSizes),
-                                            ::testing::ValuesIn(hiddenSizes), ::testing::Values(additionalConfig)),
-                         getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(
+        smoke_MemoryLSTMCellTest, MemoryLSTMCellTest,
+        ::testing::Combine(
+                ::testing::ValuesIn(transformation),
+                ::testing::Values(std::string(ov::test::utils::DEVICE_NPU) + "." +
+                                  removeDeviceNameOnlyID(ov::test::utils::getTestsPlatformFromEnvironmentOr("3720"))),
+                ::testing::Values(ov::element::f32), ::testing::ValuesIn(inputSizes), ::testing::ValuesIn(hiddenSizes),
+                ::testing::Values(additionalConfig)),
+        getTestCaseName);
 }  // namespace ov::test

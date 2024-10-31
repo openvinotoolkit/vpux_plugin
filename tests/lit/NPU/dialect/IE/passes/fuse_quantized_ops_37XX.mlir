@@ -102,7 +102,7 @@ func.func @FuseQParamIntoDepthToSpaceOp(%arg0: tensor<1x12x180x320xf16>, %arg1: 
 func.func @FuseQuantParamsIntoConv(%arg0: tensor<1x3x16x16xf16>) -> tensor<1x3x14x14xf16> {
   %1 = IE.Quantize(%arg0) {dstElemType = !qElemType1} : tensor<1x3x16x16xf16> -> tensor<1x3x16x16x!qElemType1>
   %2 = IE.Dequantize(%1) {dstElemType = f16} : tensor<1x3x16x16x!qElemType1> -> tensor<1x3x16x16xf16>
-  %weights = const.Declare tensor<3x3x3x3x!qElemType> = dense<1.0> : tensor<3x3x3x3xf16>, [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType>]
+  %weights = const.Declare tensor<3x3x3x3x!qElemType> = dense<1.0> : tensor<3x3x3x3xf16>, [#const.CastElemType<ui8>, #const.CastElemType<!qElemType>]
   %3 = IE.Dequantize(%weights) {dstElemType = f16} : tensor<3x3x3x3x!qElemType> -> tensor<3x3x3x3xf16>
   %4 = IE.Convolution(%2, %3) {dilations = [1, 1], pads_begin = [0, 0], pads_end = [0, 0], post_op = #IE.PostOp<name = "IE.LeakyRelu", attrs = {negative_slope = 2.3127431869506836 : f64}>, strides = [1, 1]} : tensor<1x3x16x16xf16>, tensor<3x3x3x3xf16> -> tensor<1x3x14x14xf16>
   %5 = IE.Quantize(%4) {dstElemType = !qElemType2}: tensor<1x3x14x14xf16> -> tensor<1x3x14x14x!qElemType2>
@@ -112,7 +112,7 @@ func.func @FuseQuantParamsIntoConv(%arg0: tensor<1x3x16x16xf16>) -> tensor<1x3x1
 
   //CHECK: [[VAL0:%.*]] = const.Declare tensor<3x3x3x3x!qElemType> =
   //CHECK-SAME:                 dense<1.000000e+00> : tensor<3x3x3x3xf16>,
-  //CHECK-SAME:                 [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType>]
+  //CHECK-SAME:                 [#const.CastElemType<ui8>, #const.CastElemType<!qElemType>]
 
   //CHECK: [[VAL1:%.*]] = IE.Quantize(%arg0) {dstElemType = !qElemType1} : tensor<1x3x16x16xf16> -> tensor<1x3x16x16x!qElemType1>
   //CHECK: [[VAL2:%.*]] = IE.Convolution([[VAL1]], [[VAL0]]) {dilations = [1, 1], pads_begin = [0, 0], pads_end = [0, 0], post_op = #IE.PostOp<name = "IE.LeakyRelu", attrs = {negative_slope = 2.3127431869506836 : f64}>, strides = [1, 1]} : tensor<1x3x16x16x!qElemType1>, tensor<3x3x3x3x!qElemType> -> tensor<1x3x14x14x!qElemType2>
@@ -130,7 +130,7 @@ func.func @FuseQuantParamsIntoConv(%arg0: tensor<1x3x16x16xf16>) -> tensor<1x3x1
 func.func @DoNotFuseQuantParamsIntoConv(%arg0: tensor<1x3x16x16xf16>) -> tensor<1x3x14x14xf16> {
   %1 = IE.Quantize(%arg0) {dstElemType = !qElemType1} : tensor<1x3x16x16xf16> -> tensor<1x3x16x16x!qElemType1>
   %2 = IE.Dequantize(%1) {dstElemType = f16} : tensor<1x3x16x16x!qElemType1> -> tensor<1x3x16x16xf16>
-  %weights = const.Declare tensor<3x3x3x3x!qElemType> = dense<1.0> : tensor<3x3x3x3xf16>, [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType>]
+  %weights = const.Declare tensor<3x3x3x3x!qElemType> = dense<1.0> : tensor<3x3x3x3xf16>, [#const.CastElemType<ui8>, #const.CastElemType<!qElemType>]
   %3 = IE.Dequantize(%weights) {dstElemType = f16} : tensor<3x3x3x3x!qElemType> -> tensor<3x3x3x3xf16>
   %4 = IE.Convolution(%2, %3) {dilations = [1, 1], pads_begin = [0, 0], pads_end = [0, 0], post_op = #IE.PostOp<name = "IE.LeakyRelu", attrs = {negative_slope = -2.3127431869506836 : f64}>, strides = [1, 1]} : tensor<1x3x16x16xf16>, tensor<3x3x3x3xf16> -> tensor<1x3x14x14xf16>
   %5 = IE.Quantize(%4) {dstElemType = !qElemType2}: tensor<1x3x14x14xf16> -> tensor<1x3x14x14x!qElemType2>
@@ -140,7 +140,7 @@ func.func @DoNotFuseQuantParamsIntoConv(%arg0: tensor<1x3x16x16xf16>) -> tensor<
 
   //CHECK: [[VAL0:%.*]] = const.Declare tensor<3x3x3x3x!qElemType> =
   //CHECK-SAME:                 dense<1.000000e+00> : tensor<3x3x3x3xf16>,
-  //CHECK-SAME:                 [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType>]
+  //CHECK-SAME:                 [#const.CastElemType<ui8>, #const.CastElemType<!qElemType>]
 
   //CHECK: [[VAL1:%.*]] = IE.Quantize(%arg0) {dstElemType = !qElemType1} : tensor<1x3x16x16xf16> -> tensor<1x3x16x16x!qElemType1>
   //CHECK: [[VAL2:%.*]] = IE.Dequantize([[VAL1]]) {dstElemType = f16} : tensor<1x3x16x16x!qElemType1> -> tensor<1x3x16x16xf16>
@@ -162,7 +162,7 @@ func.func @DoNotFuseQuantParamsIntoConv(%arg0: tensor<1x3x16x16xf16>) -> tensor<
 func.func @DoNotFuseToConvWithInvalidRescaleBias(%arg0: tensor<1x3x16x16xf16>) -> tensor<1x3x14x14xf16> {
   %1 = IE.Quantize(%arg0) {dstElemType = !qElemType1} : tensor<1x3x16x16xf16> -> tensor<1x3x16x16x!qElemType1>
   %2 = IE.Dequantize(%1) {dstElemType = f16} : tensor<1x3x16x16x!qElemType1> -> tensor<1x3x16x16xf16>
-  %weights = const.Declare tensor<3x3x3x3x!qElemType> = dense<1.0> : tensor<3x3x3x3xf16>, [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType>]
+  %weights = const.Declare tensor<3x3x3x3x!qElemType> = dense<1.0> : tensor<3x3x3x3xf16>, [#const.CastElemType<ui8>, #const.CastElemType<!qElemType>]
   %bias = const.Declare tensor<1x3x1x1xf16> = dense<100.0> : tensor<1x3x1x1xf16>
   %3 = IE.Dequantize(%weights) {dstElemType = f16} : tensor<3x3x3x3x!qElemType> -> tensor<3x3x3x3xf16>
   %4 = IE.Convolution(%2, %3, %bias) {dilations = [1, 1], pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]} : tensor<1x3x16x16xf16>, tensor<3x3x3x3xf16>, tensor<1x3x1x1xf16> -> tensor<1x3x14x14xf16>
@@ -172,7 +172,7 @@ func.func @DoNotFuseToConvWithInvalidRescaleBias(%arg0: tensor<1x3x16x16xf16>) -
   return %6 : tensor<1x3x14x14xf16>
 
   //CHECK:   [[VAL0:%.*]] = const.Declare tensor<1x3x1x1xf16> = dense<1.000000e+02> : tensor<1x3x1x1xf16>
-  //CHECK:   [[VAL1:%.*]] = const.Declare tensor<3x3x3x3x!qElemType> = dense<1.000000e+00> : tensor<3x3x3x3xf16>, [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType>]
+  //CHECK:   [[VAL1:%.*]] = const.Declare tensor<3x3x3x3x!qElemType> = dense<1.000000e+00> : tensor<3x3x3x3xf16>, [#const.CastElemType<ui8>, #const.CastElemType<!qElemType>]
   //CHECK:   [[VAL2:%.*]] = IE.Quantize(%arg0) {dstElemType = !qElemType1} : tensor<1x3x16x16xf16> -> tensor<1x3x16x16x!qElemType1>
   //CHECK:   [[VAL3:%.*]] = IE.Dequantize([[VAL2]]) {dstElemType = f16} : tensor<1x3x16x16x!qElemType1> -> tensor<1x3x16x16xf16>
   //CHECK:   [[VAL4:%.*]] = IE.Dequantize([[VAL1]]) {dstElemType = f16} : tensor<3x3x3x3x!qElemType> -> tensor<3x3x3x3xf16>
@@ -194,7 +194,7 @@ func.func @DoNotFuseToConvWithInvalidRescaleBias(%arg0: tensor<1x3x16x16xf16>) -
 func.func @DoNotFuseToGroupConvWithInvalidRescaleBias(%arg0: tensor<1x3x16x16xf16>) -> tensor<1x3x14x14xf16> {
   %1 = IE.Quantize(%arg0) {dstElemType = !qElemType1} : tensor<1x3x16x16xf16> -> tensor<1x3x16x16x!qElemType1>
   %2 = IE.Dequantize(%1) {dstElemType = f16} : tensor<1x3x16x16x!qElemType1> -> tensor<1x3x16x16xf16>
-  %weights = const.Declare tensor<3x1x3x3x!qElemType> = dense<1.0> : tensor<3x1x3x3xf16>, [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType>]
+  %weights = const.Declare tensor<3x1x3x3x!qElemType> = dense<1.0> : tensor<3x1x3x3xf16>, [#const.CastElemType<ui8>, #const.CastElemType<!qElemType>]
   %bias = const.Declare tensor<1x3x1x1xf16> = dense<100.0> : tensor<1x3x1x1xf16>
   %3 = IE.Dequantize(%weights) {dstElemType = f16} : tensor<3x1x3x3x!qElemType> -> tensor<3x1x3x3xf16>
   %4 = IE.GroupConvolution(%2, %3, %bias) {dilations = [1, 1], groups = 3 : i64, pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]} : tensor<1x3x16x16xf16>, tensor<3x1x3x3xf16>, tensor<1x3x1x1xf16> -> tensor<1x3x14x14xf16>
@@ -204,7 +204,7 @@ func.func @DoNotFuseToGroupConvWithInvalidRescaleBias(%arg0: tensor<1x3x16x16xf1
   return %6 : tensor<1x3x14x14xf16>
 
   //CHECK:   [[VAL0:%.*]] = const.Declare tensor<1x3x1x1xf16> = dense<1.000000e+02> : tensor<1x3x1x1xf16>
-  //CHECK:   [[VAL1:%.*]] = const.Declare tensor<3x1x3x3x!qElemType> = dense<1.000000e+00> : tensor<3x1x3x3xf16>, [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType>]
+  //CHECK:   [[VAL1:%.*]] = const.Declare tensor<3x1x3x3x!qElemType> = dense<1.000000e+00> : tensor<3x1x3x3xf16>, [#const.CastElemType<ui8>, #const.CastElemType<!qElemType>]
   //CHECK:   [[VAL2:%.*]] = IE.Quantize(%arg0) {dstElemType = !qElemType1} : tensor<1x3x16x16xf16> -> tensor<1x3x16x16x!qElemType1>
   //CHECK:   [[VAL3:%.*]] = IE.Dequantize([[VAL2]]) {dstElemType = f16} : tensor<1x3x16x16x!qElemType1> -> tensor<1x3x16x16xf16>
   //CHECK:   [[VAL4:%.*]] = IE.Dequantize([[VAL1]]) {dstElemType = f16} : tensor<3x1x3x3x!qElemType> -> tensor<3x1x3x3xf16>

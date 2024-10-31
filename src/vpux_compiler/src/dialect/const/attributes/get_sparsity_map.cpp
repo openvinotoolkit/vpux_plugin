@@ -126,11 +126,6 @@ Const::details::PositionRequirement Const::GetSparsityMapAttr::getPositionRequir
     return Const::details::PositionRequirement::PREFERRED_LAST;
 }
 
-//
-// ContentAttr::getSparsityMap
-//
-
-Const::ContentAttr vpux::Const::ContentAttr::getSparsityMap() const {
-    return ContentAttr::addTransformation(
-            *this, Const::GetSparsityMapAttr::get(getContext()).cast<Const::TransformAttrInterface>());
+Const::ContentSetup vpux::Const::ContentSetup::getSparsityMap() {
+    return addTransformation(Const::GetSparsityMapAttr::get(getContext()));
 }

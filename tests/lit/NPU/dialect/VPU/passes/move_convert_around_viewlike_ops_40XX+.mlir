@@ -104,30 +104,28 @@ func.func @MoveConvertAfterShapeCastMultipleUsers(%arg0: tensor<1x32x8x8xf32, {o
     %1 = VPU.ShapeCast {shape = [1, 32, 8, 8]} inputs(%0 : tensor<1x32x8x8xf16, {order = #NHWC}>) -> tensor<1x32x8x8xf16, {order = #NHWC}>
 
     %weights_table = const.Declare tensor<32x1x1x4xsi32> = dense<1> : tensor<32x1x1x4xsi32>
-    %activation_window = const.Declare tensor<1x1x1x16xui8> = dense<1> : tensor<1x1x1x16xui8>
 
-    %2 = VPU.NCE.MaxPool(%1, %weights_table, %activation_window) {
-        activation_window_channel_length = 18 : i64,
+    %2 = VPU.NCE.MaxPool(%1, %weights_table) {
         kernel_size = [3, 3],
+        opaque_ppe = #VPU.PPEStub<>,
         pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
         strides = [1, 1]
     } -> tensor<1x32x8x8xf16, {order = #NHWC}>
 
-    %3 = VPU.NCE.MaxPool(%1, %weights_table, %activation_window) {
-        activation_window_channel_length = 18 : i64,
+    %3 = VPU.NCE.MaxPool(%1, %weights_table) {
         kernel_size = [3, 3],
+        opaque_ppe = #VPU.PPEStub<>,
         pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
         strides = [1, 1]
     } -> tensor<1x32x8x8xf16, {order = #NHWC}>
 
     return %2, %3 : tensor<1x32x8x8xf16, {order = #NHWC}>, tensor<1x32x8x8xf16, {order = #NHWC}>
 
-    //CHECK: [[WEIGHTS:%.*]] = const.Declare tensor<1x1x1x16xui8>
     //CHECK: [[WEIGHT_TABLE:%.*]] = const.Declare tensor<32x1x1x4xsi32>
 
     //CHECK: [[CONVERT:%.*]] = VPU.Convert(%arg0) {dstElemType = f16}
-    //CHECK: [[MP1:%.*]] = VPU.NCE.MaxPool([[CONVERT]], [[WEIGHT_TABLE]] , [[WEIGHTS]] )
-    //CHECK: [[MP2:%.*]] = VPU.NCE.MaxPool([[CONVERT]], [[WEIGHT_TABLE]] , [[WEIGHTS]] )
+    //CHECK: [[MP1:%.*]] = VPU.NCE.MaxPool([[CONVERT]], [[WEIGHT_TABLE]] )
+    //CHECK: [[MP2:%.*]] = VPU.NCE.MaxPool([[CONVERT]], [[WEIGHT_TABLE]] )
 }
 
 // -----

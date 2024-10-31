@@ -387,8 +387,10 @@ void OptimizeReordersAcrossFunctionCallsPass::connectProducerInputsToNewArg(mlir
     for (auto producerOp : producerOps) {
         for (auto user : producerOp->getUsers()) {
             if (auto callOp = mlir::dyn_cast<mlir::func::CallOp>(user)) {
-                VPUX_THROW_WHEN(llvm::find(_functionCalls[funcOp], callOp) == _functionCalls[funcOp].end(),
-                                "Optimizing reorders across multiple calls is not supported");
+                // Skip other call users that point to a different function
+                if (llvm::find(_functionCalls[funcOp], callOp) == _functionCalls[funcOp].end()) {
+                    continue;
+                }
                 callOp.getOperandsMutable().append(producerOp->getOperand(0));
                 const auto argPos = callOp.getNumOperands() - 1;
                 VPUX_THROW_WHEN(argPos != newArgNumber, "Invalid position for new argument {0}, expected position {1}",
@@ -444,9 +446,6 @@ void OptimizeReordersAcrossFunctionCallsPass::eraseConnectionsToOriginalArg(mlir
 
     for (auto callOp : _functionCalls[funcOp]) {
         auto operand = callOp.getOperand(origArgNumber);
-        if (!operand.hasOneUse()) {
-            continue;
-        }
 
         auto parentOp = operand.getDefiningOp();
         size_t resultNumber = 0;
@@ -463,9 +462,9 @@ void OptimizeReordersAcrossFunctionCallsPass::eraseConnectionsToOriginalArg(mlir
         // removed when there are no other users
         const auto& producerOps = argOperations.producerOps;
         if (llvm::find(producerOps, parentOp) != producerOps.end()) {
-            const auto numUses =
-                    std::distance(parentOp->getResult(0).getUses().begin(), parentOp->getResult(0).getUses().end());
-            if (numUses > 1) {
+            const auto numUses = std::distance(parentOp->getResult(resultNumber).getUses().begin(),
+                                               parentOp->getResult(resultNumber).getUses().end());
+            if (numUses >= 1) {
                 continue;
             }
             parentOp->erase();

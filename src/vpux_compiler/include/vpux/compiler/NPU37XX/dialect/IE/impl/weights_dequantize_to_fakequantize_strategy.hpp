@@ -10,7 +10,7 @@
 namespace vpux::IE::arch37xx {
 
 /*
-   Class for getting WeightsDequantizeToFakeQuantizeStrategy patterns for NPU37XX
+   Class for getting WeightsDequantizeToFakeQuantizeStrategy patterns for VPU37XX
 */
 class WeightsDequantizeToFakeQuantizeStrategy : public IGreedilyPassStrategy {
 public:

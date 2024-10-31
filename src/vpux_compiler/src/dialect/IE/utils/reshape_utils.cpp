@@ -191,13 +191,20 @@ IE::ShapeCastOp buildShapeCast(mlir::Location loc, mlir::Value input, ArrayRef<i
 }
 
 bool isEligibleToFoldStrideKernel(vpux::NDTypeInterface inputType, vpux::NDTypeInterface outputType, int64_t kernelX,
-                                  int64_t strideX, int64_t inAlignment, int64_t outAlignment, const Logger& log) {
+                                  int64_t strideX, int64_t strideY, int64_t inAlignment, int64_t outAlignment,
+                                  const Logger& log) {
     auto inDimOrder = inputType.getDimsOrder();
     if (DimsOrder::NHWC != inDimOrder) {
         return false;
     }
 
     if ((1 == strideX) || (kernelX > strideX)) {
+        return false;
+    }
+
+    // Workaround. In case of [1, 4] strides, pass returns innacurate results. Follow-up ticket
+    // E#141091
+    if ((4 == strideX) && (1 == strideY)) {
         return false;
     }
 

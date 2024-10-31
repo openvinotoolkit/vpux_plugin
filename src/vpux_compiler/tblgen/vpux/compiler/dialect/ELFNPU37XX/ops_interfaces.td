@@ -25,6 +25,14 @@ def ELFNPU37XX_SectionInterface : OpInterface<"ElfSectionInterface"> {
                               "vpux::DenseMap<mlir::Operation*, elf::writer::Section*>&":$sectionMap,
                               "vpux::DenseMap<mlir::Operation*, elf::writer::Symbol*>&":$symbolMap)
         >,
+        // make interface more modular and replace preserialize with getBinarySize
+        // E#136377
+        InterfaceMethod<
+            "Serialization setup for the Op (elf sections creation, memory pre-allocation)",
+            "void",
+            "preserialize", (ins "elf::Writer&":$writer,
+                                 "vpux::DenseMap<mlir::Operation*, elf::writer::Section*>&":$sectionMap)
+        >,
         InterfaceMethod<
             "Get the block of the region",
             "mlir::Block*",
@@ -107,6 +115,7 @@ def ELFNPU37XX_BinaryOpInterface : OpInterface<"BinaryOpInterface"> {
         >,
 
         InterfaceMethod<
+            // E#136377
             "Get the size in bytes of the serialized form of this object",
             "size_t",
             "getBinarySize", (ins)

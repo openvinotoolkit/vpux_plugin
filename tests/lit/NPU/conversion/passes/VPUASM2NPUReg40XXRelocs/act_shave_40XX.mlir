@@ -64,26 +64,25 @@ module @SingleHswishFP16 attributes {VPU.arch = #VPU.arch_kind<NPU40XX>} {
         VPUASM.ActKernelRange @ActKernelRange0 idx(!VPURegMapped.Index<0:0:0>) taskLocation(@program.ActKernelRange.cmx.0.0::@DeclareTaskBuffer_ActKernelRange0_0_0) kernelTaskType(@COMPUTE) calls @text.shave::@DeclareKernelText0 : @DeclareKernelEntry0
         // CHECK-NOT:   VPUASM.ActKernelRange
         // CHECK:       NPUReg40XX.ActKernelRange
-        // CHECK:  type offset 0 size 8 = UINT 0,
-        // CHECK:  kernel_entry offset 8 size 64 = UINT 0x1D000000,
+        // CHECK:  type offset 0 size 8 = UINT 0
+        // CHECK:  kernel_entry offset 8 size 64 = UINT 0x1D000000
       }
       ELF.CreateSection @task.shave.invocation.0.0 aligned(64) secType(SHT_PROGBITS) secFlags(SHF_ALLOC) {
         VPUASM.ActKernelInvocation @ActKernelInvocation0 idx(!VPURegMapped.Index<0:0:0>) taskLocation(@program.ActKernelInvocation.cmx.0.0::@DeclareTaskBuffer_ActKernelInvocation_0_0_0) -> @program.ActKernelRange.cmx.0.0::@DeclareTaskBuffer_ActKernelRange0_0_0(kernel_data : @program.shave.data::@DeclareKernelArgs0, kernel_params : @progra.shave.parameter::@KernelParams0) waits([0 : ui8]) updates([1 : ui8]) tile(0) start_after(0) clean_after(0) range_index(0)
         // CHECK-NOT:   VPUASM.ActKernelInvocation
         // CHECK:       NPUReg40XX.ActKernelInvocation
-        // CHECK:  range offset 0 size 64 = UINT 0x200000,
-        // CHECK:  perf_packet_out offset 24 size 64 = UINT 0,
+        // CHECK:  range offset 0 size 64 = UINT 0x200000
+        // CHECK:  perf_packet_out offset 24 size 64 = UINT 0
         // CHECK:  UINT barriers_wait_mask_hi_act at 0 size 32 = 0
-        // CHECK:  barriers_wait_mask_lo_act offset 40 size 64 = UINT 1,
+        // CHECK:  barriers_wait_mask_lo_act offset 40 size 64 = UINT 1
         // CHECK:  UINT barriers_post_mask_hi_act at 0 size 32 = 0
-        // CHECK:  barriers_post_mask_lo_act offset 56 size 64 = UINT 2,
-        // CHECK:  UINT group_act at 0 size 8 = 1,
+        // CHECK:  barriers_post_mask_lo_act offset 56 size 64 = UINT 2
+        // CHECK:  UINT group_act at 0 size 8 = 1
         // CHECK:  UINT mask_act at 8 size 8 = 1
-        // CHECK:  UINT start_after_ at 0 size 32 = 0,
+        // CHECK:  UINT start_after_ at 0 size 32 = 0
         // CHECK:  UINT clean_after_ at 32 size 32 = 0
-        // CHECK:  invo_index offset 80 size 32 = UINT 0,
-        // CHECK:  invo_tile offset 84 size 32 = UINT 0,
-        // CHECK:  kernel_range_index offset 88 size 32 = UINT 0,
+        // CHECK:  invo_tile offset 84 size 32 = UINT 0
+        // CHECK:  kernel_range_index offset 88 size 32 = UINT 0
       }
       ELF.CreateSection @task.shave.runtime aligned(64) secType(SHT_PROGBITS) secFlags(SHF_ALLOC) {
         VPUASM.ActShaveRt @ActKernelRt0 kernel("nnActEntry")

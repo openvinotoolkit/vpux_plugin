@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2018-2023 Intel Corporation
+// Copyright (C) 2018-2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -14,15 +14,12 @@ namespace test {
 
 class OneHotLayerTestCommon : public OneHotLayerTest, virtual public VpuOv2LayerTest {};
 
-class OneHotLayerTest_NPU3720 : public OneHotLayerTestCommon {};
-class OneHotLayerTest_NPU4000 : public OneHotLayerTestCommon {};
-
-TEST_P(OneHotLayerTest_NPU3720, HW) {
+TEST_P(OneHotLayerTestCommon, NPU3720_HW) {
     setDefaultHardwareMode();
     run(Platform::NPU3720);
 }
 
-TEST_P(OneHotLayerTest_NPU4000, HW) {
+TEST_P(OneHotLayerTestCommon, NPU4000_HW) {
     setDefaultHardwareMode();
     run(Platform::NPU4000);
 }
@@ -51,38 +48,19 @@ auto oneHotparams = [](auto onOffType) {
                               ::testing::Values(DEVICE_NPU));
 };
 
-// ------ NPU3720 ------
-
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_OneHot_FP16, OneHotLayerTest_NPU3720, oneHotparams(ov::element::f16),
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_OneHot_FP16, OneHotLayerTestCommon, oneHotparams(ov::element::f16),
                          OneHotLayerTest::getTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(smoke_OneHot_FP32, OneHotLayerTest_NPU3720, oneHotparams(ov::element::f32),
+INSTANTIATE_TEST_SUITE_P(smoke_OneHot_FP32, OneHotLayerTestCommon, oneHotparams(ov::element::f32),
                          OneHotLayerTest::getTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(smoke_OneHot_I32, OneHotLayerTest_NPU3720, oneHotparams(ov::element::i32),
+INSTANTIATE_TEST_SUITE_P(smoke_OneHot_I32, OneHotLayerTestCommon, oneHotparams(ov::element::i32),
                          OneHotLayerTest::getTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(smoke_OneHot_I8, OneHotLayerTest_NPU3720, oneHotparams(ov::element::i8),
+INSTANTIATE_TEST_SUITE_P(smoke_OneHot_I8, OneHotLayerTestCommon, oneHotparams(ov::element::i8),
                          OneHotLayerTest::getTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(smoke_OneHot_U8, OneHotLayerTest_NPU3720, oneHotparams(ov::element::u8),
-                         OneHotLayerTest::getTestCaseName);
-
-// ------ NPU4000 ------
-
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_OneHot_FP16, OneHotLayerTest_NPU4000, oneHotparams(ov::element::f16),
-                         OneHotLayerTest::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_OneHot_FP32, OneHotLayerTest_NPU4000, oneHotparams(ov::element::f32),
-                         OneHotLayerTest::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_OneHot_I32, OneHotLayerTest_NPU4000, oneHotparams(ov::element::i32),
-                         OneHotLayerTest::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_OneHot_I8, OneHotLayerTest_NPU4000, oneHotparams(ov::element::i8),
-                         OneHotLayerTest::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_OneHot_U8, OneHotLayerTest_NPU4000, oneHotparams(ov::element::u8),
+INSTANTIATE_TEST_SUITE_P(smoke_OneHot_U8, OneHotLayerTestCommon, oneHotparams(ov::element::u8),
                          OneHotLayerTest::getTestCaseName);
 
 }  // namespace

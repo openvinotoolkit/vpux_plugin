@@ -27,9 +27,9 @@ size_t VPURT::getMaxEntry(const BarrierInfo::TaskSet& entries) {
     FIFO-0 | 0, 2, 4
     FIFO-1 | 1, 3, 5, 6
 */
-std::map<VPURT::TaskQueueType, SmallVector<uint32_t>> VPURT::getTaskOpQueues(
-        mlir::func::FuncOp funcOp, BarrierInfo& barrierInfo, std::optional<VPU::ExecutorKind> targetExecutorKind) {
-    std::map<VPURT::TaskQueueType, SmallVector<uint32_t>> taskOpQueues;
+VPURT::TaskOpQueues VPURT::getTaskOpQueues(mlir::func::FuncOp funcOp, BarrierInfo& barrierInfo,
+                                           std::optional<VPU::ExecutorKind> targetExecutorKind) {
+    VPURT::TaskOpQueues taskOpQueues;
     funcOp->walk([&](VPURT::TaskOp taskOp) {
         const auto taskQueueType = VPURT::getTaskQueueType(taskOp, false);
         if (targetExecutorKind.has_value() && targetExecutorKind.value() != taskQueueType.type) {
@@ -40,6 +40,68 @@ std::map<VPURT::TaskQueueType, SmallVector<uint32_t>> VPURT::getTaskOpQueues(
     });
 
     return taskOpQueues;
+}
+
+// Initialize the iterator for the task op queues
+VPURT::TaskOpQueueIterator VPURT::initializeTaskOpQueueIterators(TaskOpQueues& taskOpQueues) {
+    std::map<VPURT::TaskQueueType, SmallVector<uint32_t>::iterator> frontTasks;
+    for (auto& taskOpQueue : taskOpQueues) {
+        frontTasks[taskOpQueue.first] = taskOpQueue.second.begin();
+    }
+    return frontTasks;
+}
+
+// Check all task queues reach end or not
+bool VPURT::allQueuesReachedEnd(const TaskOpQueueIterator& frontTasks, const TaskOpQueues& taskOpQueues) {
+    return llvm::all_of(frontTasks, [&](const auto& entry) {
+        const auto& type = entry.first;
+        const auto& queueIter = entry.second;
+        VPUX_THROW_UNLESS(taskOpQueues.find(type) != taskOpQueues.end(), "Task op queue doesn't contain queue type {0}",
+                          VPU::stringifyExecutorKind(type.type));
+        return queueIter == taskOpQueues.at(type).end();
+    });
+}
+
+// Check that all queues wait for a barrier
+bool VPURT::allQueuesWaiting(const TaskOpQueueIterator& frontTasks, const TaskOpQueues& taskOpQueues,
+                             BarrierInfo& barrierInfo) {
+    return !llvm::any_of(frontTasks, [&](const auto& entry) {
+        const auto& type = entry.first;
+        const auto& queueIter = entry.second;
+        VPUX_THROW_UNLESS(taskOpQueues.find(type) != taskOpQueues.end(), "Task op queue doesn't contain queue type {0}",
+                          VPU::stringifyExecutorKind(type.type));
+        return queueIter != taskOpQueues.at(type).end() && barrierInfo.getWaitBarriers(*queueIter).empty();
+    });
+}
+
+/**
+ * Finds the ready operations (that don't have wait barriers) from the task operation queues/FIFO.
+ *
+ * This function iterates over the front tasks and checks if all queues are waiting for a barrier.
+ * If not, it checks if the current task operation is ready by checking if there are no wait barriers for it.
+ * If the task operation is ready, it adds its index to the `readyOps` vector and increments the iterator.
+ *
+ * @param frontTasks The iterator pointing to the front tasks that in the task operation queues.
+ * @param taskOpQueues The map of task operation queues.
+ * @param barrierInfo The barrier information.
+ * @return A vector containing the indices of the ready operations.
+ */
+SmallVector<size_t> VPURT::findReadyOpsFromTaskOpQueues(TaskOpQueueIterator& frontTasks,
+                                                        const TaskOpQueues& taskOpQueues, BarrierInfo& barrierInfo) {
+    SmallVector<size_t> readyOps;
+    while (!allQueuesWaiting(frontTasks, taskOpQueues, barrierInfo)) {
+        for (auto& entry : frontTasks) {
+            VPUX_THROW_UNLESS(taskOpQueues.find(entry.first) != taskOpQueues.end(),
+                              "Task op queue doesn't contain queue type {0}",
+                              VPU::stringifyExecutorKind(entry.first.type));
+            if (entry.second != taskOpQueues.at(entry.first).end() &&
+                barrierInfo.getWaitBarriers(*entry.second).empty()) {
+                readyOps.push_back(*entry.second);
+                ++entry.second;
+            }
+        }
+    }
+    return readyOps;
 }
 
 void VPURT::postProcessBarrierOps(mlir::func::FuncOp func) {
@@ -80,7 +142,7 @@ bool VPURT::verifyOneWaitBarrierPerTask(mlir::func::FuncOp funcOp, Logger log) {
     bool hasOneWaitBarrierPerTask = true;
     funcOp->walk([&](VPURT::TaskOp taskOp) {
         if (taskOp.getWaitBarriers().size() > 1) {
-            log.error("Task '{0}' has more then one wait barrier", taskOp);
+            log.warning("Task '{0}' has more than one wait barrier", taskOp.getLoc());
             hasOneWaitBarrierPerTask = false;
             return mlir::WalkResult::interrupt();
         }
@@ -104,46 +166,7 @@ void VPURT::orderExecutionTasksAndBarriers(mlir::func::FuncOp funcOp, BarrierInf
     std::set<size_t> newBarrierOrderSet;
 
     // initialize front task from each FIFO
-    std::map<VPURT::TaskQueueType, SmallVector<uint32_t>::iterator> frontTasks;
-    for (auto& taskOpQueue : taskOpQueues) {
-        frontTasks[taskOpQueue.first] = taskOpQueue.second.begin();
-    }
-
-    // check that all FIFOs/Queues reached end
-    auto allQueuesReachedEnd = [&]() {
-        for (auto& entry : frontTasks) {
-            if (entry.second != taskOpQueues[entry.first].end()) {
-                return false;
-            }
-        }
-        return true;
-    };
-
-    // check that all FIFOs/Queues reached wait for a barrier
-    auto allQueuesWaiting = [&]() {
-        for (auto& entry : frontTasks) {
-            if (entry.second != taskOpQueues[entry.first].end() && barrierInfo.getWaitBarriers(*entry.second).empty()) {
-                return false;
-            }
-        }
-        return true;
-    };
-
-    // retrieve ready op(s) (that don't have wait barriers) from each FIFO/Queue
-    // favour cross FIFO/Queue order e.g. DMA-FIFO-0, DMA-FIFO-1, DMA-FIFO-0, DMA-FIFO-1
-    const auto findReadyOps = [&]() {
-        SmallVector<size_t> readyOps;
-        while (!allQueuesWaiting()) {
-            for (auto& entry : frontTasks) {
-                if (entry.second != taskOpQueues[entry.first].end() &&
-                    barrierInfo.getWaitBarriers(*entry.second).empty()) {
-                    readyOps.push_back(*entry.second);
-                    ++entry.second;
-                }
-            }
-        }
-        return readyOps;
-    };
+    auto frontTasks = VPURT::initializeTaskOpQueueIterators(taskOpQueues);
 
     // reduce producer count for barrier of ready op
     // reset barrier if producer count reaches 0
@@ -172,8 +195,8 @@ void VPURT::orderExecutionTasksAndBarriers(mlir::func::FuncOp funcOp, BarrierInf
     };
 
     // simulate per FIFO execution - all FIFOs must reach end
-    while (!allQueuesReachedEnd()) {
-        const auto readyOps = findReadyOps();
+    while (!VPURT::allQueuesReachedEnd(frontTasks, taskOpQueues)) {
+        const auto readyOps = VPURT::findReadyOpsFromTaskOpQueues(frontTasks, taskOpQueues, barrierInfo);
         // at each step there must be some ready ops
         VPUX_THROW_WHEN(readyOps.empty(), "Failed to simulate execution");
 
@@ -198,9 +221,9 @@ void VPURT::orderExecutionTasksAndBarriers(mlir::func::FuncOp funcOp, BarrierInf
     });
 
     // ensure number of barriers remains the same
-    VPUX_THROW_UNLESS(newBarrierOrder.size() == barrierInfo.getNumOfVirtualBarriers() - barriersWithNoUse,
+    VPUX_THROW_UNLESS(newBarrierOrder.size() == barrierInfo.getNumOfBarrierOps() - barriersWithNoUse,
                       "Failed to order all barriers, there are {0} used barriers, got {1}",
-                      barrierInfo.getNumOfVirtualBarriers() - barriersWithNoUse, newBarrierOrder.size());
+                      barrierInfo.getNumOfBarrierOps() - barriersWithNoUse, newBarrierOrder.size());
 
     // reorder tasks in the IR based on new order
     mlir::Operation* prevTaskOp = nullptr;

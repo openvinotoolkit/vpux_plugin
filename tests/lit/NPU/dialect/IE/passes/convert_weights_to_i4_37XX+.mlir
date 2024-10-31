@@ -14,7 +14,7 @@
 // CHECK-LABEL: @ConvertU4WeightsToI4
 func.func @ConvertU4WeightsToI4(%arg0: tensor<1x3x16x16xf16>) -> tensor<1x3x14x14xf16> {
     %0 = const.Declare tensor<3x3x3x3x!qElemType1> =
-        dense<-1.0> : tensor<3x3x3x3xf16>, [#const.ConvertElemType<ui4>, #const.QuantCast<!qElemType1>]
+        dense<-1.0> : tensor<3x3x3x3xf16>, [#const.CastElemType<ui4>, #const.CastElemType<!qElemType1>]
     %1 = IE.Quantize(%arg0) {dstElemType = !qElemType2} : tensor<1x3x16x16xf16> -> tensor<1x3x16x16x!qElemType2>
     %2 = IE.Convolution(%1, %0) {
         dilations = [1, 1], pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]
@@ -25,12 +25,12 @@ func.func @ConvertU4WeightsToI4(%arg0: tensor<1x3x16x16xf16>) -> tensor<1x3x14x1
 
     // CHECK:       [[VAL0:%.*]] = const.Declare tensor<3x3x3x3x!qElemType> =
     // CHECK-SAME:      dense<-1.000000e+00> : tensor<3x3x3x3xf16>,
-    // CHECK-SAME:      #const.ConvertElemType<ui4>,
-    // CHECK-SAME:      #const.QuantCast<!qElemType1>,
-    // CHECK-SAME:      #const.ConvertElemType<ui32>,
+    // CHECK-SAME:      #const.CastElemType<ui4>,
+    // CHECK-SAME:      #const.CastElemType<!qElemType1>,
+    // CHECK-SAME:      #const.CastElemType<ui32>,
     // CHECK-SAME:      #const.Add<-8.000000e+00 : f64>,
-    // CHECK-SAME:      #const.ConvertElemType<si4>,
-    // CHECK-SAME:      #const.QuantCast<!qElemType>
+    // CHECK-SAME:      #const.CastElemType<si4>,
+    // CHECK-SAME:      #const.CastElemType<!qElemType>
 
     // CHECK:       [[VAL1:%.*]] = IE.Quantize(%arg0) {dstElemType = !qElemType2} : tensor<1x3x16x16xf16> -> tensor<1x3x16x16x!qElemType2>
     // CHECK:       [[VAL2:%.*]] = IE.Convolution([[VAL1]], [[VAL0]])
@@ -47,7 +47,7 @@ func.func @ConvertU4WeightsToI4(%arg0: tensor<1x3x16x16xf16>) -> tensor<1x3x14x1
 // CHECK-LABEL: @NotConvertU4Weights
 func.func @NotConvertU4Weights(%arg0: tensor<1x3x16x16x!qElemType>) -> tensor<1x3x14x14xf16> {
     %0 = const.Declare tensor<3x3x3x3x!qElemType> =
-        dense<-1.0> : tensor<3x3x3x3xf16>, [#const.ConvertElemType<ui4>, #const.QuantCast<!qElemType>]
+        dense<-1.0> : tensor<3x3x3x3xf16>, [#const.CastElemType<ui4>, #const.CastElemType<!qElemType>]
     %1 = IE.Convolution(%arg0, %0) {
         dilations = [1, 1], pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]
     } : tensor<1x3x16x16x!qElemType>, tensor<3x3x3x3x!qElemType> -> tensor<1x3x14x14x!qElemType>
@@ -56,8 +56,8 @@ func.func @NotConvertU4Weights(%arg0: tensor<1x3x16x16x!qElemType>) -> tensor<1x
 
     // CHECK:       [[VAL0:%.*]] = const.Declare tensor<3x3x3x3x!qElemType> =
     // CHECK-SAME:      dense<-1.000000e+00> : tensor<3x3x3x3xf16>,
-    // CHECK-SAME:      #const.ConvertElemType<ui4>,
-    // CHECK-SAME:      #const.QuantCast<!qElemType>
+    // CHECK-SAME:      #const.CastElemType<ui4>,
+    // CHECK-SAME:      #const.CastElemType<!qElemType>
     // CHECK:       [[VAL1:%.*]] = IE.Convolution([[ARG0:%.*]], [[VAL0]])
     // CHECK-SAME:      {dilations = [1, 1], pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]}
     // CHECK-SAME:      : tensor<1x3x16x16x!qElemType>, tensor<3x3x3x3x!qElemType> -> tensor<1x3x14x14x!qElemType>
@@ -71,7 +71,7 @@ func.func @NotConvertU4Weights(%arg0: tensor<1x3x16x16x!qElemType>) -> tensor<1x
 // CHECK-LABEL: @KeepI4Weights
 func.func @KeepI4Weights(%arg0: tensor<1x3x16x16x!qElemType>) -> tensor<1x3x14x14xf16> {
     %0 = const.Declare tensor<3x3x3x3x!qElemType> =
-        dense<-1.0> : tensor<3x3x3x3xf16>, [#const.ConvertElemType<si4>, #const.QuantCast<!qElemType>]
+        dense<-1.0> : tensor<3x3x3x3xf16>, [#const.CastElemType<si4>, #const.CastElemType<!qElemType>]
     %1 = IE.Convolution(%arg0, %0) {
         dilations = [1, 1], pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]
     } : tensor<1x3x16x16x!qElemType>, tensor<3x3x3x3x!qElemType> -> tensor<1x3x14x14x!qElemType>
@@ -80,8 +80,8 @@ func.func @KeepI4Weights(%arg0: tensor<1x3x16x16x!qElemType>) -> tensor<1x3x14x1
 
     // CHECK:       [[VAL0:%.*]] = const.Declare tensor<3x3x3x3x!qElemType> =
     // CHECK-SAME:      dense<-1.000000e+00> : tensor<3x3x3x3xf16>,
-    // CHECK-SAME:      #const.ConvertElemType<si4>,
-    // CHECK-SAME:      #const.QuantCast<!qElemType>
+    // CHECK-SAME:      #const.CastElemType<si4>,
+    // CHECK-SAME:      #const.CastElemType<!qElemType>
     // CHECK:       [[VAL1:%.*]] = IE.Convolution([[ARG0:%.*]], [[VAL0]])
     // CHECK-SAME:      {dilations = [1, 1], pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]}
     // CHECK-SAME:      : tensor<1x3x16x16x!qElemType>, tensor<3x3x3x3x!qElemType> -> tensor<1x3x14x14x!qElemType>
@@ -97,7 +97,7 @@ func.func @KeepI4Weights(%arg0: tensor<1x3x16x16x!qElemType>) -> tensor<1x3x14x1
 // CHECK-LABEL: @ConvertFromPerAxisTypeU4ToI4
 func.func @ConvertFromPerAxisTypeU4ToI4(%arg0: tensor<1x3x16x16xf16>) -> tensor<1x3x14x14xf16> {
     %cst = const.Declare tensor<3x3x3x3x!qElemType> =
-        dense<3.0> : tensor<3x3x3x3xf16>, [#const.ConvertElemType<ui4>, #const.QuantCast<!qElemType>]
+        dense<3.0> : tensor<3x3x3x3xf16>, [#const.CastElemType<ui4>, #const.CastElemType<!qElemType>]
     %0 = IE.Dequantize(%cst) {dstElemType = f16} : tensor<3x3x3x3x!qElemType> -> tensor<3x3x3x3xf16>
     %1 = IE.Convolution(%arg0, %0) {
         dilations = [1, 1], pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]
@@ -106,8 +106,8 @@ func.func @ConvertFromPerAxisTypeU4ToI4(%arg0: tensor<1x3x16x16xf16>) -> tensor<
 
     // CHECK:       [[CST:%.*]] = const.Declare tensor<3x3x3x3x!qElemType> =
     // CHECK-SAME:       dense<3.000000e+00> : tensor<3x3x3x3xf16>,
-    // CHECK-SAME:       [#const.ConvertElemType<ui4>, #const.QuantCast<!qElemType1>, #const.QuantCast<>, #const.ConvertElemType<ui32>,
-    // CHECK-SAME:        #const.Add<-8.000000e+00 : f64>, #const.ConvertElemType<si4>, #const.QuantCast<!qElemType>]
+    // CHECK-SAME:       [#const.CastElemType<ui4>, #const.CastElemType<!qElemType1>, #const.CastElemType<ui4>, #const.CastElemType<ui32>,
+    // CHECK-SAME:        #const.Add<-8.000000e+00 : f64>, #const.CastElemType<si4>, #const.CastElemType<!qElemType>]
     // CHECK:       [[VAL0:%.*]] = IE.Dequantize([[CST]]) {dstElemType = f16} : tensor<3x3x3x3x!qElemType> -> tensor<3x3x3x3xf16>
     // CHECK:       [[VAL1:%.*]] = IE.Convolution([[ARG0:%.*]], [[VAL0]])
     // CHECK-SAME:      {dilations = [1, 1], pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]}
@@ -123,7 +123,7 @@ func.func @ConvertFromPerAxisTypeU4ToI4(%arg0: tensor<1x3x16x16xf16>) -> tensor<
 // CHECK-LABEL: @DontConvertFromPerAxisTypeU4ToI4NotAllZeroPointAre8
 func.func @DontConvertFromPerAxisTypeU4ToI4NotAllZeroPointAre8(%arg0: tensor<1x3x16x16xf16>) -> tensor<1x3x14x14xf16> {
     %cst = const.Declare tensor<3x3x3x3x!qElemType> =
-        dense<3.0> : tensor<3x3x3x3xf16>, [#const.ConvertElemType<ui4>, #const.QuantCast<!qElemType>]
+        dense<3.0> : tensor<3x3x3x3xf16>, [#const.CastElemType<ui4>, #const.CastElemType<!qElemType>]
     %0 = IE.Dequantize(%cst) {dstElemType = f16} : tensor<3x3x3x3x!qElemType> -> tensor<3x3x3x3xf16>
     %1 = IE.Convolution(%arg0, %0) {
         dilations = [1, 1], pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]
@@ -131,7 +131,7 @@ func.func @DontConvertFromPerAxisTypeU4ToI4NotAllZeroPointAre8(%arg0: tensor<1x3
     return %1 : tensor<1x3x14x14xf16>
 
     // CHECK:       [[CST:%.*]] = const.Declare tensor<3x3x3x3x!qElemType> =
-    // CHECK-SAME:       dense<3.000000e+00> : tensor<3x3x3x3xf16>, [#const.ConvertElemType<ui4>, #const.QuantCast<!qElemType>]
+    // CHECK-SAME:       dense<3.000000e+00> : tensor<3x3x3x3xf16>, [#const.CastElemType<ui4>, #const.CastElemType<!qElemType>]
     // CHECK:       [[VAL0:%.*]] = IE.Dequantize([[CST]]) {dstElemType = f16} : tensor<3x3x3x3x!qElemType> -> tensor<3x3x3x3xf16>
     // CHECK:       [[VAL1:%.*]] = IE.Convolution([[ARG0:%.*]], [[VAL0]])
     // CHECK-SAME:      {dilations = [1, 1], pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]}

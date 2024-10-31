@@ -275,7 +275,7 @@ mlir::LogicalResult SplitBilinerIntoHAndWPass::BilinearInterpolateOpConverter::m
     auto dilations = getIntArrayAttr(ctx, SmallVector<int64_t>{1, 1});
     auto convOp = rewriter.create<IE::ConvolutionOp>(interpOnWLoc, convOutputType, interpolateOnH.getOutput(), weight,
                                                      nullptr, strides, padsBegin, padsEnd, dilations, nullptr, nullptr,
-                                                     nullptr);
+                                                     nullptr, nullptr, nullptr);
 
     const SmallVector<int64_t> reshapeOutputShape = {
             convOutputShape[Dims4D::Act::N], convOutputShape[Dims4D::Act::C] / 2, convOutputShape[Dims4D::Act::H],

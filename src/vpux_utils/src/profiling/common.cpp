@@ -21,8 +21,6 @@ std::string convertExecTypeToName(ExecutorType execType) {
         return "dma";
     case ExecutorType::DPU:
         return "dpu";
-    case ExecutorType::UPA:
-        return "upa";
     case ExecutorType::WORKPOINT:
         return "pll";
     case ExecutorType::M2I:
@@ -41,8 +39,6 @@ ExecutorType convertDataInfoNameToExecType(std::string_view name) {
         return ExecutorType::DMA_SW;
     } else if (name == "dpu") {
         return ExecutorType::DPU;
-    } else if (name == "upa") {
-        return ExecutorType::UPA;
     } else if (name == "pll") {
         return ExecutorType::WORKPOINT;
     } else if (name == "m2i") {

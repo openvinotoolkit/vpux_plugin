@@ -4,6 +4,7 @@
 //
 
 #include "vpux/compiler/core/function_outlining_splitter.hpp"
+#include "vpux/compiler/dialect/IE/IR/dialect.hpp"
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/init.hpp"
 
@@ -34,9 +35,7 @@ using MLIR_FunctionOutliningSplitterNaive = MLIR_UnitBase;
  *    [output]
  */
 TEST_F(MLIR_FunctionOutliningSplitterNaive, Linear) {
-    mlir::DialectRegistry registry;
-    vpux::registerDialects(registry);
-    vpux::registerCommonInterfaces(registry);
+    auto registry = vpux::createDialectRegistry();
 
     mlir::MLIRContext ctx(registry);
     ctx.loadDialect<IE::IEDialect>();
@@ -181,9 +180,7 @@ TEST_F(MLIR_FunctionOutliningSplitterNaive, Linear) {
  *        [output]
  */
 TEST_F(MLIR_FunctionOutliningSplitterNaive, Branching1) {
-    mlir::DialectRegistry registry;
-    vpux::registerDialects(registry);
-    vpux::registerCommonInterfaces(registry);
+    auto registry = vpux::createDialectRegistry();
 
     mlir::MLIRContext ctx(registry);
     ctx.loadDialect<IE::IEDialect>();
@@ -269,9 +266,7 @@ TEST_F(MLIR_FunctionOutliningSplitterNaive, Branching1) {
  *          [output]
  */
 TEST_F(MLIR_FunctionOutliningSplitterNaive, Branching2) {
-    mlir::DialectRegistry registry;
-    vpux::registerDialects(registry);
-    vpux::registerCommonInterfaces(registry);
+    auto registry = vpux::createDialectRegistry();
 
     mlir::MLIRContext ctx(registry);
     ctx.loadDialect<IE::IEDialect>();
@@ -380,9 +375,7 @@ TEST_F(MLIR_FunctionOutliningSplitterNaive, Branching2) {
  *       [output]
  */
 TEST_F(MLIR_FunctionOutliningSplitterNaive, IndirectConstant) {
-    mlir::DialectRegistry registry;
-    vpux::registerDialects(registry);
-    vpux::registerCommonInterfaces(registry);
+    auto registry = vpux::createDialectRegistry();
 
     mlir::MLIRContext ctx(registry);
     ctx.loadDialect<IE::IEDialect>();
@@ -475,9 +468,7 @@ TEST_F(MLIR_FunctionOutliningSplitterNaive, IndirectConstant) {
  *       [output]
  */
 TEST_F(MLIR_FunctionOutliningSplitterNaive, SharedConstant) {
-    mlir::DialectRegistry registry;
-    vpux::registerDialects(registry);
-    vpux::registerCommonInterfaces(registry);
+    auto registry = vpux::createDialectRegistry();
 
     mlir::MLIRContext ctx(registry);
     ctx.loadDialect<IE::IEDialect>();
@@ -563,9 +554,7 @@ TEST_F(MLIR_FunctionOutliningSplitterNaive, SharedConstant) {
  *          [output]
  */
 TEST_F(MLIR_FunctionOutliningSplitterNaive, Complex) {
-    mlir::DialectRegistry registry;
-    vpux::registerDialects(registry);
-    vpux::registerCommonInterfaces(registry);
+    auto registry = vpux::createDialectRegistry();
 
     mlir::MLIRContext ctx(registry);
     ctx.loadDialect<IE::IEDialect>();

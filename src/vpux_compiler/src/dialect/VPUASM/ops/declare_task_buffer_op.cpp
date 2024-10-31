@@ -43,16 +43,6 @@ size_t VPUASM::DeclareTaskBufferOp::getAlignmentRequirements() {
     return ELF::VPUX_NO_ALIGNMENT;
 }
 
-ELF::SectionFlagsAttr VPUASM::DeclareTaskBufferOp::getAccessingProcs(mlir::SymbolUserMap&) {
-    // TaskBuffers represent CMX virtual entities, whose allocation is not controlled
-    return ELF::SectionFlagsAttr::SHF_NONE;
-}
-
-ELF::SectionFlagsAttr VPUASM::DeclareTaskBufferOp::getUserProcs() {
-    // TaskBuffers represent CMX virtual entities, whose allocation is not controlled
-    return ELF::SectionFlagsAttr::SHF_NONE;
-}
-
 std::optional<ELF::SectionSignature> vpux::VPUASM::DeclareTaskBufferOp::getSectionSignature() {
     return ELF::SectionSignature(vpux::ELF::generateSignature("program", "metadata", "cmx"),
                                  ELF::SectionFlagsAttr::SHF_NONE, ELF::SectionTypeAttr::VPU_SHT_CMX_METADATA);

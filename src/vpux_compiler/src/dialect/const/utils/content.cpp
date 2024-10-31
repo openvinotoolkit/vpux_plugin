@@ -20,7 +20,7 @@ Const::Content vpux::Const::Content::fromRawBuffer(vpux::NDTypeInterface type, A
                                                    mlir::Type storageElemType, bool isSplat) {
     Const::Content content;
     content._type = type;
-    content._data = data;
+    content._data = Const::ConstData::fromRawBuffer(static_cast<const void*>(data.data()), data.size());
     content._storageElemType = storageElemType;
     content._isSplat = isSplat;
     return content;
@@ -32,33 +32,18 @@ Const::Content vpux::Const::Content::fromRawBuffer(vpux::NDTypeInterface type, A
 
 Const::Content vpux::Const::Content::allocTempBuffer(vpux::NDTypeInterface type, mlir::Type storageElemType,
                                                      bool isSplat) {
-    Const::Content content;
-    content._type = type;
-    content._storageElemType = storageElemType;
-    content._isSplat = isSplat;
-
     const int64_t tempBufSize = isSplat ? 1 : type.getNumElements();
     const Bit tempElemBitSize = vpux::getElemTypeSize(storageElemType);
     const auto tempBufRawBitSize = alignMemSize(tempElemBitSize * tempBufSize, Byte(1));
-
-    content._tempBuf = std::shared_ptr<char[]>(new char[Byte(tempBufRawBitSize).count()]);
-    content._data = ArrayRef(content._tempBuf.get(), Byte(tempBufRawBitSize).count());
-
-    return content;
+    auto data = Const::ConstData::allocate<char>(Byte(tempBufRawBitSize).count());
+    return Const::Content(type, std::move(data), storageElemType, isSplat);
 }
 
 Const::Content vpux::Const::Content::allocTempBuffer(vpux::NDTypeInterface type, mlir::Type storageElemType,
                                                      bool isSplat, size_t tempBufRawSize) {
     // Overloading for sub-byte cases.
-    Const::Content content;
-    content._type = type;
-    content._storageElemType = storageElemType;
-    content._isSplat = isSplat;
-
-    content._tempBuf = std::shared_ptr<char[]>(new char[tempBufRawSize]);
-    content._data = ArrayRef(content._tempBuf.get(), tempBufRawSize);
-
-    return content;
+    auto data = Const::ConstData::allocate<char>(tempBufRawSize);
+    return Const::Content(type, std::move(data), storageElemType, isSplat);
 }
 
 //
@@ -66,42 +51,27 @@ Const::Content vpux::Const::Content::allocTempBuffer(vpux::NDTypeInterface type,
 //
 
 Const::Content vpux::Const::Content::moveBuffer(vpux::NDTypeInterface type, Const::Content&& other) {
-    Const::Content content;
+    Const::Content content(std::move(other));
     content._type = type;
-    content._storageElemType = other._storageElemType;
-    content._isSplat = other._isSplat;
-
-    content._data = other._data;
-    other._data = std::nullopt;
-
-    if (other._tempBuf != nullptr) {
-        content._tempBuf = std::move(other._tempBuf);
-    }
-
     return content;
 }
 
 // The Content object might not own the referred data. This function ensures the returned Content object owns the
 // referred data by copying it into a new buffer when needed
-Const::Content vpux::Const::Content::copyUnownedBuffer() {
-    if (_tempBuf != nullptr) {
-        return *this;
+Const::Content vpux::Const::Content::copyUnownedBuffer(Const::Content&& origin) {
+    if (!origin._data.hasExternalOrigin()) {  // is internal already
+        return std::move(origin);
     }
 
-    Const::Content content;
-    content._type = _type;
-    content._storageElemType = _storageElemType;
-    content._isSplat = _isSplat;
-    content._data = _data;
-
-    if (!_data.empty()) {
-        const auto dataSize = _data.size();
-        content._tempBuf = std::shared_ptr<char[]>(new char[dataSize]);
-        std::copy_n(_data.begin(), dataSize, content._tempBuf.get());
-        content._data = ArrayRef(content._tempBuf.get(), dataSize);
+    auto oldData = origin._data.data();
+    if (!oldData.empty()) {  // could be the case after --fuse-constants?
+        const auto dataSize = oldData.size();
+        origin._data = Const::ConstData::allocate<char>(dataSize);
+        auto mutableData = origin._data.mutableData<char>();
+        std::copy_n(oldData.begin(), dataSize, mutableData.begin());
     }
 
-    return content;
+    return std::move(origin);
 }
 
 //
@@ -140,7 +110,7 @@ void vpux::Const::Content::copySubByteContent(MutableArrayRef<char> targetData, 
         // The _data can't correctly retrieve data when it is of type Float, but getValues can.
         // However, getValues does not support subbytes storageElementType.
         if (_storageElemType.isInteger(1)) {
-            subByteValue = _data.front() & 1;
+            subByteValue = _data.data().front() & 1;
         } else {
             subByteValue = getValues<int8_t>()[0];
         }
@@ -153,7 +123,7 @@ void vpux::Const::Content::copySubByteContent(MutableArrayRef<char> targetData, 
     }
 
     // The source data might be stored with each sub-byte element into an individual byte.
-    // This can happen when using the `ConvertElemType<i1>` transformation which does not alter the underlying data.
+    // This can happen when using the `CastElemType<i1>` transformation which does not alter the underlying data.
     // If the target buffer for the copy is smaller than the source buffer, the data will be packed if that is possible.
     // e.g. source data contains bytes with values 1 or 0 representing (i.e. boolean element type) while the target
     // buffer contains 1/8th of elements - the source values will be packed into bytes in the target buffer
@@ -179,7 +149,8 @@ void vpux::Const::Content::copySubByteContent(MutableArrayRef<char> targetData, 
         }
         return;
     }
-    std::memcpy(targetData.data(), _data.data(), _data.size());
+    auto srcData = _data.data();
+    std::memcpy(targetData.data(), srcData.data(), srcData.size());
 }
 
 mlir::Type vpux::Const::Content::getNormalizedQuantStorageType(mlir::quant::QuantizedType qType) {
@@ -200,7 +171,8 @@ void vpux::Const::Content::copyTo(MutableArrayRef<char> targetData) const {
         VPUX_THROW_UNLESS(targetData.size() >= _data.size(),
                           "Byte sizes of the target buffer '{0}' is smaller then storage buffer '{1}' ",
                           targetData.size(), _data.size());
-        std::memcpy(targetData.data(), _data.data(), _data.size());
+        auto srcData = _data.data();
+        std::memcpy(targetData.data(), srcData.data(), srcData.size());
         return;
     }
 

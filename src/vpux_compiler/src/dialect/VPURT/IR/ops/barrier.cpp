@@ -13,20 +13,6 @@ using namespace vpux;
 // ConfigureBarrierOp
 //
 
-VPUIP::BlobWriter::SpecificTask vpux::VPURT::ConfigureBarrierOp::serialize(VPUIP::BlobWriter& writer) {
-    const auto barrier = writer.createBarrier(this->getBarrier(), this->getId());
-
-    MVCNN::BarrierConfigurationTaskBuilder subBuilder(writer);
-    subBuilder.add_target(barrier);
-    const auto subTask = subBuilder.Finish();
-
-    MVCNN::ControllerTaskBuilder builder(writer);
-    builder.add_task_type(MVCNN::ControllerSubTask_BarrierConfigurationTask);
-    builder.add_task(subTask.Union());
-
-    return {builder.Finish().Union(), MVCNN::SpecificTask_ControllerTask};
-}
-
 mlir::LogicalResult vpux::VPURT::ConfigureBarrierOp::verify() {
     if (!getIsFinalBarrier()) {
         return mlir::success();

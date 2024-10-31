@@ -590,19 +590,19 @@ SmallVector<mlir::Type> VPUIP::SparseBufferType::getDistributedTypes() const {
     return distributedTypes;
 }
 
-// @brief Change the type's shapes when the DistributedType has an explicit DistributedTensorAttr.
-// Each type implementing this interface will decide the appropriate explicit DistributedTensorAttr
+// @brief Change the type's shapes when the DistributedType has an explicit DistributionInfoAttr.
+// Each type implementing this interface will decide the appropriate explicit DistributionInfoAttr
 // for its components, based on the one that was passed as an arg.
 NDTypeInterface VPUIP::SparseBufferType::changeShapeForExplicitDistribution(
-        ShapeRef shape, VPU::DistributedTensorAttr distributedAttr) const {
+        ShapeRef shape, VPU::DistributionInfoAttr distributedAttr) const {
     return changeShapeElemTypeForExplicitDistribution(shape, getElementType(), distributedAttr);
 }
 
-// @brief Change the type's shapes and elem type when the DistributedType has an explicit DistributedTensorAttr.
-// Each type implementing this interface will decide the appropriate explicit DistributedTensorAttr
+// @brief Change the type's shapes and elem type when the DistributedType has an explicit DistributionInfoAttr.
+// Each type implementing this interface will decide the appropriate explicit DistributionInfoAttr
 // for its components, based on the one that was passed as an arg.
 NDTypeInterface VPUIP::SparseBufferType::changeShapeElemTypeForExplicitDistribution(
-        ShapeRef shape, mlir::Type elemType, VPU::DistributedTensorAttr distributedAttr) const {
+        ShapeRef shape, mlir::Type elemType, VPU::DistributionInfoAttr distributedAttr) const {
     const auto distributedData = getData().dyn_cast<VPUIP::DistributedBufferType>();
     VPUX_THROW_WHEN(distributedData == nullptr,
                     "Calling changeShapeElemTypeForExplicitDistribution on SparseBuffer that does not have "
@@ -626,7 +626,7 @@ NDTypeInterface VPUIP::SparseBufferType::changeShapeElemTypeForExplicitDistribut
                         "Calling changeShapeElemTypeForExplicitDistribution on SparseBuffer that does not have "
                         "DistributedBuffer sparsity map, {0}",
                         getSparsityMap());
-        auto newSMShape = shape;
+        Shape newSMShape = shape.toValues();
         if (getIsWeights() != nullptr) {
             newSMShape = VPU::NCESparsity::inferWeightsSparsityMapShape(shape);
         }
@@ -666,11 +666,11 @@ NDTypeInterface VPUIP::SparseBufferType::changeShapeElemTypeForExplicitDistribut
                                         getSparsityCompression(), getSeAttr());
 }
 
-// @brief Change the type's components when the DistributedType has an explicit DistributedTensorAttr.
-// Each type implementing this interface will decide the appropriate explicit DistributedTensorAttr
+// @brief Change the type's components when the DistributedType has an explicit DistributionInfoAttr.
+// Each type implementing this interface will decide the appropriate explicit DistributionInfoAttr
 // for its components, based on the one that was passed as an arg.
 NDTypeInterface VPUIP::SparseBufferType::changeTypeComponentsForExplicitDistribution(
-        const TypeComponents& typeComponents, VPU::DistributedTensorAttr distributedAttr) const {
+        const TypeComponents& typeComponents, VPU::DistributionInfoAttr distributedAttr) const {
     if (distributedAttr == nullptr) {
         return changeTypeComponents(typeComponents);
     }
@@ -739,11 +739,11 @@ NDTypeInterface VPUIP::SparseBufferType::changeTypeComponentsForExplicitDistribu
                                         getSparsityCompression(), getSeAttr());
 }
 
-// @brief Extract a dense tile from a DistributedType with an explicit DistributedTensorAttr.
-// Each type implementing this interface will decide the appropriate explicit DistributedTensorAttr
+// @brief Extract a dense tile from a DistributedType with an explicit DistributionInfoAttr.
+// Each type implementing this interface will decide the appropriate explicit DistributionInfoAttr
 // for its components, based on the one that was passed as an arg.
 NDTypeInterface VPUIP::SparseBufferType::extractDenseTileForExplicitDistribution(
-        vpux::ShapeRef tileOffsets, vpux::ShapeRef tileShape, VPU::DistributedTensorAttr distributedAttr) const {
+        vpux::ShapeRef tileOffsets, vpux::ShapeRef tileShape, VPU::DistributionInfoAttr distributedAttr) const {
     if (distributedAttr == nullptr) {
         return extractDenseTile(tileOffsets, tileShape);
     }
@@ -817,7 +817,7 @@ NDTypeInterface VPUIP::SparseBufferType::extractDenseTileForExplicitDistribution
 
 NDTypeInterface VPUIP::SparseBufferType::extractViewTileForExplicitDistribution(
         vpux::ShapeRef tileOffsets, vpux::ShapeRef tileShape, vpux::ShapeRef tileElemStrides,
-        VPU::DistributedTensorAttr distributedAttr) const {
+        VPU::DistributionInfoAttr distributedAttr) const {
     if (distributedAttr == nullptr) {
         return extractViewTile(tileOffsets, tileShape, tileElemStrides);
     }

@@ -28,9 +28,6 @@ profiling::TaskInfo makeTaskInfo(VPURT::TaskOp taskOp, double startTimeNs, doubl
     case VPU::ExecutorKind::SHAVE_ACT:
         taskInfo.exec_type = profiling::TaskInfo::ExecType::SW;
         break;
-    case VPU::ExecutorKind::SHAVE_UPA:
-        taskInfo.exec_type = profiling::TaskInfo::ExecType::UPA;
-        break;
 
     default:
         log.warning("Not supported executor type - '{0}", execKind);
@@ -160,9 +157,9 @@ void InferenceExecutionAnalysisPass::safeRunOnFunc() {
     if (auto tasksCountWithInvalidCost = cycleCostInfo.getNumberOfTasksWithInvalidCost()) {
         _log.warning("There are {0} tasks with invalid cost, estimation might not be valid", tasksCountWithInvalidCost);
 
-        _log.warning("Invalid cost for:");
+        _log.debug("Invalid cost for:");
         for (auto& layerWithInvalidCost : cycleCostInfo.getLayersWithInvalidCost()) {
-            _log.nest().warning("{0}", layerWithInvalidCost);
+            _log.nest().debug("{0}", layerWithInvalidCost);
         }
     }
 

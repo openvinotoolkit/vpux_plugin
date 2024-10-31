@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2023 Intel Corporation
+// Copyright (C) 2023-2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -13,15 +13,12 @@ namespace test {
 
 class EmbeddingBagPackedSumLayerTestCommon : public EmbeddingBagPackedSumLayerTest, virtual public VpuOv2LayerTest {};
 
-class EmbeddingBagPackedSumLayerTest_NPU3720 : public EmbeddingBagPackedSumLayerTestCommon {};
-class EmbeddingBagPackedSumLayerTest_NPU4000 : public EmbeddingBagPackedSumLayerTestCommon {};
-
-TEST_P(EmbeddingBagPackedSumLayerTest_NPU3720, HW) {
+TEST_P(EmbeddingBagPackedSumLayerTestCommon, NPU3720_HW) {
     setDefaultHardwareMode();
     run(Platform::NPU3720);
 }
 
-TEST_P(EmbeddingBagPackedSumLayerTest_NPU4000, SW) {
+TEST_P(EmbeddingBagPackedSumLayerTestCommon, NPU4000_SW) {
     setReferenceSoftwareMode();
     run(Platform::NPU4000);
 }
@@ -41,14 +38,7 @@ const auto params = ::testing::Combine(::testing::Values(indices), ::testing::Va
 const ov::element::Type embeddingTablePrecision = ov::element::f16;
 const ov::element::Type indicesPrecisions = ov::element::i32;
 
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_EmbeddingBagPackedSum, EmbeddingBagPackedSumLayerTest_NPU3720,
-                         ::testing::Combine(params,
-                                            ::testing::ValuesIn(static_shapes_to_test_representation(embTableShape)),
-                                            ::testing::Values(embeddingTablePrecision),
-                                            ::testing::Values(indicesPrecisions), ::testing::Values(DEVICE_NPU)),
-                         EmbeddingBagPackedSumLayerTest::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_EmbeddingBagPackedSum, EmbeddingBagPackedSumLayerTest_NPU4000,
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_EmbeddingBagPackedSum, EmbeddingBagPackedSumLayerTestCommon,
                          ::testing::Combine(params,
                                             ::testing::ValuesIn(static_shapes_to_test_representation(embTableShape)),
                                             ::testing::Values(embeddingTablePrecision),

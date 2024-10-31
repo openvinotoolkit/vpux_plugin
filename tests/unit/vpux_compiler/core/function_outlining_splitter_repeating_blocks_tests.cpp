@@ -4,6 +4,7 @@
 //
 
 #include "vpux/compiler/core/function_outlining_splitter.hpp"
+#include "vpux/compiler/dialect/IE/IR/dialect.hpp"
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/init.hpp"
 
@@ -44,9 +45,7 @@ std::string getName(mlir::Operation* op) {
  *    [output]
  */
 TEST_F(MLIR_FunctionOutliningSplitterRepeating, NoRepeatingBlocks) {
-    mlir::DialectRegistry registry;
-    vpux::registerDialects(registry);
-    vpux::registerCommonInterfaces(registry);
+    auto registry = vpux::createDialectRegistry();
 
     mlir::MLIRContext ctx(registry);
     ctx.loadDialect<IE::IEDialect>();
@@ -88,7 +87,10 @@ TEST_F(MLIR_FunctionOutliningSplitterRepeating, NoRepeatingBlocks) {
     {
         const size_t minOpsInBlock = 2;
         const size_t maxNumIterations = 10;
-        FunctionOutlinerRepeatingBlocks splitter(minOpsInBlock, maxNumIterations, Logger::global());
+        const bool weightsAsInputs = false;
+        const bool separateFunctions = false;
+        FunctionOutlinerRepeatingBlocks splitter(minOpsInBlock, maxNumIterations, separateFunctions, weightsAsInputs,
+                                                 Logger::global());
         const auto functionInstances = splitter.getOutliningTargets(func);
         ASSERT_EQ(functionInstances.size(), 0);
     }
@@ -112,9 +114,7 @@ TEST_F(MLIR_FunctionOutliningSplitterRepeating, NoRepeatingBlocks) {
  *    [output]
  */
 TEST_F(MLIR_FunctionOutliningSplitterRepeating, LinearIdenticalOps) {
-    mlir::DialectRegistry registry;
-    vpux::registerDialects(registry);
-    vpux::registerCommonInterfaces(registry);
+    auto registry = vpux::createDialectRegistry();
 
     mlir::MLIRContext ctx(registry);
     ctx.loadDialect<IE::IEDialect>();
@@ -156,7 +156,10 @@ TEST_F(MLIR_FunctionOutliningSplitterRepeating, LinearIdenticalOps) {
     {
         const size_t minOpsInBlock = 2;
         const size_t maxNumIterations = 10;
-        FunctionOutlinerRepeatingBlocks splitter(minOpsInBlock, maxNumIterations, Logger::global());
+        const bool weightsAsInputs = false;
+        const bool separateFunctions = false;
+        FunctionOutlinerRepeatingBlocks splitter(minOpsInBlock, maxNumIterations, separateFunctions, weightsAsInputs,
+                                                 Logger::global());
         const auto functionInstances = splitter.getOutliningTargets(func);
         ASSERT_EQ(functionInstances.size(), 0);
     }
@@ -188,9 +191,7 @@ TEST_F(MLIR_FunctionOutliningSplitterRepeating, LinearIdenticalOps) {
  *    [output]
  */
 TEST_F(MLIR_FunctionOutliningSplitterRepeating, LinearIdenticalOpsDifferentConst) {
-    mlir::DialectRegistry registry;
-    vpux::registerDialects(registry);
-    vpux::registerCommonInterfaces(registry);
+    auto registry = vpux::createDialectRegistry();
 
     mlir::MLIRContext ctx(registry);
     ctx.loadDialect<IE::IEDialect>();
@@ -236,7 +237,10 @@ TEST_F(MLIR_FunctionOutliningSplitterRepeating, LinearIdenticalOpsDifferentConst
     {
         const size_t minOpsInBlock = 2;
         const size_t maxNumIterations = 10;
-        FunctionOutlinerRepeatingBlocks splitter(minOpsInBlock, maxNumIterations, Logger::global());
+        const bool weightsAsInputs = false;
+        const bool separateFunctions = false;
+        FunctionOutlinerRepeatingBlocks splitter(minOpsInBlock, maxNumIterations, separateFunctions, weightsAsInputs,
+                                                 Logger::global());
         const auto functionInstances = splitter.getOutliningTargets(func);
         ASSERT_EQ(functionInstances.size(), 0);
     }
@@ -258,9 +262,7 @@ TEST_F(MLIR_FunctionOutliningSplitterRepeating, LinearIdenticalOpsDifferentConst
  *    [output]
  */
 TEST_F(MLIR_FunctionOutliningSplitterRepeating, LinearDifferentOps) {
-    mlir::DialectRegistry registry;
-    vpux::registerDialects(registry);
-    vpux::registerCommonInterfaces(registry);
+    auto registry = vpux::createDialectRegistry();
 
     mlir::MLIRContext ctx(registry);
     ctx.loadDialect<IE::IEDialect>();
@@ -300,7 +302,10 @@ TEST_F(MLIR_FunctionOutliningSplitterRepeating, LinearDifferentOps) {
     {
         const size_t minOpsInBlock = 2;
         const size_t maxNumIterations = 10;
-        FunctionOutlinerRepeatingBlocks splitter(minOpsInBlock, maxNumIterations, Logger::global());
+        const bool weightsAsInputs = false;
+        const bool separateFunctions = false;
+        FunctionOutlinerRepeatingBlocks splitter(minOpsInBlock, maxNumIterations, separateFunctions, weightsAsInputs,
+                                                 Logger::global());
         const auto functionInstances = splitter.getOutliningTargets(func);
         ASSERT_EQ(functionInstances.size(), 1);
 
@@ -349,9 +354,7 @@ TEST_F(MLIR_FunctionOutliningSplitterRepeating, LinearDifferentOps) {
  *        [output]
  */
 TEST_F(MLIR_FunctionOutliningSplitterRepeating, BranchingIdentical) {
-    mlir::DialectRegistry registry;
-    vpux::registerDialects(registry);
-    vpux::registerCommonInterfaces(registry);
+    auto registry = vpux::createDialectRegistry();
 
     mlir::MLIRContext ctx(registry);
     ctx.loadDialect<IE::IEDialect>();
@@ -405,7 +408,10 @@ TEST_F(MLIR_FunctionOutliningSplitterRepeating, BranchingIdentical) {
     {
         const size_t minOpsInBlock = 2;
         const size_t maxNumIterations = 10;
-        FunctionOutlinerRepeatingBlocks splitter(minOpsInBlock, maxNumIterations, Logger::global());
+        const bool weightsAsInputs = false;
+        const bool separateFunctions = false;
+        FunctionOutlinerRepeatingBlocks splitter(minOpsInBlock, maxNumIterations, separateFunctions, weightsAsInputs,
+                                                 Logger::global());
         const auto functionInstances = splitter.getOutliningTargets(func);
         ASSERT_EQ(functionInstances.size(), 1);
 
@@ -455,9 +461,7 @@ TEST_F(MLIR_FunctionOutliningSplitterRepeating, BranchingIdentical) {
  *        [output]
  */
 TEST_F(MLIR_FunctionOutliningSplitterRepeating, BranchingSimilarProducers) {
-    mlir::DialectRegistry registry;
-    vpux::registerDialects(registry);
-    vpux::registerCommonInterfaces(registry);
+    auto registry = vpux::createDialectRegistry();
 
     mlir::MLIRContext ctx(registry);
     ctx.loadDialect<IE::IEDialect>();
@@ -499,7 +503,10 @@ TEST_F(MLIR_FunctionOutliningSplitterRepeating, BranchingSimilarProducers) {
     {
         const size_t minOpsInBlock = 3;
         const size_t maxNumIterations = 10;
-        FunctionOutlinerRepeatingBlocks splitter(minOpsInBlock, maxNumIterations, Logger::global());
+        const bool weightsAsInputs = false;
+        const bool separateFunctions = false;
+        FunctionOutlinerRepeatingBlocks splitter(minOpsInBlock, maxNumIterations, separateFunctions, weightsAsInputs,
+                                                 Logger::global());
         const auto functionInstances = splitter.getOutliningTargets(func);
         ASSERT_EQ(functionInstances.size(), 1);
 
@@ -535,6 +542,103 @@ TEST_F(MLIR_FunctionOutliningSplitterRepeating, BranchingSimilarProducers) {
 }
 
 /**
+ *
+ *   [input1]  [input2]
+ *      |         |
+ *    MaxPool  MaxPool
+ *       \       /
+ *          Add
+ *       /       \
+ *    MaxPool  MaxPool
+ *       \       /
+ *          Add
+ *           |
+ *        [output]
+ */
+TEST_F(MLIR_FunctionOutliningSplitterRepeating, BranchingSimilarProducersSeparateFunctions) {
+    auto registry = vpux::createDialectRegistry();
+
+    mlir::MLIRContext ctx(registry);
+    ctx.loadDialect<IE::IEDialect>();
+
+    constexpr StringLiteral inputIR = R"(
+        module @test {
+            func.func @main(%input1: tensor<1x3x300x300xf32>, %input2: tensor<1x3x300x300xf32>) -> tensor<1x3x300x300xf32> {
+                %maxpool1 = IE.MaxPool(%input1) {
+                        kernel_size = [3, 3], pads_begin = [1, 1], pads_end = [1, 1], rounding_type = #IE.rounding_type<FLOOR>, strides = [1, 1]
+                    } : tensor<1x3x300x300xf32> -> tensor<1x3x300x300xf32> loc("maxpool1")
+                %maxpool2 = IE.MaxPool(%input2) {
+                        kernel_size = [3, 3], pads_begin = [1, 1], pads_end = [1, 1], rounding_type = #IE.rounding_type<FLOOR>, strides = [1, 1]
+                    } : tensor<1x3x300x300xf32> -> tensor<1x3x300x300xf32> loc("maxpool2")
+                %add1 = IE.Add(%maxpool1, %maxpool2) {
+                        auto_broadcast = #IE.auto_broadcast_type<NUMPY>
+                    } : tensor<1x3x300x300xf32>, tensor<1x3x300x300xf32> -> tensor<1x3x300x300xf32> loc("add1")
+
+                %maxpool3 = IE.MaxPool(%add1) {
+                        kernel_size = [3, 3], pads_begin = [1, 1], pads_end = [1, 1], rounding_type = #IE.rounding_type<FLOOR>, strides = [1, 1]
+                    } : tensor<1x3x300x300xf32> -> tensor<1x3x300x300xf32> loc("maxpool3")
+                %maxpool4 = IE.MaxPool(%add1) {
+                        kernel_size = [3, 3], pads_begin = [1, 1], pads_end = [1, 1], rounding_type = #IE.rounding_type<FLOOR>, strides = [1, 1]
+                    } : tensor<1x3x300x300xf32> -> tensor<1x3x300x300xf32> loc("maxpool4")
+                %add2 = IE.Add(%maxpool3, %maxpool4) {
+                        auto_broadcast = #IE.auto_broadcast_type<NUMPY>
+                    } : tensor<1x3x300x300xf32>, tensor<1x3x300x300xf32> -> tensor<1x3x300x300xf32> loc("add2")
+
+                return %add2 : tensor<1x3x300x300xf32>
+            }
+        }
+    )";
+
+    auto module = mlir::parseSourceString<mlir::ModuleOp>(inputIR, &ctx);
+    ASSERT_TRUE(module.get() != nullptr);
+
+    auto func = module.get().lookupSymbol<mlir::func::FuncOp>("main");
+    ASSERT_TRUE(func != nullptr);
+
+    {
+        const size_t minOpsInBlock = 3;
+        const size_t maxNumIterations = 10;
+        const bool weightsAsInputs = false;
+        const bool separateFunctions = true;
+        FunctionOutlinerRepeatingBlocks splitter(minOpsInBlock, maxNumIterations, separateFunctions, weightsAsInputs,
+                                                 Logger::global());
+        const auto functionInstances = splitter.getOutliningTargets(func);
+        ASSERT_EQ(functionInstances.size(), 1);
+
+        auto& function = functionInstances[0];
+        ASSERT_EQ(function.size(), 2) << "Expected two IR slices to be outlined into this function";
+        {
+            auto& irSlice = function[0];
+            ASSERT_EQ(irSlice.operations.size(), 3);
+            EXPECT_EQ(getName(irSlice.operations[0]), "maxpool1");
+            EXPECT_EQ(getName(irSlice.operations[1]), "maxpool2");
+            EXPECT_EQ(getName(irSlice.operations[2]), "add1");
+
+            ASSERT_EQ(irSlice.inputs.size(), 2);
+            EXPECT_TRUE(mlir::isa<mlir::BlockArgument>(irSlice.inputs[0]));
+            EXPECT_TRUE(mlir::isa<mlir::BlockArgument>(irSlice.inputs[1]));
+            ASSERT_EQ(irSlice.outputs.size(), 1);
+            EXPECT_EQ(getName(irSlice.outputs[0].getDefiningOp()), "add1");
+        }
+        {
+            auto& irSlice = function[1];
+            ASSERT_EQ(irSlice.operations.size(), 3);
+            EXPECT_EQ(getName(irSlice.operations[0]), "maxpool3");
+            EXPECT_EQ(getName(irSlice.operations[1]), "maxpool4");
+            EXPECT_EQ(getName(irSlice.operations[2]), "add2");
+
+            // Compared to the case where separateFunctions is set to false, only one input value is found. This is
+            // because the identified instances will be outlined into separate functions, so there is no requirement for
+            // all functions to have the same number of inputs. This one input will be reused inside the function.
+            ASSERT_EQ(irSlice.inputs.size(), 1);
+            EXPECT_EQ(getName(irSlice.inputs[0].getDefiningOp()), "add1");
+            ASSERT_EQ(irSlice.outputs.size(), 1);
+            EXPECT_EQ(getName(irSlice.outputs[0].getDefiningOp()), "add2");
+        }
+    }
+}
+
+/**
  *        [input]
  *           |
  *        MaxPool
@@ -556,9 +660,7 @@ TEST_F(MLIR_FunctionOutliningSplitterRepeating, BranchingSimilarProducers) {
  *        [output]
  */
 TEST_F(MLIR_FunctionOutliningSplitterRepeating, BranchingDifferentConsumer) {
-    mlir::DialectRegistry registry;
-    vpux::registerDialects(registry);
-    vpux::registerCommonInterfaces(registry);
+    auto registry = vpux::createDialectRegistry();
 
     mlir::MLIRContext ctx(registry);
     ctx.loadDialect<IE::IEDialect>();
@@ -616,7 +718,10 @@ TEST_F(MLIR_FunctionOutliningSplitterRepeating, BranchingDifferentConsumer) {
     {
         const size_t minOpsInBlock = 3;
         const size_t maxNumIterations = 10;
-        FunctionOutlinerRepeatingBlocks splitter(minOpsInBlock, maxNumIterations, Logger::global());
+        const bool weightsAsInputs = false;
+        const bool separateFunctions = false;
+        FunctionOutlinerRepeatingBlocks splitter(minOpsInBlock, maxNumIterations, separateFunctions, weightsAsInputs,
+                                                 Logger::global());
         const auto functionInstances = splitter.getOutliningTargets(func);
         ASSERT_EQ(functionInstances.size(), 1);
 
@@ -678,10 +783,8 @@ TEST_F(MLIR_FunctionOutliningSplitterRepeating, BranchingDifferentConsumer) {
  *           |
  *        [output]
  */
-TEST_F(MLIR_FunctionOutliningSplitterRepeating, BranchingNonRepeating) {
-    mlir::DialectRegistry registry;
-    vpux::registerDialects(registry);
-    vpux::registerCommonInterfaces(registry);
+TEST_F(MLIR_FunctionOutliningSplitterRepeating, BranchingNonRepeatingWeightsAsInputs) {
+    auto registry = vpux::createDialectRegistry();
 
     mlir::MLIRContext ctx(registry);
     ctx.loadDialect<IE::IEDialect>();
@@ -737,7 +840,10 @@ TEST_F(MLIR_FunctionOutliningSplitterRepeating, BranchingNonRepeating) {
     {
         const size_t minOpsInBlock = 2;
         const size_t maxNumIterations = 10;
-        FunctionOutlinerRepeatingBlocks splitter(minOpsInBlock, maxNumIterations, Logger::global());
+        const bool weightsAsInputs = true;
+        const bool separateFunctions = false;
+        FunctionOutlinerRepeatingBlocks splitter(minOpsInBlock, maxNumIterations, separateFunctions, weightsAsInputs,
+                                                 Logger::global());
         const auto functionInstances = splitter.getOutliningTargets(func);
         ASSERT_EQ(functionInstances.size(), 1);
 
@@ -745,29 +851,29 @@ TEST_F(MLIR_FunctionOutliningSplitterRepeating, BranchingNonRepeating) {
         ASSERT_EQ(function.size(), 2) << "Expected two IR slices to be outlined into this function";
         {
             auto& irSlice = function[0];
-            ASSERT_EQ(irSlice.operations.size(), 5);
-            EXPECT_EQ(getName(irSlice.operations[0]), "weights1");
-            EXPECT_EQ(getName(irSlice.operations[1]), "conv1");
-            EXPECT_EQ(getName(irSlice.operations[2]), "maxpool1");
-            EXPECT_EQ(getName(irSlice.operations[3]), "avgpool1");
-            EXPECT_EQ(getName(irSlice.operations[4]), "add1");
+            ASSERT_EQ(irSlice.operations.size(), 4);
+            EXPECT_EQ(getName(irSlice.operations[0]), "conv1");
+            EXPECT_EQ(getName(irSlice.operations[1]), "maxpool1");
+            EXPECT_EQ(getName(irSlice.operations[2]), "avgpool1");
+            EXPECT_EQ(getName(irSlice.operations[3]), "add1");
 
-            ASSERT_EQ(irSlice.inputs.size(), 1);
+            ASSERT_EQ(irSlice.inputs.size(), 2);
             EXPECT_TRUE(mlir::isa<mlir::BlockArgument>(irSlice.inputs[0]));
+            EXPECT_TRUE(llvm::isa<Const::DeclareOp>(irSlice.inputs[1].getDefiningOp()));
             ASSERT_EQ(irSlice.outputs.size(), 1);
             EXPECT_EQ(getName(irSlice.outputs[0].getDefiningOp()), "add1");
         }
         {
             auto& irSlice = function[1];
-            ASSERT_EQ(irSlice.operations.size(), 5);
-            EXPECT_EQ(getName(irSlice.operations[0]), "weights2");
-            EXPECT_EQ(getName(irSlice.operations[1]), "conv2");
-            EXPECT_EQ(getName(irSlice.operations[2]), "maxpool2");
-            EXPECT_EQ(getName(irSlice.operations[3]), "avgpool2");
-            EXPECT_EQ(getName(irSlice.operations[4]), "add2");
+            ASSERT_EQ(irSlice.operations.size(), 4);
+            EXPECT_EQ(getName(irSlice.operations[0]), "conv2");
+            EXPECT_EQ(getName(irSlice.operations[1]), "maxpool2");
+            EXPECT_EQ(getName(irSlice.operations[2]), "avgpool2");
+            EXPECT_EQ(getName(irSlice.operations[3]), "add2");
 
-            ASSERT_EQ(irSlice.inputs.size(), 1);
+            ASSERT_EQ(irSlice.inputs.size(), 2);
             EXPECT_EQ(getName(irSlice.inputs[0].getDefiningOp()), "add1");
+            EXPECT_TRUE(llvm::isa<mlir::TensorType>(irSlice.inputs[1].getType()));
             ASSERT_EQ(irSlice.outputs.size(), 1);
             EXPECT_EQ(getName(irSlice.outputs[0].getDefiningOp()), "add2");
         }
@@ -800,9 +906,7 @@ TEST_F(MLIR_FunctionOutliningSplitterRepeating, BranchingNonRepeating) {
  *    [output]
  */
 TEST_F(MLIR_FunctionOutliningSplitterRepeating, ConstIntermediateOps) {
-    mlir::DialectRegistry registry;
-    vpux::registerDialects(registry);
-    vpux::registerCommonInterfaces(registry);
+    auto registry = vpux::createDialectRegistry();
 
     mlir::MLIRContext ctx(registry);
     ctx.loadDialect<IE::IEDialect>();
@@ -850,7 +954,10 @@ TEST_F(MLIR_FunctionOutliningSplitterRepeating, ConstIntermediateOps) {
     {
         const size_t minOpsInBlock = 3;
         const size_t maxNumIterations = 10;
-        FunctionOutlinerRepeatingBlocks splitter(minOpsInBlock, maxNumIterations, Logger::global());
+        const bool weightsAsInputs = false;
+        const bool separateFunctions = false;
+        FunctionOutlinerRepeatingBlocks splitter(minOpsInBlock, maxNumIterations, separateFunctions, weightsAsInputs,
+                                                 Logger::global());
         const auto functionInstances = splitter.getOutliningTargets(func);
         ASSERT_EQ(functionInstances.size(), 1);
 
@@ -919,9 +1026,7 @@ TEST_F(MLIR_FunctionOutliningSplitterRepeating, ConstIntermediateOps) {
  *    [output]
  */
 TEST_F(MLIR_FunctionOutliningSplitterRepeating, MultipleBlocks) {
-    mlir::DialectRegistry registry;
-    vpux::registerDialects(registry);
-    vpux::registerCommonInterfaces(registry);
+    auto registry = vpux::createDialectRegistry();
 
     mlir::MLIRContext ctx(registry);
     ctx.loadDialect<IE::IEDialect>();
@@ -979,7 +1084,10 @@ TEST_F(MLIR_FunctionOutliningSplitterRepeating, MultipleBlocks) {
     {
         const size_t minOpsInBlock = 2;
         const size_t maxNumIterations = 10;
-        FunctionOutlinerRepeatingBlocks splitter(minOpsInBlock, maxNumIterations, Logger::global());
+        const bool weightsAsInputs = false;
+        const bool separateFunctions = false;
+        FunctionOutlinerRepeatingBlocks splitter(minOpsInBlock, maxNumIterations, separateFunctions, weightsAsInputs,
+                                                 Logger::global());
         const auto functionInstances = splitter.getOutliningTargets(func);
         ASSERT_EQ(functionInstances.size(), 2);
 
@@ -1063,9 +1171,7 @@ TEST_F(MLIR_FunctionOutliningSplitterRepeating, MultipleBlocks) {
  *             [output2]
  */
 TEST_F(MLIR_FunctionOutliningSplitterRepeating, RepeatingProducersWithDifferentConnections) {
-    mlir::DialectRegistry registry;
-    vpux::registerDialects(registry);
-    vpux::registerCommonInterfaces(registry);
+    auto registry = vpux::createDialectRegistry();
 
     mlir::MLIRContext ctx(registry);
     ctx.loadDialect<IE::IEDialect>();
@@ -1116,7 +1222,10 @@ TEST_F(MLIR_FunctionOutliningSplitterRepeating, RepeatingProducersWithDifferentC
     {
         const size_t minOpsInBlock = 2;
         const size_t maxNumIterations = 10;
-        FunctionOutlinerRepeatingBlocks splitter(minOpsInBlock, maxNumIterations, Logger::global());
+        const bool weightsAsInputs = false;
+        const bool separateFunctions = false;
+        FunctionOutlinerRepeatingBlocks splitter(minOpsInBlock, maxNumIterations, separateFunctions, weightsAsInputs,
+                                                 Logger::global());
         const auto functionInstances = splitter.getOutliningTargets(func);
         ASSERT_EQ(functionInstances.size(), 2);
 
@@ -1204,9 +1313,7 @@ TEST_F(MLIR_FunctionOutliningSplitterRepeating, RepeatingProducersWithDifferentC
  *             [output3]
  */
 TEST_F(MLIR_FunctionOutliningSplitterRepeating, RepeatingMultipleProducers) {
-    mlir::DialectRegistry registry;
-    vpux::registerDialects(registry);
-    vpux::registerCommonInterfaces(registry);
+    auto registry = vpux::createDialectRegistry();
 
     mlir::MLIRContext ctx(registry);
     ctx.loadDialect<IE::IEDialect>();
@@ -1274,7 +1381,10 @@ TEST_F(MLIR_FunctionOutliningSplitterRepeating, RepeatingMultipleProducers) {
     {
         const size_t minOpsInBlock = 2;
         const size_t maxNumIterations = 10;
-        FunctionOutlinerRepeatingBlocks splitter(minOpsInBlock, maxNumIterations, Logger::global());
+        const bool weightsAsInputs = false;
+        const bool separateFunctions = false;
+        FunctionOutlinerRepeatingBlocks splitter(minOpsInBlock, maxNumIterations, separateFunctions, weightsAsInputs,
+                                                 Logger::global());
         const auto functionInstances = splitter.getOutliningTargets(func);
         ASSERT_EQ(functionInstances.size(), 1);
 
@@ -1342,9 +1452,7 @@ TEST_F(MLIR_FunctionOutliningSplitterRepeating, RepeatingMultipleProducers) {
  *            [output3]
  */
 TEST_F(MLIR_FunctionOutliningSplitterRepeating, RepeatingMultipleProducersWithDifferentConnections) {
-    mlir::DialectRegistry registry;
-    vpux::registerDialects(registry);
-    vpux::registerCommonInterfaces(registry);
+    auto registry = vpux::createDialectRegistry();
 
     mlir::MLIRContext ctx(registry);
     ctx.loadDialect<IE::IEDialect>();
@@ -1398,7 +1506,10 @@ TEST_F(MLIR_FunctionOutliningSplitterRepeating, RepeatingMultipleProducersWithDi
     {
         const size_t minOpsInBlock = 2;
         const size_t maxNumIterations = 10;
-        FunctionOutlinerRepeatingBlocks splitter(minOpsInBlock, maxNumIterations, Logger::global());
+        const bool weightsAsInputs = false;
+        const bool separateFunctions = false;
+        FunctionOutlinerRepeatingBlocks splitter(minOpsInBlock, maxNumIterations, separateFunctions, weightsAsInputs,
+                                                 Logger::global());
         const auto functionInstances = splitter.getOutliningTargets(func);
         ASSERT_EQ(functionInstances.size(), 1);
 
@@ -1454,9 +1565,7 @@ TEST_F(MLIR_FunctionOutliningSplitterRepeating, RepeatingMultipleProducersWithDi
  *           [output]
  */
 TEST_F(MLIR_FunctionOutliningSplitterRepeating, RepeatingMultipleProducersWithDifferentConnections2) {
-    mlir::DialectRegistry registry;
-    vpux::registerDialects(registry);
-    vpux::registerCommonInterfaces(registry);
+    auto registry = vpux::createDialectRegistry();
 
     mlir::MLIRContext ctx(registry);
     ctx.loadDialect<IE::IEDialect>();
@@ -1498,7 +1607,10 @@ TEST_F(MLIR_FunctionOutliningSplitterRepeating, RepeatingMultipleProducersWithDi
     {
         const size_t minOpsInBlock = 2;
         const size_t maxNumIterations = 10;
-        FunctionOutlinerRepeatingBlocks splitter(minOpsInBlock, maxNumIterations, Logger::global());
+        const bool weightsAsInputs = false;
+        const bool separateFunctions = false;
+        FunctionOutlinerRepeatingBlocks splitter(minOpsInBlock, maxNumIterations, separateFunctions, weightsAsInputs,
+                                                 Logger::global());
         const auto functionInstances = splitter.getOutliningTargets(func);
         ASSERT_EQ(functionInstances.size(), 1);
 
@@ -1550,9 +1662,7 @@ TEST_F(MLIR_FunctionOutliningSplitterRepeating, RepeatingMultipleProducersWithDi
  *        [output]
  */
 TEST_F(MLIR_FunctionOutliningSplitterRepeating, FirstInstanceInputReuse) {
-    mlir::DialectRegistry registry;
-    vpux::registerDialects(registry);
-    vpux::registerCommonInterfaces(registry);
+    auto registry = vpux::createDialectRegistry();
 
     mlir::MLIRContext ctx(registry);
     ctx.loadDialect<IE::IEDialect>();
@@ -1582,7 +1692,10 @@ TEST_F(MLIR_FunctionOutliningSplitterRepeating, FirstInstanceInputReuse) {
     {
         const size_t minOpsInBlock = 2;
         const size_t maxNumIterations = 10;
-        FunctionOutlinerRepeatingBlocks splitter(minOpsInBlock, maxNumIterations, Logger::global());
+        const bool weightsAsInputs = false;
+        const bool separateFunctions = false;
+        FunctionOutlinerRepeatingBlocks splitter(minOpsInBlock, maxNumIterations, separateFunctions, weightsAsInputs,
+                                                 Logger::global());
         const auto functionInstances = splitter.getOutliningTargets(func);
         ASSERT_EQ(functionInstances.size(), 1);
 

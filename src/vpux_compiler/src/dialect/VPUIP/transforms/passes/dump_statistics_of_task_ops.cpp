@@ -606,6 +606,20 @@ std::tuple<uint64_t, uint64_t> getInputOutputSize(mlir::func::FuncOp funcOp) {
     return {inputSize, outputSize};
 }
 
+uint64_t getDDRHeapSize(mlir::func::FuncOp funcOp) {
+    uint64_t maxOffset = 0;
+    auto calcOffset = [&](VPURT::DeclareBufferOp bufferOp) {
+        if (bufferOp.getMemorySpace() == VPURT::BufferSection::DDR) {
+            auto currentOffset = bufferOp.getByteOffset() + bufferOp.getBinarySize();
+            maxOffset = std::max(maxOffset, currentOffset);
+        }
+    };
+    auto bufferOps = funcOp.getOps<VPURT::DeclareBufferOp>();
+    llvm::for_each(bufferOps, calcOffset);
+
+    return maxOffset;
+}
+
 //
 // DumpStatisticsOfTaskOpsPass
 //
@@ -621,13 +635,7 @@ private:
 };
 
 void DumpStatisticsOfTaskOpsPass::safeRunOnFunc() {
-    auto& ctx = getContext();
     auto func = getOperation();
-
-    llvm::DenseSet<mlir::OperationName> dpuOperations{
-            mlir::OperationName(VPUIP::ConvolutionUPAOp::getOperationName(), &ctx),
-            mlir::OperationName(VPUIP::PoolingUPAOp::getOperationName(), &ctx),
-            mlir::OperationName(VPUIP::EltwiseUPAOp::getOperationName(), &ctx)};
 
     auto opStatisticsCounter = populateCounters();
     CompressionRateCounter compressionCounter;
@@ -637,6 +645,9 @@ void DumpStatisticsOfTaskOpsPass::safeRunOnFunc() {
     _log.info("Input size - {0} Output size - {1}", convertBytesToReadableSize(std::get<0>(inputOutputsize)),
               convertBytesToReadableSize(std::get<1>(inputOutputsize)));
 
+    auto ddrHeapSize = getDDRHeapSize(func);
+    _log.info("DDR heap size - {0}", convertBytesToReadableSize(ddrHeapSize));
+
     func->walk([&](mlir::Operation* op) {
         opStatisticsCounter.count(op);
         compressionCounter.count(op);
@@ -644,11 +655,6 @@ void DumpStatisticsOfTaskOpsPass::safeRunOnFunc() {
 
         if (VPU::getCompilationMode(func) == VPU::CompilationMode::ReferenceSW) {
             return;
-        }
-
-        const auto opName = op->getName();
-        if (dpuOperations.contains(opName)) {
-            _log.nest().warning("'{0}' was not converted to 'VPUIP.NCETask'", opName);
         }
     });
 

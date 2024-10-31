@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation
+// Copyright (C) 2022-2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 #include "single_op_tests/rdft.hpp"
@@ -95,7 +95,7 @@ INSTANTIATE_TEST_SUITE_P(smoke_RDFT_1d, RdftLayerTestCommon,
 
 INSTANTIATE_TEST_SUITE_P(smoke_RDFT_2d, RdftLayerTestCommon,
                          testing::Combine(testing::Values(std::vector<size_t>{10, 2}), testing::ValuesIn(modelTypes),
-                                          testing::ValuesIn(std::vector<std::vector<int64_t>>{{{0}}}),
+                                          testing::ValuesIn(std::vector<std::vector<int64_t>>{{0}}),
                                           testing::ValuesIn(std::vector<std::vector<int64_t>>{{}, {3}, {12}}),
                                           testing::Values(DFTOpType::FORWARD), testing::Values(DEVICE_NPU)),
                          RDFTLayerTest::getTestCaseName);

@@ -21,8 +21,18 @@ include "vpux/compiler/NPU37XX/dialect/NPUReg37XX/dialect.td"
 // RegField Specialization
 //
 
-class NPUReg37XX_RegFieldWrapper<string name = "", int width = 0, int pos = 0, string dataType = "UINT"> :
-    VPURegMapped_RegFieldWrapper<NPUReg37XX_Dialect, name, width, pos, dataType> {
+class NPUReg37XX_Version<int vMajor, int vMinor, int vPatch> : VPURegMapped_Version {
+    let major = vMajor;
+    let minor = vMinor;
+    let patch = vPatch;
+}
+
+// MI Version that acts as baseline for NPU37XX NNRT API
+// All registers default to this baseline unless specified otherwise
+def NPUReg37XX_BaselineVersion : NPUReg37XX_Version<7, 0, 0>;
+
+class NPUReg37XX_RegFieldWrapper<string name = "", int width = 0, int pos = 0, string dataType = "UINT", VPURegMapped_Version version = NPUReg37XX_BaselineVersion> :
+    VPURegMapped_RegFieldWrapper<NPUReg37XX_Dialect, name, width, pos, dataType, version> {
 
     }
 
@@ -533,7 +543,7 @@ def reg_dma_watermark : NPUReg37XX_RegisterWrapper<"dma_watermark", 64, 0x0, ["d
 //  dma_64_bit_word_1
 //
 
-def bf_dma_type : NPUReg37XX_RegFieldWrapper<"dma_type", 2, 0>; 
+def bf_dma_type : NPUReg37XX_RegFieldWrapper<"dma_type", 2, 0>;
 def bf_dma_burst_length : NPUReg37XX_RegFieldWrapper<"dma_burst_length", 8, 2>;
 def bf_dma_critical : NPUReg37XX_RegFieldWrapper<"dma_critical", 1, 10>;
 def bf_dma_interrupt_en : NPUReg37XX_RegFieldWrapper<"dma_interrupt_en", 1, 11>;
@@ -544,7 +554,7 @@ def bf_dma_watermark_en : NPUReg37XX_RegFieldWrapper<"dma_watermark_en", 1, 27>;
 def bf_dma_dec_en : NPUReg37XX_RegFieldWrapper<"dma_dec_en", 1, 28>;
 def bf_dma_barrier_en : NPUReg37XX_RegFieldWrapper<"dma_barrier_en", 1, 29>;
 
-def reg_dma_cfg_bits : NPUReg37XX_RegisterWrapper<"dma_cfg_bits", 64, 0x8, 
+def reg_dma_cfg_bits : NPUReg37XX_RegisterWrapper<"dma_cfg_bits", 64, 0x8,
     ["dma_type", "dma_burst_length", "dma_critical", "dma_interrupt_en", "dma_interrupt_trigger", "dma_skip_nr",
      "dma_order_forced", "dma_watermark_en", "dma_dec_en", "dma_barrier_en"]>;
 

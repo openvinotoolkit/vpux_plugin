@@ -13,6 +13,7 @@
 #include "vpux/compiler/core/layers.hpp"
 #include "vpux/compiler/core/tiling.hpp"
 #include "vpux/compiler/dialect/VPU/utils/generate_tiling.hpp"
+#include "vpux/compiler/dialect/VPU/utils/max_kernel_size_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_invariant.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_sparsity.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
@@ -32,26 +33,14 @@ bool vpux::VPU::NCEMaxPoolOp::fitIntoCMX(vpux::NDTypeInterface input, vpux::NDTy
     const auto outputShape = output.getShape();
     const auto outputChannels = outputShape[Dims4D::Act::C];
 
-    const auto kernelSize = Shape(parseIntArrayAttr<int64_t>(getKernelSize()));
-
-    const auto kernelStrides = Shape(parseIntArrayAttr<int64_t>(getStrides()));
-    const auto strideW = kernelStrides[Dims4D::Strides::X];
-
     SmallVector<Byte> buffers = {input.getTotalAllocSize(), output.getTotalAllocSize()};
 
     if (getWeightsTable() != nullptr) {
         buffers.push_back(NCEInvariant::getWeightsTableSize(outputChannels));
     }
 
-    if (getActivationWindow() != nullptr) {
-        const auto activationWindowSize = NCESparsity::getActivationWindowSize(NCESparsity::Mode::POOL, kernelSize,
-                                                                               strideW, input.getElementType(), 1);
-        buffers.push_back(activationWindowSize * 1_Byte);
-    }
-
     auto totalAvailableCMXSize = reservedMem.count() == 0 ? getTotalCMXSize(getOperation()).count()
                                                           : getTotalCMXFragmentationAwareSize(getOperation()).count();
-
     auto arch = getArch(getOperation());
     return vpux::VPU::calculateAlignedBuffersMemoryRequirement(arch, buffers).count() + reservedMem.count() <=
            totalAvailableCMXSize;
@@ -97,7 +86,7 @@ bool vpux::VPU::NCEMaxPoolOp::isSupported(IE::MaxPoolOp op, LogCb logCb, bool ch
 
     const auto pads = PadInfo(op.getPadsBegin(), op.getPadsEnd());
 
-    if (!NCEInvariant::isAttrsSupported(arch, KY, KX, SY, SX, pads.top, pads.bottom, pads.left, pads.right, logCb)) {
+    if (!NCEInvariant::isAttrsSupported(op, KY, KX, SY, SX, pads.top, pads.bottom, pads.left, pads.right, logCb)) {
         return false;
     }
 
@@ -110,10 +99,9 @@ bool vpux::VPU::NCEMaxPoolOp::isSupported(IE::MaxPoolOp op, LogCb logCb, bool ch
     }
 
     if (checkChannelAlignment) {
-        if (!NCEInvariant::isInputActTypeSupported(
-                    arch, inputType, vpux::VPU::NCEInvariant::getAlignment(inputType.getElementType()), false) ||
-            !NCEInvariant::isOutputActTypeSupported(
-                    outputType, vpux::VPU::NCEInvariant::getAlignment(outputType.getElementType()))) {
+        auto iface = mlir::cast<IE::AlignedChannelsOpInterface>(op.getOperation());
+        if (!NCEInvariant::isInputActTypeSupported(arch, inputType, iface.getInputChannelAlignment(), false) ||
+            !NCEInvariant::isOutputActTypeSupported(outputType, iface.getOutputChannelAlignment())) {
             logCb(formatv("Misaligned tensor shape"));
             return false;
         }
@@ -162,7 +150,7 @@ mlir::LogicalResult vpux::VPU::NCEMaxPoolOp::verify() {
     const auto padLeft = getPad().getLeft().getValue().getSExtValue();
     const auto padRight = getPad().getRight().getValue().getSExtValue();
 
-    if (!NCEInvariant::isAttrsSupported(arch, KY, KX, SY, SX, padTop, padBottom, padLeft, padRight, logCb)) {
+    if (!NCEInvariant::isAttrsSupported(op, KY, KX, SY, SX, padTop, padBottom, padLeft, padRight, logCb)) {
         return mlir::failure();
     }
 
@@ -176,19 +164,6 @@ mlir::LogicalResult vpux::VPU::NCEMaxPoolOp::verify() {
         if (weightsTableShape != expectedWeightsTableShape) {
             return errorAt(op, "Got wrong shape for 'weightsTable' '{0}', expected '{1}'", weightsTableShape,
                            expectedWeightsTableShape);
-        }
-    }
-
-    if (getActivationWindow() != nullptr) {
-        const auto inputType = getInput().getType().cast<NDTypeInterface>();
-
-        const auto activationWindowShape = getShape(getActivationWindow());
-        const auto expectedActivationWindowShape = NCESparsity::inferActivationWindowShape(
-                NCESparsity::Mode::POOL, kernelSize, SX, inputType.getElementType(), 1);
-
-        if (activationWindowShape != expectedActivationWindowShape) {
-            return errorAt(op, "Got wrong shape for 'activationWindow' '{0}', expected '{1}'", activationWindowShape,
-                           expectedActivationWindowShape);
         }
     }
 
@@ -253,30 +228,12 @@ vpux::InputTiling vpux::VPU::NCEMaxPoolOp::backInferTileInfo(const vpux::TileInf
     if (getWeightsTable() != nullptr) {
         inputTiling.tiles.push_back(VPU::getWeightsTableTile(this, outputTile));
     }
-    if (getActivationWindow() != nullptr) {
-        inputTiling.tiles.push_back(VPU::getActivationWindowTile(this, outputTile));
-    }
 
     return inputTiling;
 }
 
 void vpux::VPU::NCEMaxPoolOp::adjustAttrs(const TilingInfo& inputTiling, const TileInfo& /*outputTile*/) {
     VPU::adjustPaddings(this, inputTiling);
-
-    const auto inputType = getInput().getType().cast<NDTypeInterface>();
-    const auto IC = inputTiling.tiles[0].shape[Dims4D::Act::C];
-
-    const auto kernelSize = Shape(parseIntArrayAttr<int64_t>(getKernelSize()));
-
-    const auto kernelStrides = Shape(parseIntArrayAttr<int64_t>(getStrides()));
-    const auto SX = kernelStrides[Dims4D::Strides::X];
-
-    if (getActivationWindow() != nullptr) {
-        const auto bitPatternSize = VPU::NCESparsity::getBitPatternSize(VPU::NCESparsity::Mode::POOL, kernelSize, SX,
-                                                                        inputType.getElementType(), IC);
-
-        setActivationWindowChannelLengthAttr(getIntAttr(getContext(), bitPatternSize));
-    }
 }
 
 mlir::FailureOr<OutputTiling> vpux::VPU::NCEMaxPoolOp::getTilingStrategy(TilingMode tilingMode, Logger log) {
@@ -301,13 +258,13 @@ bool vpux::VPU::NCEMaxPoolOp::checkStrategyCompatibility(VPU::MultiClusterStrate
            strategy == VPU::MultiClusterStrategy::SplitOverHeight || strategy == VPU::MultiClusterStrategy::HKSwitch;
 }
 
-vpux::VPU::DistributedTensorNative vpux::VPU::NCEMaxPoolOp::getExplicitDistributedTensorAttr(
+vpux::VPU::DistributionInfo vpux::VPU::NCEMaxPoolOp::getExplicitDistributionInfoAttr(
         vpux::ShapeRef shape, vpux::VPU::DistributionMode distributionMode, ArrayRef<int64_t> numTiles,
         const int64_t numClusters, ArrayRef<int64_t> alignment, const bool uniformDistributedSegments,
         const vpux::VPU::OverlapDistributionParams& overlapParams) {
-    return VPU::getNCEExplicitDistributedTensorNative(mlir::dyn_cast<VPU::NCEOpInterface>(getOperation()), shape,
-                                                      distributionMode, numTiles, numClusters, alignment,
-                                                      uniformDistributedSegments, overlapParams);
+    return VPU::getNCEExplicitDistributionInfo(mlir::dyn_cast<VPU::NCEOpInterface>(getOperation()), shape,
+                                               distributionMode, numTiles, numClusters, alignment,
+                                               uniformDistributedSegments, overlapParams);
 }
 
 // Each cluster should compute at least one output line. Therefore in order for a layer to be SOH
@@ -359,37 +316,26 @@ bool VPU::NCEMaxPoolOp::isOperationSplitOverBatchCompatible(vpux::ShapeRef outpu
     return VPU::isOperationSplitOverBatchCompatible(getOperation(), outputShape);
 }
 
-bool VPU::NCEMaxPoolOp::doesLayerFitIntoCMX(VPU::MultiClusterStrategy strategy, Byte reservedMem) {
+bool VPU::NCEMaxPoolOp::doesLayerFitIntoCMX(VPU::MultiClusterStrategy strategy, SiblingOpsAnalysis& siblingsAnalysis,
+                                            Byte reservedMem) {
     auto nceOp = mlir::cast<VPU::NCEMaxPoolOp>(getOperation());
     const auto outputType = nceOp->getResult(0).getType().cast<vpux::NDTypeInterface>();
     auto numClusters = VPU::getOptimalNumClusters(nceOp, outputType.getShape(), strategy);
     auto output = nceOp.getOutput().getType().cast<vpux::NDTypeInterface>();
-    auto input = nceOp.getInput().getType().cast<vpux::NDTypeInterface>();
 
     const auto outputShape = output.getShape();
     const auto outputChannels = outputShape[Dims4D::Act::C];
 
-    const auto kernelSize = Shape(parseIntArrayAttr<int64_t>(getKernelSize()));
-
-    const auto kernelStrides = Shape(parseIntArrayAttr<int64_t>(getStrides()));
-    const auto strideW = kernelStrides[Dims4D::Strides::X];
-
     SmallVector<Byte> buffers = {
             VPU::getTotalAllocSizeWithDistribution(
-                    getInput().getType(),
-                    getActivationDistributionAttrFromOp(nceOp, getInput().getType(), numClusters.getInt(), strategy)),
+                    getInput().getType(), getActivationDistributionAttrFromOp(nceOp, getInput().getType(), numClusters,
+                                                                              strategy, siblingsAnalysis)),
             VPU::getTotalAllocSizeWithDistribution(
-                    getOutput().getType(),
-                    getOutputDistributionAttrFromOp(nceOp, getOutput().getType(), numClusters.getInt(), strategy))};
+                    getOutput().getType(), getOutputDistributionAttrFromOp(nceOp, getOutput().getType(), numClusters,
+                                                                           strategy, siblingsAnalysis))};
 
     if (getWeightsTable() != nullptr) {
         buffers.push_back(NCEInvariant::getWeightsTableSize(outputChannels));
-    }
-
-    if (getActivationWindow() != nullptr) {
-        const auto activationWindowSize = NCESparsity::getActivationWindowSize(NCESparsity::Mode::POOL, kernelSize,
-                                                                               strideW, input.getElementType(), 1);
-        buffers.push_back(activationWindowSize * 1_Byte);
     }
 
     auto totalAvailableCMXSize = reservedMem.count() == 0 ? getTotalCMXSize(getOperation()).count()
@@ -412,6 +358,48 @@ bool VPU::NCEMaxPoolOp::doesLayerChangeOutputAlignmentFitIntoCMX(
 
 bool vpux::VPU::NCEMaxPoolOp::isVFSupported() {
     return vpux::VPU::isVFNCESupported(mlir::cast<NCEOpInterface>(getOperation()));
+}
+
+vpux::NDTypeInterface vpux::VPU::NCEMaxPoolOp::getDistributedTypeForOpOperand(mlir::OpOperand& operand,
+                                                                              bool hasExplicitDistributedAttr,
+                                                                              SiblingOpsAnalysis& siblingsAnalysis) {
+    auto clusteredOp = mlir::cast<VPU::ClusteredOpInterface>(getOperation());
+    auto origOp = mlir::cast<NCEMaxPoolOp>(getOperation());
+    const auto strategy = clusteredOp.getMultiClusterStrategy().value();
+    auto outputTensorType = origOp.getOutput().getType().cast<vpux::NDTypeInterface>();
+    auto numClusters = VPU::getOptimalNumClusters(clusteredOp, outputTensorType.getShape(), strategy);
+    auto* ctx = clusteredOp->getContext();
+
+    if (operand.get() == origOp.getInput()) {
+        mlir::ArrayAttr activationAlignmentAttr = nullptr;
+        const auto activationTensorDistributionMode = getActivationTensorDistributionMode(clusteredOp, strategy);
+        const auto activationTensorNumTiles =
+                getIntArrayAttr(ctx, getActivationTensorNumTiles(clusteredOp, numClusters, strategy));
+
+        const auto activationAlignment = getActivationTensorAlignment(clusteredOp, numClusters, strategy);
+        if (activationAlignment.has_value()) {
+            activationAlignmentAttr = getIntArrayAttr(ctx, activationAlignment.value());
+        }
+        return getDistributedTypeFromInput(clusteredOp, origOp.getInput(), activationTensorDistributionMode,
+                                           activationTensorNumTiles, activationAlignmentAttr, strategy,
+                                           hasExplicitDistributedAttr, siblingsAnalysis);
+    } else if (operand.get() == origOp.getWeightsTable()) {
+        auto outputType = origOp.getOutput().getType().cast<vpux::NDTypeInterface>();
+        mlir::ArrayAttr weightAlignmentAttr = nullptr;
+
+        const auto weightAlignment = getWeightsTensorAlignment(strategy);
+        if (weightAlignment.has_value()) {
+            weightAlignmentAttr = getIntArrayAttr(ctx, weightAlignment.value());
+        }
+        const auto weightsTableTensorDistributionMode = getWeightsTensorDistributionMode(strategy);
+        const auto weightsTableTensorNumTiles =
+                getIntArrayAttr(ctx, getWeightsTableTensorNumTiles(clusteredOp, outputType, numClusters, strategy));
+        return getDistributedTypeFromInput(clusteredOp, origOp.getWeightsTable(), weightsTableTensorDistributionMode,
+                                           weightsTableTensorNumTiles, weightAlignmentAttr, strategy,
+                                           hasExplicitDistributedAttr, siblingsAnalysis);
+    }
+    VPUX_THROW("Failed to compute distributed type for op {0}", clusteredOp);
+    return nullptr;
 }
 
 //
@@ -464,6 +452,5 @@ mlir::LogicalResult vpux::VPU::NCEMaxPoolOp::verifyKernel(IE::MaxPoolOp origOp, 
     const auto padLeft = padsBegin[1];
     const auto padRight = padsEnd[1];
 
-    return NCEInvariant::verifyKernel(origOp->getLoc(), KY, KX, SY, SX, padTop, padBottom, padLeft, padRight, arch,
-                                      log);
+    return NCEInvariant::verifyKernel(origOp, KY, KX, SY, SX, padTop, padBottom, padLeft, padRight, log);
 }

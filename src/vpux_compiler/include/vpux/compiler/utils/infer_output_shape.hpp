@@ -59,6 +59,24 @@ SmallVector<int64_t> inferMaxPoolOutputShape(ArrayRef<int64_t> inDataShape, Arra
                                              IE::RoundingType roundingType = IE::RoundingType::FLOOR);
 
 /**
+ * @brief                        Infers the output shape for a MaxPool8 operation
+ *                               with the given parameters
+ * @param inDataShape:           The shape of the input data
+ * @param windowStrides:         The strides
+ * @param windowDilations:       The dilations of the pooling filter
+ * @param dataPaddingBelow:      Builds the beginning of padding shape
+ * @param dataPaddingAbove:      Builds the end of padding shape
+ * @param windowShape:           The kernel window
+ * @param roundingType:          Whether to use ceiling or floor rounding type while
+ *                               computing output shape
+ * @return                       The output shape as SmallVector
+ */
+SmallVector<int64_t> inferMaxPool8OutputShape(ArrayRef<int64_t> inDataShape, ArrayRef<int64_t> windowStrides,
+                                              ArrayRef<int64_t> windowDilations, ArrayRef<int64_t> dataPaddingBelow,
+                                              ArrayRef<int64_t> dataPaddingAbove, ArrayRef<int64_t> windowShape,
+                                              IE::RoundingType roundingType = IE::RoundingType::FLOOR);
+
+/**
  * @brief                        Infers the output shape for a AvgPool operation
  *                               with the given parameters
  * @param inDataShape:           The shape of the input data

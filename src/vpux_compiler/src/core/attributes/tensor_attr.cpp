@@ -4,7 +4,10 @@
 //
 
 #include "vpux/compiler/core/attributes/tensor_attr.hpp"
+#include <mlir/IR/Value.h>
+#include <mlir/Support/LLVM.h>
 
+#include "vpux/compiler/core/type_interfaces.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 
 #include "vpux/utils/core/error.hpp"
@@ -157,6 +160,19 @@ mlir::AffineMap vpux::getOrder(mlir::RankedTensorType type) {
 IndexedSymbolAttr vpux::getMemorySpace(mlir::RankedTensorType type) {
     if (const auto desc = vpux::getTensorAttr(type)) {
         return desc.getMemSpace();
+    }
+
+    return nullptr;
+}
+
+mlir::ArrayAttr vpux::getBounds(mlir::Value value) {
+    if (value == nullptr) {
+        return nullptr;
+    }
+
+    const auto type = value.getType();
+    if (const auto boundedType = mlir::dyn_cast_or_null<BoundedTypeInterface>(type)) {
+        return boundedType.getBounds();
     }
 
     return nullptr;

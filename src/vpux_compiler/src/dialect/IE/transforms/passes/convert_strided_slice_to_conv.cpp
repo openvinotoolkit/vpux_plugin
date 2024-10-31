@@ -78,7 +78,8 @@ IE::ConvolutionOp createStridedSliceConv(mlir::Value input, mlir::ArrayRef<int64
     auto newLoc = appendLoc(loc, "_strided_slice_Conv_1_1");
     return rewriter.create<IE::ConvolutionOp>(newLoc, grpConvOutType, input, weights, /*bias=*/nullptr, stridesAttr,
                                               padBeginAttr, padEndAttr, dilationsAttr,
-                                              /*post_opAttr=*/nullptr, /*clamp=*/nullptr, /*staticScale=*/nullptr);
+                                              /*post_opAttr=*/nullptr, /*clamp=*/nullptr, /*staticScale=*/nullptr,
+                                              /*output_channelsAttr=*/nullptr, /*input_channelsAttr=*/nullptr);
 }
 
 IE::ConvolutionOp createParallelStridedSliceToConv(mlir::Value input, mlir::ArrayRef<int64_t> strides,
@@ -134,7 +135,8 @@ IE::ConvolutionOp createParallelStridedSliceToConv(mlir::Value input, mlir::Arra
     auto newLoc = appendLoc(loc, "parallel_strided_slice_Conv");
     return rewriter.create<IE::ConvolutionOp>(newLoc, convOutType, input, weights, /*bias=*/nullptr, stridesAttr,
                                               padBeginAttr, padEndAttr, dilationsAttr,
-                                              /*post_opAttr=*/nullptr, /*clamp=*/nullptr, /*staticScale=*/nullptr);
+                                              /*post_opAttr=*/nullptr, /*clamp=*/nullptr, /*staticScale=*/nullptr,
+                                              /*outputChannels*/ nullptr, /*inputChannels*/ nullptr);
 }
 
 //

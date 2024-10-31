@@ -52,12 +52,16 @@ IE::FakeQuantizeOp createNewFq(mlir::PatternRewriter& rewriter, mlir::Location l
     auto fqValType = initialFqOp.getInputHigh().getType().cast<vpux::NDTypeInterface>().getElementType();
     const auto storageType = mlir::RankedTensorType::get({1, 1, 1, 1}, fqValType);
 
-    mlir::Value inLow = createNegativeFqVal(rewriter, loc, initialFqOp.getInputHigh(), storageType);
-    mlir::Value inHigh = createNegativeFqVal(rewriter, loc, initialFqOp.getInputLow(), storageType);
-    mlir::Value outLow = createNegativeFqVal(rewriter, loc, initialFqOp.getOutputHigh(), storageType);
-    mlir::Value outHigh = createNegativeFqVal(rewriter, loc, initialFqOp.getOutputLow(), storageType);
+    mlir::Value inLow =
+            createNegativeFqVal(rewriter, appendLoc(loc, "in_low"), initialFqOp.getInputHigh(), storageType);
+    mlir::Value inHigh =
+            createNegativeFqVal(rewriter, appendLoc(loc, "in_high"), initialFqOp.getInputLow(), storageType);
+    mlir::Value outLow =
+            createNegativeFqVal(rewriter, appendLoc(loc, "out_low"), initialFqOp.getOutputHigh(), storageType);
+    mlir::Value outHigh =
+            createNegativeFqVal(rewriter, appendLoc(loc, "out_high"), initialFqOp.getOutputLow(), storageType);
 
-    return rewriter.create<IE::FakeQuantizeOp>(loc, fqInput, inLow, inHigh, outLow, outHigh,
+    return rewriter.create<IE::FakeQuantizeOp>(appendLoc(loc, "new_fq"), fqInput, inLow, inHigh, outLow, outHigh,
                                                initialFqOp.getLevelsAttr(), initialFqOp.getLowFpTypeAttr(),
                                                initialFqOp.getAutoBroadcastAttr());
 }
@@ -79,10 +83,61 @@ private:
     Logger _log;
 };
 
+// Three typical pattern conversions:
+//
+// Scenario 1: FakeQuantize is optional
+// - The first input is either a tensor or a constant (but cannot be used as a bias - Scenario 2)
+// - The second input is a tensor
+//                                                                Input_2         Filter(-1)
+// Input_1 / Constant       Input_2                                  |                |
+//         |                   |                               FakeQuantize_1   FakeQuantize_3
+//   FakeQuantize_0      FakeQuantize_1       =>                            \   /
+//                 \    /                           Input_1 / Constant    GroupConv
+//                Subtract                                  |                  |
+//                    |                              FakeQuantize_0     FakeQuantize_4
+//              FakeQuantize_2                                     \   /
+//                                                                  Add
+//                                                                   |
+//                                                             FakeQuantize_2
+//
+// Scenario 2:
+// - The first input is a constant, either a splat or with one dimension larger than 1, matching the output channel size
+// - The second input is a tensor
+//
+//   Constant(splat / inC == outC)      Input_2             Input_2    Filter(-1)   Input_0(Bias)
+//                |________________________|        =>         |___________|______________|
+//                             |                                           |
+//                         Subtract                                     GroupConv
+//
+//
+// Scenario 3: FakeQuantize is optional
+// - The first input is a tensor
+// - The second input is a constant
+//
+//      Input_1             Constant                        Input_1          Constant(rescale -1)
+//         |                   |                               |                       |
+//   FakeQuantize_0      FakeQuantize_1       =>        FakeQuantize_0           FakeQuantize_3
+//                 \    /                                            \            /
+//                Subtract                                                 Add
+//                    |                                                     |
+//              FakeQuantize_2                                        FakeQuantize_2
+//
+// Scenario 4:
+// - Constant input of Multiply can be either the first and the second input
+// - Multiply has to be the second input of Subtract, so that the Subtract can be
+//   converted to Add without additional changes
+//
+//          MulInput1    Constant (MulInput2)                 MulInput1    Constant (rescale -1)
+//                \       /                                        \       /
+//    SubInput1   Multiply (SubInput2)       =>         SubInput1   Multiply
+//        \       /                                             \   /
+//         Subtract                                              Add
+//
+
 mlir::LogicalResult ConvertSubtractToDWConvAdd::matchAndRewrite(IE::SubtractOp subOp,
                                                                 mlir::PatternRewriter& rewriter) const {
     auto subOpLoc = subOp.getLoc();
-    _log.trace("Found SubtractOp at location '{0}'", subOpLoc);
+    _log.trace("[{0}] Got '{1}' at '{2}'", this->getDebugName(), subOp->getName(), subOp->getLoc());
 
     auto input1 = subOp.getInput1();
     auto input2 = subOp.getInput2();
@@ -93,28 +148,76 @@ mlir::LogicalResult ConvertSubtractToDWConvAdd::matchAndRewrite(IE::SubtractOp s
         return mlir::failure();
     }
 
-    mlir::Value firstInput = input1;
+    if (auto mulOp = input2.getDefiningOp<IE::MultiplyOp>()) {
+        auto handleConstantInput = [&](auto constInputOp, mlir::Value otherInput, mlir::Value maybeFqInput) {
+            auto constInputContent = constInputOp.getContentAttr();
+            auto negativeContent = constInputContent.transform().rescale(-1.0).get();
+            mlir::Value negativeInput = rewriter.create<Const::DeclareOp>(constInputOp.getLoc(), constInputOp.getType(),
+                                                                          std::move(negativeContent));
+            auto fqInput = maybeFqInput.getDefiningOp<IE::FakeQuantizeOp>();
+            if (fqInput != nullptr) {
+                negativeInput = createNewFq(rewriter, fqInput.getLoc(), negativeInput, fqInput).getOutput();
+            }
+            auto negativeMulOp = rewriter.create<IE::MultiplyOp>(
+                    takeOpLoc(mulOp, "neg"), negativeInput, otherInput, mulOp.getAutoBroadcastAttr(),
+                    /*post_op=*/nullptr, /*clamp=*/nullptr, /*output_channels=*/nullptr, /*input_channels=*/nullptr);
+            auto addOp = rewriter.replaceOpWithNewOp<IE::AddOp>(
+                    subOp, input1, negativeMulOp.getOutput(), subOp.getAutoBroadcastAttr(),
+                    /*post_op=*/nullptr, /*clamp=*/nullptr, /*output_channels=*/nullptr, /*input_channels=*/nullptr);
+            extendOpLoc(addOp, "as_add");
+            return mlir::success();
+        };
+
+        if (auto constInput1Op = getInputConstantOp(mulOp.getInput1())) {
+            return handleConstantInput(constInput1Op, mulOp.getInput2(), mulOp.getInput1());
+        } else if (auto constInput2Op = getInputConstantOp(mulOp.getInput2())) {
+            return handleConstantInput(constInput2Op, mulOp.getInput1(), mulOp.getInput2());
+        }
+    }
+
     const auto outputType = subOp.getOutput().getType().cast<vpux::NDTypeInterface>();
+    auto outputChannel = outputType.getShape()[Dims4D::Act::C];
+    auto constInput1Op = getInputConstantOp(input1);
+    auto fqInput1 = input1.getDefiningOp<IE::FakeQuantizeOp>();
+    const auto isLegalToConvertConstantInput1ToBias =
+            (constInput1Op != nullptr) && (fqInput1 == nullptr) &&
+            (input1Shape.totalSize() == 1 || input1Shape.totalSize() == outputChannel);
+
+    mlir::Value biasInput = nullptr;
+    if (isLegalToConvertConstantInput1ToBias) {
+        auto broadcastContentSetup = constInput1Op.transformContentAttr();
+        auto newInput1Shape = to_small_vector(input1Shape);
+        newInput1Shape[Dims4D::Act::C.ind()] = outputChannel;
+
+        if (input1Shape.totalSize() == 1) {
+            broadcastContentSetup = broadcastContentSetup.broadcast(Dims4D::Act::C, outputChannel);
+        }
+        auto constInput1Type = constInput1Op.getType().cast<NDTypeInterface>();
+        auto newInput1Type = constInput1Type.changeShape(Shape(newInput1Shape));
+        biasInput = rewriter.create<Const::DeclareOp>(subOpLoc, newInput1Type, broadcastContentSetup.get());
+    }
 
     auto fqInput2 = input2.getDefiningOp<IE::FakeQuantizeOp>();
 
     mlir::Value negativeInput = input2;
     if (auto constInput2 = getInputConstantOp(input2)) {
         auto constInput2Content = constInput2.getContentAttr();
-        auto negativeContent = constInput2Content.rescale(-1.0);
-        negativeInput = rewriter.create<Const::DeclareOp>(subOpLoc, constInput2.getType(), negativeContent);
+        auto negativeContent = constInput2Content.transform().rescale(-1.0).get();
+        negativeInput = rewriter.create<Const::DeclareOp>(appendLoc(subOpLoc, "neg_cst"), constInput2.getType(),
+                                                          std::move(negativeContent));
     } else {
         const auto elemType = outputType.getElementType();
         const auto inputC = input2Shape[Dims4D::Act::C];
         const auto filterStorageType = mlir::RankedTensorType::get(SmallVector<int64_t>{inputC, 1, 1, 1}, elemType);
-        auto dwConvFilter = createConstOpFromValue(rewriter, subOpLoc, -1.0f, filterStorageType);
+        auto dwConvFilter =
+                createConstOpFromValue(rewriter, appendLoc(subOpLoc, "conv_filter"), -1.0f, filterStorageType);
         auto filter = dwConvFilter.getOutput();
 
         if (fqInput2 != nullptr) {
             const auto fqArgType = mlir::RankedTensorType::get({1, 1, 1, 1}, elemType);
             auto fqVal = createConstOpFromValue(rewriter, subOpLoc, -1.0f, fqArgType);
             auto filterFQ = rewriter.create<IE::FakeQuantizeOp>(subOpLoc, filter, fqVal, fqVal, fqVal, fqVal,
-                                                                fqInput2.getLevelsAttr(), /*lowFpType=*/nullptr,
+                                                                fqInput2.getLevelsAttr(), fqInput2.getLowFpTypeAttr(),
                                                                 fqInput2.getAutoBroadcastAttr());
             filter = filterFQ.getOutput();
         }
@@ -125,49 +228,27 @@ mlir::LogicalResult ConvertSubtractToDWConvAdd::matchAndRewrite(IE::SubtractOp s
         auto padEndAttr = getIntArrayAttr(rewriter, SmallVector<int32_t>{0, 0});
         auto groupAttr = getIntAttr(rewriter, inputC);
 
-        auto dwConv = rewriter.create<IE::GroupConvolutionOp>(subOpLoc, input2, filter, /*bias=*/nullptr, stridesAttr,
-                                                              padBeginAttr, padEndAttr, dilationsAttr, groupAttr,
-                                                              /*post_opAttr=*/nullptr, /*clampAttr=*/nullptr);
+        auto dwConv =
+                rewriter.create<IE::GroupConvolutionOp>(appendLoc(subOpLoc, "as_gconv"), input2, filter, biasInput,
+                                                        stridesAttr, padBeginAttr, padEndAttr, dilationsAttr, groupAttr,
+                                                        /*post_opAttr=*/nullptr, /*clampAttr=*/nullptr,
+                                                        /*outputChannels=*/nullptr, /*inputChannels=*/nullptr);
         negativeInput = dwConv.getOutput();
+        if (biasInput) {
+            rewriter.replaceOp(subOp, negativeInput);
+            return mlir::success();
+        }
     }
 
     if (fqInput2 != nullptr) {
         negativeInput = createNewFq(rewriter, subOpLoc, negativeInput, fqInput2).getOutput();
     }
 
-    rewriter.replaceOpWithNewOp<IE::AddOp>(subOp, firstInput, negativeInput, subOp.getAutoBroadcastAttr(),
-                                           /*post_op=*/nullptr, /*clamp=*/nullptr);
-    return mlir::success();
-}
-
-//
-// ConvertSubtractToNegativeAdd
-//
-
-class ConvertSubtractToNegativeAdd final : public mlir::OpRewritePattern<IE::SubtractOp> {
-public:
-    ConvertSubtractToNegativeAdd(mlir::MLIRContext* ctx, Logger log)
-            : mlir::OpRewritePattern<IE::SubtractOp>(ctx), _log(log) {
-        setDebugName("ConvertSubtractToNegativeAdd");
-    }
-
-    mlir::LogicalResult matchAndRewrite(IE::SubtractOp subOp, mlir::PatternRewriter& rewriter) const final;
-
-private:
-    Logger _log;
-};
-
-mlir::LogicalResult ConvertSubtractToNegativeAdd::matchAndRewrite(IE::SubtractOp subOp,
-                                                                  mlir::PatternRewriter& rewriter) const {
-    _log.trace("Found SubtractOp at location '{0}'", subOp.getLoc());
-
-    auto input1 = subOp.getInput1();
-    auto input2 = subOp.getInput2();
-
-    auto negativeOp = rewriter.create<IE::NegativeOp>(subOp.getLoc(), input2.getType(), input2);
-
-    rewriter.replaceOpWithNewOp<IE::AddOp>(subOp, input1, negativeOp, subOp.getAutoBroadcastAttr(),
-                                           /*post_op=*/nullptr, /*clamp=*/nullptr);
+    auto addOp =
+            rewriter.replaceOpWithNewOp<IE::AddOp>(subOp, input1, negativeInput, subOp.getAutoBroadcastAttr(),
+                                                   /*post_op=*/nullptr, /*clamp=*/nullptr, /*output_channels=*/nullptr,
+                                                   /*input_channels=*/nullptr);
+    extendOpLoc(addOp, "add_out");
     return mlir::success();
 }
 
@@ -211,9 +292,15 @@ void ConvertSubtractToAddPass::safeRunOnFunc() {
 
         // Check if an expansion operation is needed. If the size of the output shape is not a multiple of the channel
         // alignment, then expansion is required
-        auto iface = mlir::cast<IE::AlignedChannelsOpInterface>(op.getOperation());
-        const auto alignment = iface.getOutputChannelAlignment();
+        const auto alignment = VPU::NCEInvariant::getAlignment(outputType.getElementType());
         const auto needsExpansion = (outputType.getShape().totalSize() % alignment) != 0;
+
+        // if the second input is a multiply with constant, marked as illegal to enable the optimization
+        if (auto mulOp = op.getInput2().getDefiningOp<IE::MultiplyOp>()) {
+            if (getInputConstantOp(mulOp.getInput1()) || getInputConstantOp(mulOp.getInput2())) {
+                return false;
+            }
+        }
 
         return hasIntInput || needsBroadcast || needsExpansion;
     };
@@ -224,6 +311,7 @@ void ConvertSubtractToAddPass::safeRunOnFunc() {
     target.addLegalOp<Const::DeclareOp>();
     target.addLegalOp<IE::FakeQuantizeOp>();
     target.addLegalOp<IE::NegativeOp>();
+    target.addLegalOp<IE::MultiplyOp>();
     target.addDynamicallyLegalOp<IE::SubtractOp>(isLegalSubtractOp);
 
     mlir::RewritePatternSet patterns(&ctx);

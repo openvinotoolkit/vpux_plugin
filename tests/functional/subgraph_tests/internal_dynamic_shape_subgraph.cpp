@@ -88,7 +88,7 @@ protected:
         auto scatterNDUpdate = std::make_shared<ov::opset4::ScatterNDUpdate>(inputParams[1], transpose, stridedSlice);
 
         auto results = ov::ResultVector();
-        for (size_t i = 0; i < transpose->get_output_size(); i++) {
+        for (size_t i = 0; i < scatterNDUpdate->get_output_size(); i++) {
             results.push_back(std::make_shared<ov::opset3::Result>(scatterNDUpdate->output(i)));
         }
 
@@ -96,14 +96,15 @@ protected:
     }
 };
 
-TEST_P(InternalDynamicShapesNPUTest, NPU3720_HW) {
-    abs_threshold = 0.0f;
+TEST_P(InternalDynamicShapesNPUTest, NPU3720_HW_TestKindSubgraph) {
+    abs_threshold = std::numeric_limits<float>::epsilon();
+    setMLIRCompilerType();
     setDefaultHardwareMode();
     run(Platform::NPU3720);
 }
 
 const std::vector<ov::test::InputShape> inShapes = {staticShape(1, 3, 3)};
 
-INSTANTIATE_TEST_SUITE_P(DISABLED_smoke_InternalDynamicShapes, InternalDynamicShapesNPUTest,
-                         ::testing::ValuesIn(inShapes), InternalDynamicShapesNPUTest::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_InternalDynamicShapes, InternalDynamicShapesNPUTest, ::testing::ValuesIn(inShapes),
+                         InternalDynamicShapesNPUTest::getTestCaseName);
 }  // namespace

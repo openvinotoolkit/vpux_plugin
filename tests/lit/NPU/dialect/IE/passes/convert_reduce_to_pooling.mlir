@@ -222,3 +222,16 @@ func.func @DoNotConvertReduceMinToPoolingF32(%arg0: tensor<1x256x7x7xf32>) -> te
   // CHECK-DAG:       axes_value = [2, 3], keep_dims} : tensor<1x256x7x7xf32> -> tensor<1x256x1x1xf32>
   // CHECK:       return [[OUTPUT:%.*]] : tensor<1x256x1x1xf32>
 }
+
+// CHECK-LABEL: @ConvertReduceMaxwithLargeChannelDim
+// CHECK-SAME: ([[ARG0:%.+]]: tensor<1x42840x12xf16>)
+func.func @ConvertReduceMaxwithLargeChannelDim(%arg0: tensor<1x42840x12xf16>) -> tensor<1x42840x1xf16> {
+  %0 = IE.ReduceMax(%arg0) {axes_value = [2], keep_dims} : tensor<1x42840x12xf16> -> tensor<1x42840x1xf16>
+  return %0 : tensor<1x42840x1xf16>
+
+  // CHECK:       [[RESHAPE1:%.+]] = IE.Reshape([[ARG0]]) {shape_value = [1, 42840, 12, 1]} : tensor<1x42840x12xf16> -> tensor<1x42840x12x1xf16>
+  // CHECK:       [[MAXPOOL:%.+]] = IE.MaxPool([[RESHAPE1]]) {
+  // CHECK-DAG:       kernel_size = [12, 1], pads_begin = [0, 0], pads_end = [0, 0], rounding_type = #IE.rounding_type<FLOOR>, strides = [1, 1]} : tensor<1x42840x12x1xf16> -> tensor<1x42840x1x1xf16>
+  // CHECK:       [[RESHAPE2:%.+]] = IE.Reshape([[MAXPOOL]]) {shape_value = [1, 42840, 1]} : tensor<1x42840x1x1xf16> -> tensor<1x42840x1xf16>
+  // CHECK:       return [[RESHAPE2:%.*]] : tensor<1x42840x1xf16>
+}

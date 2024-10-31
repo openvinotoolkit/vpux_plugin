@@ -5,6 +5,7 @@
 
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/utils/adjust_layout_utils.hpp"
+#include "vpux/compiler/utils/rewriter.hpp"
 
 #include <llvm/ADT/SmallPtrSet.h>
 #include <mlir/IR/Builders.h>
@@ -23,7 +24,8 @@ void insertReorderForInput(mlir::Operation* op, mlir::OpOperand& input, DimsOrde
     rewriter.setInsertionPoint(op);
 
     auto reorderOp =
-            rewriter.create<IE::ReorderOp>(op->getLoc(), input.get(), dstOrder.toAffineMap(rewriter.getContext()));
+            rewriter.create<IE::ReorderOp>(takeOpLoc(op, StringLiteral("reorder_in_{0}"), input.getOperandNumber()),
+                                           input.get(), dstOrder.toAffineMap(rewriter.getContext()));
 
     log.trace("Redirect input to the new Value");
     input.set(reorderOp.getOutput());
@@ -37,7 +39,8 @@ IE::ReorderOp insertReorderForOutput(mlir::Operation* op, mlir::Value output, Di
     mlir::OpBuilder::InsertionGuard guard(rewriter);
     rewriter.setInsertionPointAfter(op);
 
-    auto reorderOp = rewriter.create<IE::ReorderOp>(op->getLoc(), output, dstOrder.toAffineMap(rewriter.getContext()));
+    auto reorderOp = rewriter.create<IE::ReorderOp>(takeOpLoc(op, "reorder_out"), output,
+                                                    dstOrder.toAffineMap(rewriter.getContext()));
 
     log.trace("Redirect output users to the new Value");
     output.replaceAllUsesExcept(reorderOp.getOutput(), llvm::SmallPtrSet<mlir::Operation*, 1>{reorderOp});
@@ -152,12 +155,12 @@ mlir::FailureOr<vpux::AdjustConvShapeParams> getAdjustConvShapeParameters(IE::Co
     auto realInFactor = std::lcm(strides[Dims4D::Strides::X], borrowIn);
 
     if (maybePaddedInputShape[Dims4D::Act::W] % realInFactor) {
-        _log.info("Don't have factor {0} in input DimW", realInFactor);
+        _log.trace("Don't have factor {0} in input DimW", realInFactor);
         return mlir::failure();
     }
 
     if (outputShape[Dims4D::Act::W] % borrowOut) {
-        _log.info("Don't have factor {0} in output DimW", borrowOut);
+        _log.trace("Don't have factor {0} in output DimW", borrowOut);
         return mlir::failure();
     }
 
@@ -205,7 +208,7 @@ mlir::FailureOr<vpux::AdjustConvShapeParams> getAdjustConvShapeParameters(IE::Co
         }
 
         if (outputShape[Dims4D::Act::W] % borrowFactor) {
-            _log.info("The outputShape not aligned");
+            _log.trace("The outputShape not aligned");
             return mlir::failure();
         }
 

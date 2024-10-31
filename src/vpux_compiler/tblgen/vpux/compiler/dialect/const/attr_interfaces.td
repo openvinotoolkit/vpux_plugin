@@ -56,17 +56,6 @@ def Const_TransformAttrInterface : AttrInterface<"TransformAttrInterface"> {
         >,
 
         InterfaceMethod<
-            "Update attributes of transformation and return new one",
-            "Const::TransformAttrInterface",
-            "updateAttributes",
-            (ins "mlir::ElementsAttr&":$baseContent, "ArrayRef<mlir::Attribute>":$prevTransformations), [{}], [{
-                std::ignore = prevTransformations;
-                std::ignore = baseContent;
-                return nullptr;
-            }]
-        >,
-
-        InterfaceMethod<
             "Supports sub byte storage type",
             "bool", "supportsSubByteStorageType",
             (ins), [{}], [{
@@ -74,18 +63,6 @@ def Const_TransformAttrInterface : AttrInterface<"TransformAttrInterface"> {
             }]
         >
     ];
-}
-
-//
-// RequestQueueAttrInterface
-//
-
-def Const_RequestQueueAttrInterface : AttrInterface<"RequestQueueAttrInterface"> {
-    let description = [{
-        The interface for Attributes which are used as elements in the request queue for folding in background.
-    }];
-
-    let cppNamespace = "vpux::Const";
 }
 
 #endif

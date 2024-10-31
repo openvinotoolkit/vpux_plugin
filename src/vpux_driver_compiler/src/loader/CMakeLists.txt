@@ -33,7 +33,6 @@ set(Loader_Library_SRCS
     ${ELF_DIR}/core/include/vpux_elf/types/data_types.hpp
     ${ELF_DIR}/core/include/vpux_elf/types/elf_header.hpp
     ${ELF_DIR}/core/include/vpux_elf/types/elf_structs.hpp
-    ${ELF_DIR}/core/include/vpux_elf/types/program_header.hpp
     ${ELF_DIR}/core/include/vpux_elf/types/relocation_entry.hpp
     ${ELF_DIR}/core/include/vpux_elf/types/section_header.hpp
     ${ELF_DIR}/core/include/vpux_elf/utils/utils.hpp
@@ -44,7 +43,6 @@ set(Loader_Library_SRCS
     ${ELF_DIR}/core/include/vpux_elf/writer/relocation.hpp
     ${ELF_DIR}/core/include/vpux_elf/writer/relocation_section.hpp
     ${ELF_DIR}/core/include/vpux_elf/writer/section.hpp
-    ${ELF_DIR}/core/include/vpux_elf/writer/segment.hpp
     ${ELF_DIR}/core/include/vpux_elf/writer/string_section.hpp
     ${ELF_DIR}/core/include/vpux_elf/writer/symbol.hpp
     ${ELF_DIR}/core/include/vpux_elf/writer/symbol_section.hpp

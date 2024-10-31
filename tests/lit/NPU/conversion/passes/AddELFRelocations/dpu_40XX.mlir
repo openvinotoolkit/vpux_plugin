@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2023-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -61,36 +61,81 @@ module @DPURelocTest {
     }
 }
 
-// CHECK:       ELF.CreateRelocationSection @rela.text.invariants.symtab target(@text.invariants) symtab(@symtab) secFlags("SHF_NONE") {
+// CHECK:       ELF.CreateRelocationSection @rela.text.invariants.symtab
+// CHECK-SAME:     target(@text.invariants)
+// CHECK-SAME:     symtab(@symtab)
+// CHECK-SAME:     secFlags("SHF_NONE") {
 // Input Relocs:
 //      tensor_start:
-// CHECK:           ELF.Reloc offset({{.*}}) sourceSym(@symtab::@elfsym.builtin.data.nncmx0) relocType(<R_VPU_LO_21>) {{.*}}
+// CHECK:           ELF.Reloc
+// CHECK-SAME:        offset({{[0-9]+}})
+// CHECK-SAME:        sourceSym(@symtab::@elfsym.builtin.data.nncmx0)
+// CHECK-SAME:        relocType(<R_VPU_LO_21>)
+// CHECK-SAME:        addend({{[0-9]+}})
 //      act_offset[1]:
-// CHECK:           ELF.Reloc offset({{.*}}) sourceSym(@symtab::@elfsym.builtin.data.nncmx0) relocType(<R_VPU_LO_21>) {{.*}}
+// CHECK:           ELF.Reloc
+// CHECK-SAME:        offset({{[0-9]+}})
+// CHECK-SAME:        sourceSym(@symtab::@elfsym.builtin.data.nncmx0)
+// CHECK-SAME:        relocType(<R_VPU_LO_21>)
+// CHECK-SAME:        addend({{[0-9]+}})
 //      act_offset[2]:
-// CHECK:           ELF.Reloc offset({{.*}}) sourceSym(@symtab::@elfsym.builtin.data.nncmx0) relocType(<R_VPU_LO_21>) {{.*}}
+// CHECK:           ELF.Reloc
+// CHECK-SAME:        offset({{[0-9]+}})
+// CHECK-SAME:        sourceSym(@symtab::@elfsym.builtin.data.nncmx0)
+// CHECK-SAME:        relocType(<R_VPU_LO_21>)
+// CHECK-SAME:        addend({{[0-9]+}})
 //      act_offset[3]:
-// CHECK:           ELF.Reloc offset({{.*}}) sourceSym(@symtab::@elfsym.builtin.data.nncmx0) relocType(<R_VPU_LO_21>) {{.*}}
+// CHECK:           ELF.Reloc
+// CHECK-SAME:        offset({{[0-9]+}})
+// CHECK-SAME:        sourceSym(@symtab::@elfsym.builtin.data.nncmx0)
+// CHECK-SAME:        relocType(<R_VPU_LO_21>)
+// CHECK-SAME:        addend({{[0-9]+}})
 // Weights Relocs (relocation generated because nce_task_type is MAXPOOL)
 //      wt_offset:
-// CHECK:           ELF.Reloc offset({{.*}}) sourceSym(@symtab::@elfsym.builtin.data.nncmx0) relocType(<R_VPU_LO_21>) {{.*}}
+// CHECK:           ELF.Reloc
+// CHECK-SAME:        offset({{[0-9]+}})
+// CHECK-SAME:        sourceSym(@symtab::@elfsym.builtin.data.nncmx0)
+// CHECK-SAME:        relocType(<R_VPU_LO_21>)
+// CHECK-SAME:        addend({{[0-9]+}})
 // Output Relocs:
 //      odu_ac_base:
-// CHECK:           ELF.Reloc offset({{.*}}) sourceSym(@symtab::@elfsym.builtin.data.nncmx0) relocType(<R_VPU_LO_21>) {{.*}}
+// CHECK:           ELF.Reloc
+// CHECK-SAME:        offset({{[0-9]+}})
+// CHECK-SAME:        sourceSym(@symtab::@elfsym.builtin.data.nncmx0)
+// CHECK-SAME:        relocType(<R_VPU_LO_21>)
+// CHECK-SAME:        addend({{[0-9]+}})
 // relocation for preemtion workaround:
 //      tensor_mode.pad_value:
-// CHECK:           ELF.Reloc offset({{.*}}) sourceSym(@symtab::@elfsym.builtin.tasks.DPUInvariant0) relocType(<R_VPU_16_LSB_17_RSHIFT_5_LSHIFT_16>) {{.*}}
+// CHECK:           ELF.Reloc
+// CHECK-SAME:        offset({{[0-9]+}})
+// CHECK-SAME:        sourceSym(@symtab::@elfsym.builtin.tasks.DPUInvariant0)
+// CHECK-SAME:        relocType(<R_VPU_16_LSB_17_RSHIFT_5_LSHIFT_16>)
+// CHECK-SAME:        addend({{[0-9]+}})
 
-
-// CHECK:       ELF.CreateRelocationSection @rela.text.variants.symtab target(@text.variants) symtab(@symtab) secFlags("SHF_NONE") {
+// CHECK:       ELF.CreateRelocationSection @rela.text.variants.symtab
+// CHECK-SAME:    target(@text.variants)
+// CHECK-SAME:    symtab(@symtab)
+// CHECK-SAME:    secFlags("SHF_NONE") {
 // invariant pointer Relocs:
 //      invariant_.ptr:
-// CHECK:           ELF.Reloc offset({{.*}}) sourceSym(@symtab::@elfsym.builtin.tasks.DPUInvariant0) relocType(<R_VPU_64_BIT_OR_B21_B26_UNSET>) {{.*}}
+// CHECK:           ELF.Reloc
+// CHECK-SAME:        offset({{[0-9]+}})
+// CHECK-SAME:        sourceSym(@symtab::@elfsym.builtin.tasks.DPUInvariant0)
+// CHECK-SAME:        relocType(<R_VPU_64_BIT_OR_B21_B26_UNSET>)
+// CHECK-SAME:        addend({{[0-9]+}})
 //      invar_ptr:
-// CHECK:           ELF.Reloc offset({{.*}}) sourceSym(@symtab::@elfsym.builtin.tasks.DPUInvariant0) relocType(<R_VPU_16_LSB_17_RSHIFT_5>) {{.*}}
+// CHECK:           ELF.Reloc
+// CHECK-SAME:        offset({{[0-9]+}})
+// CHECK-SAME:        sourceSym(@symtab::@elfsym.builtin.tasks.DPUInvariant0)
+// CHECK-SAME:        relocType(<R_VPU_16_LSB_17_RSHIFT_5>)
+// CHECK-SAME:        addend({{[0-9]+}})
 // relocation for preemtion workaround:
 //      dpu_cfg: cfg_Reserved_4, cfg_Reserved_5, cfg_Reserved_6
-// CHECK:           ELF.Reloc offset({{.*}}) sourceSym(@symtab::@elfsym.builtin.tasks.DPUVariant0) relocType(<R_VPU_16_LSB_17_RSHIFT_5_LSHIFT_CUSTOM>) {{.*}}
+// CHECK:           ELF.Reloc
+// CHECK-SAME:        offset({{[0-9]+}})
+// CHECK-SAME:        sourceSym(@symtab::@elfsym.builtin.tasks.DPUVariant0)
+// CHECK-SAME:        relocType(<R_VPU_16_LSB_17_RSHIFT_5_LSHIFT_CUSTOM>)
+// CHECK-SAME:        addend({{[0-9]+}})
 
 // -----
 
@@ -157,5 +202,10 @@ module @DPULLRelocTest {
     }
 }
 
-//CHECK: ELF.CreateRelocationSection @rela.text.variants.symtab target(@text.variants) symtab(@symtab)
-//CHECK: ELF.Reloc offset({{.*}}) sourceSym(@symtab::@elfsym.text.variants) relocType(<R_VPU_16_LSB_17_RSHIFT_5_LSHIFT_16>) addend(0)
+// CHECK:       ELF.CreateRelocationSection @rela.text.variants.symtab
+// CHECK-SAME:    target(@text.variants)
+// CHECK-SAME:    symtab(@symtab)
+// CHECK:       ELF.Reloc offset(28)
+// CHECK-SAME:    sourceSym(@symtab::@elfsym.text.variants)
+// CHECK-SAME:    relocType(<R_VPU_16_LSB_17_RSHIFT_5_LSHIFT_16>)
+// CHECK-SAME:    addend(0)

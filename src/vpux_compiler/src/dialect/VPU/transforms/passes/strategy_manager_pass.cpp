@@ -38,7 +38,9 @@ public:
 private:
     void safeRunOnFunc() final;
 
-    SmallVector<std::pair<Strategy, StrategyCost>> getOperationOptions(mlir::Operation* operation, size_t numTiles);
+    SmallVector<std::pair<Strategy, StrategyCost>> getOperationOptions(mlir::Operation* operation,
+                                                                       SiblingOpsAnalysis& siblingsAnalysis,
+                                                                       size_t numTiles);
     SmallVector<VPU::MultiClusterStrategy> getAvailiableStrategies(ArchKind arch) const;
     bool checkDefaultStrategy(MultiClusterStrategy strategy) const;
     void fillInOptions(TilingOptions& options) const;
@@ -108,8 +110,8 @@ bool StrategyManagerImplPass::checkDefaultStrategy(MultiClusterStrategy strategy
     return strategy == MultiClusterStrategy::Clustering;
 }
 
-SmallVector<std::pair<Strategy, StrategyCost>> StrategyManagerImplPass::getOperationOptions(mlir::Operation* operation,
-                                                                                            size_t numTiles) {
+SmallVector<std::pair<Strategy, StrategyCost>> StrategyManagerImplPass::getOperationOptions(
+        mlir::Operation* operation, SiblingOpsAnalysis& siblingsAnalysis, size_t numTiles) {
     SmallVector<std::pair<Strategy, StrategyCost>> strategies;
     auto clusteredOp = mlir::dyn_cast<VPU::ClusteredOpInterface>(operation);
 
@@ -162,7 +164,8 @@ SmallVector<std::pair<Strategy, StrategyCost>> StrategyManagerImplPass::getOpera
                                 operation->getLoc(), getTilingModeStr(mode));
 
                 tilingStrategy = getIntArrayAttr(operation->getContext(), operationTiling[0].axis);
-            } else if (clusteredOp != nullptr && !clusteredOp.doesLayerFitIntoCMX(strategy, Byte(0))) {
+            } else if (clusteredOp != nullptr &&
+                       !clusteredOp.doesLayerFitIntoCMX(strategy, siblingsAnalysis, Byte(0))) {
                 _log.trace("Layer {0} doesn't fit in CMX with strategy {1}", operation->getLoc(), strategy);
                 break;
             }
@@ -172,7 +175,7 @@ SmallVector<std::pair<Strategy, StrategyCost>> StrategyManagerImplPass::getOpera
             }
 
             if (!tilingNeeded) {
-                if (clusteredOp != nullptr && !clusteredOp.doesLayerFitIntoCMX(strategy, Byte(0))) {
+                if (clusteredOp != nullptr && !clusteredOp.doesLayerFitIntoCMX(strategy, siblingsAnalysis, Byte(0))) {
                     _log.trace("Layer {0} doesn't fit in CMX with strategy {1}", operation->getLoc(), strategy);
                     continue;
                 } else if (prefetchTiling) {
@@ -207,6 +210,7 @@ SmallVector<VPU::MultiClusterStrategy> StrategyManagerImplPass::getAvailiableStr
 void StrategyManagerImplPass::safeRunOnFunc() {
     auto func = getOperation();
     auto module = func->getParentOfType<mlir::ModuleOp>();
+    auto siblingsAnalysis = getAnalysis<SiblingOpsAnalysis>();
     _costModel = std::make_shared<LayerVPUNNCost>(func);
     _numTiles = IE::getTileExecutor(module).getCount();
     _archStrategies = getAvailiableStrategies(VPU::getArch(module));
@@ -216,7 +220,7 @@ void StrategyManagerImplPass::safeRunOnFunc() {
     auto operationStrategies = std::make_shared<OperationStrategies>();
 
     const auto findStrategyCallback = [&](mlir::Operation* operation) {
-        auto strategies = getOperationOptions(operation, _numTiles);
+        auto strategies = getOperationOptions(operation, siblingsAnalysis, _numTiles);
 
         if (strategies.empty()) {
             return;

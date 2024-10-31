@@ -21,7 +21,7 @@ module @SingleRepeat {
     // CHECk-SAME: -> memref<1x4x60x60xf16, @DDR>
     func.func private @foo(%in: memref<1x4x60x60xf16, @DDR>, %out: memref<1x4x60x60xf16, @DDR>)
             -> memref<1x4x60x60xf16, @DDR> {
-        // CHECK-NEXT: [[ALLOC:%.+]] = VPUIP.StaticAlloc<57600> -> memref<1x4x60x60xf16, @DDR>
+        // CHECK-NEXT: [[ALLOC:%.+]] = VPUIP.StaticAlloc<115200> -> memref<1x4x60x60xf16, @DDR>
         %alloc = memref.alloc() : memref<1x4x60x60xf16, @DDR>
 
         // CHECK: [[TOKEN:%.+]], {{%.+}} = async.execute -> !async.value<memref<1x4x60x60xf16, @DDR>>

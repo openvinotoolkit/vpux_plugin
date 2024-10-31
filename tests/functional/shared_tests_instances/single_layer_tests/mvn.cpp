@@ -93,7 +93,7 @@ class Mvn1ZeroInputLayerTestCommon : public Mvn1LayerTest, virtual public VpuOv2
 class Mvn1ZeroInputLayerTest_NPU3720_HW : public Mvn1ZeroInputLayerTestCommon {};
 class Mvn1ZeroInputLayerTest_NPU4000_HW : public Mvn1ZeroInputLayerTestCommon {};
 class Mvn1LayerTest_NPU4000_HW : public Mvn1ZeroInputLayerTestCommon {};
-class Mvn1LayerTest_NPU4000_SW : public Mvn1ZeroInputLayerTestCommon {};
+class Mvn1LayerTest_SW : public Mvn1ZeroInputLayerTestCommon {};
 
 TEST_P(Mvn1LayerTest_NPU3720, HW) {
     setDefaultHardwareMode();
@@ -106,7 +106,7 @@ TEST_P(Mvn1LayerTest_NPU4000_HW, HW) {
     run(Platform::NPU4000);
 }
 
-TEST_P(Mvn1LayerTest_NPU4000_SW, SW) {
+TEST_P(Mvn1LayerTest_SW, NPU4000_SW) {
     abs_threshold = 0.03;
     setReferenceSoftwareMode();
     run(Platform::NPU4000);
@@ -128,15 +128,12 @@ TEST_P(Mvn1ZeroInputLayerTest_NPU4000_HW, HW) {
 
 class Mvn6LayerTestCommon : public Mvn6LayerTest, virtual public VpuOv2LayerTest {};
 
-class Mvn6LayerTest_NPU3720 : public Mvn6LayerTestCommon {};
-class Mvn6LayerTest_NPU4000 : public Mvn6LayerTestCommon {};
-
-TEST_P(Mvn6LayerTest_NPU3720, SW) {
+TEST_P(Mvn6LayerTestCommon, NPU3720_SW) {
     setReferenceSoftwareMode();
     run(Platform::NPU3720);
 }
 
-TEST_P(Mvn6LayerTest_NPU4000, HW) {
+TEST_P(Mvn6LayerTestCommon, NPU4000_HW) {
     setDefaultHardwareMode();
     run(Platform::NPU4000);
 }
@@ -177,7 +174,7 @@ const auto genMvn6LessParams = [](auto shape, auto axes, auto eps) {
                               ::testing::Values(epsMode), ::testing::Values(DEVICE_NPU));
 };
 
-/* ============================ MVN1 tests (NPU3720/NPU4000) ============================= */
+/* ============================ MVN1 tests ============================= */
 
 const std::vector<std::vector<ov::Shape>> inputShapesForOrder = {{{1, 4, 2, 1024}}};
 
@@ -190,12 +187,12 @@ const std::vector<std::vector<ov::Shape>> inputShapes4D = {{{1, 4, 512, 1}}, {{1
 #endif
 };
 const std::vector<std::vector<ov::Shape>> inputShapesForDecomposition = {
-        {{1, 1, 515971, 1}}, {{2, 3, 20, 35971}}, {{1, 12, 20, 35971}}};
+        {{2, 3, 20, 35971}}, {{1, 1, 515971, 1}}, {{1, 1, 1, 515971}}, {{1, 12, 20, 35971}}};
 const std::vector<std::vector<ov::Shape>> inputShapesForNHWCOpt = {{{1, 16, 4, 32}}, {{1, 32, 4, 16}}};
 const std::vector<std::vector<ov::Shape>> inputShapesForBigSize = {{{1, 1, 8, 48}}, {{1, 2, 8, 128}}};
 
 // -------------- MVN1 - NPU3270
-INSTANTIATE_TEST_CASE_P(
+INSTANTIATE_TEST_SUITE_P(
         precommit_MVN1_order, Mvn1LayerTest_NPU3720,
         ::testing::Combine(::testing::ValuesIn(static_shapes_to_test_representation(inputShapesForOrder)),
                            ::testing::Values(ov::element::f16),
@@ -204,14 +201,15 @@ INSTANTIATE_TEST_CASE_P(
                            ::testing::ValuesIn(normalizeVariance), ::testing::ValuesIn(epsilon)),
         Mvn1LayerTest_NPU3720::getTestCaseName);
 
-INSTANTIATE_TEST_CASE_P(smoke_MVN1, Mvn1LayerTest_NPU3720,
-                        ::testing::Combine(::testing::ValuesIn(static_shapes_to_test_representation(inputShapes4D)),
-                                           ::testing::Values(ov::element::f16), ::testing::Values(ov::Layout("NCHW")),
-                                           ::testing::ValuesIn(emptyReductionAxes), ::testing::ValuesIn(acrossChannels),
-                                           ::testing::ValuesIn(normalizeVariance), ::testing::ValuesIn(epsilon)),
-                        Mvn1LayerTest_NPU3720::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_MVN1, Mvn1LayerTest_NPU3720,
+                         ::testing::Combine(::testing::ValuesIn(static_shapes_to_test_representation(inputShapes4D)),
+                                            ::testing::Values(ov::element::f16), ::testing::Values(ov::Layout("NCHW")),
+                                            ::testing::ValuesIn(emptyReductionAxes),
+                                            ::testing::ValuesIn(acrossChannels), ::testing::ValuesIn(normalizeVariance),
+                                            ::testing::ValuesIn(epsilon)),
+                         Mvn1LayerTest_NPU3720::getTestCaseName);
 
-INSTANTIATE_TEST_CASE_P(
+INSTANTIATE_TEST_SUITE_P(
         precommit_MVN1_opt, Mvn1LayerTest_NPU3720,
         ::testing::Combine(::testing::ValuesIn(static_shapes_to_test_representation(inputShapesForNHWCOpt)),
                            ::testing::Values(ov::element::f16), ::testing::Values(ov::Layout("NHWC")),
@@ -219,7 +217,7 @@ INSTANTIATE_TEST_CASE_P(
                            ::testing::ValuesIn(normalizeVariance), ::testing::ValuesIn(epsilon)),
         Mvn1LayerTest_NPU3720::getTestCaseName);
 
-INSTANTIATE_TEST_CASE_P(
+INSTANTIATE_TEST_SUITE_P(
         precommit_MVN1_bigsize, Mvn1LayerTest_NPU3720,
         ::testing::Combine(::testing::ValuesIn(static_shapes_to_test_representation(inputShapesForBigSize)),
                            ::testing::Values(ov::element::f16), ::testing::Values(ov::Layout("NCHW")),
@@ -229,7 +227,7 @@ INSTANTIATE_TEST_CASE_P(
 
 // -------------- MVN1 Decomposition
 
-INSTANTIATE_TEST_CASE_P(
+INSTANTIATE_TEST_SUITE_P(
         smoke_MVN1_Decomposition, Mvn1LayerTest_NPU3720,
         ::testing::Combine(::testing::ValuesIn(static_shapes_to_test_representation(inputShapesForDecomposition)),
                            ::testing::Values(ov::element::f32), ::testing::Values(ov::Layout("NCHW")),
@@ -237,18 +235,19 @@ INSTANTIATE_TEST_CASE_P(
                            ::testing::ValuesIn(normalizeVariance), ::testing::ValuesIn(epsilon)),
         Mvn1LayerTest_NPU3720::getTestCaseName);
 
-// -------------- MVN1 - NPU4000
+// -------------- MVN1 - SW
 
-INSTANTIATE_TEST_CASE_P(precommit_MVN1, Mvn1LayerTest_NPU4000_SW,
-                        ::testing::Combine(::testing::ValuesIn(static_shapes_to_test_representation(inputShapes4D)),
-                                           ::testing::Values(ov::element::f16), ::testing::ValuesIn(emptyReductionAxes),
-                                           ::testing::ValuesIn(acrossChannels), ::testing::ValuesIn(normalizeVariance),
-                                           ::testing::ValuesIn(epsilon), ::testing::Values(DEVICE_NPU)),
-                        Mvn1LayerTest_NPU4000_SW::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(precommit_MVN1, Mvn1LayerTest_SW,
+                         ::testing::Combine(::testing::ValuesIn(static_shapes_to_test_representation(inputShapes4D)),
+                                            ::testing::Values(ov::element::f16),
+                                            ::testing::ValuesIn(emptyReductionAxes),
+                                            ::testing::ValuesIn(acrossChannels), ::testing::ValuesIn(normalizeVariance),
+                                            ::testing::ValuesIn(epsilon), ::testing::Values(DEVICE_NPU)),
+                         Mvn1LayerTest_SW::getTestCaseName);
 
 // -------------- MVN1 Decomposition
 
-INSTANTIATE_TEST_CASE_P(
+INSTANTIATE_TEST_SUITE_P(
         smoke_MVN1_Decomposition, Mvn1LayerTest_NPU4000_HW,
         ::testing::Combine(::testing::ValuesIn(static_shapes_to_test_representation(inputShapesForDecomposition)),
                            ::testing::Values(ov::element::f32), ::testing::ValuesIn(emptyReductionAxes),
@@ -256,13 +255,13 @@ INSTANTIATE_TEST_CASE_P(
                            ::testing::ValuesIn(epsilon), ::testing::Values(DEVICE_NPU)),
         Mvn1LayerTest_NPU4000_HW::getTestCaseName);
 
-INSTANTIATE_TEST_CASE_P(
-        smoke_MVN1_Decomposition, Mvn1LayerTest_NPU4000_SW,
+INSTANTIATE_TEST_SUITE_P(
+        smoke_MVN1_Decomposition, Mvn1LayerTest_SW,
         ::testing::Combine(::testing::ValuesIn(static_shapes_to_test_representation(inputShapesForDecomposition)),
                            ::testing::Values(ov::element::f32), ::testing::ValuesIn(emptyReductionAxes),
                            ::testing::ValuesIn(acrossChannels), ::testing::ValuesIn(normalizeVariance),
                            ::testing::ValuesIn(epsilon), ::testing::Values(DEVICE_NPU)),
-        Mvn1LayerTest_NPU4000_SW::getTestCaseName);
+        Mvn1LayerTest_SW::getTestCaseName);
 
 // -------------- MVN6 'pseudo' tests : actually testing MVN1 op,
 // as innermost-consecutive norm axes config trigger 'ConvertMVN6toMVN1' to pass
@@ -272,22 +271,17 @@ const auto pse3D = genMvn6LessParams(std::vector<std::vector<ov::Shape>>{{{10, 5
 const auto pse3DAxes2D =
         genMvn6LessParams(std::vector<std::vector<ov::Shape>>{{{1, 48, 48}}}, AxesVec{{1, 2}}, epsilonF);
 const auto pse4D = genMvn6LessParams(std::vector<std::vector<ov::Shape>>{{{1, 48, 48, 32}}}, AxesVec{{-1}}, epsilonF);
+const auto pse4DAxis1 =
+        genMvn6LessParams(std::vector<std::vector<ov::Shape>>{{{1, 20, 112, 112}}}, AxesVec{{1}}, epsilonF);
 const auto pse5D =
         genMvn6LessParams(std::vector<std::vector<ov::Shape>>{{{1, 32, 20, 20, 20}}}, AxesVec{{2, 3, 4}}, epsilonF);
 
-INSTANTIATE_TEST_SUITE_P(pseudo_MVN6_2D, Mvn6LayerTest_NPU3720, pse2D, Mvn6LayerTest_NPU3720::getTestCaseName);
-INSTANTIATE_TEST_SUITE_P(pseudo_MVN6_3D, Mvn6LayerTest_NPU3720, pse3D, Mvn6LayerTest_NPU3720::getTestCaseName);
-INSTANTIATE_TEST_SUITE_P(pseudo_MVN6_3DAxes2D, Mvn6LayerTest_NPU3720, pse3DAxes2D,
-                         Mvn6LayerTest_NPU3720::getTestCaseName);
-INSTANTIATE_TEST_SUITE_P(pseudo_MVN6_4D, Mvn6LayerTest_NPU3720, pse4D, Mvn6LayerTest_NPU3720::getTestCaseName);
-INSTANTIATE_TEST_SUITE_P(pseudo_MVN6_5D, Mvn6LayerTest_NPU3720, pse5D, Mvn6LayerTest_NPU3720::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(pseudo_MVN6_2D, Mvn6LayerTest_NPU4000, pse2D, Mvn6LayerTest_NPU4000::getTestCaseName);
-INSTANTIATE_TEST_SUITE_P(pseudo_MVN6_3D, Mvn6LayerTest_NPU4000, pse3D, Mvn6LayerTest_NPU4000::getTestCaseName);
-INSTANTIATE_TEST_SUITE_P(pseudo_MVN6_3DAxes2D, Mvn6LayerTest_NPU4000, pse3DAxes2D,
-                         Mvn6LayerTest_NPU4000::getTestCaseName);
-INSTANTIATE_TEST_SUITE_P(pseudo_MVN6_4D, Mvn6LayerTest_NPU4000, pse4D, Mvn6LayerTest_NPU4000::getTestCaseName);
-INSTANTIATE_TEST_SUITE_P(pseudo_MVN6_5D, Mvn6LayerTest_NPU4000, pse5D, Mvn6LayerTest_NPU4000::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(pseudo_MVN6_2D, Mvn6LayerTestCommon, pse2D, Mvn6LayerTestCommon::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(pseudo_MVN6_3D, Mvn6LayerTestCommon, pse3D, Mvn6LayerTestCommon::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(pseudo_MVN6_3DAxes2D, Mvn6LayerTestCommon, pse3DAxes2D, Mvn6LayerTestCommon::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(pseudo_MVN6_4D, Mvn6LayerTestCommon, pse4D, Mvn6LayerTestCommon::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(pseudo_MVN6_4DAxis1, Mvn6LayerTestCommon, pse4DAxis1, Mvn6LayerTestCommon::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(pseudo_MVN6_5D, Mvn6LayerTestCommon, pse5D, Mvn6LayerTestCommon::getTestCaseName);
 
 // -------------- MVN1 Zero-Input test
 
@@ -296,13 +290,13 @@ const auto zeroTestCfg = ::testing::Combine(
         ::testing::ValuesIn(emptyReductionAxes), ::testing::ValuesIn(acrossChannels), ::testing::Values(true),
         ::testing::ValuesIn(epsilon), ::testing::Values(DEVICE_NPU));
 
-INSTANTIATE_TEST_CASE_P(zero_input, Mvn1ZeroInputLayerTest_NPU3720_HW, zeroTestCfg,
-                        Mvn1ZeroInputLayerTest_NPU3720_HW::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(zero_input, Mvn1ZeroInputLayerTest_NPU3720_HW, zeroTestCfg,
+                         Mvn1ZeroInputLayerTest_NPU3720_HW::getTestCaseName);
 
-INSTANTIATE_TEST_CASE_P(zero_input, Mvn1ZeroInputLayerTest_NPU4000_HW, zeroTestCfg,
-                        Mvn1ZeroInputLayerTest_NPU4000_HW::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(zero_input, Mvn1ZeroInputLayerTest_NPU4000_HW, zeroTestCfg,
+                         Mvn1ZeroInputLayerTest_NPU4000_HW::getTestCaseName);
 
-/* ============================= MVN6 tests (NPU3720/NPU4000) ============================ */
+/* ============================= MVN6 tests ============================ */
 
 const std::vector<float> bigEps = {0.5};
 std::vector<std::vector<ov::Shape>> shapes1D = {{{17}}};
@@ -315,7 +309,7 @@ std::vector<std::vector<ov::Shape>> shapes5D = {{{10, 16, 5, 10, 6}}};
 std::vector<std::vector<int>> axes1D = {{0}};
 std::vector<std::vector<int>> axes2D = {{1}, {0, 1}};
 std::vector<std::vector<int>> axes3D = {{0}, {1}, {0, 1}};
-std::vector<std::vector<int>> axes4D = {{0},    {1},    {2},       {3},       {0, 1},      {0, 2},
+std::vector<std::vector<int>> axes4D = {{0},    {2},    {3},       {0, 1},    {0, 2},
                                         {1, 2}, {1, 3}, {0, 1, 2}, {0, 1, 3}, {0, 1, 2, 3}};
 std::vector<std::vector<int>> axes5D = {{1}, {1, 2}, {1, 3, 4}, {0, 2, 3}, {0, 1, 3, 4}};
 
@@ -337,28 +331,14 @@ const auto cfgMS = genMvn6LessParams(std::vector<std::vector<ov::Shape>>{{{4, 10
 
 // -------------- MVN6 - NPU3720
 
-INSTANTIATE_TEST_SUITE_P(smoke_MVN6_1D, Mvn6LayerTest_NPU3720, cfg1D, Mvn6LayerTest_NPU3720::getTestCaseName);
-INSTANTIATE_TEST_SUITE_P(smoke_MVN6_2D, Mvn6LayerTest_NPU3720, cfg2D, Mvn6LayerTest_NPU3720::getTestCaseName);
-INSTANTIATE_TEST_SUITE_P(smoke_MVN6_3D, Mvn6LayerTest_NPU3720, cfg3D, Mvn6LayerTest_NPU3720::getTestCaseName);
-INSTANTIATE_TEST_SUITE_P(smoke_MVN6_4D, Mvn6LayerTest_NPU3720, cfg4D, Mvn6LayerTest_NPU3720::getTestCaseName);
-INSTANTIATE_TEST_SUITE_P(smoke_MVN6_5D, Mvn6LayerTest_NPU3720, cfg5D, Mvn6LayerTest_NPU3720::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_MVN6_1D, Mvn6LayerTestCommon, cfg1D, Mvn6LayerTestCommon::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_MVN6_2D, Mvn6LayerTestCommon, cfg2D, Mvn6LayerTestCommon::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_MVN6_3D, Mvn6LayerTestCommon, cfg3D, Mvn6LayerTestCommon::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_MVN6_4D, Mvn6LayerTestCommon, cfg4D, Mvn6LayerTestCommon::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_MVN6_5D, Mvn6LayerTestCommon, cfg5D, Mvn6LayerTestCommon::getTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(tiling_MVN6_a, Mvn6LayerTest_NPU3720, cfgT0, Mvn6LayerTest_NPU3720::getTestCaseName);
-INSTANTIATE_TEST_SUITE_P(tiling_MVN6_b, Mvn6LayerTest_NPU3720, cfgT1, Mvn6LayerTest_NPU3720::getTestCaseName);
-INSTANTIATE_TEST_SUITE_P(tiling_MVN6_c, Mvn6LayerTest_NPU3720, cfgT2, Mvn6LayerTest_NPU3720::getTestCaseName);
-
-// -------------- MVN6 - NPU4000
-
-INSTANTIATE_TEST_SUITE_P(smoke_MVN6_1D, Mvn6LayerTest_NPU4000, cfg1D, Mvn6LayerTest_NPU4000::getTestCaseName);
-INSTANTIATE_TEST_SUITE_P(smoke_MVN6_2D, Mvn6LayerTest_NPU4000, cfg2D, Mvn6LayerTest_NPU4000::getTestCaseName);
-INSTANTIATE_TEST_SUITE_P(smoke_MVN6_3D, Mvn6LayerTest_NPU4000, cfg3D, Mvn6LayerTest_NPU4000::getTestCaseName);
-INSTANTIATE_TEST_SUITE_P(smoke_MVN6_4D, Mvn6LayerTest_NPU4000, cfg4D, Mvn6LayerTest_NPU4000::getTestCaseName);
-INSTANTIATE_TEST_SUITE_P(smoke_MVN6_5D, Mvn6LayerTest_NPU4000, cfg5D, Mvn6LayerTest_NPU4000::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(tiling_MVN6_a, Mvn6LayerTest_NPU4000, cfgT0, Mvn6LayerTest_NPU4000::getTestCaseName);
-INSTANTIATE_TEST_SUITE_P(tiling_MVN6_b, Mvn6LayerTest_NPU4000, cfgT1, Mvn6LayerTest_NPU4000::getTestCaseName);
-INSTANTIATE_TEST_SUITE_P(tiling_MVN6_c, Mvn6LayerTest_NPU4000, cfgT2, Mvn6LayerTest_NPU4000::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(multi_SHAVEs_MVN6, Mvn6LayerTest_NPU4000, cfgMS, Mvn6LayerTest_NPU4000::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(tiling_MVN6_a, Mvn6LayerTestCommon, cfgT0, Mvn6LayerTestCommon::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(tiling_MVN6_b, Mvn6LayerTestCommon, cfgT1, Mvn6LayerTestCommon::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(tiling_MVN6_c, Mvn6LayerTestCommon, cfgT2, Mvn6LayerTestCommon::getTestCaseName);
 
 }  // namespace

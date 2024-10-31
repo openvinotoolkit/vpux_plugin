@@ -7,6 +7,7 @@
 
 #include <queue>
 #include "vpux/compiler/dialect/VPU/utils/multi_cluster_strategy_utils.hpp"
+#include "vpux/compiler/dialect/VPU/utils/sibling_ops_analysis.hpp"
 
 namespace vpux {
 namespace VPU {
@@ -17,7 +18,8 @@ class SubgraphOptimizer final {
 public:
     using ShortcutMapTy =
             std::unordered_map<mlir::Operation*, std::pair<mlir::Operation*, SmallVector<mlir::Operation*>>>;
-    SubgraphOptimizer(mlir::func::FuncOp func, bool enablePrefetchTiling, Logger log);
+    SubgraphOptimizer(mlir::func::FuncOp func, bool enablePrefetchTiling, Logger log,
+                      SiblingOpsAnalysis& siblingsOpsAnalysis);
     void optimizeStrategyAvoidSpillingOnModel();
 
 private:
@@ -88,6 +90,7 @@ private:
     SubgraphOptConfig _configForCalcOrigCost = {false, true};
     // The configuration of calculating the rollback cost of subgraph
     SubgraphOptConfig _configForCalcRollbackCost = {true, true};
+    SiblingOpsAnalysis& _siblingsOpsAnalysis;
 };
 
 }  // namespace VPU

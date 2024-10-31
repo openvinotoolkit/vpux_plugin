@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2018-2023 Intel Corporation
+// Copyright (C) 2018-2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -66,33 +66,29 @@ class RandomLayerTestCommon : public RandomUniformLayerTest, virtual public VpuO
     }
 };
 
-class RandomLayerTest_NPU3720 : public RandomLayerTestCommon {};
-class RandomLayerTest_NPU4000 : public RandomLayerTestCommon {};
-
-class RandomLayerTest_NPU4000_F32 : public RandomLayerTestCommon {
+class RandomLayerTest_F32 : public RandomLayerTestCommon {
     void configure_model() override {
         VpuOv2LayerTest::configuration[ov::intel_npu::compilation_mode_params.name()] =
                 "convert-precision-to-fp16=false";
     }
 };
 
-TEST_P(RandomLayerTest_NPU3720, SW) {
+TEST_P(RandomLayerTestCommon, NPU3720_SW) {
     VpuOv2LayerTest::setReferenceSoftwareMode();
     VpuOv2LayerTest::run(Platform::NPU3720);
 }
 
-TEST_P(RandomLayerTest_NPU4000, SW) {
+TEST_P(RandomLayerTestCommon, NPU4000_SW) {
     VpuOv2LayerTest::setReferenceSoftwareMode();
     VpuOv2LayerTest::run(Platform::NPU4000);
 }
 
-TEST_P(RandomLayerTest_NPU4000_F32, SW) {
+TEST_P(RandomLayerTest_F32, NPU4000_SW) {
     VpuOv2LayerTest::setReferenceSoftwareMode();
     VpuOv2LayerTest::run(Platform::NPU4000);
 }
 
 }  // namespace test
-
 }  // namespace ov
 
 using namespace ov::test;
@@ -118,13 +114,9 @@ const auto randParamsF32 = ::testing::Combine(
         ::testing::Values(outputShapes[1]), ::testing::ValuesIn(randomUniformSpecificParamsF32),
         ::testing::Values(globalSeeds[0]), ::testing::Values(opSeeds[1]), ::testing::Values(DEVICE_NPU));
 
-INSTANTIATE_TEST_SUITE_P(smoke_RandomUniform, RandomLayerTest_NPU3720, randParams,
-                         RandomLayerTest_NPU3720::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_RandomUniform, RandomLayerTestCommon, randParams,
+                         RandomLayerTestCommon::getTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_RandomUniform, RandomLayerTest_NPU4000, randParams,
-                         RandomLayerTest_NPU4000::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_RandomUniform, RandomLayerTest_NPU4000_F32, randParamsF32,
-                         RandomLayerTest_NPU4000_F32::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_RandomUniform, RandomLayerTest_F32, randParamsF32, RandomLayerTest_F32::getTestCaseName);
 
 }  // namespace

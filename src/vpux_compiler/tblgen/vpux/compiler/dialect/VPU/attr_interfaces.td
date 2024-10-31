@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -145,6 +145,15 @@ def VPU_SEAttrInterface : AttrInterface<"SEAttr"> {
             "std::optional<VPU::SETileInfo>", "getTileInfo", (ins)
         >
     ];
+}
+
+def VPU_PPEAttrInterface : AttrInterface<"PPEAttr"> {
+    let description = [{
+        Interface PPE attributes. The interface doesn't contain any method since it is used only to
+        mark other attributes for further casting.
+    }];
+
+    let cppNamespace = "vpux::VPU";
 }
 
 #endif

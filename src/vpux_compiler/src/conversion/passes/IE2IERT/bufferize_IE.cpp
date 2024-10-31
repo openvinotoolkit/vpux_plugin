@@ -7,6 +7,7 @@
 
 #include "vpux/compiler/core/attributes/stride_reqs.hpp"
 #include "vpux/compiler/core/layers.hpp"
+#include "vpux/compiler/dialect/IE/IR/dialect.hpp"
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/IERT/ops.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
@@ -1390,6 +1391,15 @@ mlir::Operation* createRTLayer(IE::PermuteQuantizeOp origOp, ArrayRef<mlir::Valu
                                              origOp.getMemPerm());
 }
 
+mlir::Operation* createRTLayer(IE::DeformableConvolutionOp origOp, ArrayRef<mlir::Value> allBufs, mlir::OpBuilder& b) {
+    IERT::DeformableConvolutionOp::Adaptor newOp(allBufs);
+    return b.create<IERT::DeformableConvolutionOp>(
+            origOp.getLoc(), newOp.getInput(), newOp.getOffset(), newOp.getKernel(), newOp.getMask(),
+            newOp.getOutputBuff(), origOp.getStridesAttr(), origOp.getPadsBeginAttr(), origOp.getPadsEndAttr(),
+            origOp.getDilationsAttr(), origOp.getGroupAttr(), origOp.getDeformableGroupAttr(),
+            origOp.getBiliniarInterpolatePadAttr());
+}
+
 class LayerRewrite final : public mlir::ConversionPattern {
 public:
     LayerRewrite(mlir::TypeConverter& typeConverter, mlir::MLIRContext* ctx, Logger log)
@@ -1551,6 +1561,7 @@ mlir::LogicalResult LayerRewrite::matchAndRewrite(mlir::Operation* origOp, Array
     CASE(IE::GRUSequenceOp)
     CASE(IE::DeformablePSROIPoolingOp)
     CASE(IE::PermuteQuantizeOp)
+    CASE(IE::DeformableConvolutionOp)
     .Default([](mlir::Operation*) {
         return nullptr;
     });

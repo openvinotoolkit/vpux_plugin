@@ -28,7 +28,7 @@ SmallString getSwKernelArchString(VPU::ArchKind archKind) {
 
 ArrayRef<uint8_t> vpux::ELF::getDataAndSizeOfElfSection(ArrayRef<uint8_t> elfBlob,
                                                         ArrayRef<StringRef> possibleSecNames) {
-    auto accessor = elf::ElfDDRAccessManager(elfBlob.data(), elfBlob.size());
+    auto accessor = elf::DDRAccessManager<elf::DDRAlwaysEmplace>(elfBlob.data(), elfBlob.size());
     auto elfReader = elf::Reader<elf::ELF_Bitness::Elf32>(&accessor);
 
     const uint8_t* secData = nullptr;
@@ -75,6 +75,13 @@ size_t vpux::ELF::getOffsetOfSymRef(ELF::SymbolReferenceMap& symRefMap, mlir::Sy
     return wrappableOp.getMemoryOffset();
 }
 
+vpux::ELF::MainOp vpux::ELF::getElfMainOp(mlir::ModuleOp moduleOp) {
+    IE::CNNNetworkOp netOp;
+    mlir::func::FuncOp netFunc;
+    IE::CNNNetworkOp::getFromModule(moduleOp, netOp, netFunc);
+    return getElfMainOp(netFunc);
+}
+
 vpux::ELF::MainOp vpux::ELF::getElfMainOp(mlir::func::FuncOp funcOp) {
     auto mainOps = to_small_vector(funcOp.getOps<ELF::MainOp>());
     VPUX_THROW_UNLESS(mainOps.size() == 1, "Expected exactly one ELF mainOp. Got {0}", mainOps.size());
@@ -86,14 +93,8 @@ ArrayRef<uint8_t> vpux::ELF::getKernelELF(mlir::Operation* operation, StringRef 
     const auto& kernelInfo = ShaveBinaryResources::getInstance();
     const auto archKind = VPU::getArch(operation);
     const auto arch = getSwKernelArchString(archKind);
-    const auto revisionID = VPU::getRevisionID(operation);
-    llvm::ArrayRef<uint8_t> elfBlob;
-    if (archKind == VPU::ArchKind::NPU40XX && revisionID >= VPU::RevisionID::REVISION_B) {
-        llvm::StringRef suffix = "B0";
-        elfBlob = kernelInfo.getElf(kernelPath, arch, suffix);
-    } else {
-        elfBlob = kernelInfo.getElf(kernelPath, arch);
-    }
+    llvm::ArrayRef<uint8_t> elfBlob = kernelInfo.getElf(kernelPath, arch);
+
     return sectionNames.empty() ? elfBlob : vpux::ELF::getDataAndSizeOfElfSection(elfBlob, sectionNames);
 }
 

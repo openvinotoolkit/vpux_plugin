@@ -100,22 +100,22 @@ const auto variadicSplitParams4 =
                                  std::vector<std::vector<ov::Shape>>{{{1, 4, 2}}})),  // inputShapes
                          ::testing::Values(ov::test::utils::DEVICE_NPU));
 
-INSTANTIATE_TEST_CASE_P(smoke_precommit_VariadicSplit, VariadicSplitLayerTestCommon, variadicSplitParams0,
-                        VariadicSplitLayerTestCommon::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_VariadicSplit, VariadicSplitLayerTestCommon, variadicSplitParams0,
+                         VariadicSplitLayerTestCommon::getTestCaseName);
 
-INSTANTIATE_TEST_CASE_P(smoke_VariadicSplitNegAxis0, VariadicSplitLayerTestCommon, variadicSplitParams1,
-                        VariadicSplitLayerTestCommon::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_VariadicSplitNegAxis0, VariadicSplitLayerTestCommon, variadicSplitParams1,
+                         VariadicSplitLayerTestCommon::getTestCaseName);
 
-INSTANTIATE_TEST_CASE_P(smoke_VariadicSplitNegAxis1, VariadicSplitLayerTestCommon, variadicSplitParams2,
-                        VariadicSplitLayerTestCommon::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_VariadicSplitNegAxis1, VariadicSplitLayerTestCommon, variadicSplitParams2,
+                         VariadicSplitLayerTestCommon::getTestCaseName);
 
-INSTANTIATE_TEST_CASE_P(smoke_VariadicSplitPosAxis, VariadicSplitLayerTestCommon, variadicSplitParams3,
-                        VariadicSplitLayerTestCommon::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_VariadicSplitPosAxis, VariadicSplitLayerTestCommon, variadicSplitParams3,
+                         VariadicSplitLayerTestCommon::getTestCaseName);
 
-INSTANTIATE_TEST_CASE_P(smoke_precommit_VariadicSplitNegAxis, VariadicSplitLayerTestCommon, variadicSplitParams4,
-                        VariadicSplitLayerTestCommon::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_VariadicSplitNegAxis, VariadicSplitLayerTestCommon, variadicSplitParams4,
+                         VariadicSplitLayerTestCommon::getTestCaseName);
 
-INSTANTIATE_TEST_CASE_P(smoke_VariadicSplitInt32Axis, VariadicSplitLayerTestAxisInt32_NPU3720, variadicSplitParams3,
-                        VariadicSplitLayerTestAxisInt32_NPU3720::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_VariadicSplitInt32Axis, VariadicSplitLayerTestAxisInt32_NPU3720, variadicSplitParams3,
+                         VariadicSplitLayerTestAxisInt32_NPU3720::getTestCaseName);
 
 }  // namespace

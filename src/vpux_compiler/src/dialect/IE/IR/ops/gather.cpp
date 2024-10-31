@@ -10,6 +10,8 @@
 
 #include "vpux/utils/core/checked_cast.hpp"
 
+#include <numeric>
+
 using namespace vpux;
 
 namespace {
@@ -72,8 +74,8 @@ mlir::LogicalResult vpux::IE::GatherOp::inferReturnTypeComponents(
     // calculate output shape
     int64_t batchDims = gather.getBatchDims();
     int64_t axisVal = checked_cast<int64_t>(*axis);
-    int64_t outRank = inputShape.size() + indicesShape.size() - 1 - batchDims;
-    int64_t indicesRank = indicesShape.size();
+    int64_t indicesRank = gather.getIndicesRank().value_or(indicesShape.size());
+    int64_t outRank = inputShape.size() + indicesRank - 1 - batchDims;
     int64_t i = 0;
 
     for (; i < batchDims; i++) {
@@ -135,7 +137,8 @@ mlir::LogicalResult ConvertConstToAttr::matchAndRewrite(IE::GatherOp gatherOp, m
     }
 
     rewriter.replaceOpWithNewOp<IE::GatherOp>(gatherOp, gatherOp.getType(), gatherOp.getInput(), gatherOp.getIndices(),
-                                              nullptr, rewriter.getI64IntegerAttr(axisInd), gatherOp.getBatchDims());
+                                              nullptr, rewriter.getI64IntegerAttr(axisInd), gatherOp.getBatchDims(),
+                                              gatherOp.getIndicesRankAttr());
     return mlir::success();
 }
 

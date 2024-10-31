@@ -39,8 +39,9 @@ mlir::Value createFloatConst(mlir::OpBuilder& builder, mlir::Location loc, mlir:
 template <typename In>
 mlir::Value createConst(
         mlir::OpBuilder& builder, mlir::Location loc, mlir::RankedTensorType type, ArrayRef<In> values,
-        FuncRef<Const::ContentAttr(Const::ContentAttr)> transform = [](Const::ContentAttr attr) {
-            return attr;
+        FuncRef<Const::ContentSetup(Const::ContentSetup&)> transform =
+                [](Const::ContentSetup& setup) -> Const::ContentSetup {
+            return std::move(setup);
         }) {
     const auto constShape = type.getShape();
     const auto shapeTotalSize =
@@ -51,8 +52,11 @@ mlir::Value createConst(
     const auto dataAttr = mlir::DenseElementsAttr::get(type, values);
     VPUX_THROW_UNLESS(dataAttr != nullptr, "Data is incompatible with the supplied type {0}", type.getElementType());
 
-    auto contentAttr = transform(Const::ContentAttr::get(dataAttr));
-    return builder.create<Const::DeclareOp>(loc, contentAttr.getType(), contentAttr).getOutput();
+    auto setup = Const::ContentAttr::transform(dataAttr);
+    setup = transform(setup);
+
+    auto contentAttr = setup.get();
+    return builder.create<Const::DeclareOp>(loc, contentAttr.getType(), std::move(contentAttr)).getOutput();
 }
 
 mlir::Value buildWeightsConst(mlir::OpBuilder& builder, mlir::Location loc, mlir::RankedTensorType type,
@@ -60,9 +64,6 @@ mlir::Value buildWeightsConst(mlir::OpBuilder& builder, mlir::Location loc, mlir
 
 /// Returns whether constant content has negative values.
 bool hasNegativeValues(const Const::Content& content);
-
-mlir::FailureOr<mlir::Value> updateConstStorageValues(const Logger& log, mlir::OpBuilder& builder,
-                                                      Const::DeclareOp origOp, ArrayRef<float> values);
 
 // Returns all Const::DeclareOp operations nested in 'from' that use the symbol defined by 'rodataOp'.
 SmallVector<Const::DeclareOp> getDeclareOpsUses(Const::RodataOp rodataOp, mlir::Operation* from);

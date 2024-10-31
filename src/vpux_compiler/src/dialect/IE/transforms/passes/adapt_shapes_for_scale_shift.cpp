@@ -79,7 +79,8 @@ mlir::LogicalResult BroadcastEltwiseRewriter<EltwiseOp>::matchAndTranspose(Eltwi
 
     // Create new IE.Add operation
     auto newOp = rewriter.create<EltwiseOp>(origOp->getLoc(), transposedLhs, reshapedRhs, origOp.getAutoBroadcast(),
-                                            origOp.getPostOpAttr(), origOp.getClampAttr());
+                                            origOp.getPostOpAttr(), origOp.getClampAttr(),
+                                            origOp.getOutputChannelsAttr(), origOp.getInputChannelsAttr());
     _log.trace("[{0}]: new element-wise: {1}", this->getDebugName(), newOp);
 
     // Transpose the 1xMxNx1 output to 1xNxMx1
@@ -346,7 +347,8 @@ mlir::LogicalResult MultiNonTrivialDimEltwiseRewriter<EltwiseOp>::matchAndRewrit
 
     // Create new EltwiseOp operation
     auto newOp = rewriter.create<EltwiseOp>(origOp->getLoc(), transposedLhs, reshapedRhs, origOp.getAutoBroadcast(),
-                                            origOp.getPostOpAttr(), origOp.getClampAttr());
+                                            origOp.getPostOpAttr(), origOp.getClampAttr(),
+                                            origOp.getOutputChannelsAttr(), origOp.getInputChannelsAttr());
 
     // output: 1x(HxW)xNxC -> 1xNxCx(HxW) -> NxCxHxW
     const auto transposeOutOrder =
@@ -394,13 +396,15 @@ mlir::LogicalResult TransposeEltwiseRewriter<EltwiseOp>::matchAndRewrite(Eltwise
 
     const auto transposedOrder = mlir::AffineMapAttr::get(mlir::AffineMap::getPermutationMap(newInputOrder, ctx));
 
-    auto actInputTranspose = rewriter.create<IE::TransposeOp>(
-            origOp->getLoc(), actInputType.changeShape(newActInputShape), actInput, nullptr, transposedOrder);
+    auto actInputTranspose = rewriter.create<IE::TransposeOp>(takeOpLoc(origOp, "transpose_lhs"),
+                                                              actInputType.changeShape(newActInputShape), actInput,
+                                                              nullptr, transposedOrder);
     actInput.replaceUsesWithIf(actInputTranspose, [&](mlir::OpOperand& opOperand) {
         return opOperand.getOwner() == origOp;
     });
-    auto constInputTranspose = rewriter.create<IE::TransposeOp>(
-            origOp->getLoc(), constInputType.changeShape(newConstInputShape), constInput, nullptr, transposedOrder);
+    auto constInputTranspose = rewriter.create<IE::TransposeOp>(takeOpLoc(origOp, "transpose_rhs"),
+                                                                constInputType.changeShape(newConstInputShape),
+                                                                constInput, nullptr, transposedOrder);
     constInput.replaceUsesWithIf(constInputTranspose, [&](mlir::OpOperand& opOperand) {
         return opOperand.getOwner() == origOp;
     });
@@ -412,8 +416,8 @@ mlir::LogicalResult TransposeEltwiseRewriter<EltwiseOp>::matchAndRewrite(Eltwise
     auto newOutputOrder =
             dimToMove == Dims4D::Act::W ? SmallVector<uint32_t>{0, 2, 3, 1} : SmallVector<uint32_t>{0, 2, 1, 3};
     const auto outputTransposeOrder = mlir::AffineMapAttr::get(mlir::AffineMap::getPermutationMap(newOutputOrder, ctx));
-    auto outputTranspose = rewriter.create<IE::TransposeOp>(origOp->getLoc(), outputType, origOp->getResult(0), nullptr,
-                                                            outputTransposeOrder);
+    auto outputTranspose = rewriter.create<IE::TransposeOp>(takeOpLoc(origOp, "transpose_out"), outputType,
+                                                            origOp->getResult(0), nullptr, outputTransposeOrder);
 
     _log.trace("[{0}] Tranpose '{1}' at '{2}'", this->getDebugName(), origOp->getName(), origOp->getLoc());
     origOp->getResult(0).replaceAllUsesExcept(outputTranspose, outputTranspose);

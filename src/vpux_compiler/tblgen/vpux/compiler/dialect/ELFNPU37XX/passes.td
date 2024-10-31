@@ -12,7 +12,7 @@ include "mlir/Pass/PassBase.td"
 // Cleanup ELF Sections
 //
 
-def RemoveEmptyELFSections : PassBase<"remove-empty-elf-sections", "vpux::FunctionPass"> {
+def RemoveEmptyELFSections : PassBase<"remove-empty-ELFNPU37XX-sections", "vpux::FunctionPass"> {
     let summary = "Cleans up empty sections in ELF";
 
     let description = [{
@@ -33,7 +33,7 @@ def RemoveEmptyELFSections : PassBase<"remove-empty-elf-sections", "vpux::Functi
 // UpdateELFSectionFlags
 //
 
-def UpdateELFSectionFlags : PassBase<"update-elf-section-flags", "vpux::ModulePass"> {
+def UpdateELFSectionFlags : PassBase<"update-ELFNPU37XX-section-flags", "vpux::ModulePass"> {
     let summary = "Update ELF section flags";
 
     let description = [{

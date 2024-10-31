@@ -96,12 +96,14 @@ mlir::LogicalResult FuseConvAndSlice::matchAndRewrite(IE::ConvolutionOp convOp, 
             sliceInputShape[Dims4D::Act::C] - filterShape[Dims4D::Filter::IC] - sliceOffset[Dims4D::Act::C.ind()];
     Shape cstPadBegin = {0, sliceOffset[Dims4D::Act::C.ind()], 0, 0};
     Shape cstPadEnd = {0, dimCPaddingEnd, 0, 0};
-    auto newCstContent = cstContentAttrFilter.padWithZero(cstPadBegin, cstPadEnd);
-    auto newFilterConst = rewriter.create<Const::DeclareOp>(convOp.getLoc(), newCstContent.getType(), newCstContent);
+    auto newCstContent = cstContentAttrFilter.transform().padWithZero(cstPadBegin, cstPadEnd).get();
+    auto newFilterConst =
+            rewriter.create<Const::DeclareOp>(convOp.getLoc(), newCstContent.getType(), std::move(newCstContent));
     auto newConvOp = rewriter.create<IE::ConvolutionOp>(
             convOp.getLoc(), outNDInterface, sliceInput, newFilterConst, convOp.getBias(), convOp.getStridesAttr(),
             convOp.getPadsBeginAttr(), convOp.getPadsEndAttr(), convOp.getDilationsAttr(), convOp.getPostOpAttr(),
-            convOp.getClampAttr(), convOp.getStaticScaleAttr());
+            convOp.getClampAttr(), convOp.getStaticScaleAttr(), convOp.getOutputChannelsAttr(),
+            convOp.getInputChannelsAttr());
 
     rewriter.replaceOp(convOp, newConvOp->getOpResults());
 
@@ -150,9 +152,14 @@ mlir::LogicalResult vpux::IE::ConvolutionOp::inferReturnTypeComponents(
             ov::Strides(windowDilations.begin(), windowDilations.end()));
 
     const auto& outputShape = op.get_output_partial_shape(0);
-    const auto shapeI64 = to_small_vector(outputShape.get_shape() | transformed([](size_t val) {
-                                              return checked_cast<int64_t>(val);
-                                          }));
+    auto shapeI64 = to_small_vector(outputShape.get_shape() | transformed([](size_t val) {
+                                        return checked_cast<int64_t>(val);
+                                    }));
+
+    if (conv.getOutputChannels().has_value()) {
+        shapeI64[Dims4D::Act::C.ind()] = conv.getOutputChannels().value();
+    }
+
     inferredReturnShapes.emplace_back(shapeI64, inType);
 
     return mlir::success();
@@ -209,7 +216,11 @@ mlir::LogicalResult vpux::IE::GroupConvolutionOp::inferReturnTypeComponents(
         filterShape.erase(filterShape.begin());
     }
 
-    inShape[1] /= groups;
+    if (conv.getInputChannels().has_value()) {
+        inShape[1] = filterShape[1];
+    } else {
+        inShape[1] /= groups;
+    }
 
     auto op = ov::op::v1::Convolution(
             std::make_shared<ov::op::v0::Parameter>(ov::element::i32, ov::Shape(inShape.begin(), inShape.end())),
@@ -221,9 +232,13 @@ mlir::LogicalResult vpux::IE::GroupConvolutionOp::inferReturnTypeComponents(
             ov::Strides(windowDilations.begin(), windowDilations.end()));
 
     const auto& outputShape = op.get_output_partial_shape(0);
-    const auto shapeI64 = to_small_vector(outputShape.get_shape() | transformed([](size_t val) {
-                                              return checked_cast<int64_t>(val);
-                                          }));
+    auto shapeI64 = to_small_vector(outputShape.get_shape() | transformed([](size_t val) {
+                                        return checked_cast<int64_t>(val);
+                                    }));
+
+    if (conv.getOutputChannels().has_value()) {
+        shapeI64[Dims4D::Act::C.ind()] = conv.getOutputChannels().value();
+    }
 
     const auto inputType = conv.getInput().getType().cast<vpux::NDTypeInterface>();
     const auto outDesc = vpux::getTensorAttr(ctx, inputType.getDimsOrder(), inputType.getMemSpace());
@@ -253,22 +268,22 @@ mlir::LogicalResult GroupsToAttr::matchAndRewrite(IE::GroupConvolutionOp convOp,
     auto filterShape = to_small_vector(filter.getType().cast<mlir::ShapedType>().getShape());
     const auto groups = filterShape[0];
 
-    auto getNewShapeValue = [&](mlir::Value input) -> mlir::Value {
+    auto getNewShapeValue = [&](mlir::Value input, StringRef locSuffix) -> mlir::Value {
         auto shape = to_small_vector(getShape(input).raw());
         shape[1] *= shape[0];
         shape.erase(shape.begin());
         const auto shapeAttr = getIntArrayAttr(getContext(), shape);
-        return rewriter.createOrFold<IE::ReshapeOp>(convOp->getLoc(), input, nullptr, false, shapeAttr);
+        return rewriter.createOrFold<IE::ReshapeOp>(takeOpLoc(convOp, locSuffix), input, nullptr, false, shapeAttr);
     };
 
     mlir::Value newFilter = filter;
     if (auto weightsFQ = filter.getDefiningOp<IE::FakeQuantizeOp>()) {
         if (auto weightsCst = weightsFQ.getInput().getDefiningOp<Const::DeclareOp>()) {
-            auto newWeights = getNewShapeValue(weightsCst);
-            auto newInputLow = getNewShapeValue(weightsFQ.getInputLow());
-            auto newInputHigh = getNewShapeValue(weightsFQ.getInputHigh());
-            auto newOutputLow = getNewShapeValue(weightsFQ.getOutputLow());
-            auto newOutputHigh = getNewShapeValue(weightsFQ.getOutputHigh());
+            auto newWeights = getNewShapeValue(weightsCst, "weights");
+            auto newInputLow = getNewShapeValue(weightsFQ.getInputLow(), "in_low");
+            auto newInputHigh = getNewShapeValue(weightsFQ.getInputHigh(), "in_high");
+            auto newOutputLow = getNewShapeValue(weightsFQ.getOutputLow(), "out_low");
+            auto newOutputHigh = getNewShapeValue(weightsFQ.getOutputHigh(), "out_high");
 
             newFilter =
                     rewriter.create<IE::FakeQuantizeOp>(weightsFQ->getLoc(), newWeights, newInputLow, newInputHigh,
@@ -277,13 +292,14 @@ mlir::LogicalResult GroupsToAttr::matchAndRewrite(IE::GroupConvolutionOp convOp,
                             .getOutput();
         }
     } else {
-        newFilter = getNewShapeValue(filter);
+        newFilter = getNewShapeValue(filter, "weights");
     }
 
     rewriter.replaceOpWithNewOp<IE::GroupConvolutionOp>(
             convOp, convOp.getInput(), newFilter, convOp.getBias(), convOp.getStridesAttr(), convOp.getPadsBeginAttr(),
             convOp.getPadsEndAttr(), convOp.getDilationsAttr(), getIntAttr(convOp.getContext(), groups),
-            convOp.getPostOpAttr(), convOp.getClampAttr());
+            convOp.getPostOpAttr(), convOp.getClampAttr(), convOp.getOutputChannelsAttr(),
+            convOp.getInputChannelsAttr());
 
     return mlir::success();
 }

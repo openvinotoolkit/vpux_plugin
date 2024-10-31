@@ -15,7 +15,7 @@
 func.func @CompressConvWeightsMoreThan4IC(%arg0: memref<1x16x224x224x!qElemType2, #NHWC, [@CMX_NN, 0]>) -> memref<1x64x112x112x!qElemType3, #NHWC, [@CMX_NN, 0]> {
     %cst = const.Declare memref<64x1x1x4xsi32> = dense<1> : tensor<64x1x1x4xsi32>
     %cst_0 = const.Declare memref<64x16x7x7x!qElemType, #NHWC> = dense<1.0> :
-        tensor<64x13x7x7xf16>, [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType>,
+        tensor<64x13x7x7xf16>, [#const.CastElemType<ui8>, #const.CastElemType<!qElemType>,
         #const.Reorder<#NHWC>, #const.PadWithZero<[0, 0, 0, 0], [0, 3, 0, 0]>]
     %2 = memref.alloc() : memref<64x16x7x7x!qElemType, #NHWC, [@CMX_NN, 0]>
     %weights = VPUIP.Copy
@@ -91,9 +91,9 @@ func.func @CompressConvWeightsMoreThan4IC(%arg0: memref<1x16x224x224x!qElemType2
 // CHECK-LABEL: @DoNotCompressSparseConvWeights
 func.func @DoNotCompressSparseConvWeights(%arg0: memref<1x16x224x224x!qElemType2, #NHWC, [@CMX_NN, 0]>) -> memref<1x64x112x112x!qElemType3, #NHWC, [@CMX_NN, 0]> {
     %cst_weights = const.Declare memref<64x16x7x7x!qElemType, #NHWC> = dense<1.0> : tensor<64x3x7x7xf16>,
-        [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType>, #const.Reorder<#NHWC>, #const.PadWithZero<[0, 0, 0, 0], [0, 13, 0, 0]>, #const.Sparsify<false>]
+        [#const.CastElemType<ui8>, #const.CastElemType<!qElemType>, #const.Reorder<#NHWC>, #const.PadWithZero<[0, 0, 0, 0], [0, 13, 0, 0]>, #const.Sparsify<false>]
     %cst_weights_sm = const.Declare memref<64x1x1x896xi1> = dense<1.0> : tensor<64x3x7x7xf16>,
-        [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType>, #const.Reorder<#NHWC>, #const.PadWithZero<[0, 0, 0, 0], [0, 13, 0, 0]>, #const.GetSparsityMap]
+        [#const.CastElemType<ui8>, #const.CastElemType<!qElemType>, #const.Reorder<#NHWC>, #const.PadWithZero<[0, 0, 0, 0], [0, 13, 0, 0]>, #const.GetSparsityMap]
     %weights_sparse_ddr = VPUIP.GroupSparseBuffer(%cst_weights, %cst_weights_sm) {is_weights}
         -> !VPUIP.SparseBuffer<data=memref<64x16x7x7x!qElemType, #NHWC>, sparsity_map=memref<64x1x1x896xi1>, is_weights>
     %weights_cmx = memref.alloc() : memref<64x16x7x7x!qElemType, #NHWC, [@CMX_NN, 0]>
@@ -192,7 +192,7 @@ func.func @TiledCompressConvWeights(%arg0: memref<1x16x224x224x!qElemType2, #NHW
     {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}> {
     %cst = const.Declare memref<64x1x1x4xsi32> = dense<1> : tensor<64x1x1x4xsi32>
     %cst_0 = const.Declare memref<64x16x7x7x!qElemType, #NHWC> = dense<1.0> :
-        tensor<64x3x7x7xf16>, [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType>,
+        tensor<64x3x7x7xf16>, [#const.CastElemType<ui8>, #const.CastElemType<!qElemType>,
         #const.Reorder<#NHWC>, #const.PadWithZero<[0, 0, 0, 0], [0, 13, 0, 0]>]
     %output = VPURT.AllocDistributed -> !OutputDistributed
     %2 = VPURT.AllocDistributed -> !VPUIP.DistributedBuffer<64x16x7x7x!qElemType, #NHWC, @CMX_NN,
@@ -237,10 +237,8 @@ func.func @TiledCompressConvWeights(%arg0: memref<1x16x224x224x!qElemType2, #NHW
                     outStart = [64, 56, 0]
                 }
             } PPE : {
-                PPETask <NOOP> {
-                    clamp_high = 255 : i64, clamp_low = 0 : i64,
-                    fp_prelu_alpha = 1.000000e+00 : f64, lrelu_mult = 1 : i64,
-                    lrelu_shift = 0 : i64
+                PPETask {
+                    opaque_ppe = #VPU.PPEStub<>
                 }
             }
 
@@ -294,10 +292,10 @@ func.func @TiledCompressConvWeights(%arg0: memref<1x16x224x224x!qElemType2, #NHW
 func.func @CompressConvWeightsSharedTable(%arg0: memref<1x16x224x224x!qElemType2, #NHWC, [@CMX_NN, 0]>) -> memref<1x64x112x112x!qElemType3, #NHWC, [@CMX_NN, 0]> {
     %cst_wt = const.Declare memref<64x1x1x4xsi32> = dense<1> : tensor<64x1x1x4xsi32>
     %cst_w1 = const.Declare memref<64x16x7x7x!qElemType, #NHWC> = dense<1.0> :
-        tensor<64x13x7x7xf16>, [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType>,
+        tensor<64x13x7x7xf16>, [#const.CastElemType<ui8>, #const.CastElemType<!qElemType>,
         #const.Reorder<#NHWC>, #const.PadWithZero<[0, 0, 0, 0], [0, 3, 0, 0]>]
     %cst_w2 = const.Declare memref<64x64x1x1x!qElemType, #NHWC> = dense<1.0> :
-        tensor<64x64x1x1xf16>, [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType>,
+        tensor<64x64x1x1xf16>, [#const.CastElemType<ui8>, #const.CastElemType<!qElemType>,
         #const.Reorder<#NHWC>, #const.PadWithZero<[0, 0, 0, 0], [0, 0, 0, 0]>]
 
     %weights1_cmx = memref.alloc() : memref<64x16x7x7x!qElemType, #NHWC, [@CMX_NN, 0]>
@@ -397,10 +395,10 @@ func.func @CompressConvWeightsSharedTable(%arg0: memref<1x16x224x224x!qElemType2
 func.func @CompressTiledConvWeightsSharedTable(%arg0: memref<1x16x224x224x!qElemType2, #NHWC, [@CMX_NN, 0]>) -> memref<1x64x112x112x!qElemType3, #NHWC, [@CMX_NN, 0]> {
     %cst_wt = const.Declare memref<64x1x1x4xsi32> = dense<1> : tensor<64x1x1x4xsi32>
     %cst_w1 = const.Declare memref<64x16x7x7x!qElemType, #NHWC> = dense<1.0> :
-        tensor<64x13x7x7xf16>, [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType>,
+        tensor<64x13x7x7xf16>, [#const.CastElemType<ui8>, #const.CastElemType<!qElemType>,
         #const.Reorder<#NHWC>, #const.PadWithZero<[0, 0, 0, 0], [0, 3, 0, 0]>]
     %cst_w2 = const.Declare memref<64x64x1x1x!qElemType, #NHWC> = dense<1.0> :
-        tensor<64x64x1x1xf16>, [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType>,
+        tensor<64x64x1x1xf16>, [#const.CastElemType<ui8>, #const.CastElemType<!qElemType>,
         #const.Reorder<#NHWC>, #const.PadWithZero<[0, 0, 0, 0], [0, 0, 0, 0]>]
 
     %weights1_cmx = VPURT.AllocDistributed -> !VPUIP.DistributedBuffer<64x16x7x7x!qElemType, #NHWC, [@CMX_NN, 0],
@@ -463,10 +461,8 @@ func.func @CompressTiledConvWeightsSharedTable(%arg0: memref<1x16x224x224x!qElem
                 outStart = [64, 56, 0]
             }
         } PPE : {
-            PPETask <NOOP> {
-                clamp_high = 255 : i64, clamp_low = 0 : i64,
-                fp_prelu_alpha = 1.000000e+00 : f64, lrelu_mult = 1 : i64,
-                lrelu_shift = 0 : i64
+            PPETask {
+                opaque_ppe = #VPU.PPEStub<>
             }
         }
 
@@ -576,8 +572,8 @@ func.func @DoNotCompressConvWeightsOCPadding(%arg0: memref<1x32x2x4xf16, #NHWC, 
                     pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>
                 }
         } PPE : {
-        PPETask <NOOP> {clamp_high = 2147483647 : i64, clamp_low = -2147483648 : i64,
-        fp_prelu_alpha = 1.000000e+00 : f64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64
+        PPETask {
+            opaque_ppe = #VPU.PPEStub<>
         }
     }
 
@@ -625,7 +621,7 @@ func.func @DoNotCompressConvWeightsOCPadding(%arg0: memref<1x32x2x4xf16, #NHWC, 
 func.func @DoNotCompressConvSubByteWeights(%arg0: memref<1x16x224x224xf16, #NHWC, [@CMX_NN, 0]>) -> memref<1x64x112x112xf16, #NHWC, [@CMX_NN, 0]> {
     %cst = const.Declare memref<64x1x1x4xsi32> = dense<1> : tensor<64x1x1x4xsi32>
     %cst_0 = const.Declare memref<64x16x7x7x!qElemType, #NHWC> = dense<1.0> :
-        tensor<64x13x7x7xf16>, [#const.ConvertElemType<si4>, #const.QuantCast<!qElemType>,
+        tensor<64x13x7x7xf16>, [#const.CastElemType<si4>, #const.CastElemType<!qElemType>,
         #const.Reorder<#NHWC>, #const.PadWithZero<[0, 0, 0, 0], [0, 3, 0, 0]>]
     %2 = memref.alloc() : memref<64x16x7x7x!qElemType, #NHWC, [@CMX_NN, 0]>
     %weights = VPUIP.Copy
@@ -743,7 +739,7 @@ func.func @DoNotCompressConvSubByteWeights(%arg0: memref<1x16x224x224xf16, #NHWC
 // CHECK-SAME:    [[INPUT:%.+]]: !VPUIP.DistributedBuffer<1x16x1x1xf16, #NHWC, @CMX_NN, {mode = "DUPLICATED", num_clusters = 2 : i64, alignment = [1, 16, 1, 1]
 func.func @TiledCompressConvWeightsWithExplicitShapeAndOffset(%arg0: !InputDistributed) -> !OutputDistributed {
     %cst = const.Declare memref<240x16x1x1xf16, #NHWC> = dense<1.0> :
-         tensor<240x10x1x1xf32>, [#const.ConvertElemType<f16>, #const.Reorder<#NHWC>,
+         tensor<240x10x1x1xf32>, [#const.CastElemType<f16>, #const.Reorder<#NHWC>,
          #const.PadWithZero<[0, 0, 0, 0], [0, 6, 0, 0]>]
     %alloc = VPURT.AllocDistributed -> !WeightsDistributed
     %0 = VPUIP.Copy
@@ -784,9 +780,8 @@ func.func @TiledCompressConvWeightsWithExplicitShapeAndOffset(%arg0: !InputDistr
                     pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>
                 }
             } PPE : {
-                PPETask <NOOP> {
-                    clamp_high = 2147483647 : i64, clamp_low = -2147483648 : i64,
-                    fp_prelu_alpha = 1.000000e+00 : f64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64
+                PPETask {
+                    opaque_ppe = #VPU.PPEStub<>
                 }
             }
 
@@ -865,7 +860,7 @@ func.func @DoNotCompressConvWithoutPadZero(%arg0: memref<1x96x96x96xf16, #NHWC, 
             DPUTask {cluster_id = 0 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [95, 47, 31], outStart = [0, 0, 0], pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 0 : i64>}
             DPUTask {cluster_id = 1 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [95, 95, 31], outStart = [0, 48, 0], pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 0 : i64, bottom = 1 : i64>}
         } PPE : {
-            PPETask <NOOP> {clamp_high = 2147483647 : i64, clamp_low = -2147483648 : i64, fp_prelu_alpha = 1.000000e+00 : f64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64}
+            PPETask {opaque_ppe = #VPU.PPEStub<>}
         }
     }
     %alloc = memref.alloc() : memref<1x32x96x96xf16, #NHWC, @DDR>
@@ -898,7 +893,7 @@ func.func @DoNotCompressConvWithoutPadZero(%arg0: memref<1x96x96x96xf16, #NHWC, 
     //CHECK:                    DPUTask {cluster_id = 0 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [95, 47, 31], outStart = [0, 0, 0], pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 0 : i64>}
     //CHECK:                    DPUTask {cluster_id = 1 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [95, 95, 31], outStart = [0, 48, 0], pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 0 : i64, bottom = 1 : i64>}
     //CHECK:                } PPE : {
-    //CHECK:                    PPETask <NOOP> {clamp_high = 2147483647 : i64, clamp_low = -2147483648 : i64, fp_prelu_alpha = 1.000000e+00 : f64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64}
+    //CHECK:                    PPETask {opaque_ppe = #VPU.PPEStub<>}
     //CHECK:                }
     //CHECK:            }
     //CHECK:        [[ALLOC:%.*]] = memref.alloc() : memref<1x32x96x96xf16, #NHWC, @DDR>
@@ -944,7 +939,7 @@ func.func @DoNotCompressConvWithoutPadZero(%arg0: memref<1x96x96x96xf16, #NHWC, 
 // CHECK-SAME:    [[INPUT:%.+]]: !VPUIP.DistributedBuffer<1x16x129x64xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}>
 func.func @DoNotCompressConvWeightsWithNonICPadAttr(%arg0: !InputDistributed) -> !OutputDistributed {
     %cst = const.Declare memref<16x16x2x1xf16, #NHWC> = dense<1.0> :
-        tensor<1x1x2x1xf32>, [#const.ConvertElemType<f16>, #const.Reorder<#NHWC>,
+        tensor<1x1x2x1xf32>, [#const.CastElemType<f16>, #const.Reorder<#NHWC>,
         #const.PadWithZero<[0, 0, 0, 0], [0, 15, 0, 0]>, #const.PadWithZero<[0, 0, 0, 0], [15, 0, 0, 0]>]
     %cst_1 = const.Declare memref<16x1x1x4xsi32> = dense<1> : tensor<16x1x1x4xsi32>
 
@@ -986,7 +981,7 @@ func.func @DoNotCompressConvWeightsWithNonICPadAttr(%arg0: !InputDistributed) ->
                     pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>
                 }
         } PPE : {
-            PPETask <NOOP> {clamp_high = 2147483647 : i64, clamp_low = -2147483648 : i64, fp_prelu_alpha = 1.000000e+00 : f64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64}
+            PPETask {opaque_ppe = #VPU.PPEStub<>}
         }
 
     return %5 : !OutputDistributed
@@ -1036,7 +1031,7 @@ func.func @CompressConvWeightsWithReshape(
     %CST_WEIGHTS = const.Declare memref<128x16x1x1xf16, #NHWC> = dense<1.0> : tensor<1x1x128x9xf32>, [
         #const.Reshape<[128, 9]>,
         #const.Reshape<[128, 9, 1, 1]>,
-        #const.ConvertElemType<f16>,
+        #const.CastElemType<f16>,
         #const.Reorder<#NHWC>,
         #const.PadWithZero<[0, 0, 0, 0], [0, 7, 0, 0]>
     ]

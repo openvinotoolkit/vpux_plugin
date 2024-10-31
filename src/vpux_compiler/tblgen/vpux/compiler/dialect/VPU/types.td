@@ -42,7 +42,7 @@ def VPU_DistributedTensor :
         "mlir::Type":$elementType,
         "mlir::AffineMapAttr":$order,
         "vpux::IndexedSymbolAttr":$memSpace,
-        "DistributedTensorAttr":$distribution
+        "DistributionInfoAttr":$distribution
     );
 
     let genAccessors = 0;
@@ -51,7 +51,7 @@ def VPU_DistributedTensor :
         mlir::RankedTensorType getCompactType() const;
 
         mlir::AffineMapAttr getOrder() const;
-        DistributedTensorAttr getDistribution() const;
+        DistributionInfoAttr getDistribution() const;
         DistributedTensorType cloneWith(std::optional<mlir::ArrayRef<int64_t>> shape, mlir::Type elementType) const;
     }];
 

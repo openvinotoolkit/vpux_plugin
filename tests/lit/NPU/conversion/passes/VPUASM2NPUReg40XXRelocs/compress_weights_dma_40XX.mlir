@@ -48,11 +48,11 @@ module @mainModule attributes {VPU.arch = #VPU.arch_kind<NPU40XX>} {
           acceleration_mode(<DECOMPRESSION>)
         // CHECK-NOT:   VPUASM.NNDMA
         // CHECK:       NPUReg40XX.NNDMA
-        // CHECK:  UINT dma_cfg_fields_rwf_en at 33 size 1 = 0,
-        // CHECK:  UINT dma_cfg_fields_rws_en at 34 size 1 = 0,
-        // CHECK:  UINT dma_cfg_fields_acceleration_cfg at 42 size 2 = 2,
-        // CHECK:  UINT dma_acc_info_decompress_dtype at 0 size 2 = 1,
-        // CHECK:  UINT dma_acc_info_decompress_bitc_en at 4 size 1 = 1,
+        // CHECK:  UINT dma_cfg_fields_rwf_en at 33 size 1 = 0
+        // CHECK:  UINT dma_cfg_fields_rws_en at 34 size 1 = 0
+        // CHECK:  UINT dma_cfg_fields_acceleration_cfg at 42 size 2 = 2
+        // CHECK:  UINT dma_acc_info_decompress_dtype at 0 size 2 = 1
+        // CHECK:  UINT dma_acc_info_decompress_bitc_en at 4 size 1 = 1
       }
       ELF.CreateSection @task.dma.0.1 aligned(64) secType(SHT_PROGBITS) secFlags(SHF_ALLOC) {
         VPUASM.NNDMA @NNDMA_0_1_0 idx(!VPURegMapped.Index<0:1:0>) taskLocation(@program.DMA.cmx.0.1::@DeclareTaskBuffer_DMA_0_1_0)
@@ -62,7 +62,7 @@ module @mainModule attributes {VPU.arch = #VPU.arch_kind<NPU40XX>} {
           acceleration_mode(<DISABLE>)
         // CHECK-NOT:   VPUASM.NNDMA
         // CHECK:       NPUReg40XX.NNDMA
-        // CHECK:  UINT dma_cfg_fields_acceleration_cfg at 42 size 2 = 0,
+        // CHECK:  UINT dma_cfg_fields_acceleration_cfg at 42 size 2 = 0
       }
     }
     return

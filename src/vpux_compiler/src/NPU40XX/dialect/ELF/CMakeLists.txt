@@ -14,6 +14,7 @@ add_mlir_dialect_library(${TARGET_NAME}
         npu_ov_utils
         flatbuffers
         npu_elf
+        openvino::npu_al
         inferenceStatic
         # E#98178: remove depedency on firmware headers
         npu_40xx_firmware_headers)

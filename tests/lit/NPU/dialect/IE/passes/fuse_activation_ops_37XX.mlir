@@ -85,10 +85,10 @@ func.func @FakeQuantConv2dWithLeakyRelu15Test(%arg0: tensor<1x16x4x4xf16>) -> te
 // -----
 
 func.func @FakeQuantAddWithLeakyReluFusedTest(%arg0: tensor<1x128x1x8xf16>) -> tensor<1x128x1x8xf16> {
-    %cst = const.Declare tensor<1x1x1x1xf16> = dense<1.270000e+02> : tensor<1x1x1x1xf32>, [#const.ConvertElemType<f16>]
-    %cst_0 = const.Declare tensor<1x1x1x1xf16> = dense<-1.280000e+02> : tensor<1x1x1x1xf32>, [#const.ConvertElemType<f16>]
-    %cst_1 = const.Declare tensor<1x1x1x1xf16> = dense<6.000000e+00> : tensor<1x1x1x1xf32>, [#const.ConvertElemType<f16>]
-    %cst_2 = const.Declare tensor<1x1x1x1xf16> = dense<-6.000000e+00> : tensor<1x1x1x1xf32>, [#const.ConvertElemType<f16>]
+    %cst = const.Declare tensor<1x1x1x1xf16> = dense<1.270000e+02> : tensor<1x1x1x1xf32>, [#const.CastElemType<f16>]
+    %cst_0 = const.Declare tensor<1x1x1x1xf16> = dense<-1.280000e+02> : tensor<1x1x1x1xf32>, [#const.CastElemType<f16>]
+    %cst_1 = const.Declare tensor<1x1x1x1xf16> = dense<6.000000e+00> : tensor<1x1x1x1xf32>, [#const.CastElemType<f16>]
+    %cst_2 = const.Declare tensor<1x1x1x1xf16> = dense<-6.000000e+00> : tensor<1x1x1x1xf32>, [#const.CastElemType<f16>]
     %0 = IE.FakeQuantize(%arg0, %cst_2, %cst_1, %cst_2, %cst_1) {
         auto_broadcast = #IE.auto_broadcast_type<NUMPY>,
         levels = 256 : i64
@@ -148,10 +148,10 @@ func.func @AvgPoolWithLeakyReluFuseTest(%arg0: tensor<1x16x4x4xf16>) -> tensor<1
 // -----
 
 func.func @SkipFakeQuantAndOpWithLeakyReluFusedTest(%arg0: tensor<1x128x1x8xf16>) -> tensor<1x128x1x8xf16> {
-    %cst = const.Declare tensor<1x1x1x1xf16> = dense<1.270000e+02> : tensor<1x1x1x1xf32>, [#const.ConvertElemType<f16>]
-    %cst_0 = const.Declare tensor<1x1x1x1xf16> = dense<-1.280000e+02> : tensor<1x1x1x1xf32>, [#const.ConvertElemType<f16>]
-    %cst_1 = const.Declare tensor<1x1x1x1xf16> = dense<6.000000e+00> : tensor<1x1x1x1xf32>, [#const.ConvertElemType<f16>]
-    %cst_2 = const.Declare tensor<1x1x1x1xf16> = dense<-6.000000e+00> : tensor<1x1x1x1xf32>, [#const.ConvertElemType<f16>]
+    %cst = const.Declare tensor<1x1x1x1xf16> = dense<1.270000e+02> : tensor<1x1x1x1xf32>, [#const.CastElemType<f16>]
+    %cst_0 = const.Declare tensor<1x1x1x1xf16> = dense<-1.280000e+02> : tensor<1x1x1x1xf32>, [#const.CastElemType<f16>]
+    %cst_1 = const.Declare tensor<1x1x1x1xf16> = dense<6.000000e+00> : tensor<1x1x1x1xf32>, [#const.CastElemType<f16>]
+    %cst_2 = const.Declare tensor<1x1x1x1xf16> = dense<-6.000000e+00> : tensor<1x1x1x1xf32>, [#const.CastElemType<f16>]
     %0 = IE.FakeQuantize(%arg0, %cst_2, %cst_1, %cst_2, %cst_1) {
         auto_broadcast = #IE.auto_broadcast_type<NUMPY>,
         levels = 256 : i64
@@ -182,10 +182,10 @@ func.func @SkipFakeQuantAndOpWithLeakyReluFusedTest(%arg0: tensor<1x128x1x8xf16>
 // -----
 
 func.func @SkipFakeQuantMultiplyWithLeakyReluFusedTest(%arg0: tensor<1x128x1x8xf16>) -> tensor<1x128x1x8xf16> {
-    %cst = const.Declare tensor<1x1x1x1xf16> = dense<1.270000e+02> : tensor<1x1x1x1xf32>, [#const.ConvertElemType<f16>]
-    %cst_0 = const.Declare tensor<1x1x1x1xf16> = dense<-1.280000e+02> : tensor<1x1x1x1xf32>, [#const.ConvertElemType<f16>]
-    %cst_1 = const.Declare tensor<1x1x1x1xf16> = dense<6.000000e+00> : tensor<1x1x1x1xf32>, [#const.ConvertElemType<f16>]
-    %cst_2 = const.Declare tensor<1x1x1x1xf16> = dense<-6.000000e+00> : tensor<1x1x1x1xf32>, [#const.ConvertElemType<f16>]
+    %cst = const.Declare tensor<1x1x1x1xf16> = dense<1.270000e+02> : tensor<1x1x1x1xf32>, [#const.CastElemType<f16>]
+    %cst_0 = const.Declare tensor<1x1x1x1xf16> = dense<-1.280000e+02> : tensor<1x1x1x1xf32>, [#const.CastElemType<f16>]
+    %cst_1 = const.Declare tensor<1x1x1x1xf16> = dense<6.000000e+00> : tensor<1x1x1x1xf32>, [#const.CastElemType<f16>]
+    %cst_2 = const.Declare tensor<1x1x1x1xf16> = dense<-6.000000e+00> : tensor<1x1x1x1xf32>, [#const.CastElemType<f16>]
     %0 = IE.FakeQuantize(%arg0, %cst_2, %cst_1, %cst_2, %cst_1) {
         auto_broadcast = #IE.auto_broadcast_type<NUMPY>,
         levels = 256 : i64

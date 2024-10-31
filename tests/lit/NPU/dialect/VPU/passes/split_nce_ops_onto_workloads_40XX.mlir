@@ -44,7 +44,8 @@ func.func @NCEPermuteDifferentOverlap(%arg0: !Input_DDR) -> !Output_CMX {
         %0 = VPU.NCE.Permute(%arg2) {
                 dstElemType = !quant.uniform<u8:f16, 1.000000e+00>,
                 dstOrder = #NHWC,
-                expandedChannels = 4 : i64
+                expandedChannels = 4 : i64,
+                opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64>
         } -> !OutputStub_CMX
         VPU.Yield %0
     }
@@ -114,7 +115,7 @@ func.func @NCEPermuteSOC(%arg0: !Input_DDR) -> !Output_CMX {
                 dstElemType = f16,
                 dstOrder = #NHWC,
                 expandedChannels = 128 : i64,
-                ppe = #VPU.PPETask<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>
+                opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64>
         } -> !OutputStub_CMX
         VPU.Yield %0
     }
@@ -181,6 +182,7 @@ func.func @SOKDistributedSEGOutput(%input_cmx: !InputDistributed) -> !OutputDist
     %output_cmx = VPU.NCE.ClusterTiling (%input_cmx as %arg1: !InputStub_CMX)
               -> !OutputDistributed {
         %0 = VPU.NCE.MaxPool(%arg1) {
+                opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64>,
                 pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
                 strides = [1, 1],
                 kernel_size = [3, 3]
@@ -252,6 +254,7 @@ func.func @SOKDistributedDUPSEGOutput(%input_cmx: !InputDistributed) -> !OutputD
     %output_cmx = VPU.NCE.ClusterTiling (%input_cmx as %arg1: !InputStub_CMX)
               -> !OutputDistributed {
         %0 = VPU.NCE.MaxPool(%arg1) {
+                opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64>,
                 pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
                 strides = [1, 1],
                 kernel_size = [3, 3]

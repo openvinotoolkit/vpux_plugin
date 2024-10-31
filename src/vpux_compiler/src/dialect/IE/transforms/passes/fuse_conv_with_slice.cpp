@@ -198,7 +198,8 @@ mlir::LogicalResult FuseConvWithSlice::matchAndRewrite(IE::ConvolutionOp origOp,
         rewriter.replaceOpWithNewOp<IE::ConvolutionOp>(
                 slice, slice.getResult().getType(), origOp.getInput(), filterslice, bias, origOp.getStrides(),
                 origOp.getPadsBegin(), origOp.getPadsEnd(), origOp.getDilations(), origOp.getPostOpAttr(),
-                origOp.getClampAttr(), origOp.getStaticScaleAttr());
+                origOp.getClampAttr(), origOp.getStaticScaleAttr(), origOp.getOutputChannelsAttr(),
+                origOp.getInputChannelsAttr());
     }
     nestedLogger.trace("fuse conv with slice success");
     return mlir::success();

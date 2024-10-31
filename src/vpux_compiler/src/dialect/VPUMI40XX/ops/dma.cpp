@@ -20,7 +20,7 @@ void NNDMAOp::build(mlir::OpBuilder& odsBuilder, mlir::OperationState& odsState,
     build(odsBuilder, odsState, index, taskLocation, input, mlir::ValueRange(output_buff), previousDma, waitBarriers,
           updateBarriers, 0, 0, false, false, false, 0, VPUIP::DMAAccMode::DISABLE,
           /*act_compression_size_entry*/ nullptr, /*act_compression_sparsity_map*/ nullptr, dma_transaction,
-          dma_descriptor, 0, nullptr, 0, nullptr);
+          dma_descriptor, 0, nullptr, 0, nullptr, /*enqueue_target_barrier*/ nullptr);
 }
 
 mlir::LogicalResult NNDMAOp::verify() {

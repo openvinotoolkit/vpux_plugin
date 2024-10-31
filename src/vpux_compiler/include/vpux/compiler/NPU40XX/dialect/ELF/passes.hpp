@@ -33,7 +33,8 @@ std::unique_ptr<mlir::Pass> createSetOpOffsetsPass(Logger log = Logger::global()
                                                    bool enableComputeTaskBufferOffsets = false);
 std::unique_ptr<mlir::Pass> createSetEntryPointPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createAddNetworkMetadataPass(Logger log = Logger::global());
-std::unique_ptr<mlir::Pass> createUpdateELFSectionFlagsPass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createUpdateELFSectionFlagsPass(Logger log = Logger::global(),
+                                                            std::string isShaveDDRAccessEnabled = "true");
 std::unique_ptr<mlir::Pass> createRemoveEmptyELFSectionsPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createAddInnerSectionPaddingPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createAddABIVersionPass(Logger log = Logger::global(), uint32_t versionMajor = 0,

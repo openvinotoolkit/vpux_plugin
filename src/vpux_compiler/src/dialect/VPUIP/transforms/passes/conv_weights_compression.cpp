@@ -25,11 +25,11 @@ mlir::Value reduceWeightsConstant(VPUIP::NCEClusterTaskOp nceOp, VPUIP::CopyOp w
     auto weightsConstOp = weightsCopyInput.getDefiningOp<vpux::Const::DeclareOp>();
     mlir::OpBuilder constBuilder(weightsConstOp);
 
-    const auto newContentAttr = weightsConstOp.getContentAttr().subview(Shape(currentOffset), origShape);
+    auto newContentAttr = weightsConstOp.transformContentAttr().subview(Shape(currentOffset), origShape).get();
 
     auto newConstType = weightsConstOp.getType().cast<NDTypeInterface>().changeShape(origShape);
     auto newWeightsConstOp = constBuilder.create<Const::DeclareOp>(
-            weightsConstOp.getLoc(), newConstType.cast<mlir::MemRefType>(), newContentAttr);
+            weightsConstOp.getLoc(), newConstType.cast<mlir::MemRefType>(), std::move(newContentAttr));
     weightsConstOp.replaceAllUsesWith(newWeightsConstOp.getOperation());
 
     constexpr int64_t requiredAlignment = 16;
@@ -65,7 +65,7 @@ mlir::Value reduceWeightsConstant(VPUIP::NCEClusterTaskOp nceOp, VPUIP::CopyOp w
             // Small optimization:
             // convert to native type so when getPerCluster... to avoid
             // multiple parsing for same values
-            auto distribution = vpux::VPU::DistributedTensorNative::getClassFromAttr(distributedAttr);
+            auto distribution = vpux::VPU::DistributionInfo::getClassFromAttr(distributedAttr);
 
             auto perClusterMemoryShapes =
                     VPU::getPerClusterMemoryShapes(weightsCopyOutputType.getShape(), distribution).value();
@@ -81,8 +81,7 @@ mlir::Value reduceWeightsConstant(VPUIP::NCEClusterTaskOp nceOp, VPUIP::CopyOp w
             distribution.setComputeShapes(VPU::arrayOfArrayFromShape(perClusterComputeShapes));
             distribution.setComputeOffsets(VPU::arrayOfArrayFromShape(perClusterComputeOffsets));
 
-            distributedAttr =
-                    vpux::VPU::DistributedTensorNative::getAttrFromClass(oldDistrType.getContext(), distribution);
+            distributedAttr = vpux::VPU::DistributionInfo::getAttrFromClass(oldDistrType.getContext(), distribution);
         }
 
         auto distrib = VPUIP::DistributedBufferType::get(

@@ -13,7 +13,7 @@ func.func @Reshape(%arg0: memref<1x512xf16>, %arg1: memref<1x512xf16>) -> memref
 
     %0 = VPUIP.GenericReshape inputs(%in : memref<1x512xf16>) -> memref<1x512x1x1xf16>
     %1 = VPURT.DeclareBuffer <DDR> <0> -> memref<1x512x1x1xf16, @DDR>
-    %2 = VPUIP.SoftMaxUPA {axisInd = 1} inputs(%0 : memref<1x512x1x1xf16>) outputs(%1 : memref<1x512x1x1xf16, @DDR>) -> memref<1x512x1x1xf16, @DDR>
+    %2 = VPUIP.NNDMA inputs(%0 : memref<1x512x1x1xf16>) outputs(%1 : memref<1x512x1x1xf16, @DDR>) -> memref<1x512x1x1xf16, @DDR>
     %3 = VPUIP.GenericReshape inputs(%2 : memref<1x512x1x1xf16, @DDR>) -> memref<1x512xf16, @DDR>
     %4 = VPUIP.NNDMA inputs(%3 : memref<1x512xf16, @DDR>) outputs(%out : memref<1x512xf16>) -> memref<1x512xf16>
     return %arg1 : memref<1x512xf16>
@@ -24,8 +24,7 @@ func.func @Reshape(%arg0: memref<1x512xf16>, %arg1: memref<1x512xf16>) -> memref
 
     // CHECK-DAG:       [[VAR1:%.*]] = VPURT.DeclareBuffer <DDR> <0> -> memref<1x512x1x1xf16, @DDR>
 
-    // CHECK:       [[VAR2:%.*]] = VPUIP.SoftMaxUPA
-    // CHECK-SAME:      axisInd = 1
+    // CHECK:       [[VAR2:%.*]] = VPUIP.NNDMA
     // CHECK-SAME:      inputs([[IN]] : memref<1x512x1x1xf16>)
     // CHECK-SAME:      outputs([[VAR1]] : memref<1x512x1x1xf16, @DDR>)
 
@@ -85,7 +84,7 @@ func.func @PermuteCast(%arg0: memref<1x12x16x16xf16, #NHWC>, %arg1: memref<1x16x
         -> memref<1x16x16x12xf16>
 
     %1 = VPURT.DeclareBuffer <DDR> <2000> -> memref<1x16x16x12xf16, @DDR>
-    %2 = VPUIP.SoftMaxUPA {axisInd = 1}
+    %2 = VPUIP.NNDMA
         inputs(%0 : memref<1x16x16x12xf16>)
         outputs(%1 : memref<1x16x16x12xf16, @DDR>) -> memref<1x16x16x12xf16, @DDR>
     %3 = VPUIP.NNDMA
@@ -96,7 +95,7 @@ func.func @PermuteCast(%arg0: memref<1x12x16x16xf16, #NHWC>, %arg1: memref<1x16x
     //CHECK-DAG:    [[OUT:%.*]] = VPURT.DeclareBuffer <NetworkOutput> [0] <0> -> memref<1x16x16x12xf16>
     //CHECK-DAG:    [[IN:%.*]] = VPURT.DeclareBuffer <NetworkInput> [0] <0> -> memref<1x16x16x12xf16>
     //CHECK-DAG:    [[VAR1:%.*]] = VPURT.DeclareBuffer <DDR> <2000> -> memref<1x16x16x12xf16, @DDR>
-    //CHECK:        [[VAR2:%.*]] = VPUIP.SoftMaxUPA {axisInd = 1 : i64}
+    //CHECK:        [[VAR2:%.*]] = VPUIP.NNDMA
     //CHECK-SAME:       inputs([[IN]] : memref<1x16x16x12xf16>)
     //CHECK-SAME:       outputs([[VAR1]] : memref<1x16x16x12xf16, @DDR>) -> memref<1x16x16x12xf16, @DDR>
     //CHECK:        [[VAR3:%.*]] = VPUIP.NNDMA
@@ -605,10 +604,10 @@ func.func @ShapeCast(%arg0: memref<64x3x7x7xf16, #NHWC>, %arg1: memref<1x64x112x
 #NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
 
 !InputDistributedBuffer = !VPUIP.DistributedBuffer<1x32x1x128xf16, #NCHW, @CMX_NN, {
-    mode = "SEGMENTED", num_tiles = [1, 4, 1, 1], num_clusters = 4 : i64, uniform_distributed_segments, 
-    compute_shapes = [[1, 8, 1, 128], [1, 8, 1, 128], [1, 8, 1, 128], [1, 8, 1, 128]], 
-    compute_offsets = [[0, 0, 0, 0], [0, 8, 0, 0], [0, 16, 0, 0], [0, 24, 0, 0]], 
-    memory_shapes = [[1, 8, 1, 128], [1, 8, 1, 128], [1, 8, 1, 128], [1, 8, 1, 128]], 
+    mode = "SEGMENTED", num_tiles = [1, 4, 1, 1], num_clusters = 4 : i64, uniform_distributed_segments,
+    compute_shapes = [[1, 8, 1, 128], [1, 8, 1, 128], [1, 8, 1, 128], [1, 8, 1, 128]],
+    compute_offsets = [[0, 0, 0, 0], [0, 8, 0, 0], [0, 16, 0, 0], [0, 24, 0, 0]],
+    memory_shapes = [[1, 8, 1, 128], [1, 8, 1, 128], [1, 8, 1, 128], [1, 8, 1, 128]],
     memory_offsets = [[0, 0, 0, 0], [0, 8, 0, 0], [0, 16, 0, 0], [0, 24, 0, 0]]}
 >
 !OutType = memref<1x1x1x128xf16, [@CMX_NN, 2]>

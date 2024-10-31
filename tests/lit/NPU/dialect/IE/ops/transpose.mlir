@@ -61,14 +61,14 @@ func.func @FoldConstTranspose() -> tensor<40x512xf32> {
 !qElemType1 = !quant.uniform<u8:f16:3, {0.0016649433210784313, 0.0026649433210784313, 0.0036649433210784313, 0.0046649433210784313}>
 
 func.func @FoldConstTransposeWithQuantizeDimChanged() -> tensor<1x1x4x128x!qElemType> {
-    %0 = const.Declare tensor<1x1x128x4x!qElemType1> = dense<1.0> : tensor<1x1x128x4xf16>, [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType1>]
+    %0 = const.Declare tensor<1x1x128x4x!qElemType1> = dense<1.0> : tensor<1x1x128x4xf16>, [#const.CastElemType<ui8>, #const.CastElemType<!qElemType1>]
     %1 = const.Declare tensor<4xsi64> = dense<[0, 1, 3, 2]> : tensor<4xsi64>
     %2= IE.Transpose(%0, %1) : tensor<1x1x128x4x!qElemType1>, tensor<4xsi64> -> tensor<1x1x4x128x!qElemType>
 
     return %2 : tensor<1x1x4x128x!qElemType>
 
     // CHECK-DAG:      [[VAL0:%.*]] = const.Declare tensor<1x1x4x128x!qElemType>
-    // CHECK-SAME:     dense<1.000000e+00> : tensor<1x1x128x4xf16>, [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType1>, #const.Transpose<#NCWH>]
+    // CHECK-SAME:     dense<1.000000e+00> : tensor<1x1x128x4xf16>, [#const.CastElemType<ui8>, #const.CastElemType<!qElemType1>, #const.Transpose<#NCWH>]
     // CHECK:      return [[VAL0]] : tensor<1x1x4x128x!qElemType>
     // CHECK-NOT:  IE.Transpose
 }

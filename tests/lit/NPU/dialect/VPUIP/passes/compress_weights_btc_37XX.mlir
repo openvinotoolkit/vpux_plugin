@@ -11,7 +11,7 @@
 
 // CHECK-LABEL: func.func @CompressWeightsDuplicated
 func.func @CompressWeightsDuplicated() -> !VPUIP.DistributedBuffer<64x16x7x7x!qElemType, #NHWC, @CMX_NN, {mode = "DUPLICATED", num_clusters = 2 : i64}> {
-  %cst = const.Declare memref<64x16x7x7x!qElemType, #NHWC> = dense<1> : tensor<64x16x7x7xui8>, [#const.QuantCast<!qElemType>, #const.Reorder<#NHWC>]
+  %cst = const.Declare memref<64x16x7x7x!qElemType, #NHWC> = dense<1> : tensor<64x16x7x7xui8>, [#const.CastElemType<!qElemType>, #const.Reorder<#NHWC>]
   %0 = VPURT.DeclareBuffer <CMX_NN> <1605632> -> !VPUIP.DistributedBuffer<64x16x7x7x!qElemType, #NHWC, @CMX_NN, {mode = "DUPLICATED", num_clusters = 2 : i64}>
 
   VPURT.Task attributes {isTrailingSWLayer = false} {
@@ -43,7 +43,7 @@ func.func @CompressWeightsDuplicated() -> !VPUIP.DistributedBuffer<64x16x7x7x!qE
 
 // CHECK-LABEL: @CompressQuantConstant
 func.func @CompressQuantConstant() -> memref<1x512x3x3x!qElemType, [@CMX_NN, 0]> {
-  %cst_0 = const.Declare memref<1x512x3x3x!qElemType> = dense<1> : tensor<1x512x3x3xui8>, [#const.QuantCast<!qElemType>]
+  %cst_0 = const.Declare memref<1x512x3x3x!qElemType> = dense<1> : tensor<1x512x3x3xui8>, [#const.CastElemType<!qElemType>]
   %0 = VPURT.DeclareBuffer <CMX_NN> [0] <0> -> memref<1x512x3x3x!qElemType, [@CMX_NN, 0]>
   %1 = VPUIP.NNDMA {set_crit = false, set_ord = true}
     inputs(%cst_0 : memref<1x512x3x3x!qElemType>)
@@ -98,7 +98,7 @@ func.func @CompressSwizzledConstant(%arg0: !BufferDdr, %arg1: !BufferCmx) -> !Bu
 
 // CHECK-LABEL: @NotConvert2CompressDMA
 func.func @NotConvert2CompressDMA() -> memref<1x512x3x3x!qElemType, @DDR> {
-  %cst_0 = const.Declare memref<1x512x3x3x!qElemType> = dense<1> : tensor<1x512x3x3xui8>, [#const.QuantCast<!qElemType>]
+  %cst_0 = const.Declare memref<1x512x3x3x!qElemType> = dense<1> : tensor<1x512x3x3xui8>, [#const.CastElemType<!qElemType>]
   %0 = VPURT.DeclareBuffer <DDR> <0> -> memref<1x512x3x3x!qElemType, @DDR>
   %1 = VPUIP.NNDMA {set_crit = false, set_ord = true}
     inputs(%cst_0 : memref<1x512x3x3x!qElemType>)

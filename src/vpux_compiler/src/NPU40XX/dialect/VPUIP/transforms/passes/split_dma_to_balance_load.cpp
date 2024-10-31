@@ -35,7 +35,7 @@ NDTypeInterface getNewBufferType(NDTypeInterface bufferType, vpux::Dim tileDim, 
         const auto origDistAttr = distributedType.getDistribution();
         VPUX_THROW_UNLESS(VPU::isDuplicated(origDistAttr), "Only support DUPLICATED distributed buffer type");
 
-        // When DistributedTensorAttr has explicit per cluster memory/compute shapes, recompute them for the new shape
+        // When DistributionInfoAttr has explicit per cluster memory/compute shapes, recompute them for the new shape
         // Since changeShape is not appliable for explicit distribution
         if (VPU::isDistributedAttrWithExplicitShapesAndOffsets(origDistAttr)) {
             auto ctx = bufferType.getContext();

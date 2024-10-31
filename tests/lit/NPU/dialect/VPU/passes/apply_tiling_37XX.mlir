@@ -16,6 +16,7 @@ func.func @SplitNCEPermute(%arg0: tensor<1x31x224x224xf16>) -> tensor<1x32x224x2
         dstElemType = !qElemType,
         dstOrder = #NHWC,
         expandedChannels = 32 : i64,
+        opaque_ppe = #VPU.PPEStub<>,
         tilingStrategy = [1, 2, 1, 1]
     } -> tensor<1x32x224x224x!qElemType, {order = #NHWC}>
 
@@ -29,7 +30,8 @@ func.func @SplitNCEPermute(%arg0: tensor<1x31x224x224xf16>) -> tensor<1x32x224x2
     // CHECK:       [[OUTPUT_TILE0:%.+]] = VPU.NCE.Permute([[INPUT_TILE0]])
     // CHECK-SAME:          dstElemType = !qElemType,
     // CHECK-SAME:          dstOrder = #NHWC,
-    // CHECK-SAME:          expandedChannels = 16 : i64}
+    // CHECK-SAME:          expandedChannels = 16 : i64,
+    // CHECK-SAME:          opaque_ppe = #VPU.PPEStub<>}
     // CHECK-SAME:      -> tensor<1x16x224x224x!qElemType, {order = #NHWC}>
 
     // Tile 1
@@ -40,7 +42,8 @@ func.func @SplitNCEPermute(%arg0: tensor<1x31x224x224xf16>) -> tensor<1x32x224x2
     // CHECK:       [[OUTPUT_TILE1:%.+]] = VPU.NCE.Permute([[INPUT_TILE1]])
     // CHECK-SAME:          dstElemType = !qElemType,
     // CHECK-SAME:          dstOrder = #NHWC,
-    // CHECK-SAME:          expandedChannels = 16 : i64}
+    // CHECK-SAME:          expandedChannels = 16 : i64,
+    // CHECK-SAME:          opaque_ppe = #VPU.PPEStub<>}
     // CHECK-SAME:      -> tensor<1x16x224x224x!qElemType, {order = #NHWC}>
 
     // Concat
@@ -61,7 +64,7 @@ func.func @SplitNCEPermute(%arg0: tensor<1x31x224x224xf16>) -> tensor<1x32x224x2
 // CHECK-SAME:      [[INPUT:%arg[0-9]]]: tensor<1x16x128x128xf16, {order = #NHWC}>
 func.func @ApplyTilingSETransposedConv(%arg0: tensor<1x16x128x128xf16, {order = #NHWC}>) -> tensor<1x16x382x382xf16, {order = #NHWC}> {
     %cst = const.Declare tensor<16x1x1x4xsi32> = dense<1> : tensor<16x1x1x4xsi32>
-    %cst_0 = const.Declare tensor<1x16x386x386xi1, {order = #NHWC}> = dense<1> : tensor<1x16x386x386xi8>, [#const.Reorder<#NHWC>, #const.ConvertElemType<i1>]
+    %cst_0 = const.Declare tensor<1x16x386x386xi1, {order = #NHWC}> = dense<1> : tensor<1x16x386x386xi8>, [#const.Reorder<#NHWC>, #const.CastElemType<i1>]
     %cst_1 = const.Declare tensor<16x16x5x5xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<16x16x5x5xf16, {order = #NHWC}>
     %0 = VPU.StorageElementTable {
             dataElemType = f16, dataShape = [1, 16, 128, 128], seAttr = #VPU.SEUpsampling<factors = [2, 2], padding = [3, 1, 1, 3]>, seDepth = 1 : i64, seSize = 16 : i64
@@ -76,9 +79,8 @@ func.func @ApplyTilingSETransposedConv(%arg0: tensor<1x16x128x128xf16, {order = 
 
     %2 = VPU.NCE.Convolution(%1, %cst_1, %cst) {
             multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
+            opaque_ppe = #VPU.PPEStub<>,
             pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-            ppe = #VPU.PPETask<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-            lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>,
             rawFilterShape = [16, 16, 5, 5], strides = [1, 1],
             tilingStrategy = [1, 1, 1, 2]
         } -> tensor<1x16x382x382xf16, {order = #NHWC}>
@@ -86,9 +88,9 @@ func.func @ApplyTilingSETransposedConv(%arg0: tensor<1x16x128x128xf16, {order = 
     return %2 : tensor<1x16x382x382xf16, {order = #NHWC}>
 
     // CHECK-DAG:   [[INPUT_SM_0:%.+]] = const.Declare tensor<1x16x386x195xi1, {order = #NHWC}> =
-    // CHECK-SAME:          : tensor<1x16x386x386xi8>, [#const.SubView<[0, 0, 0, 0], [1, 16, 386, 195]>, #const.Reorder<#NHWC>, #const.ConvertElemType<i1>]
+    // CHECK-SAME:          : tensor<1x16x386x386xi8>, [#const.SubView<[0, 0, 0, 0], [1, 16, 386, 195]>, #const.Reorder<#NHWC>, #const.CastElemType<i1>]
     // CHECK-DAG:   [[INPUT_SM_1:%.+]] = const.Declare tensor<1x16x386x195xi1, {order = #NHWC}> =
-    // CHECK-SAME:          : tensor<1x16x386x386xi8>, [#const.SubView<[0, 0, 0, 191], [1, 16, 386, 195]>, #const.Reorder<#NHWC>, #const.ConvertElemType<i1>]
+    // CHECK-SAME:          : tensor<1x16x386x386xi8>, [#const.SubView<[0, 0, 0, 191], [1, 16, 386, 195]>, #const.Reorder<#NHWC>, #const.CastElemType<i1>]
 
     // CHECK-DAG:   [[WEIGHTS_TABLE:%.+]] = const.Declare tensor<16x1x1x4xsi32> = dense<1> : tensor<16x1x1x4xsi32>
     // CHECK-DAG:   [[WEIGHTS:%.+]] = const.Declare tensor<16x16x5x5xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<16x16x5x5xf16, {order = #NHWC}>

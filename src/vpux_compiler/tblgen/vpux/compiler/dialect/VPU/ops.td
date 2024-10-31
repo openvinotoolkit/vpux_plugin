@@ -81,7 +81,8 @@ def VPU_DPUWorkloadOp :
                     "vpux::VPU::NCEEltwiseOp",
                     "vpux::VPU::NCECompressConvolutionOp",
                     "vpux::VPU::NCEInterpolateOp",
-                    "vpux::VPU::NCEPermuteOp"
+                    "vpux::VPU::NCEPermuteOp",
+                    "vpux::VPU::NCEReduceOp"
                 ]>
             ]
         > {
@@ -147,10 +148,10 @@ def VPU_NCEConvolutionOp :
                                                                      "isOperationSplitOverKernelCompatible",
                                                                      "isOperationSplitOverBatchCompatible",
                                                                      "doesLayerFitIntoCMX",
-                                                                     "doesLayerChangeOutputAlignmentFitIntoCMX"]>,
+                                                                     "doesLayerChangeOutputAlignmentFitIntoCMX",
+                                                                     "getDistributedTypeForOpOperand"]>,
                 DeclareOpInterfaceMethods<VPU_SparseOpInterface>,
-                DeclareOpInterfaceMethods<VPU_VerticalFusionOpInterface>,
-                AttrSizedOperandSegments
+                DeclareOpInterfaceMethods<VPU_VerticalFusionOpInterface>
             ]
         > {
     let summary = "NCE version of Convolution layer";
@@ -159,16 +160,14 @@ def VPU_NCEConvolutionOp :
         AnyTypeOf<[4DTensorOf<[F16, BF16, quant_QuantizedType]>, VPU_SparseTensor, VPU_DistributedTensor]>:$input,
         AnyTypeOf<[4DTensorOf<[F16, BF16, quant_QuantizedType]>, VPU_SparseTensor, VPU_DistributedTensor]>:$filter,
         AnyTypeOf<[4DTensorOf<[SI32]>, VPU_DistributedTensor]>:$weightsTable,
-        Optional<AnyTypeOf<[4DTensorOf<[UI8]>, VPU_DistributedTensor]>>:$activationWindow,
         Optional<AnyTypeOf<[4DTensorOf<[SI32]>, VPU_DistributedTensor]>>:$instructionListTable,
 
         ConfinedAttr<I64ArrayAttr, [ArrayCount<2>]>:$strides,
         VPU_PaddingAttr:$pad,
 
-        OptionalAttr<VPU_PPETaskAttr>:$ppe,
+        VPU_PPEAttr:$opaque_ppe,
 
         ConfinedAttr<I64ArrayAttr, [ArrayCount<4>]>:$rawFilterShape,
-        OptionalAttr<IntAttr>:$activation_window_channel_length,
 
         OptionalAttr<VPU_MultiClusterStrategyAttr>:$multiClusterStrategy
     );
@@ -182,7 +181,7 @@ def VPU_NCEConvolutionOp :
     );
 
     let assemblyFormat = [{
-        `(` $input `,` $filter `,` $weightsTable (`,` $activationWindow^ custom<OptionalTypes>(type($activationWindow)) ``)?
+        `(` $input `,` $filter `,` $weightsTable
          (`,` $instructionListTable^ custom<OptionalTypes>(type($instructionListTable)) ``)? `)`
         attr-dict
         custom<OptionalTypes>(type($input), type($filter), type($weightsTable)) ``
@@ -235,7 +234,8 @@ def VPU_NCEMatMulOp :
                                                                      "isOperationSplitOverWidthCompatible",
                                                                      "isOperationSplitOverKernelCompatible",
                                                                      "doesLayerFitIntoCMX",
-                                                                     "doesLayerChangeOutputAlignmentFitIntoCMX"]>
+                                                                     "doesLayerChangeOutputAlignmentFitIntoCMX",
+                                                                     "getDistributedTypeForOpOperand"]>
             ]
         > {
     let summary = "NCE version of MatMul executed on DPU";
@@ -301,7 +301,7 @@ def VPU_NCEMatMulOp :
         ConfinedAttr<I64ArrayAttr, [ArrayCount<2>]>:$strides,
         VPU_PaddingAttr:$pad,
 
-        OptionalAttr<VPU_PPETaskAttr>:$ppe,
+        VPU_PPEAttr:$opaque_ppe,
         ConfinedAttr<I64ArrayAttr, [ArrayCount<5>]>:$rawFilterShape,
 
         OptionalAttr<VPU_MultiClusterStrategyAttr>:$multiClusterStrategy
@@ -363,10 +363,10 @@ def VPU_NCEDepthConvolutionOp :
                                                                      "isOperationSplitOverWidthCompatible",
                                                                      "isOperationSplitOverKernelCompatible",
                                                                      "doesLayerFitIntoCMX",
-                                                                     "doesLayerChangeOutputAlignmentFitIntoCMX"]>,
+                                                                     "doesLayerChangeOutputAlignmentFitIntoCMX",
+                                                                     "getDistributedTypeForOpOperand"]>,
                 DeclareOpInterfaceMethods<VPU_SparseOpInterface>,
-                DeclareOpInterfaceMethods<VPU_VerticalFusionOpInterface>,
-                AttrSizedOperandSegments
+                DeclareOpInterfaceMethods<VPU_VerticalFusionOpInterface>
             ]
         > {
     let summary = "NCE version of Depthwise Convolution layer";
@@ -375,16 +375,14 @@ def VPU_NCEDepthConvolutionOp :
         AnyTypeOf<[4DTensorOf<[F16, BF16, quant_QuantizedType]>, VPU_SparseTensor, VPU_DistributedTensor]>:$input,
         AnyTypeOf<[4DTensorOf<[F16, BF16, quant_QuantizedType]>, VPU_SparseTensor, VPU_DistributedTensor]>:$filter,
         AnyTypeOf<[4DTensorOf<[SI32]>, VPU_DistributedTensor]>:$weightsTable,
-        Optional<AnyTypeOf<[4DTensorOf<[UI8]>, VPU_DistributedTensor]>>:$activationWindow,
         Optional<AnyTypeOf<[4DTensorOf<[SI32]>, VPU_DistributedTensor]>>:$instructionListTable,
 
         ConfinedAttr<I64ArrayAttr, [ArrayCount<2>]>:$strides,
         VPU_PaddingAttr:$pad,
 
-        OptionalAttr<VPU_PPETaskAttr>:$ppe,
+        VPU_PPEAttr:$opaque_ppe,
 
         ConfinedAttr<I64ArrayAttr, [ArrayCount<4>]>:$rawFilterShape,
-        OptionalAttr<IntAttr>:$activation_window_channel_length,
 
         OptionalAttr<VPU_MultiClusterStrategyAttr>:$multiClusterStrategy
     );
@@ -399,7 +397,6 @@ def VPU_NCEDepthConvolutionOp :
 
     let assemblyFormat = [{
         `(` $input `,` $filter `,` $weightsTable
-           (`,` $activationWindow^ custom<OptionalTypes>(type($activationWindow)) ``)?
            (`,` $instructionListTable^ custom<OptionalTypes>(type($instructionListTable)) ``)?
         `)`
         attr-dict
@@ -427,7 +424,7 @@ def VPU_NCEDepthConvolutionOp :
         static mlir::LogicalResult verifyGroupConvCMX(mlir::Location loc, mlir::ModuleOp module,
                                                   vpux::NDTypeInterface inputType, vpux::NDTypeInterface filterType,
                                                   vpux::NDTypeInterface outputType, mlir::ArrayAttr kernelStrides,
-                                                  bool hasActivationWindow, Logger log = Logger::global());
+                                                  Logger log = Logger::global());
     }] # baseExtraClassDeclaration;
 
     let elemComparisonModes = [IE_TypeComparisonMode_ALLOW_QUANT_MIXED_PRECISION, IE_TypeComparisonMode_ALLOW_DIFFERENT_QUANT,
@@ -449,8 +446,10 @@ def VPU_NCECompressConvolutionOp :
                 DeclareOpInterfaceMethods<VPU_ClusteredOpInterface, ["isOperationSplitOverHeightCompatible",
                                                                      "isOperationSplitOverWidthCompatible",
                                                                      "isOperationSplitOverKernelCompatible",
+                                                                     "isOperationSplitOverBatchCompatible",
                                                                      "doesLayerFitIntoCMX",
-                                                                     "doesLayerChangeOutputAlignmentFitIntoCMX"]>,
+                                                                     "doesLayerChangeOutputAlignmentFitIntoCMX",
+                                                                     "getDistributedTypeForOpOperand"]>,
                 DeclareOpInterfaceMethods<VPU_SparseOpInterface>
             ]
         > {
@@ -469,7 +468,7 @@ def VPU_NCECompressConvolutionOp :
         ConfinedAttr<I64ArrayAttr, [ArrayCount<2>]>:$strides,
         VPU_PaddingAttr:$pad,
 
-        OptionalAttr<VPU_PPETaskAttr>:$ppe,
+        VPU_PPEAttr:$opaque_ppe,
 
         ConfinedAttr<I64ArrayAttr, [ArrayCount<4>]>:$rawFilterShape,
 
@@ -527,10 +526,10 @@ def VPU_NCEMaxPoolOp :
                                                                      "isOperationSplitOverKernelCompatible",
                                                                      "isOperationSplitOverBatchCompatible",
                                                                      "doesLayerFitIntoCMX",
-                                                                     "doesLayerChangeOutputAlignmentFitIntoCMX"]>,
+                                                                     "doesLayerChangeOutputAlignmentFitIntoCMX",
+                                                                     "getDistributedTypeForOpOperand"]>,
                 DeclareOpInterfaceMethods<VPU_SparseOpInterface>,
-                DeclareOpInterfaceMethods<VPU_VerticalFusionOpInterface>,
-                AttrSizedOperandSegments
+                DeclareOpInterfaceMethods<VPU_VerticalFusionOpInterface>
             ]
         > {
     let summary = "NCE version of MaxPool layer";
@@ -538,14 +537,12 @@ def VPU_NCEMaxPoolOp :
     let arguments = (ins
         AnyTypeOf<[4DTensorOf<[F16, BF16, quant_QuantizedType]>, VPU_SparseTensor, VPU_DistributedTensor]>:$input,
         Optional<AnyTypeOf<[4DTensorOf<[SI32]>, VPU_DistributedTensor]>>:$weightsTable,
-        Optional<AnyTypeOf<[4DTensorOf<[UI8]>, VPU_DistributedTensor]>>:$activationWindow,
 
         ConfinedAttr<I64ArrayAttr, [ArrayCount<2>]>:$kernel_size,
         ConfinedAttr<I64ArrayAttr, [ArrayCount<2>]>:$strides,
         VPU_PaddingAttr:$pad,
 
-        OptionalAttr<VPU_PPETaskAttr>:$ppe,
-        OptionalAttr<IntAttr>:$activation_window_channel_length,
+        VPU_PPEAttr:$opaque_ppe,
 
         OptionalAttr<VPU_MultiClusterStrategyAttr>:$multiClusterStrategy
     );
@@ -561,7 +558,6 @@ def VPU_NCEMaxPoolOp :
     let assemblyFormat = [{
         `(` $input
             (`,` $weightsTable^ custom<OptionalTypes>(type($weightsTable)) ``)?
-            (`,` $activationWindow^ custom<OptionalTypes>(type($activationWindow)) ``)?
         `)`
         attr-dict
         custom<OptionalTypes>(type($input)) ``
@@ -604,8 +600,8 @@ def VPU_NCEAveragePoolOp :
                                                                      "isOperationSplitOverWidthCompatible",
                                                                      "isOperationSplitOverKernelCompatible",
                                                                      "isOperationSplitOverBatchCompatible",
-                                                                     "doesLayerFitIntoCMX",
-                                                                     "doesLayerChangeOutputAlignmentFitIntoCMX"]>,
+                                                                     "doesLayerChangeOutputAlignmentFitIntoCMX",
+                                                                     "getDistributedTypeForOpOperand"]>,
                 DeclareOpInterfaceMethods<VPU_SparseOpInterface>,
                 DeclareOpInterfaceMethods<VPU_VerticalFusionOpInterface>
             ]
@@ -619,7 +615,7 @@ def VPU_NCEAveragePoolOp :
         ConfinedAttr<I64ArrayAttr, [ArrayCount<2>]>:$strides,
         VPU_PaddingAttr:$pad,
 
-        OptionalAttr<VPU_PPETaskAttr>:$ppe,
+        VPU_PPEAttr:$opaque_ppe,
 
         OptionalAttr<VPU_MultiClusterStrategyAttr>:$multiClusterStrategy
     );
@@ -675,7 +671,8 @@ def VPU_NCEEltwiseOp :
                 DeclareOpInterfaceMethods<VPU_ClusteredOpInterface, ["isOperationSplitOverHeightCompatible",
                                                                      "isOperationSplitOverWidthCompatible",
                                                                      "isOperationSplitOverKernelCompatible",
-                                                                     "doesLayerFitIntoCMX"]>,
+                                                                     "doesLayerFitIntoCMX",
+                                                                     "getDistributedTypeForOpOperand"]>,
                 DeclareOpInterfaceMethods<VPU_SparseOpInterface>,
                 DeclareOpInterfaceMethods<VPU_VerticalFusionOpInterface>
             ]
@@ -688,7 +685,7 @@ def VPU_NCEEltwiseOp :
 
         VPU_EltwiseTypeAttr:$op_type,
 
-        OptionalAttr<VPU_PPETaskAttr>:$ppe,
+        VPU_PPEAttr:$opaque_ppe,
 
         OptionalAttr<VPU_MultiClusterStrategyAttr>:$multiClusterStrategy,
         OptionalAttr<BoolAttr>:$is_inplace
@@ -739,6 +736,56 @@ def VPU_NCEEltwiseOp :
 }
 
 //
+// NCE.Reduce
+//
+
+def VPU_NCEReduceOp :
+        VPU_LayerOp<
+            "NCE.Reduce",
+            [
+                NoRegionArguments,
+                NoTerminator,
+                SingleBlock
+            ]
+        > {
+    let summary = "NCE version of Reduce layer";
+
+    let arguments = (ins
+        AnyTypeOf<[4DTensorOf<[F16, BF16, quant_QuantizedType]>]>:$input,
+        I64ArrayAttr:$axes,
+
+        VPU_PPEAttr:$opaque_ppe,
+        VPU_ReduceTypeAttr:$op_type
+    );
+
+    let results = (outs
+        AnyTypeOf<[4DTensorOf<[F16, BF16, quant_QuantizedType]>]>:$output
+    );
+
+    let extraClassDeclaration = [{
+        static bool isSupported(mlir::Operation* op,
+                                vpux::LogCb logCb, bool checkLayout = false,
+                                bool checkChannelAlignment = false);
+        static mlir::LogicalResult verifyKernel(mlir::Operation* origOp, Logger log = Logger::global());
+
+    }] # baseExtraClassDeclaration;
+
+    let assemblyFormat = [{
+       `(` $input`)`
+        attr-dict
+        custom<OptionalTypes>(type($input)) ``
+        `->` type(results)
+        custom<OptionalRegion>($workloads)
+    }];
+
+    let regions = (region
+        AnyRegion:$workloads
+    );
+
+    let elemComparisonModes = [IE_TypeComparisonMode_ALLOW_QUANT_MIXED_PRECISION];
+}
+
+//
 // NCE.Permute
 //
 
@@ -753,7 +800,7 @@ def VPU_NCEPermuteOp :
             DeclareOpInterfaceMethods<VPU_ClusteredOpInterface, ["isOperationSplitOverHeightCompatible",
                                                                  "isOperationSplitOverWidthCompatible",
                                                                  "isOperationSplitOverKernelCompatible",
-                                                                 "doesLayerFitIntoCMX"]>,
+                                                                 "getDistributedTypeForOpOperand"]>,
             DeclareOpInterfaceMethods<VPU_SparseOpInterface>
         ]
         > {
@@ -774,7 +821,7 @@ def VPU_NCEPermuteOp :
         IntAttr:$expandedChannels,
         TypeAttr:$dstElemType,
         AffineMapAttr:$dstOrder,
-        OptionalAttr<VPU_PPETaskAttr>:$ppe,
+        VPU_PPEAttr:$opaque_ppe,
 
         OptionalAttr<VPU_MultiClusterStrategyAttr>:$multiClusterStrategy
     );
@@ -873,7 +920,8 @@ def VPU_NCEInterpolateOp :
                                                                      "isOperationSplitOverWidthCompatible",
                                                                      "isOperationSplitOverKernelCompatible",
                                                                      "doesLayerFitIntoCMX",
-                                                                     "doesLayerChangeOutputAlignmentFitIntoCMX"]>,
+                                                                     "doesLayerChangeOutputAlignmentFitIntoCMX",
+                                                                     "getDistributedTypeForOpOperand"]>,
                 DeclareOpInterfaceMethods<VPU_SparseOpInterface>
             ]
         > {
@@ -886,7 +934,7 @@ def VPU_NCEInterpolateOp :
 
         ConfinedAttr<I64ArrayAttr, [ArrayCount<2>]>:$strides,
 
-        OptionalAttr<VPU_PPETaskAttr>:$ppe,
+        VPU_PPEAttr:$opaque_ppe,
         ConfinedAttr<I64ArrayAttr, [ArrayCount<4>]>:$rawFilterShape,
         OptionalAttr<VPU_MultiClusterStrategyAttr>:$multiClusterStrategy,
         OptionalAttr<VPU_NCEInterpolateModeAttr>:$mode
@@ -1175,6 +1223,34 @@ def VPU_ConditionalCopyOp :
 
     let hasVerifier = 1;
 }
+
+//
+// LoopSelectOp
+//
+
+def VPU_LoopSelectOp :
+        VPU_LayerOp<
+            "LoopSelect"
+        > {
+    let summary = "Select a slice of the input according to collected execution conditions, helping implement Loop Op.";
+
+    let arguments = (ins
+        1DTensorOf<[Bool8, SI8]>:$initExecCond,
+        1DTensorOf<[Bool8, SI8]>:$execConds,
+        AnyRankedTensor:$input,
+
+        BoolAttr:$do_concat,
+        IntAttr:$axis,
+        IntAttr:$stride
+    );
+
+    let results = (outs
+        AnyRankedTensor:$output
+    );
+
+    let hasVerifier = 1;
+}
+
 
 //
 // ConcatOp
@@ -1889,7 +1965,7 @@ def VPU_FloorOp :
                 VPU_TilingBuilderOpInterface,
                 VPU_EltwiseOp,
                 DeclareOpInterfaceMethods<VPU_SWOpInterface>,
-                DeclareOpInterfaceMethods<VPU_ClusteredOpInterface, ["doesLayerFitIntoCMX"]>
+                DeclareOpInterfaceMethods<VPU_ClusteredOpInterface>
             ]
         > {
     let summary = "Floor VPU layer";
@@ -2284,7 +2360,7 @@ def VPU_NormalizeL2Op :
             [
                 DeclareOpInterfaceMethods<VPU_TilingBuilderOpInterface>,
                 DeclareOpInterfaceMethods<VPU_SWOpInterface>,
-                DeclareOpInterfaceMethods<VPU_ClusteredOpInterface, ["doesLayerFitIntoCMX"]>
+                DeclareOpInterfaceMethods<VPU_ClusteredOpInterface>
             ]
         > {
     let summary = "NormalizeL2 VPU layer";
@@ -2668,22 +2744,46 @@ def VPU_GatherOp :
         VPU_LayerOp<
             "Gather",
             [
-                DeclareOpInterfaceMethods<VPU_TilingBuilderOpInterface>
+                DeclareOpInterfaceMethods<VPU_TilingBuilderOpInterface>,
+                DeclareOpInterfaceMethods<VPU_SWOpInterface>,
+                DeclareOpInterfaceMethods<VPU_ClusteredOpInterface>
             ]
         > {
     let summary = "Gather VPU layer";
 
     let arguments = (ins
-        AnyRankedTensor:$input,
-        RankedTensorOf<[AnyInteger]>:$indices,
+        AnyTypeOf<[AnyRankedTensor, VPU_DistributedTensor]>:$input,
+        AnyTypeOf<[RankedTensorOf<[AnyInteger]>, VPU_DistributedTensor]>:$indices,
         Optional<AnyRankedTensor>:$axis,
         OptionalAttr<IntAttr>:$axis_value,
-        IntAttr:$batch_dims
+        IntAttr:$batch_dims,
+
+        OptionalAttr<IntAttr>:$indices_rank,
+        OptionalAttr<VPU_MultiClusterStrategyAttr>:$multiClusterStrategy
     );
 
     let results = (outs
-        AnyRankedTensor:$output
+        AnyTypeOf<[AnyRankedTensor, VPU_DistributedTensor]>:$output
     );
+
+    let builders = [
+        OpBuilder<(ins
+            "::mlir::Value":$input,
+            "::mlir::Value":$indices,
+            "::mlir::Value":$axis,
+            "::mlir::IntegerAttr":$axis_value,
+            "::mlir::IntegerAttr":$batch_dims,
+            "::mlir::IntegerAttr":$indices_rank
+        )>
+    ];
+
+    let extraClassDeclaration = [{
+        bool fitIntoCMX(::llvm::ArrayRef<vpux::NDTypeInterface> buffers, Byte reservedMem);
+
+        bool fitIntoCMX(::llvm::ArrayRef<vpux::NDTypeInterface> buffers);
+    }] # baseExtraClassDeclaration;
+
+    let elemComparisonModes = [IE_TypeComparisonMode_ALLOW_DISTRIBUTED_OUTPUT];
 }
 
 //
@@ -2841,8 +2941,9 @@ def VPU_ScatterElementsUpdateOp :
         AnyRankedTensor:$input,
         RankedTensorOf<[AnyInteger]>:$indices,
         AnyRankedTensor:$updates,
-        IntAttr:$axis
-
+        IntAttr:$axis,
+        IE_ScatterElementsUpdateReductionTypeAttr:$reduction,
+        BoolAttr:$use_init_val
     );
 
     let results = (outs
@@ -2908,7 +3009,7 @@ def VPU_FakeQuantizeOp :
             [
                 DeclareOpInterfaceMethods<VPU_TilingBuilderOpInterface>,
                 DeclareOpInterfaceMethods<VPU_SWOpInterface>,
-                DeclareOpInterfaceMethods<VPU_ClusteredOpInterface, ["doesLayerFitIntoCMX"]>,
+                DeclareOpInterfaceMethods<VPU_ClusteredOpInterface>,
                 VPU_EltwiseOp
             ]
         > {
@@ -3013,18 +3114,11 @@ def VPU_InterpolateOp :
         > {
     let summary = "Interpolate VPU layer";
 
-    let description = [{
-        The `coordinates` are byte offsets in the tiled `input`.
-        The `lambdas` contain two interleaved values for each coordinate.
-    }];
-
     let arguments = (ins
         AnyTypeOf<[RankedTensorOf<[UI8, F16, F32, quant_QuantizedType]>, VPU_DistributedTensor]>:$input,
         Optional<AnyTypeOf<[RankedTensorOf<[AnyInteger]>, VPU_DistributedTensor]>>:$sizes,
         Optional<AnyTypeOf<[RankedTensorOf<[F16, F32]>, VPU_DistributedTensor]>>:$scales,
         Optional<AnyTypeOf<[RankedTensorOf<[AnyInteger]>, VPU_DistributedTensor]>>:$axes,
-        Optional<AnyTypeOf<[RankedTensorOf<[SI32]>, VPU_DistributedTensor]>>:$coordinates,
-        Optional<AnyTypeOf<[RankedTensorOf<[F16]>, VPU_DistributedTensor]>>:$lambdas,
 
         OptionalAttr<I64ArrayAttr>:$sizes_attr,
         OptionalAttr<F64ArrayAttr>:$scales_attr,
@@ -3055,8 +3149,6 @@ def VPU_InterpolateOp :
             "::mlir::Value":$sizes,
             "::mlir::Value":$scales,
             "::mlir::Value":$axes,
-            "::mlir::Value":$coordinates,
-            "::mlir::Value":$lambdas,
             "::mlir::ArrayAttr":$sizes_attr,
             "::mlir::ArrayAttr":$scales_attr,
             "::mlir::ArrayAttr":$axes_attr,
@@ -3081,7 +3173,7 @@ def VPU_TopKOp :
             [
                 DeclareOpInterfaceMethods<VPU_TilingBuilderOpInterface>,
                 DeclareOpInterfaceMethods<VPU_SWOpInterface>,
-                DeclareOpInterfaceMethods<VPU_ClusteredOpInterface, ["doesLayerFitIntoCMX"]>
+                DeclareOpInterfaceMethods<VPU_ClusteredOpInterface>
             ]
         > {
     let summary = "TopK VPU layer";
@@ -3293,8 +3385,7 @@ def VPU_DetectionOutputSortOp:
                 DeclareOpInterfaceMethods<VPU_SWOpInterface>,
                 DeclareOpInterfaceMethods<VPU_ClusteredOpInterface, ["isOperationSplitOverHeightCompatible",
                                                                      "isOperationSplitOverWidthCompatible",
-                                                                     "isOperationSplitOverKernelCompatible",
-                                                                     "doesLayerFitIntoCMX"]>,
+                                                                     "isOperationSplitOverKernelCompatible"]>,
             ]
         > {
     let summary = "DetectionOutputSort VPU layer";
@@ -3494,8 +3585,8 @@ def VPU_MVN1SumOp :
 
     let extraClassDeclaration = [{
         bool fitIntoCMX(::llvm::ArrayRef<vpux::NDTypeInterface> buffers, Byte reservedMem);
-
         bool fitIntoCMX(::llvm::ArrayRef<vpux::NDTypeInterface> buffers);
+        static bool buffsFitIntoCMX(mlir::ModuleOp module, vpux::NDTypeInterface in, vpux::NDTypeInterface out);
     }] # baseExtraClassDeclaration;
 
     let results = (outs
@@ -3522,6 +3613,7 @@ def VPU_MVN1MeanVarOp :
         VPU_LayerOp<
             "MVN1MeanVar",
             [
+                DeclareOpInterfaceMethods<VPU_TilingBuilderOpInterface>,
                 DeclareOpInterfaceMethods<VPU_SWOpInterface>,
                 DeclareOpInterfaceMethods<VPU_ClusteredOpInterface>
             ]
@@ -3554,7 +3646,6 @@ def VPU_MVN1MeanVarOp :
 
     let extraClassDeclaration = [{
         bool fitIntoCMX(::llvm::ArrayRef<vpux::NDTypeInterface> buffers, Byte reservedMem);
-
         bool fitIntoCMX(::llvm::ArrayRef<vpux::NDTypeInterface> buffers);
     }] # baseExtraClassDeclaration;
 
@@ -3650,6 +3741,7 @@ def VPU_MVN6Op :
         VPU_LayerOp<
             "MVN6",
             [
+                AttrSizedOperandSegments,
                 VPU_EltwiseOp,
                 VPU_TilingBuilderOpInterface,
                 DeclareOpInterfaceMethods<VPU_SWOpInterface>,
@@ -3660,6 +3752,8 @@ def VPU_MVN6Op :
 
     let arguments = (ins
         AnyTypeOf<[AnyRankedTensor, VPU_DistributedTensor]>:$input,
+        Optional<AnyTypeOf<[AnyRankedTensor, VPU_DistributedTensor]>>:$scale,
+        Optional<AnyTypeOf<[AnyRankedTensor, VPU_DistributedTensor]>>:$bias,
         I64ArrayAttr:$axes,
         BoolAttr:$normalize_variance,
         F64Attr:$eps,
@@ -3680,6 +3774,15 @@ def VPU_MVN6Op :
     let builders = [
         OpBuilder<(ins
             "::mlir::Value":$input,
+            "::mlir::ArrayAttr":$axes,
+            "::mlir::BoolAttr":$normalize_variance,
+            "::mlir::FloatAttr":$eps,
+            "vpux::IE::MvnEpsModeAttr":$eps_mode
+        )>,
+        OpBuilder<(ins
+            "::mlir::Value":$input,
+            "::mlir::Value":$scale,
+            "::mlir::Value":$bias,
             "::mlir::ArrayAttr":$axes,
             "::mlir::BoolAttr":$normalize_variance,
             "::mlir::FloatAttr":$eps,
@@ -3823,7 +3926,7 @@ def VPU_PReluOp :
                 DeclareOpInterfaceMethods<VPU_TilingBuilderOpInterface>,
                 VPU_EltwiseOp,
                 DeclareOpInterfaceMethods<VPU_SWOpInterface>,
-                DeclareOpInterfaceMethods<VPU_ClusteredOpInterface, ["doesLayerFitIntoCMX"]>,
+                DeclareOpInterfaceMethods<VPU_ClusteredOpInterface>,
                 DeclareOpInterfaceMethods<VPU_VerticalFusionOpInterface>
             ]
         > {
@@ -4073,7 +4176,7 @@ def VPU_MatMulOp:
             [
                 DeclareOpInterfaceMethods<VPU_TilingBuilderOpInterface>,
                 DeclareOpInterfaceMethods<VPU_SWOpInterface>,
-                DeclareOpInterfaceMethods<VPU_ClusteredOpInterface, ["doesLayerFitIntoCMX"]>
+                DeclareOpInterfaceMethods<VPU_ClusteredOpInterface>
             ]
         > {
     let summary = "MatMul VPU layer";
@@ -4273,7 +4376,7 @@ def VPU_LSTMGatesOp :
             [
                 DeclareOpInterfaceMethods<VPU_TilingBuilderOpInterface>,
                 DeclareOpInterfaceMethods<VPU_SWOpInterface>,
-                DeclareOpInterfaceMethods<VPU_ClusteredOpInterface, ["doesLayerFitIntoCMX"]>
+                DeclareOpInterfaceMethods<VPU_ClusteredOpInterface>
             ]
         > {
     let summary = "Computes LSTM activation functions";
@@ -4326,27 +4429,52 @@ def VPU_LSTMGatesOp :
 
 def VPU_LSTMSequenceOp :
         VPU_LayerOp<
-            "LSTMSequence"
+            "LSTMSequence",
+        [
+                DeclareOpInterfaceMethods<VPU_SWOpInterface>,
+                DeclareOpInterfaceMethods<VPU_ClusteredOpInterface, ["isOperationSplitOverKernelCompatible",
+                                                                     "isOperationSplitOverBatchCompatible"]>
+        ]
         > {
     let summary = "LSTMSequence VPU layer";
 
     let arguments = (ins
-        3DTensorOf<[F16, F32]>:$inputData,
-        3DTensorOf<[F16, F32]>:$initialHiddenState,
-        3DTensorOf<[F16, F32]>:$initialCellState,
-        3DTensorOf<[F16, F32]>:$weights,
-        3DTensorOf<[F16, F32]>:$reccurenceWeights,
-        2DTensorOf<[F16, F32]>:$biases,
+        AnyTypeOf<[RankedTensorOf<[F16, F32]>, VPU_DistributedTensor]>:$inputData,
+        AnyTypeOf<[RankedTensorOf<[F16, F32]>, VPU_DistributedTensor]>:$initialHiddenState,
+        AnyTypeOf<[RankedTensorOf<[F16, F32]>, VPU_DistributedTensor]>:$initialCellState,
+        AnyTypeOf<[RankedTensorOf<[F16, F32]>, VPU_DistributedTensor]>:$reccurenceWeights,
+        AnyTypeOf<[RankedTensorOf<[SI32]>, VPU_DistributedTensor]>:$syncBuffer,
 
         IntAttr:$sequenceLength,
-        IE_RNNSequenceDirectionAttr:$direction
+        IE_RNNSequenceDirectionAttr:$direction,
+        OptionalAttr<VPU_MultiClusterStrategyAttr>:$multiClusterStrategy
     );
 
     let results = (outs
-        4DTensorOf<[F16, F32]>:$outputHiddenValues,
-        3DTensorOf<[F16, F32]>:$outputHiddenState,
-        3DTensorOf<[F16, F32]>:$outputCellState
+        AnyTypeOf<[RankedTensorOf<[F16, F32]>, VPU_DistributedTensor]>:$outputHiddenValues,
+        AnyTypeOf<[RankedTensorOf<[F16, F32]>, VPU_DistributedTensor]>:$outputHiddenState,
+        AnyTypeOf<[RankedTensorOf<[F16, F32]>, VPU_DistributedTensor]>:$outputCellState
     );
+
+    let builders = [
+        OpBuilder<(ins
+            "::mlir::Value":$inputData,
+            "::mlir::Value":$initialHiddenState,
+            "::mlir::Value":$initialCellState,
+            "::mlir::Value":$reccurenceWeights,
+            "::mlir::IntegerAttr":$sequenceLength,
+            "vpux::IE::RNNSequenceDirectionAttr":$direction,
+            "vpux::VPU::MultiClusterStrategyAttr":$multiClusterStrategy
+        )>
+    ];
+
+    let extraClassDeclaration = [{
+        static bool isSupported(vpux::IE::LSTMSequenceOp origOp);
+        bool fitIntoCMX(::llvm::ArrayRef<vpux::NDTypeInterface> buffers, Byte reservedMem);
+        bool fitIntoCMX(::llvm::ArrayRef<vpux::NDTypeInterface> buffers);
+    }] # baseExtraClassDeclaration;
+
+    let elemComparisonModes = [IE_TypeComparisonMode_ALLOW_DISTRIBUTED_OUTPUT];
 }
 
 //
@@ -4360,7 +4488,7 @@ def VPU_SelectOp :
                 VPU_TilingBuilderOpInterface,
                 VPU_EltwiseOp,
                 DeclareOpInterfaceMethods<VPU_SWOpInterface>,
-                DeclareOpInterfaceMethods<VPU_ClusteredOpInterface, ["doesLayerFitIntoCMX"]>,
+                DeclareOpInterfaceMethods<VPU_ClusteredOpInterface>,
             ]
         > {
     let summary = "Select VPU layer";
@@ -4437,6 +4565,29 @@ def VPU_SpaceToBatch :
         OptionalAttr<I64ArrayAttr>:$block_shape_value,
         OptionalAttr<I64ArrayAttr>:$pads_begin_value,
         OptionalAttr<I64ArrayAttr>:$pads_end_value
+    );
+
+    let results = (outs
+        AnyRankedTensor:$output
+    );
+}
+
+//
+// BatchToSpace
+//
+
+def VPU_BatchToSpace :
+        VPU_LayerOp<
+            "BatchToSpace"
+        > {
+    let summary = "BatchToSpace VPU layer";
+
+    let arguments = (ins
+        AnyRankedTensor:$input,
+
+        OptionalAttr<I64ArrayAttr>:$block_shape_value,
+        OptionalAttr<I64ArrayAttr>:$crops_begin_value,
+        OptionalAttr<I64ArrayAttr>:$crops_end_value
     );
 
     let results = (outs
@@ -4798,6 +4949,40 @@ def VPU_TileOp :
 }
 
 //
+// DynamicTile
+//
+
+def VPU_DynamicTileOp :
+        VPU_LayerOp<
+            "DynamicTile",
+            [
+                DeclareOpInterfaceMethods<VPU_SWOpInterface>
+            ]
+        > {
+    let summary = "DynamicTile VPU layer";
+
+    let arguments = (ins
+        AnyRankedTensor:$input,
+        RankedTensorOf<[AnyInteger]>:$target_shape,
+
+        Optional<RankedTensorOf<[AnyInteger]>>:$repeats,
+        OptionalAttr<I64ArrayAttr>:$repeats_values,
+
+        I64ArrayAttr:$output_shape,
+        I64ArrayAttr:$output_bounds
+    );
+
+    let results = (outs
+        AnyRankedTensor:$output
+    );
+
+    let extraClassDeclaration = [{
+        bool fitIntoCMX(::llvm::ArrayRef<vpux::NDTypeInterface> buffers, Byte reservedMem);
+        bool fitIntoCMX(::llvm::ArrayRef<vpux::NDTypeInterface> buffers);
+    }] # baseExtraClassDeclaration;
+}
+
+//
 // Split
 //
 
@@ -4837,7 +5022,7 @@ def VPU_PowerOp :
             [
                 VPU_TilingBuilderOpInterface,
                 DeclareOpInterfaceMethods<VPU_SWOpInterface>,
-                DeclareOpInterfaceMethods<VPU_ClusteredOpInterface, ["doesLayerFitIntoCMX"]>,
+                DeclareOpInterfaceMethods<VPU_ClusteredOpInterface>,
                 VPU_EltwiseOp
             ]
         > {
@@ -4883,7 +5068,7 @@ def VPU_AddOp :
                 VPU_TilingBuilderOpInterface,
                 Commutative,
                 DeclareOpInterfaceMethods<VPU_SWOpInterface>,
-                DeclareOpInterfaceMethods<VPU_ClusteredOpInterface, ["doesLayerFitIntoCMX"]>,
+                DeclareOpInterfaceMethods<VPU_ClusteredOpInterface>,
                 VPU_EltwiseOp
             ]
         > {
@@ -4930,7 +5115,7 @@ def VPU_DivideOp :
             [
                 VPU_TilingBuilderOpInterface,
                 DeclareOpInterfaceMethods<VPU_SWOpInterface>,
-                DeclareOpInterfaceMethods<VPU_ClusteredOpInterface, ["doesLayerFitIntoCMX"]>,
+                DeclareOpInterfaceMethods<VPU_ClusteredOpInterface>,
                 VPU_EltwiseOp
             ]
         > {
@@ -5053,7 +5238,7 @@ def VPU_LessOp :
             [
                 VPU_TilingBuilderOpInterface,
                 DeclareOpInterfaceMethods<VPU_SWOpInterface>,
-                DeclareOpInterfaceMethods<VPU_ClusteredOpInterface, ["doesLayerFitIntoCMX"]>,
+                DeclareOpInterfaceMethods<VPU_ClusteredOpInterface>,
                 VPU_EltwiseOp
             ]
         > {
@@ -5124,7 +5309,7 @@ def VPU_GreaterOp :
             [
                 VPU_TilingBuilderOpInterface,
                 DeclareOpInterfaceMethods<VPU_SWOpInterface>,
-                DeclareOpInterfaceMethods<VPU_ClusteredOpInterface, ["doesLayerFitIntoCMX"]>,
+                DeclareOpInterfaceMethods<VPU_ClusteredOpInterface>,
                 VPU_EltwiseOp
             ]
         > {
@@ -5251,7 +5436,7 @@ def VPU_MultiplyOp :
                 Commutative,
                 VPU_EltwiseOp,
                 DeclareOpInterfaceMethods<VPU_SWOpInterface>,
-                DeclareOpInterfaceMethods<VPU_ClusteredOpInterface, ["doesLayerFitIntoCMX"]>,
+                DeclareOpInterfaceMethods<VPU_ClusteredOpInterface>,
                 DeclareOpInterfaceMethods<VPU_VerticalFusionOpInterface>
             ]
         > {
@@ -5299,7 +5484,7 @@ def VPU_AndOp :
                 VPU_TilingBuilderOpInterface,
                 Commutative,
                 DeclareOpInterfaceMethods<VPU_SWOpInterface>,
-                DeclareOpInterfaceMethods<VPU_ClusteredOpInterface, ["doesLayerFitIntoCMX"]>,
+                DeclareOpInterfaceMethods<VPU_ClusteredOpInterface>,
                 VPU_EltwiseOp
             ]
         > {
@@ -5455,8 +5640,8 @@ def VPU_GroupConvolutionOp :
     let summary = "GroupConvolution VPU layer";
 
     let arguments = (ins
-        RankedTensorOf<[F16, F32]>:$input,
-        RankedTensorOf<[F16, F32]>:$filter,
+        RankedTensorOf<[F16, F32, quant_QuantizedType]>:$input,
+        RankedTensorOf<[F16, F32, quant_QuantizedType]>:$filter,
         Optional<RankedTensorOf<[F16, F32]>>:$bias,
 
         I64ArrayAttr:$strides,
@@ -5469,14 +5654,43 @@ def VPU_GroupConvolutionOp :
     );
 
     let results = (outs
-        RankedTensorOf<[F16, F32]>:$output
+        RankedTensorOf<[F16, F32, quant_QuantizedType]>:$output
     );
+
+    list<string> elemComparisonModes = [IE_TypeComparisonMode_ALLOW_DIFFERENT_QUANT];
 
     let extraClassDeclaration = [{
         bool fitIntoCMX(vpux::NDTypeInterface input, vpux::NDTypeInterface filter, vpux::NDTypeInterface output, Byte reservedMem);
 
         bool fitIntoCMX(vpux::NDTypeInterface input, vpux::NDTypeInterface filter, vpux::NDTypeInterface output);
     }] # baseExtraClassDeclaration;
+}
+
+//
+// GroupNormalizationOp
+//
+
+def VPU_GroupNormalizationOp :
+        VPU_LayerOp<
+            "GroupNormalization",
+            [
+                DeclareOpInterfaceMethods<InferTypeOpInterface, ["inferReturnTypes"]>
+            ]
+        > {
+    let summary = "GroupNormalization VPU layer";
+
+    let arguments = (ins
+       RankedTensorOf<[F16, F32]>:$input,
+       RankedTensorOf<[F16, F32]>:$scale,
+       RankedTensorOf<[F16, F32]>:$bias,
+
+       I32Attr:$num_groups,
+       F32Attr: $epsilon
+    );
+
+    let results = (outs
+       RankedTensorOf<[F16, F32]>:$output
+    );
 }
 
 //
@@ -5535,6 +5749,36 @@ def VPU_MaxPoolOp :
 
     let results = (outs
         RankedTensorOf<[F16, F32, SI32, SI8, UI8]>:$output
+    );
+}
+
+//
+// MaxPool8
+//
+
+def VPU_MaxPool8Op :
+        VPU_LayerOp<
+            "MaxPool8"
+        > {
+    let summary = "MaxPool8 VPU layer";
+
+    let arguments = (ins
+        RankedTensorOf<[F16, F32, SI32, SI8, UI8]>:$input,
+
+        I64ArrayAttr:$kernel_size,
+        I64ArrayAttr:$strides,
+        I64ArrayAttr:$dilations,
+        I64ArrayAttr:$pads_begin,
+        I64ArrayAttr:$pads_end,
+        IE_RoundingTypeAttr:$rounding_type,
+        TypeAttr:$index_element_type,
+
+        IntAttr:$axis
+    );
+
+    let results = (outs
+        RankedTensorOf<[F16, F32, SI32, SI8, UI8]>:$output,
+        RankedTensorOf<[SI32, SI64]>:$output_index
     );
 }
 
@@ -6074,7 +6318,7 @@ def VPU_MinimumOp :
                 VPU_TilingBuilderOpInterface,
                 VPU_EltwiseOp,
                 DeclareOpInterfaceMethods<VPU_SWOpInterface>,
-                DeclareOpInterfaceMethods<VPU_ClusteredOpInterface, ["doesLayerFitIntoCMX"]>
+                DeclareOpInterfaceMethods<VPU_ClusteredOpInterface>
             ]
         > {
     let summary = "InferenceEngine Minimum layer";
@@ -6118,7 +6362,7 @@ def VPU_MaximumOp :
                 VPU_TilingBuilderOpInterface,
                 VPU_EltwiseOp,
                 DeclareOpInterfaceMethods<VPU_SWOpInterface>,
-                DeclareOpInterfaceMethods<VPU_ClusteredOpInterface, ["doesLayerFitIntoCMX"]>
+                DeclareOpInterfaceMethods<VPU_ClusteredOpInterface>
             ]
         > {
     let summary = "Maximum VPU layer";
@@ -6393,7 +6637,7 @@ def VPU_SubtractOp :
             [
                 VPU_TilingBuilderOpInterface,
                 DeclareOpInterfaceMethods<VPU_SWOpInterface>,
-                DeclareOpInterfaceMethods<VPU_ClusteredOpInterface, ["doesLayerFitIntoCMX"]>,
+                DeclareOpInterfaceMethods<VPU_ClusteredOpInterface>,
                 VPU_EltwiseOp
             ]
         > {
@@ -6506,7 +6750,7 @@ def VPU_EqualOp :
                 VPU_TilingBuilderOpInterface,
                 Commutative,
                 DeclareOpInterfaceMethods<VPU_SWOpInterface>,
-                DeclareOpInterfaceMethods<VPU_ClusteredOpInterface, ["doesLayerFitIntoCMX"]>,
+                DeclareOpInterfaceMethods<VPU_ClusteredOpInterface>,
                 VPU_EltwiseOp
             ]
         > {
@@ -7212,7 +7456,7 @@ def VPU_AccumulateOp :
             [
                 DeclareOpInterfaceMethods<VPU_TilingBuilderOpInterface>,
                 DeclareOpInterfaceMethods<VPU_SWOpInterface>,
-                DeclareOpInterfaceMethods<VPU_ClusteredOpInterface, ["doesLayerFitIntoCMX"]>
+                DeclareOpInterfaceMethods<VPU_ClusteredOpInterface>
             ]
         > {
     let summary = "Accumulate VPU layer";
@@ -7285,4 +7529,181 @@ def VPU_NonZeroOp :
     let hasVerifier = 1;
 }
 
+//
+// DynamicReshape
+//
+
+def VPU_DynamicReshapeOp :
+        VPU_LayerOp<
+            "DynamicReshape",
+            [
+                DeclareOpInterfaceMethods<VPU_SWOpInterface>
+            ]
+        > {
+    let summary = "DynamicReshape VPU layer";
+
+    let arguments = (ins
+        AnyRankedTensor:$input,
+        RankedTensorOf<[SI32]>:$shape,
+
+        I64ArrayAttr:$output_shape,
+        I64ArrayAttr:$output_bounds
+    );
+
+    let results = (outs
+        AnyRankedTensor:$output
+    );
+
+    let extraClassDeclaration = [{
+        bool fitIntoCMX(::llvm::ArrayRef<vpux::NDTypeInterface> buffers, Byte reservedMem);
+        bool fitIntoCMX(::llvm::ArrayRef<vpux::NDTypeInterface> buffers);
+    }] # baseExtraClassDeclaration;
+}
+
+//
+// DynamicDequantizeOp
+//
+
+def VPU_DynamicDequantizeOp :
+        VPU_LayerOp<"DynamicDequantize",
+            [
+                VPU_EltwiseOp
+            ]
+        > {
+    let summary = "InferenceEngine Dynamic Dequantize layer";
+
+    let arguments = (ins
+        RankedTensorOf<[quant_QuantizedType]>:$input,
+        RankedTensorOf<[F16, F32]>:$scale,
+        RankedTensorOf<[I8, I4]>:$zp,
+
+        TypeAttr:$dstElemType
+    );
+
+    let results = (outs
+        RankedTensorOf<[F16, F32]>:$output
+    );
+
+    let hasVerifier = 1;
+}
+
+//
+// DeformableConvolution
+//
+
+def VPU_DeformableConvolutionOp :
+        VPU_LayerOp<
+            "DeformableConvolution"
+        > {
+    let summary = "DeformableConvolution VPU layer";
+
+    let arguments = (ins
+        RankedTensorOf<[F16, F32]>:$input,
+        RankedTensorOf<[F16, F32]>:$offset,
+        RankedTensorOf<[F16, F32]>:$kernel,
+        Optional<RankedTensorOf<[F16, F32]>>:$mask,
+
+        I64ArrayAttr:$strides,
+        I64ArrayAttr:$pads_begin,
+        I64ArrayAttr:$pads_end,
+        I64ArrayAttr:$dilations,
+
+        IntAttr:$group,
+        IntAttr:$deformable_group,
+        UnitAttr:$biliniar_interpolate_pad
+    );
+
+    let results = (outs
+        RankedTensorOf<[F16, F32]>:$output
+    );
+}
+
+//
+// PopulateWeightTable
+//
+
+def VPU_PopulateWeightTableOp :
+        VPU_LayerOp<
+            "PopulateWeightTable",
+            [
+                DeclareOpInterfaceMethods<VPU_TilingBuilderOpInterface>,
+                DeclareOpInterfaceMethods<VPU_SWOpInterface>,
+                DeclareOpInterfaceMethods<VPU_ClusteredOpInterface>
+            ]
+
+        > {
+    let summary = "Populate weight table VPU layer";
+
+    let arguments = (ins
+        RankedTensorOf<[F16, F32]>:$scale,
+
+        TypeAttr:$dstType,
+        IntAttr:$base,
+        IntAttr:$step,
+        OptionalAttr<VPU_MultiClusterStrategyAttr>:$multiClusterStrategy
+    );
+
+    let results = (outs
+        4DTensorOf<[SI32]>:$output
+    );
+
+    let extraClassDeclaration = [{
+        bool fitIntoCMX(::llvm::ArrayRef<vpux::NDTypeInterface> buffers, Byte reservedMem);
+
+        bool fitIntoCMX(::llvm::ArrayRef<vpux::NDTypeInterface> buffers);
+    }] # baseExtraClassDeclaration;
+
+
+    let builders = [
+        OpBuilder<(ins
+            "::mlir::Value":$scale,
+            CArg<"mlir::Type">:$dstElemType,
+            CArg<"int64_t">:$base,
+            CArg<"int64_t">:$step
+        )>
+    ];
+}
+
+//
+// RMS
+//
+
+def VPU_RMSOp :
+        VPU_LayerOp<
+            "RMS"
+        > {
+    let summary = "RMS VPU layer";
+
+    let arguments = (ins
+        RankedTensorOf<[F16, F32]>:$input,
+        1DTensorOf<[F16, F32]>:$gamma,
+
+        F64Attr:$epsilon
+    );
+
+    let results = (outs
+        RankedTensorOf<[F16, F32]>:$output
+    );
+}
+
+//
+// Inverse
+//
+
+def VPU_InverseOp :
+        VPU_LayerOp<
+            "Inverse"
+        > {
+    let summary = "Inverse VPU layer";
+
+    let arguments = (ins
+        RankedTensorOf<[F16, F32]>:$input,
+
+        UnitAttr:$adjoint
+    );
+
+    let results = (outs
+        RankedTensorOf<[F16, F32]>:$output
+    );
+}
 #endif

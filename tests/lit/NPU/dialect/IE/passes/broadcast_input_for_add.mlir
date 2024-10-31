@@ -12,7 +12,7 @@ func.func @BroadcastTensorInput(%arg0: tensor<1x16x16x32xf16>, %arg1: tensor<1x1
 
     return %0 : tensor<1x16x16x32xf16>
 
-    // CHECK-DAG:   [[TARGET_SHAPE:%.+]] = const.Declare tensor<4xsi32> = dense<[1, 16, 16, 32]> : tensor<4xsi64>, [#const.ConvertElemType<si32>]
+    // CHECK-DAG:   [[TARGET_SHAPE:%.+]] = const.Declare tensor<4xsi32> = dense<[1, 16, 16, 32]> : tensor<4xsi64>, [#const.CastElemType<si32>]
     // CHECK:       [[BROADCAST:%.+]] = IE.Broadcast(%arg1, [[TARGET_SHAPE]])
     // CHECK-SAME:      {mode = #IE.broadcast_type<NUMPY>} : tensor<1x16x16x1xf16>, tensor<4xsi32> -> tensor<1x16x16x32xf16>
     // CHECK:       [[ADD_RES:%.+]] = IE.Add(%arg0, [[BROADCAST]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x16x16x32xf16>, tensor<1x16x16x32xf16> -> tensor<1x16x16x32xf16>
@@ -28,7 +28,7 @@ func.func @BroadcastSingleNonTrivialDimInput(%arg0: tensor<1x16x16x32xf16>, %arg
 
     return %0 : tensor<1x16x16x32xf16>
 
-    // CHECK-DAG:   [[TARGET_SHAPE:%.+]] = const.Declare tensor<4xsi32> = dense<[1, 16, 16, 32]> : tensor<4xsi64>, [#const.ConvertElemType<si32>]
+    // CHECK-DAG:   [[TARGET_SHAPE:%.+]] = const.Declare tensor<4xsi32> = dense<[1, 16, 16, 32]> : tensor<4xsi64>, [#const.CastElemType<si32>]
     // CHECK:       [[BROADCAST:%.+]] = IE.Broadcast(%arg1, [[TARGET_SHAPE]])
     // CHECK-SAME:      {mode = #IE.broadcast_type<NUMPY>} : tensor<1x16x1x1xf16>, tensor<4xsi32> -> tensor<1x16x16x32xf16>
     // CHECK:       [[ADD_RES:%.+]] = IE.Add(%arg0, [[BROADCAST]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x16x16x32xf16>, tensor<1x16x16x32xf16> -> tensor<1x16x16x32xf16>
@@ -44,7 +44,7 @@ func.func @BroadcastTwoInputs(%arg0: tensor<1x16x1x32xf16>, %arg1: tensor<1x16x1
 
     return %0 : tensor<1x16x16x32xf16>
 
-    // CHECK-DAG:   [[TARGET_SHAPE:%.+]] = const.Declare tensor<4xsi32> = dense<[1, 16, 16, 32]> : tensor<4xsi64>, [#const.ConvertElemType<si32>]
+    // CHECK-DAG:   [[TARGET_SHAPE:%.+]] = const.Declare tensor<4xsi32> = dense<[1, 16, 16, 32]> : tensor<4xsi64>, [#const.CastElemType<si32>]
     // CHECK:       [[BROADCAST0:%.+]] = IE.Broadcast(%arg0, [[TARGET_SHAPE]])
     // CHECK-SAME:      {mode = #IE.broadcast_type<NUMPY>} : tensor<1x16x1x32xf16>, tensor<4xsi32> -> tensor<1x16x16x32xf16>
     // CHECK:       [[BROADCAST1:%.+]] = IE.Broadcast(%arg1, [[TARGET_SHAPE]])
@@ -58,13 +58,13 @@ func.func @BroadcastTwoInputs(%arg0: tensor<1x16x1x32xf16>, %arg1: tensor<1x16x1
 
 // CHECK-LABEL: @BroadcastFlatConstantInput
 func.func @BroadcastFlatConstantInput(%arg0: tensor<1x16x16x32xf16>) -> tensor<1x16x16x32xf16> {
-    %0 = const.Declare tensor<1x16x16x1xf16> = dense<1.0> : tensor<1x16x16x1xf16>, [#const.ConvertElemType<f16>]
+    %0 = const.Declare tensor<1x16x16x1xf16> = dense<1.0> : tensor<1x16x16x1xf16>, [#const.CastElemType<f16>]
     %1 = IE.Add(%arg0, %0) { auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x16x16x32xf16>, tensor<1x16x16x1xf16> -> tensor<1x16x16x32xf16>
 
     return %1 : tensor<1x16x16x32xf16>
 
     // CHECK-DAG:   [[BROADCAST:%.+]] = const.Declare tensor<1x16x16x32xf16> = dense<1.000000e+00> : tensor<1x16x16x1xf16>,
-    // CHECK-SAME:                            [#const.ConvertElemType<f16>, #const.Broadcast<3 : i64, 32 : i64>]
+    // CHECK-SAME:                            [#const.CastElemType<f16>, #const.Broadcast<3 : i64, 32 : i64>]
     // CHECK:       [[ADD_RES:%.+]] = IE.Add(%arg0, [[BROADCAST]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x16x16x32xf16>, tensor<1x16x16x32xf16> -> tensor<1x16x16x32xf16>
 
     // CHECK:       return [[ADD_RES]]
@@ -74,14 +74,14 @@ func.func @BroadcastFlatConstantInput(%arg0: tensor<1x16x16x32xf16>) -> tensor<1
 
 // CHECK-LABEL: @BroadcastNonFlatConstantInput
 func.func @BroadcastNonFlatConstantInput(%arg0: tensor<1x16x4x4xf16>) -> tensor<1x16x4x4xf16> {
-    %0 = const.Declare tensor<1x1x1x4xf16> = dense<[[[[1.0, 2.0, 3.0, 4.0]]]]> : tensor<1x1x1x4xf16>, [#const.ConvertElemType<f16>]
+    %0 = const.Declare tensor<1x1x1x4xf16> = dense<[[[[1.0, 2.0, 3.0, 4.0]]]]> : tensor<1x1x1x4xf16>, [#const.CastElemType<f16>]
     %1 = IE.Add(%arg0, %0) { auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x16x4x4xf16>, tensor<1x1x1x4xf16> -> tensor<1x16x4x4xf16>
 
     return %1 : tensor<1x16x4x4xf16>
 
     // CHECK:       [[BROADCAST:%.+]] = const.Declare tensor<1x16x4x4xf16>
     // CHECK-SAME{LITERAL}:      dense<[[[[1.000000e+00, 2.000000e+00, 3.000000e+00, 4.000000e+00]]]]> : tensor<1x1x1x4xf16>,
-    // CHECK-SAME:               [#const.ConvertElemType<f16>, #const.Broadcast<1 : i64, 16 : i64>, #const.Broadcast<2 : i64, 4 : i64>]
+    // CHECK-SAME:               [#const.CastElemType<f16>, #const.Broadcast<1 : i64, 16 : i64>, #const.Broadcast<2 : i64, 4 : i64>]
     // CHECK:       [[ADD_RES:%.+]] = IE.Add(%arg0, [[BROADCAST]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x16x4x4xf16>, tensor<1x16x4x4xf16> -> tensor<1x16x4x4xf16>
 
     // CHECK:       return [[ADD_RES]]
@@ -91,7 +91,7 @@ func.func @BroadcastNonFlatConstantInput(%arg0: tensor<1x16x4x4xf16>) -> tensor<
 
 // CHECK-LABEL: @BroadcastFQAddConstInput
 func.func @BroadcastFQAddConstInput(%arg0: tensor<1x3x30x30xf16>) -> tensor<1x3x30x30xf16> {
-    %CST = const.Declare tensor<1x1x30x30xf16> = dense<1.0> : tensor<1x1x30x30xf16>, [#const.ConvertElemType<f16>]
+    %CST = const.Declare tensor<1x1x30x30xf16> = dense<1.0> : tensor<1x1x30x30xf16>, [#const.CastElemType<f16>]
     %val_low = const.Declare tensor<1x1x1x1xf16> = dense<4.0> : tensor<1x1x1x1xf16>
     %val_high = const.Declare tensor<1x1x1x1xf16> = dense<255.0> : tensor<1x1x1x1xf16>
 
@@ -106,7 +106,7 @@ func.func @BroadcastFQAddConstInput(%arg0: tensor<1x3x30x30xf16>) -> tensor<1x3x
 
     return %add : tensor<1x3x30x30xf16>
 
-    // CHECK:       [[CST:%.+]] = const.Declare tensor<1x3x30x30xf16> = dense<1.000000e+00> : tensor<1x1x30x30xf16>, [#const.ConvertElemType<f16>, #const.Broadcast<1 : i64, 3 : i64>]
+    // CHECK:       [[CST:%.+]] = const.Declare tensor<1x3x30x30xf16> = dense<1.000000e+00> : tensor<1x1x30x30xf16>, [#const.CastElemType<f16>, #const.Broadcast<1 : i64, 3 : i64>]
     // CHECK:       [[VAL_LOW:%.+]] = const.Declare tensor<1x1x1x1xf16> = dense<4.000000e+00> : tensor<1x1x1x1xf16>
     // CHECK:       [[VAL_HIGH:%.+]] = const.Declare tensor<1x1x1x1xf16> = dense<2.550000e+02> : tensor<1x1x1x1xf16>
     // CHECK:       [[RELU:%.+]] = IE.ReLU(%arg0) : tensor<1x3x30x30xf16> -> tensor<1x3x30x30xf16>
@@ -133,12 +133,12 @@ func.func @NotBroadcastWithSameInputShape(%arg0: tensor<1x16x16x32xf16>, %arg1: 
 
 // CHECK-LABEL: @NotBroadcastWithNon4DTensor
 func.func @NotBroadcastWithNon4DTensor(%arg0: tensor<1x3x16xf16>) -> tensor<1x3x16xf16> {
-    %0 = const.Declare tensor<1x1x16xf16> = dense<1.0> : tensor<1x1x16xf16>, [#const.ConvertElemType<f16>]
+    %0 = const.Declare tensor<1x1x16xf16> = dense<1.0> : tensor<1x1x16xf16>, [#const.CastElemType<f16>]
     %1 = IE.Add(%arg0, %0) { auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x3x16xf16>, tensor<1x1x16xf16> -> tensor<1x3x16xf16>
 
     return %1 : tensor<1x3x16xf16>
 
-    // CHECK-DAG:   [[CST:%.+]] = const.Declare tensor<1x1x16xf16> = dense<1.000000e+00> : tensor<1x1x16xf16>, [#const.ConvertElemType<f16>]
+    // CHECK-DAG:   [[CST:%.+]] = const.Declare tensor<1x1x16xf16> = dense<1.000000e+00> : tensor<1x1x16xf16>, [#const.CastElemType<f16>]
     // CHECK:       [[ADD:%.+]] =  IE.Add(%arg0, [[CST]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x3x16xf16>, tensor<1x1x16xf16> -> tensor<1x3x16xf16>
     // CHECK:       return [[ADD]]
 }
@@ -147,12 +147,12 @@ func.func @NotBroadcastWithNon4DTensor(%arg0: tensor<1x3x16xf16>) -> tensor<1x3x
 
 // CHECK-LABEL: @NotBroadcastWithTrivialInput
 func.func @NotBroadcastWithTrivialInput(%arg0: tensor<1x3x16x16xf16>) -> tensor<1x3x16x16xf16> {
-    %0 = const.Declare tensor<1x1x1x1xf16> = dense<1.0> : tensor<1x1x1x1xf16>, [#const.ConvertElemType<f16>]
+    %0 = const.Declare tensor<1x1x1x1xf16> = dense<1.0> : tensor<1x1x1x1xf16>, [#const.CastElemType<f16>]
     %1 = IE.Add(%arg0, %0) { auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x3x16x16xf16>, tensor<1x1x1x1xf16> -> tensor<1x3x16x16xf16>
 
     return %1 : tensor<1x3x16x16xf16>
 
-    // CHECK-DAG:   [[CST:%.+]] = const.Declare tensor<1x1x1x1xf16> = dense<1.000000e+00> : tensor<1x1x1x1xf16>, [#const.ConvertElemType<f16>]
+    // CHECK-DAG:   [[CST:%.+]] = const.Declare tensor<1x1x1x1xf16> = dense<1.000000e+00> : tensor<1x1x1x1xf16>, [#const.CastElemType<f16>]
     // CHECK:       [[ADD:%.+]] =  IE.Add(%arg0, [[CST]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x3x16x16xf16>, tensor<1x1x1x1xf16> -> tensor<1x3x16x16xf16>
     // CHECK:       return [[ADD]]
 }

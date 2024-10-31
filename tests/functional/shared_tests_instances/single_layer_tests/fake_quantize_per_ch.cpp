@@ -136,18 +136,19 @@ const std::vector<ov::Shape> shapesTiling = {
         {1, 64, 128, 100}, {1, 128, 68, 164},  // aclnet
 };
 
-INSTANTIATE_TEST_CASE_P(smoke_precommit_FakeQuantPerCh, FakeQuantPerChLayerTest_NPU3720, ::testing::ValuesIn(shapesHW));
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_FakeQuantPerCh, FakeQuantPerChLayerTest_NPU3720,
+                         ::testing::ValuesIn(shapesHW));
 
-INSTANTIATE_TEST_CASE_P(smoke_FakeQuantPerCh, FakeQuantPerChLayerTestConfig_NPU3720, ::testing::ValuesIn(shapesSW));
+INSTANTIATE_TEST_SUITE_P(smoke_FakeQuantPerCh, FakeQuantPerChLayerTestConfig_NPU3720, ::testing::ValuesIn(shapesSW));
 
-INSTANTIATE_TEST_CASE_P(smoke_FakeQuantPerCh, FakeQuantPerChLayerTest_NPU4000, ::testing::ValuesIn(shapesSW));
+INSTANTIATE_TEST_SUITE_P(smoke_FakeQuantPerCh, FakeQuantPerChLayerTest_NPU4000, ::testing::ValuesIn(shapesSW));
 
-INSTANTIATE_TEST_CASE_P(smoke_tiling_FakeQuantPerCh, FakeQuantPerChLayerTestConfig_NPU3720,
-                        ::testing::ValuesIn(shapesTiling));
+INSTANTIATE_TEST_SUITE_P(smoke_tiling_FakeQuantPerCh, FakeQuantPerChLayerTestConfig_NPU3720,
+                         ::testing::ValuesIn(shapesTiling));
 
 //{outHigh, outLow, inHigh, inLow}
 // testing per-channel quantization with different ZPs for output
-INSTANTIATE_TEST_CASE_P(
+INSTANTIATE_TEST_SUITE_P(
         smoke_customLimits_FakeQuantPerCh1, FakeQuantPerChCustomLimitsLayerTest_NPU3720,
         ::testing::Combine(::testing::ValuesIn(shapesSWcustomLimits),
                            ::testing::Values(std::vector<float>{+2.63867188}),
@@ -156,7 +157,7 @@ INSTANTIATE_TEST_CASE_P(
                            ::testing::Values(std::vector<float>{+2.551250e+02, +2.670000e+02, +2.780000e+02})));
 
 // testing per-channel quantization with different ZPs for output and input
-INSTANTIATE_TEST_CASE_P(
+INSTANTIATE_TEST_SUITE_P(
         smoke_customLimits_FakeQuantPerCh2, FakeQuantPerChCustomLimitsLayerTest_NPU3720,
         ::testing::Combine(::testing::ValuesIn(shapesSWcustomLimits),
                            ::testing::Values(std::vector<float>{+2.551250e+02, +2.670000e+02, +2.780000e+02}),
@@ -165,11 +166,11 @@ INSTANTIATE_TEST_CASE_P(
                            ::testing::Values(std::vector<float>{-49.28125, -35.65625, -31.828125})));
 
 // testing per-channel quantization with different ZPs for input
-INSTANTIATE_TEST_CASE_P(smoke_customLimits_FakeQuantPerCh3, FakeQuantPerChCustomLimitsLayerTest_NPU3720,
-                        ::testing::Combine(::testing::ValuesIn(shapesSWcustomLimits),
-                                           ::testing::Values(std::vector<float>{+2.63867188}),
-                                           ::testing::Values(std::vector<float>{-2.63867188}),
-                                           ::testing::Values(std::vector<float>{+2.551250e+02, +2.670000e+02,
-                                                                                +2.780000e+02}),
-                                           ::testing::Values(std::vector<float>{-49.28125, -35.65625, -31.828125})));
+INSTANTIATE_TEST_SUITE_P(smoke_customLimits_FakeQuantPerCh3, FakeQuantPerChCustomLimitsLayerTest_NPU3720,
+                         ::testing::Combine(::testing::ValuesIn(shapesSWcustomLimits),
+                                            ::testing::Values(std::vector<float>{+2.63867188}),
+                                            ::testing::Values(std::vector<float>{-2.63867188}),
+                                            ::testing::Values(std::vector<float>{+2.551250e+02, +2.670000e+02,
+                                                                                 +2.780000e+02}),
+                                            ::testing::Values(std::vector<float>{-49.28125, -35.65625, -31.828125})));
 }  // namespace

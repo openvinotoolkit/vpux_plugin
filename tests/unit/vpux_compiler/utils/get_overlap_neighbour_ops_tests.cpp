@@ -5,9 +5,11 @@
 
 //
 
+#include "vpux/compiler/dialect/VPU/IR/dialect.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
 #include "vpux/compiler/dialect/VPU/utils/overlap_distribution_utils.hpp"
+#include "vpux/compiler/dialect/VPU/utils/sibling_ops_analysis.hpp"
 #include "vpux/compiler/init.hpp"
 #include "vpux/compiler/interfaces_registry.hpp"
 
@@ -103,9 +105,7 @@ ProducersConsumers getProducerConsumersSets(mlir::func::FuncOp func, bool ignore
 TEST_P(GetOverlapSiblingsTests, GetOps) {
     const auto inputIR = GetParam();
 
-    mlir::DialectRegistry registry;
-    vpux::registerDialects(registry);
-    vpux::registerCommonInterfaces(registry);
+    auto registry = vpux::createDialectRegistry();
     auto interfacesRegistry = vpux::createInterfacesRegistry(vpux::VPU::ArchKind::NPU40XX);
     interfacesRegistry->registerInterfaces(registry);
 
@@ -118,10 +118,10 @@ TEST_P(GetOverlapSiblingsTests, GetOps) {
     ASSERT_TRUE(func != nullptr);
 
     auto producersConsumers = getProducerConsumersSets(func, false);
-
     auto expectedSiblings = producersConsumers.consumers;
+    auto siblingAnalysis = vpux::VPU::SiblingOpsAnalysis(func);
     for (auto op : expectedSiblings) {
-        const auto actualSiblings = VPU::getSiblingOps(op.getOperation());
+        const auto actualSiblings = siblingAnalysis.getSiblings(op);
 
         EXPECT_EQ(actualSiblings, expectedSiblings);
     }
@@ -135,9 +135,7 @@ TEST_P(GetActivationOverlapTests, GetParams) {
     const auto expectedMemoryOffsets = params.memoryOffsets;
     const auto inputTileShape = params.tileShape;
 
-    mlir::DialectRegistry registry;
-    vpux::registerDialects(registry);
-    vpux::registerCommonInterfaces(registry);
+    auto registry = vpux::createDialectRegistry();
     auto interfacesRegistry = vpux::createInterfacesRegistry(vpux::VPU::ArchKind::NPU40XX);
     interfacesRegistry->registerInterfaces(registry);
 
@@ -162,14 +160,15 @@ TEST_P(GetActivationOverlapTests, GetParams) {
 
     vpux::NDTypeInterface inputType = nullptr;
     const auto& expectedSiblings = producersConsumers.consumers;
+    auto siblingAnalysis = vpux::VPU::SiblingOpsAnalysis(func);
     for (auto op : expectedSiblings) {
         if (!inputTileShape.empty()) {
             inputType = op->getOperand(0).getType().cast<vpux::NDTypeInterface>().extractDenseTile(
                     Shape{0, 0, 0, 0}, Shape(inputTileShape));
         }
 
-        auto actualOverlappedParams =
-                VPU::getActivationOverlappedParams(op, numTiles, uniformDistributedSegments ? true : false, inputType);
+        auto actualOverlappedParams = VPU::getActivationOverlappedParams(
+                op, numTiles, uniformDistributedSegments ? true : false, siblingAnalysis, inputType);
 
         const auto memShapes = actualOverlappedParams.getMemoryShapes();
         const auto memOffsets = actualOverlappedParams.getMemoryOffsets();
@@ -197,9 +196,7 @@ TEST_P(GetOutputOverlapTests, GetParams) {
     const auto expectedMemoryOffsets = params.memoryOffsets;
     const auto outputTileShape = params.tileShape;
 
-    mlir::DialectRegistry registry;
-    vpux::registerDialects(registry);
-    vpux::registerCommonInterfaces(registry);
+    auto registry = vpux::createDialectRegistry();
     auto interfacesRegistry = vpux::createInterfacesRegistry(vpux::VPU::ArchKind::NPU40XX);
     interfacesRegistry->registerInterfaces(registry);
 
@@ -217,6 +214,7 @@ TEST_P(GetOutputOverlapTests, GetParams) {
             getProducerConsumersSets(func, /*ignore sep ops*/ false, /*max pool producer*/ true);
 
     NDTypeInterface outputType = nullptr;
+    auto siblingAnalysis = vpux::VPU::SiblingOpsAnalysis(func);
     for (auto op : producersConsumers.producers) {
         if (!outputTileShape.empty()) {
             outputType = op->getResult(0).getType().cast<vpux::NDTypeInterface>().extractDenseTile(
@@ -224,7 +222,8 @@ TEST_P(GetOutputOverlapTests, GetParams) {
         }
 
         auto producerOverlappedParams =
-                VPU::getOutputOverlappedParams(op, numTiles, uniformDistributedSegments ? true : false, outputType);
+                VPU::getOutputOverlappedParams(op, numTiles, uniformDistributedSegments ? true : false, outputType,
+                                               TileInfo(ShapeRef()), siblingAnalysis);
 
         if (mlir::isa<VPU::NCEMaxPoolOp>(op.getOperation())) {
             // MaxPool producer is used when not all produces should have the same set of consumers.
@@ -266,31 +265,21 @@ llvm::StringLiteral twoConvConsumers = R"(
 
             %0 = VPU.NCE.AveragePool(%arg0) {
                 kernel_size = [1, 1],
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-                ppe = #VPU.PPETask<mode = <LPRELU>,
-                clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                lrelu_mult = 1311 : i64, lrelu_shift = 17 : i64,
-                quant_scale = [1.000000e+00],
-                fp_prelu_alpha = 0.01000213623046875 : f64>,
                 strides = [1, 1]}
                     -> tensor<1x144x28x27xf16, {order = #NHWC}>
 
             %1 = VPU.NCE.Convolution(%0, %w0, %weightsTable) {
+                    opaque_ppe = #VPU.PPEStub<>,
                     pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
-                    ppe = #VPU.PPETask<mode = <NOOP>,
-                    clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                    lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-                    fp_prelu_alpha = 1.000000e+00 : f64>,
                     rawFilterShape = [144, 144, 3, 3],
                     strides = [1, 1]}
                         -> tensor<1x144x28x27xf16, {order = #NHWC}>
 
             %2 = VPU.NCE.Convolution(%0, %w1, %weightsTable) {
+                    opaque_ppe = #VPU.PPEStub<>,
                     pad = #VPU.Padding<left = 2 : i64, right = 2 : i64, top = 2 : i64, bottom = 2 : i64>,
-                    ppe = #VPU.PPETask<mode = <NOOP>,
-                    clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                    lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-                    fp_prelu_alpha = 1.000000e+00 : f64>,
                     rawFilterShape = [144, 144, 5, 5],
                     strides = [1, 1]}
                         -> tensor<1x144x28x27xf16, {order = #NHWC}>
@@ -331,21 +320,14 @@ llvm::StringLiteral nceInterpAndConvConsumers = R"(
 
             %0 = VPU.NCE.AveragePool(%arg0) {
                 kernel_size = [1, 1],
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-                ppe = #VPU.PPETask<mode = <LPRELU>,
-                clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                lrelu_mult = 1311 : i64, lrelu_shift = 17 : i64,
-                quant_scale = [1.000000e+00],
-                fp_prelu_alpha = 0.01000213623046875 : f64>,
                 strides = [1, 1]}
                     -> tensor<1x144x28x27xf16, {order = #NHWC}>
 
             %1 = VPU.NCE.Convolution(%0, %w0, %weightsTable) {
+                    opaque_ppe = #VPU.PPEStub<>,
                     pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
-                    ppe = #VPU.PPETask<mode = <NOOP>,
-                    clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                    lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-                    fp_prelu_alpha = 1.000000e+00 : f64>,
                     rawFilterShape = [144, 144, 3, 3],
                     strides = [1, 1]}
                         -> tensor<1x144x28x27xf16, {order = #NHWC}>
@@ -362,11 +344,11 @@ llvm::StringLiteral nceInterpAndConvConsumers = R"(
                                               scale = [1.0, 1.0, 2.0, 2.0]>>
 
             %2 = VPU.NCE.Interpolate(%interpIn, %w3, %weightsTable) {
+                opaque_ppe = #VPU.PPEStub<>,
                 rawFilterShape = [144, 144, 2, 2],
                 strides = [1, 1],
                 mode = #VPU.nce_interpolate_mode<BILINEAR>,
-                scales_attr = [2, 2],
-                ppe = #VPU.PPETask<clamp_high = 2147483967, clamp_low = 0, lrelu_mult = 1, lrelu_shift = 0, mode = <NOOP>>}
+                scales_attr = [2, 2]}
                         -> tensor<1x144x56x54xf16, {order = #NHWC}>
 
             return %1, %2 : tensor<1x144x28x27xf16, {order = #NHWC}>, tensor<1x144x56x54xf16, {order = #NHWC}>
@@ -395,31 +377,21 @@ llvm::StringLiteral threeClusteredConsumers = R"(
 
             %0 = VPU.NCE.AveragePool(%arg0) {
                 kernel_size = [1, 1],
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-                ppe = #VPU.PPETask<mode = <LPRELU>,
-                clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                lrelu_mult = 1311 : i64, lrelu_shift = 17 : i64,
-                quant_scale = [1.000000e+00],
-                fp_prelu_alpha = 0.01000213623046875 : f64>,
                 strides = [1, 1]}
                     -> tensor<1x144x28x27xf16, {order = #NHWC}>
 
             %1 = VPU.NCE.Convolution(%0, %w0, %weightsTable) {
+                    opaque_ppe = #VPU.PPEStub<>,
                     pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
-                    ppe = #VPU.PPETask<mode = <NOOP>,
-                    clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                    lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-                    fp_prelu_alpha = 1.000000e+00 : f64>,
                     rawFilterShape = [144, 144, 3, 3],
                     strides = [1, 1]}
                         -> tensor<1x144x28x27xf16, {order = #NHWC}>
 
             %2 = VPU.NCE.Convolution(%0, %w1, %weightsTable) {
+                    opaque_ppe = #VPU.PPEStub<>,
                     pad = #VPU.Padding<left = 2 : i64, right = 2 : i64, top = 2 : i64, bottom = 2 : i64>,
-                    ppe = #VPU.PPETask<mode = <NOOP>,
-                    clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                    lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-                    fp_prelu_alpha = 1.000000e+00 : f64>,
                     rawFilterShape = [144, 144, 5, 5],
                     strides = [1, 1]}
                         -> tensor<1x144x28x27xf16, {order = #NHWC}>
@@ -451,21 +423,14 @@ llvm::StringLiteral oneConsumerNotClustered = R"(
 
             %0 = VPU.NCE.AveragePool(%arg0) {
                 kernel_size = [1, 1],
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-                ppe = #VPU.PPETask<mode = <LPRELU>,
-                clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                lrelu_mult = 1311 : i64, lrelu_shift = 17 : i64,
-                quant_scale = [1.000000e+00],
-                fp_prelu_alpha = 0.01000213623046875 : f64>,
                 strides = [1, 1]}
                     -> tensor<1x144x28x27xf16, {order = #NHWC}>
 
             %1 = VPU.NCE.Convolution(%0, %w0, %weightsTable) {
+                    opaque_ppe = #VPU.PPEStub<>,
                     pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
-                    ppe = #VPU.PPETask<mode = <NOOP>,
-                    clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                    lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-                    fp_prelu_alpha = 1.000000e+00 : f64>,
                     rawFilterShape = [144, 144, 3, 3],
                     strides = [1, 1]}
                         -> tensor<1x144x28x27xf16, {order = #NHWC}>
@@ -548,19 +513,15 @@ llvm::StringLiteral quantizeCastDirectConsumer = R"(
         func.func @main(%arg0: tensor<1x32x28x27x!qElemType, {order = #NHWC}>)
           -> (tensor<1x32x14x14x!qElemType2, {order = #NHWC}>, tensor<1x32x28x27x!qElemType3, {order = #NHWC}>) {
             %weights0 = const.Declare tensor<32x32x1x1x!qElemType1, {order = #NHWC}>
-                = dense<1.0> : tensor<32x32x1x1xf16, {order = #NHWC}>, [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType2>]
+                = dense<1.0> : tensor<32x32x1x1xf16, {order = #NHWC}>, [#const.CastElemType<ui8>, #const.CastElemType<!qElemType2>]
             %weights1 = const.Declare tensor<32x32x5x5x!qElemType1, {order = #NHWC}>
-                = dense<1.0> : tensor<32x32x5x5xf16, {order = #NHWC}>, [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType2>]
+                = dense<1.0> : tensor<32x32x5x5xf16, {order = #NHWC}>, [#const.CastElemType<ui8>, #const.CastElemType<!qElemType2>]
             %weightsTable = const.Declare tensor<32x1x1x4xsi32> = dense<1> : tensor<32x1x1x4xsi32>
 
             %0 = VPU.NCE.AveragePool(%arg0) {
                 kernel_size = [1, 1],
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-                ppe = #VPU.PPETask<mode = <LPRELU>,
-                clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                lrelu_mult = 1311 : i64, lrelu_shift = 17 : i64,
-                quant_scale = [1.000000e+00],
-                fp_prelu_alpha = 1.000000e+00 : f64>,
                 strides = [1, 1]}
                     -> tensor<1x32x28x27x!qElemType, {order = #NHWC}>
 
@@ -568,11 +529,8 @@ llvm::StringLiteral quantizeCastDirectConsumer = R"(
                 : tensor<1x32x28x27x!qElemType, {order = #NHWC}> -> tensor<1x32x28x27x!qElemType2, {order = #NHWC}>
 
             %2 = VPU.NCE.Convolution(%1, %weights0, %weightsTable) {
+                    opaque_ppe = #VPU.PPEStub<>,
                     pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-                    ppe = #VPU.PPETask<mode = <NOOP>,
-                    clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                    lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-                    fp_prelu_alpha = 1.000000e+00 : f64>,
                     rawFilterShape = [32, 32, 1, 1],
                     strides = [2, 2]}
                         -> tensor<1x32x14x14x!qElemType2, {order = #NHWC}>
@@ -581,11 +539,8 @@ llvm::StringLiteral quantizeCastDirectConsumer = R"(
                 : tensor<1x32x28x27x!qElemType, {order = #NHWC}> -> tensor<1x32x28x27x!qElemType3, {order = #NHWC}>
 
             %4 = VPU.NCE.Convolution(%3, %weights1, %weightsTable) {
+                    opaque_ppe = #VPU.PPEStub<>,
                     pad = #VPU.Padding<left = 2 : i64, right = 2 : i64, top = 2 : i64, bottom = 2 : i64>,
-                    ppe = #VPU.PPETask<mode = <NOOP>,
-                    clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                    lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-                    fp_prelu_alpha = 1.000000e+00 : f64>,
                     rawFilterShape = [32, 32, 5, 5],
                     strides = [1, 1]}
                         -> tensor<1x32x28x27x!qElemType3, {order = #NHWC}>
@@ -613,19 +568,15 @@ llvm::StringLiteral multipleConsumersOfQuantizeCast = R"(
         func.func @main(%arg0: tensor<1x32x28x27x!qElemType, {order = #NHWC}>)
           -> (tensor<1x32x14x14x!qElemType2, {order = #NHWC}>, tensor<1x32x28x27x!qElemType3, {order = #NHWC}>, tensor<1x32x28x27x!qElemType3, {order = #NHWC}>) {
             %weights0 = const.Declare tensor<32x32x1x1x!qElemType1, {order = #NHWC}>
-                = dense<1.0> : tensor<32x32x1x1xf16, {order = #NHWC}>, [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType2>]
+                = dense<1.0> : tensor<32x32x1x1xf16, {order = #NHWC}>, [#const.CastElemType<ui8>, #const.CastElemType<!qElemType2>]
             %weights1 = const.Declare tensor<32x32x3x3x!qElemType1, {order = #NHWC}>
-                = dense<1.0> : tensor<32x32x3x3xf16, {order = #NHWC}>, [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType2>]
+                = dense<1.0> : tensor<32x32x3x3xf16, {order = #NHWC}>, [#const.CastElemType<ui8>, #const.CastElemType<!qElemType2>]
             %weightsTable = const.Declare tensor<32x1x1x4xsi32> = dense<1> : tensor<32x1x1x4xsi32>
 
             %0 = VPU.NCE.AveragePool(%arg0) {
                 kernel_size = [1, 1],
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-                ppe = #VPU.PPETask<mode = <LPRELU>,
-                clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                lrelu_mult = 1311 : i64, lrelu_shift = 17 : i64,
-                quant_scale = [1.000000e+00],
-                fp_prelu_alpha = 1.000000e+00 : f64>,
                 strides = [1, 1]}
                     -> tensor<1x32x28x27x!qElemType, {order = #NHWC}>
 
@@ -633,31 +584,22 @@ llvm::StringLiteral multipleConsumersOfQuantizeCast = R"(
                 : tensor<1x32x28x27x!qElemType, {order = #NHWC}> -> tensor<1x32x28x27x!qElemType2, {order = #NHWC}>
 
             %2 = VPU.NCE.Convolution(%1, %weights0, %weightsTable) {
+                    opaque_ppe = #VPU.PPEStub<>,
                     pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-                    ppe = #VPU.PPETask<mode = <NOOP>,
-                    clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                    lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-                    fp_prelu_alpha = 1.000000e+00 : f64>,
                     rawFilterShape = [32, 32, 1, 1],
                     strides = [2, 2]}
                         -> tensor<1x32x14x14x!qElemType2, {order = #NHWC}>
 
             %4 = VPU.NCE.Convolution(%1, %weights1, %weightsTable) {
+                    opaque_ppe = #VPU.PPEStub<>,
                     pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
-                    ppe = #VPU.PPETask<mode = <NOOP>,
-                    clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                    lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-                    fp_prelu_alpha = 1.000000e+00 : f64>,
                     rawFilterShape = [32, 32, 3, 3],
                     strides = [1, 1]}
                         -> tensor<1x32x28x27x!qElemType3, {order = #NHWC}>
 
             %5 = VPU.NCE.Convolution(%0, %weights0, %weightsTable) {
+                    opaque_ppe = #VPU.PPEStub<>,
                     pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-                    ppe = #VPU.PPETask<mode = <NOOP>,
-                    clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                    lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-                    fp_prelu_alpha = 1.000000e+00 : f64>,
                     rawFilterShape = [32, 32, 1, 1],
                     strides = [1, 1]}
                         -> tensor<1x32x28x27x!qElemType3, {order = #NHWC}>
@@ -737,40 +679,28 @@ llvm::StringLiteral eltwiseResidualBlock = R"(
 
             %0 = VPU.NCE.AveragePool(%arg0) {
                 kernel_size = [1, 1],
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-                ppe = #VPU.PPETask<mode = <LPRELU>,
-                clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                lrelu_mult = 1311 : i64, lrelu_shift = 17 : i64,
-                quant_scale = [1.000000e+00],
-                fp_prelu_alpha = 0.01000213623046875 : f64>,
                 strides = [1, 1]}
                     -> tensor<1x16x8x8xf16, {order = #NHWC}>
 
             %1 = VPU.NCE.Convolution(%0, %w0, %weightsTable) {
+                    opaque_ppe = #VPU.PPEStub<>,
                     pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
-                    ppe = #VPU.PPETask<mode = <NOOP>,
-                    clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                    lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-                    fp_prelu_alpha = 1.000000e+00 : f64>,
                     rawFilterShape = [16, 16, 3, 3],
                     strides = [1, 1]}
                         -> tensor<1x16x8x8xf16, {order = #NHWC}>
 
             %2 = VPU.NCE.Convolution(%0, %w1, %weightsTable) {
+                    opaque_ppe = #VPU.PPEStub<>,
                     pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-                    ppe = #VPU.PPETask<mode = <NOOP>,
-                    clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                    lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-                    fp_prelu_alpha = 1.000000e+00 : f64>,
                     rawFilterShape = [16, 16, 1, 1],
                     strides = [2, 2]}
                         -> tensor<1x16x4x4xf16, {order = #NHWC}>
 
             %3 = VPU.NCE.Eltwise(%0, %1) {
                     op_type = #VPU.eltwise_type<ADD>,
-                    ppe = #VPU.PPETask<mode = <ADD>,
-                    clamp_high = 2147483647 : i64, clamp_low = -2147483648 : i64,
-                    lrelu_mult = 1 : i64, lrelu_shift = 0 : i64>}
+                    opaque_ppe = #VPU.PPEStub<>}
                         -> tensor<1x16x8x8xf16, {order = #NHWC}>
 
             return %2, %3 : tensor<1x16x4x4xf16, {order = #NHWC}>, tensor<1x16x8x8xf16, {order = #NHWC}>
@@ -801,51 +731,35 @@ llvm::StringLiteral eltwiseWithParentsInDiffSubgraphs = R"(
 
             %0 = VPU.NCE.AveragePool(%arg0) {
                 kernel_size = [1, 1],
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-                ppe = #VPU.PPETask<mode = <LPRELU>,
-                clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                lrelu_mult = 1311 : i64, lrelu_shift = 17 : i64,
-                quant_scale = [1.000000e+00],
-                fp_prelu_alpha = 0.01000213623046875 : f64>,
                 strides = [1, 1]}
                     -> tensor<1x16x8x8xf16, {order = #NHWC}>
 
             %1 = VPU.NCE.Convolution(%0, %w0, %weightsTable) {
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
-                ppe = #VPU.PPETask<mode = <NOOP>,
-                clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-                fp_prelu_alpha = 1.000000e+00 : f64>,
                 rawFilterShape = [16, 16, 3, 3],
                 strides = [1, 1]}
                     -> tensor<1x16x8x8xf16, {order = #NHWC}>
 
             %2 = VPU.NCE.AveragePool(%arg0) {
                 kernel_size = [2, 2],
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 1 : i64, right = 0 : i64, top = 1 : i64, bottom = 0 : i64>,
-                ppe = #VPU.PPETask<mode = <LPRELU>,
-                clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                lrelu_mult = 1311 : i64, lrelu_shift = 17 : i64,
-                quant_scale = [1.000000e+00],
-                fp_prelu_alpha = 0.01000213623046875 : f64>,
                 strides = [1, 1]}
                     -> tensor<1x16x8x8xf16, {order = #NHWC}>
 
             %3 = VPU.NCE.Convolution(%2, %w1, %weightsTable) {
+                    opaque_ppe = #VPU.PPEStub<>,
                     pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-                    ppe = #VPU.PPETask<mode = <NOOP>,
-                    clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                    lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-                    fp_prelu_alpha = 1.000000e+00 : f64>,
                     rawFilterShape = [16, 16, 1, 1],
                     strides = [1, 1]}
                         -> tensor<1x16x8x8xf16, {order = #NHWC}>
 
             %4 = VPU.NCE.Eltwise(%0, %2) {
                     op_type = #VPU.eltwise_type<ADD>,
-                    ppe = #VPU.PPETask<mode = <ADD>,
-                    clamp_high = 2147483647 : i64, clamp_low = -2147483648 : i64,
-                    lrelu_mult = 1 : i64, lrelu_shift = 0 : i64>}
+                    opaque_ppe = #VPU.PPEStub<>}
                         -> tensor<1x16x8x8xf16, {order = #NHWC}>
 
             return %1, %3, %4 : tensor<1x16x8x8xf16, {order = #NHWC}>, tensor<1x16x8x8xf16, {order = #NHWC}>, tensor<1x16x8x8xf16, {order = #NHWC}>
@@ -909,33 +823,23 @@ llvm::StringLiteral eltwiseInPlaceSubgraph = R"(
             %0 = VPU.NCE.AveragePool(%arg0) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
                 kernel_size = [1, 1],
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-                ppe = #VPU.PPETask<mode = <LPRELU>,
-                clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                lrelu_mult = 1311 : i64, lrelu_shift = 17 : i64,
-                quant_scale = [1.000000e+00],
-                fp_prelu_alpha = 0.01000213623046875 : f64>,
                 strides = [1, 1]}
                     -> tensor<1x16x8x8xf16, {order = #NHWC}>
 
             %1 = VPU.NCE.Convolution(%0, %w0, %weightsTable) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
-                ppe = #VPU.PPETask<mode = <NOOP>,
-                clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-                fp_prelu_alpha = 1.000000e+00 : f64>,
                 rawFilterShape = [16, 16, 3, 3],
                 strides = [1, 1]}
                     -> tensor<1x16x8x8xf16, {order = #NHWC}>
 
             %2 = VPU.NCE.Convolution(%0, %w1, %weightsTable) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-                ppe = #VPU.PPETask<mode = <NOOP>,
-                clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-                fp_prelu_alpha = 1.000000e+00 : f64>,
                 rawFilterShape = [16, 16, 1, 1],
                 strides = [2, 2]}
                     -> tensor<1x16x4x4xf16, {order = #NHWC}>
@@ -943,18 +847,13 @@ llvm::StringLiteral eltwiseInPlaceSubgraph = R"(
             %3 = VPU.NCE.Eltwise(%0, %1) {
                 is_inplace = true,
                 op_type = #VPU.eltwise_type<ADD>,
-                ppe = #VPU.PPETask<mode = <ADD>,
-                clamp_high = 2147483647 : i64, clamp_low = -2147483648 : i64,
-                lrelu_mult = 1 : i64, lrelu_shift = 0 : i64>}
+                opaque_ppe = #VPU.PPEStub<>}
                     -> tensor<1x16x8x8xf16, {order = #NHWC}>
 
             %4 = VPU.NCE.Convolution(%3, %w2, %weightsTable) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 2 : i64, right = 2 : i64, top = 2 : i64, bottom = 2 : i64>,
-                ppe = #VPU.PPETask<mode = <NOOP>,
-                clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-                fp_prelu_alpha = 1.000000e+00 : f64>,
                 rawFilterShape = [16, 16, 5, 5],
                 strides = [1, 1]}
                     -> tensor<1x16x8x8xf16, {order = #NHWC}>
@@ -990,22 +889,15 @@ llvm::StringLiteral eltwiseInPlaceWithParentsInDiffSubgraphs = R"(
             %0 = VPU.NCE.AveragePool(%arg0) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
                 kernel_size = [1, 1],
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-                ppe = #VPU.PPETask<mode = <LPRELU>,
-                clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                lrelu_mult = 1311 : i64, lrelu_shift = 17 : i64,
-                quant_scale = [1.000000e+00],
-                fp_prelu_alpha = 0.01000213623046875 : f64>,
                 strides = [1, 1]}
                     -> tensor<1x16x8x8xf16, {order = #NHWC}>
 
             %1 = VPU.NCE.Convolution(%0, %w0, %weightsTable) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
-                ppe = #VPU.PPETask<mode = <NOOP>,
-                clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-                fp_prelu_alpha = 1.000000e+00 : f64>,
                 rawFilterShape = [16, 16, 3, 3],
                 strides = [1, 1]}
                     -> tensor<1x16x8x8xf16, {order = #NHWC}>
@@ -1013,22 +905,15 @@ llvm::StringLiteral eltwiseInPlaceWithParentsInDiffSubgraphs = R"(
             %2 = VPU.NCE.AveragePool(%arg0) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
                 kernel_size = [2, 2],
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 1 : i64, right = 0 : i64, top = 1 : i64, bottom = 0 : i64>,
-                ppe = #VPU.PPETask<mode = <LPRELU>,
-                clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                lrelu_mult = 1311 : i64, lrelu_shift = 17 : i64,
-                quant_scale = [1.000000e+00],
-                fp_prelu_alpha = 0.01000213623046875 : f64>,
                 strides = [1, 1]}
                     -> tensor<1x16x8x8xf16, {order = #NHWC}>
 
             %3 = VPU.NCE.Convolution(%2, %w1, %weightsTable) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-                ppe = #VPU.PPETask<mode = <NOOP>,
-                clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-                fp_prelu_alpha = 1.000000e+00 : f64>,
                 rawFilterShape = [16, 16, 1, 1],
                 strides = [1, 1]}
                     -> tensor<1x16x8x8xf16, {order = #NHWC}>
@@ -1036,18 +921,13 @@ llvm::StringLiteral eltwiseInPlaceWithParentsInDiffSubgraphs = R"(
             %4 = VPU.NCE.Eltwise(%0, %2) {
                 is_inplace = true,
                 op_type = #VPU.eltwise_type<ADD>,
-                ppe = #VPU.PPETask<mode = <ADD>,
-                clamp_high = 2147483647 : i64, clamp_low = -2147483648 : i64,
-                lrelu_mult = 1 : i64, lrelu_shift = 0 : i64>}
+                opaque_ppe = #VPU.PPEStub<>}
                     -> tensor<1x16x8x8xf16, {order = #NHWC}>
 
             %5 = VPU.NCE.Convolution(%4, %w2, %weightsTable) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 2 : i64, right = 2 : i64, top = 2 : i64, bottom = 2 : i64>,
-                ppe = #VPU.PPETask<mode = <NOOP>,
-                clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-                fp_prelu_alpha = 1.000000e+00 : f64>,
                 rawFilterShape = [16, 16, 5, 5],
                 strides = [1, 1]}
                     -> tensor<1x16x8x8xf16, {order = #NHWC}>
@@ -1119,33 +999,23 @@ llvm::StringLiteral concatSubgraph = R"(
             %0 = VPU.NCE.AveragePool(%arg0) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
                 kernel_size = [1, 1],
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-                ppe = #VPU.PPETask<mode = <LPRELU>,
-                clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                lrelu_mult = 1311 : i64, lrelu_shift = 17 : i64,
-                quant_scale = [1.000000e+00],
-                fp_prelu_alpha = 0.01000213623046875 : f64>,
                 strides = [1, 1]}
                     -> tensor<1x16x8x8xf16, {order = #NHWC}>
 
             %1 = VPU.NCE.Convolution(%0, %w0, %weightsTable) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
-                ppe = #VPU.PPETask<mode = <NOOP>,
-                clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-                fp_prelu_alpha = 1.000000e+00 : f64>,
                 rawFilterShape = [16, 16, 3, 3],
                 strides = [1, 1]}
                     -> tensor<1x16x8x8xf16, {order = #NHWC}>
 
             %2 = VPU.NCE.Convolution(%0, %w1, %weightsTable) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-                ppe = #VPU.PPETask<mode = <NOOP>,
-                clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-                fp_prelu_alpha = 1.000000e+00 : f64>,
                 rawFilterShape = [16, 16, 1, 1],
                 strides = [2, 2]}
                     -> tensor<1x16x4x4xf16, {order = #NHWC}>
@@ -1156,11 +1026,8 @@ llvm::StringLiteral concatSubgraph = R"(
 
             %4 = VPU.NCE.Convolution(%3, %w2, %weightsTable) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 2 : i64, right = 2 : i64, top = 2 : i64, bottom = 2 : i64>,
-                ppe = #VPU.PPETask<mode = <NOOP>,
-                clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-                fp_prelu_alpha = 1.000000e+00 : f64>,
                 rawFilterShape = [16, 32, 5, 5],
                 strides = [1, 1]}
                     -> tensor<1x16x8x8xf16, {order = #NHWC}>
@@ -1192,45 +1059,31 @@ llvm::StringLiteral notSOHCompatibleConcatSubgraph = R"(
             %0 = VPU.NCE.AveragePool(%arg0) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
                 kernel_size = [1, 1],
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-                ppe = #VPU.PPETask<mode = <LPRELU>,
-                clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                lrelu_mult = 1311 : i64, lrelu_shift = 17 : i64,
-                quant_scale = [1.000000e+00],
-                fp_prelu_alpha = 0.01000213623046875 : f64>,
                 strides = [1, 1]}
                     -> tensor<1x16x8x8xf16, {order = #NHWC}>
 
             %1 = VPU.NCE.MaxPool(%arg0) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
                 kernel_size = [1, 1],
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-                ppe = #VPU.PPETask<mode = <LPRELU>,
-                clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-                quant_scale = [1.000000e+00],
-                fp_prelu_alpha = 1.0 : f64>,
                 strides = [1, 1]}
                     -> tensor<1x16x8x8xf16, {order = #NHWC}>
 
             %2 = VPU.NCE.Convolution(%0, %w0, %weightsTable) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
-                ppe = #VPU.PPETask<mode = <NOOP>,
-                clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-                fp_prelu_alpha = 1.000000e+00 : f64>,
                 rawFilterShape = [16, 16, 3, 3],
                 strides = [1, 1]}
                     -> tensor<1x16x8x8xf16, {order = #NHWC}>
 
             %3 = VPU.NCE.Convolution(%0, %w1, %weightsTable) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-                ppe = #VPU.PPETask<mode = <NOOP>,
-                clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-                fp_prelu_alpha = 1.000000e+00 : f64>,
                 rawFilterShape = [16, 16, 1, 1],
                 strides = [2, 2]}
                     -> tensor<1x16x4x4xf16, {order = #NHWC}>
@@ -1242,11 +1095,8 @@ llvm::StringLiteral notSOHCompatibleConcatSubgraph = R"(
             %5 = VPU.NCE.MaxPool(%4) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
                 kernel_size = [5, 5],
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 2 : i64, right = 2 : i64, top = 2 : i64, bottom = 2 : i64>,
-                ppe = #VPU.PPETask<mode = <NOOP>,
-                clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-                fp_prelu_alpha = 1.000000e+00 : f64>,
                 strides = [1, 1]}
                     -> tensor<1x16x16x8xf16, {order = #NHWC}>
 
@@ -1281,22 +1131,15 @@ llvm::StringLiteral concatWithParentsInDiffSubgraphs = R"(
             %0 = VPU.NCE.AveragePool(%arg0) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
                 kernel_size = [1, 1],
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-                ppe = #VPU.PPETask<mode = <LPRELU>,
-                clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                lrelu_mult = 1311 : i64, lrelu_shift = 17 : i64,
-                quant_scale = [1.000000e+00],
-                fp_prelu_alpha = 0.01000213623046875 : f64>,
                 strides = [1, 1]}
                     -> tensor<1x16x8x8xf16, {order = #NHWC}>
 
             %1 = VPU.NCE.Convolution(%0, %w0, %weightsTable) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
-                ppe = #VPU.PPETask<mode = <NOOP>,
-                clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-                fp_prelu_alpha = 1.000000e+00 : f64>,
                 rawFilterShape = [16, 16, 3, 3],
                 strides = [1, 1]}
                     -> tensor<1x16x8x8xf16, {order = #NHWC}>
@@ -1304,22 +1147,15 @@ llvm::StringLiteral concatWithParentsInDiffSubgraphs = R"(
             %2 = VPU.NCE.AveragePool(%arg0) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
                 kernel_size = [2, 2],
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 1 : i64, right = 0 : i64, top = 1 : i64, bottom = 0 : i64>,
-                ppe = #VPU.PPETask<mode = <LPRELU>,
-                clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                lrelu_mult = 1311 : i64, lrelu_shift = 17 : i64,
-                quant_scale = [1.000000e+00],
-                fp_prelu_alpha = 0.01000213623046875 : f64>,
                 strides = [1, 1]}
                     -> tensor<1x16x8x8xf16, {order = #NHWC}>
 
             %3 = VPU.NCE.Convolution(%2, %w1, %weightsTable) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-                ppe = #VPU.PPETask<mode = <NOOP>,
-                clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-                fp_prelu_alpha = 1.000000e+00 : f64>,
                 rawFilterShape = [16, 16, 1, 1],
                 strides = [1, 1]}
                     -> tensor<1x16x8x8xf16, {order = #NHWC}>
@@ -1330,11 +1166,8 @@ llvm::StringLiteral concatWithParentsInDiffSubgraphs = R"(
 
             %5 = VPU.NCE.Convolution(%4, %w2, %weightsTable) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 2 : i64, right = 2 : i64, top = 2 : i64, bottom = 2 : i64>,
-                ppe = #VPU.PPETask<mode = <NOOP>,
-                clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-                fp_prelu_alpha = 1.000000e+00 : f64>,
                 rawFilterShape = [16, 32, 5, 5],
                 strides = [1, 1]}
                     -> tensor<1x16x8x8xf16, {order = #NHWC}>
@@ -1417,34 +1250,23 @@ llvm::StringLiteral mixedSubgraph0 = R"(
             %0 = VPU.NCE.AveragePool(%arg0) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
                 kernel_size = [1, 1],
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-                ppe = #VPU.PPETask<mode = <LPRELU>,
-                clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                lrelu_mult = 1311 : i64, lrelu_shift = 17 : i64,
-                quant_scale = [1.000000e+00],
-                fp_prelu_alpha = 0.01000213623046875 : f64>,
                 strides = [1, 1]}
                     -> tensor<1x16x8x8xf16, {order = #NHWC}>
 
             %1 = VPU.NCE.AveragePool(%arg0) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
                 kernel_size = [2, 2],
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 1 : i64, right = 0 : i64, top = 1 : i64, bottom = 0 : i64>,
-                ppe = #VPU.PPETask<mode = <LPRELU>,
-                clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                lrelu_mult = 1311 : i64, lrelu_shift = 17 : i64,
-                quant_scale = [0.250000e+00],
-                fp_prelu_alpha = 0.01000213623046875 : f64>,
                 strides = [1, 1]}
                     -> tensor<1x16x8x8xf16, {order = #NHWC}>
 
             %2 = VPU.NCE.Convolution(%1, %w0, %weightsTable) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
-                ppe = #VPU.PPETask<mode = <NOOP>,
-                clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-                fp_prelu_alpha = 1.000000e+00 : f64>,
                 rawFilterShape = [16, 16, 3, 3],
                 strides = [1, 1]}
                     -> tensor<1x16x8x8xf16, {order = #NHWC}>
@@ -1456,22 +1278,15 @@ llvm::StringLiteral mixedSubgraph0 = R"(
             %4 = VPU.NCE.AveragePool(%arg1) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
                 kernel_size = [1, 1],
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-                ppe = #VPU.PPETask<mode = <LPRELU>,
-                clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                lrelu_mult = 1311 : i64, lrelu_shift = 17 : i64,
-                quant_scale = [1.000000e+00],
-                fp_prelu_alpha = 0.01000213623046875 : f64>,
                 strides = [1, 1]}
                     -> tensor<1x32x8x8xf16, {order = #NHWC}>
 
             %5 = VPU.NCE.Convolution(%4, %w1, %weightsTable) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 2 : i64, right = 2 : i64, top = 2 : i64, bottom = 2 : i64>,
-                ppe = #VPU.PPETask<mode = <NOOP>,
-                clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-                fp_prelu_alpha = 1.000000e+00 : f64>,
                 rawFilterShape = [16, 32, 5, 5],
                 strides = [1, 1]}
                     -> tensor<1x16x8x8xf16, {order = #NHWC}>
@@ -1479,9 +1294,7 @@ llvm::StringLiteral mixedSubgraph0 = R"(
             %6 = VPU.NCE.Eltwise(%3, %4) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
                 op_type = #VPU.eltwise_type<ADD>,
-                ppe = #VPU.PPETask<mode = <ADD>,
-                clamp_high = 2147483647 : i64, clamp_low = -2147483648 : i64,
-                lrelu_mult = 1 : i64, lrelu_shift = 0 : i64>}
+                opaque_ppe = #VPU.PPEStub<>}
                     -> tensor<1x32x8x8xf16, {order = #NHWC}>
 
             return %2, %5, %6 : tensor<1x16x8x8xf16, {order = #NHWC}>, tensor<1x16x8x8xf16, {order = #NHWC}>, tensor<1x32x8x8xf16, {order = #NHWC}>
@@ -1514,42 +1327,31 @@ llvm::StringLiteral mixedSubgraph1 = R"(
         func.func @main(%arg0: tensor<1x16x8x8x!qElemType, {order = #NHWC}>, %arg1: tensor<1x16x8x8x!qElemType, {order = #NHWC}>)
           -> (tensor<1x16x8x8x!qElemType3, {order = #NHWC}>, tensor<1x16x8x8x!qElemType2, {order = #NHWC}>, tensor<1x16x8x8x!qElemType3, {order = #NHWC}>) {
             %w0 = const.Declare tensor<16x16x3x3x!qElemType1, {order = #NHWC}>
-                    = dense<1.0> : tensor<16x16x3x3xf16, {order = #NHWC}>, [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType1>]
+                    = dense<1.0> : tensor<16x16x3x3xf16, {order = #NHWC}>, [#const.CastElemType<ui8>, #const.CastElemType<!qElemType1>]
             %w1 = const.Declare tensor<16x32x5x5x!qElemType1, {order = #NHWC}>
-                    = dense<1.0> : tensor<16x32x5x5xf16, {order = #NHWC}>, [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType1>]
+                    = dense<1.0> : tensor<16x32x5x5xf16, {order = #NHWC}>, [#const.CastElemType<ui8>, #const.CastElemType<!qElemType1>]
             %weightsTable = const.Declare tensor<16x1x1x4xsi32> = dense<1> : tensor<16x1x1x4xsi32>
 
             %0 = VPU.NCE.AveragePool(%arg0) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
                 kernel_size = [1, 1],
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-                ppe = #VPU.PPETask<mode = <LPRELU>,
-                clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                lrelu_mult = 1311 : i64, lrelu_shift = 17 : i64,
-                quant_scale = [1.000000e+00],
-                fp_prelu_alpha = 0.01000213623046875 : f64>,
                 strides = [1, 1]}
                     -> tensor<1x16x8x8x!qElemType, {order = #NHWC}>
 
             %1 = VPU.NCE.AveragePool(%arg1) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
                 kernel_size = [1, 1],
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-                ppe = #VPU.PPETask<mode = <LPRELU>,
-                clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                lrelu_mult = 1311 : i64, lrelu_shift = 17 : i64,
-                quant_scale = [1.000000e+00],
-                fp_prelu_alpha = 0.01000213623046875 : f64>,
                 strides = [1, 1]}
                     -> tensor<1x16x8x8x!qElemType2, {order = #NHWC}>
 
             %2 = VPU.NCE.Convolution(%0, %w0, %weightsTable) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
-                ppe = #VPU.PPETask<mode = <NOOP>,
-                clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-                fp_prelu_alpha = 1.000000e+00 : f64>,
                 rawFilterShape = [16, 16, 3, 3],
                 strides = [1, 1]}
                     -> tensor<1x16x8x8x!qElemType2, {order = #NHWC}>
@@ -1559,11 +1361,8 @@ llvm::StringLiteral mixedSubgraph1 = R"(
 
             %4 = VPU.NCE.Convolution(%3, %w0, %weightsTable) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
-                ppe = #VPU.PPETask<mode = <NOOP>,
-                clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-                fp_prelu_alpha = 1.000000e+00 : f64>,
                 rawFilterShape = [16, 16, 3, 3],
                 strides = [1, 1]}
                     -> tensor<1x16x8x8x!qElemType3, {order = #NHWC}>
@@ -1571,9 +1370,7 @@ llvm::StringLiteral mixedSubgraph1 = R"(
             %5 = VPU.NCE.Eltwise(%1, %3) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
                 op_type = #VPU.eltwise_type<ADD>,
-                ppe = #VPU.PPETask<mode = <ADD>,
-                clamp_high = 2147483647 : i64, clamp_low = -2147483648 : i64,
-                lrelu_mult = 1 : i64, lrelu_shift = 0 : i64>}
+                opaque_ppe = #VPU.PPEStub<>}
                     -> tensor<1x16x8x8x!qElemType2, {order = #NHWC}>
 
             %6 = VPU.Concat(%1, %2) {static_offsets = [[0, 0, 0, 0], [0, 16, 0, 0]]}:
@@ -1582,11 +1379,8 @@ llvm::StringLiteral mixedSubgraph1 = R"(
 
             %7 = VPU.NCE.Convolution(%6, %w1, %weightsTable) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
+                opaque_ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 2 : i64, right = 2 : i64, top = 2 : i64, bottom = 2 : i64>,
-                ppe = #VPU.PPETask<mode = <NOOP>,
-                clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-                lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
-                fp_prelu_alpha = 1.000000e+00 : f64>,
                 rawFilterShape = [16, 32, 5, 5],
                 strides = [1, 1]}
                     -> tensor<1x16x8x8x!qElemType3, {order = #NHWC}>

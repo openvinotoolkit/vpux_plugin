@@ -114,7 +114,7 @@ func.func @NotConvertToDequantizeIfInputIsConstants(%arg0: tensor<1x64x64x100xf1
   %0 = IE.Convert(%cst) {dstElemType = f16} : tensor<64x64x1x1xsi8> -> tensor<64x64x1x1xf16>
   %1 = IE.Convolution(%arg0, %0) {dilations = [1, 1], pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]} : tensor<1x64x64x100xf16, {order = #NHWC}>, tensor<64x64x1x1xf16> -> tensor<1x64x64x100xf16, {order = #NHWC}>
   return %1 : tensor<1x64x64x100xf16, {order = #NHWC}>
-  // CHECK:              [[CST:%.*]] = const.Declare tensor<64x64x1x1xf16> = dense<1> : tensor<64x64x1x1xsi8>, [#const.ConvertElemType<f16>]
+  // CHECK:              [[CST:%.*]] = const.Declare tensor<64x64x1x1xf16> = dense<1> : tensor<64x64x1x1xsi8>, [#const.CastElemType<f16>]
   // CHECK-NOT:          IE.QuantizeCast
   // CHECK:              [[VAL0:%.*]] = IE.Convolution([[ARG0:%.*]], [[CST:%.*]]) {dilations = [1, 1], pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]} : tensor<1x64x64x100xf16, {order = #NHWC}>, tensor<64x64x1x1xf16> -> tensor<1x64x64x100xf16, {order = #NHWC}>
   // CHECK:              return [[VAL0]]

@@ -39,14 +39,6 @@ size_t vpux::ELF::ABIVersionOp::getAlignmentRequirements() {
     return alignof(LoaderAbiVersionNote);
 }
 
-vpux::ELF::SectionFlagsAttr vpux::ELF::ABIVersionOp::getAccessingProcs(mlir::SymbolUserMap&) {
-    return ELF::SectionFlagsAttr::SHF_NONE;
-}
-
-vpux::ELF::SectionFlagsAttr vpux::ELF::ABIVersionOp::getUserProcs() {
-    return ELF::SectionFlagsAttr::SHF_NONE;
-}
-
 std::optional<ELF::SectionSignature> vpux::ELF::ABIVersionOp::getSectionSignature() {
     return ELF::SectionSignature(vpux::ELF::generateSignature("note", "LoaderABIVersion"),
                                  ELF::SectionFlagsAttr::SHF_NONE, ELF::SectionTypeAttr::SHT_NOTE);

@@ -54,27 +54,27 @@ module @Test {
                         VPUIPDPU.IDUWeights wmode(f16)
                         VPUIPDPU.IDUDepthWiseCfg dw_3x3s1_opt_dis(true) dw_opt_offset(16)
                     }
-                    // CHECK:  UINT num_ses_in_z_dir at 4 size 9 = 2,
-                    // CHECK:  UINT cm_sp_pattern at 13 size 16 = 7,
-                    // CHECK:  UINT npo2_se_z_split_en at 29 size 1 = 0,
-                    // CHECK:  UINT kernel_y at 5 size 4 = 2,
-                    // CHECK:  UINT kernel_x at 9 size 4 = 1,
-                    // CHECK:  UINT act_dense at 15 size 1 = 1,
-                    // CHECK:  UINT wt_dense at 16 size 1 = 1,
-                    // CHECK:  UINT stride_y_en at 17 size 1 = 1,
-                    // CHECK:  UINT stride_y at 18 size 3 = 1,
-                    // CHECK:  UINT layer1_cmp_en at 24 size 1 = 0,
-                    // CHECK:  UINT pool_opt_en at 25 size 1 = 1,
-                    // CHECK:  UINT tensor_size_x at 0 size 14 = 0x10,
+                    // CHECK:  UINT num_ses_in_z_dir at 4 size 9 = 2
+                    // CHECK:  UINT cm_sp_pattern at 13 size 16 = 7
+                    // CHECK:  UINT npo2_se_z_split_en at 29 size 1 = 0
+                    // CHECK:  UINT kernel_y at 5 size 4 = 2
+                    // CHECK:  UINT kernel_x at 9 size 4 = 1
+                    // CHECK:  UINT act_dense at 15 size 1 = 1
+                    // CHECK:  UINT wt_dense at 16 size 1 = 1
+                    // CHECK:  UINT stride_y_en at 17 size 1 = 1
+                    // CHECK:  UINT stride_y at 18 size 3 = 1
+                    // CHECK:  UINT layer1_cmp_en at 24 size 1 = 0
+                    // CHECK:  UINT pool_opt_en at 25 size 1 = 1
+                    // CHECK:  UINT tensor_size_x at 0 size 14 = 0x10
                     // CHECK:  UINT tensor_size_y at 14 size 14 = 0x10
-                    // CHECK:  UINT tensor_size_z at 0 size 14 = 0x10,
-                    // CHECK:  UINT amode at 4 size 4 = 0,
-                    // CHECK:  UINT stride at 8 size 3 = 0,
-                    // CHECK:  UINT zm_input at 11 size 1 = 1,
-                    // CHECK:  UINT workload_operation at 14 size 2 = 2,
-                    // CHECK:  UINT pool_wt_data at 4 size 16 = 0,
-                    // CHECK:  UINT dw_opt_offset at 18 size 6 = 0x10,
-                    // CHECK:  UINT dw_opt_en at 24 size 1 = 1,
+                    // CHECK:  UINT tensor_size_z at 0 size 14 = 0x10
+                    // CHECK:  UINT amode at 4 size 4 = 0
+                    // CHECK:  UINT stride at 8 size 3 = 0
+                    // CHECK:  UINT zm_input at 11 size 1 = 1
+                    // CHECK:  UINT workload_operation at 14 size 2 = 2
+                    // CHECK:  UINT pool_wt_data at 4 size 16 = 0
+                    // CHECK:  UINT dw_opt_offset at 18 size 6 = 0x10
+                    // CHECK:  UINT dw_opt_en at 24 size 1 = 1
                     // CHECK:  UINT dw_3x3s1_opt_dis at 25 size 1 = 1
 
                     VPUIPDPU.ODUCfg {
@@ -88,20 +88,20 @@ module @Test {
                         VPUIPDPU.ODUMemoryMode mem_mode(MODE_DENSE)
                         VPUIPDPU.ODUCmxPorts cmx_ports(CMX_PORTS_ALL)
                     }
-                    // CHECK:  UINT dtype at 0 size 3 = 4,
-                    // CHECK:  UINT wcb_ac_mode at 3 size 1 = 1,
-                    // CHECK:  UINT wcb_sp_mode at 4 size 1 = 0,
-                    // CHECK:  UINT sp_value at 5 size 8 = 6,
-                    // CHECK:  UINT sp_out_en at 13 size 1 = 1,
-                    // CHECK:  UINT cmx_port_muxing_disable at 14 size 1 = 0,
-                    // CHECK:  UINT write_sp at 15 size 1 = 0,
-                    // CHECK:  UINT write_ac at 17 size 1 = 1,
-                    // CHECK:  UINT mode at 18 size 2 = 0,
-                    // CHECK:  UINT swizzle_key at 21 size 3 = 1,
-                    // CHECK:  UINT nthw at 25 size 2 = 2,
-                    // CHECK:  UINT permutation at 27 size 3 = 1,
+                    // CHECK:  UINT dtype at 0 size 3 = 4
+                    // CHECK:  UINT wcb_ac_mode at 3 size 1 = 1
+                    // CHECK:  UINT wcb_sp_mode at 4 size 1 = 0
+                    // CHECK:  UINT sp_value at 5 size 8 = 6
+                    // CHECK:  UINT sp_out_en at 13 size 1 = 1
+                    // CHECK:  UINT cmx_port_muxing_disable at 14 size 1 = 0
+                    // CHECK:  UINT write_sp at 15 size 1 = 0
+                    // CHECK:  UINT write_ac at 17 size 1 = 1
+                    // CHECK:  UINT mode at 18 size 2 = 0
+                    // CHECK:  UINT swizzle_key at 21 size 3 = 1
+                    // CHECK:  UINT nthw at 25 size 2 = 2
+                    // CHECK:  UINT permutation at 27 size 3 = 1
                     // CHECK:  UINT wcb_bypass at 31 size 1 = 0
-                    // CHECK:  UINT te_dim_y at 0 size 13 = 0x40,
+                    // CHECK:  UINT te_dim_y at 0 size 13 = 0x40
                     // CHECK:  UINT te_dim_z at 13 size 13 = 0x10
                     // CHECK:  UINT te_dim_x at 0 size 13 = 0x40
 
@@ -119,24 +119,24 @@ module @Test {
                         VPUIPDPU.PPEIntConvert convert_mode(NONE)
 
                     }
-                    // CHECK:  SINT ppe_g8_bias_c at 0 size 9 = 0x180,
+                    // CHECK:  SINT ppe_g8_bias_c at 0 size 9 = 0x180
                     // Note:              0x180(Hex) = 384(Dec:uint64_t) is 2's complement representation of -128(Dec:int64_t)
-                    // CHECK:  UINT ppe_scale_round at 10 size 2 = 0,
-                    // CHECK:  UINT ppe_scale_override at 0 size 1 = 0,
-                    // CHECK:  UINT ppe_prelu_shift at 8 size 5 = 0,
+                    // CHECK:  UINT ppe_scale_round at 10 size 2 = 0
+                    // CHECK:  UINT ppe_scale_override at 0 size 1 = 0
+                    // CHECK:  UINT ppe_prelu_shift at 8 size 5 = 0
                     // CHECK:  UINT ppe_prelu_mult at 16 size 11 = 1
-                    // CHECK:  ppe_scale_hclamp offset 160 size 32 = SINT 0xFF,
-                    // CHECK:  ppe_scale_lclamp offset 164 size 32 = SINT 0,
+                    // CHECK:  ppe_scale_hclamp offset 160 size 32 = SINT 0xFF
+                    // CHECK:  ppe_scale_lclamp offset 164 size 32 = SINT 0
                     // CHECK:  UINT ppe_i32_convert at 8 size 2 = 0
-                    // CHECK:  UINT ppe_fp_convert at 0 size 3 = 0,
-                    // CHECK:  UINT ppe_fp_bypass at 3 size 1 = 1,
+                    // CHECK:  UINT ppe_fp_convert at 0 size 3 = 0
+                    // CHECK:  UINT ppe_fp_bypass at 3 size 1 = 1
 
                     VPUIPDPU.BarrierCfg waits([3 : ui8, 5 : ui8]) updates([1 : ui8, 7 : ui8, 8 : ui8]) start_after(0) clean_after(0)
                     // CHECK:  UINT barriers_wait_mask_hi_ at 0 size 32 = 0
-                    // CHECK:  barriers_wait_mask_lo_ offset 296 size 64 = UINT 0x28,
+                    // CHECK:  barriers_wait_mask_lo_ offset 296 size 64 = UINT 0x28
                     // CHECK:  UINT barriers_post_mask_hi_ at 0 size 32 = 0
-                    // CHECK:  barriers_post_mask_lo_ offset 312 size 64 = UINT 0x182,
-                    // CHECK:  UINT group_ at 0 size 8 = 1,
+                    // CHECK:  barriers_post_mask_lo_ offset 312 size 64 = UINT 0x182
+                    // CHECK:  UINT group_ at 0 size 8 = 1
                     // CHECK:  UINT mask_ at 8 size 8 = 0x28
                 }
 
@@ -161,21 +161,21 @@ module @Test {
                         VPUIPDPU.IDUWorkloadCfg workload_type(MAXPOOL)
                         VPUIPDPU.IDUWeights wmode(f16)
                     }
-                    // CHECK:  UINT cm_sp_pattern at 13 size 16 = 0x1F,
-                    // CHECK:  UINT npo2_se_z_split_en at 29 size 1 = 0,
-                    // CHECK:  UINT kernel_y at 5 size 4 = 0xB,
-                    // CHECK:  UINT kernel_x at 9 size 4 = 0xB,
-                    // CHECK:  UINT act_dense at 15 size 1 = 1,
-                    // CHECK:  UINT wt_dense at 16 size 1 = 1,
-                    // CHECK:  UINT layer1_cmp_en at 24 size 1 = 1,
-                    // CHECK:  UINT tensor_size_x at 0 size 14 = 0x10,
+                    // CHECK:  UINT cm_sp_pattern at 13 size 16 = 0x1F
+                    // CHECK:  UINT npo2_se_z_split_en at 29 size 1 = 0
+                    // CHECK:  UINT kernel_y at 5 size 4 = 0xB
+                    // CHECK:  UINT kernel_x at 9 size 4 = 0xB
+                    // CHECK:  UINT act_dense at 15 size 1 = 1
+                    // CHECK:  UINT wt_dense at 16 size 1 = 1
+                    // CHECK:  UINT layer1_cmp_en at 24 size 1 = 1
+                    // CHECK:  UINT tensor_size_x at 0 size 14 = 0x10
                     // CHECK:  UINT tensor_size_y at 14 size 14 = 0x10
-                    // CHECK:  UINT tensor_size_z at 0 size 14 = 0x10,
-                    // CHECK:  UINT amode at 4 size 4 = 0,
-                    // CHECK:  UINT stride at 8 size 3 = 7,
-                    // CHECK:  UINT dw_input at 12 size 1 = 1,
-                    // CHECK:  UINT workload_operation at 14 size 2 = 2,
-                    // CHECK:  UINT pool_wt_data at 4 size 16 = 0,
+                    // CHECK:  UINT tensor_size_z at 0 size 14 = 0x10
+                    // CHECK:  UINT amode at 4 size 4 = 0
+                    // CHECK:  UINT stride at 8 size 3 = 7
+                    // CHECK:  UINT dw_input at 12 size 1 = 1
+                    // CHECK:  UINT workload_operation at 14 size 2 = 2
+                    // CHECK:  UINT pool_wt_data at 4 size 16 = 0
 
                     VPUIPDPU.ODUCfg {
                         VPUIPDPU.ODUOutTensorSize dim_x(65) dim_y(33) dim_z(17)
@@ -188,20 +188,20 @@ module @Test {
                         VPUIPDPU.ODUCmxPorts cmx_ports(CMX_PORTS_ALL)
                     }
 
-                    // CHECK:  UINT dtype at 0 size 3 = 3,
-                    // CHECK:  UINT wcb_ac_mode at 3 size 1 = 0,
-                    // CHECK:  UINT wcb_sp_mode at 4 size 1 = 0,
-                    // CHECK:  UINT sp_value at 5 size 8 = 6,
-                    // CHECK:  UINT sp_out_en at 13 size 1 = 1,
-                    // CHECK:  UINT cmx_port_muxing_disable at 14 size 1 = 0,
-                    // CHECK:  UINT write_sp at 15 size 1 = 0,
-                    // CHECK:  UINT write_ac at 17 size 1 = 1,
-                    // CHECK:  UINT mode at 18 size 2 = 0,
-                    // CHECK:  UINT swizzle_key at 21 size 3 = 5,
-                    // CHECK:  UINT nthw at 25 size 2 = 3,
-                    // CHECK:  UINT permutation at 27 size 3 = 3,
+                    // CHECK:  UINT dtype at 0 size 3 = 3
+                    // CHECK:  UINT wcb_ac_mode at 3 size 1 = 0
+                    // CHECK:  UINT wcb_sp_mode at 4 size 1 = 0
+                    // CHECK:  UINT sp_value at 5 size 8 = 6
+                    // CHECK:  UINT sp_out_en at 13 size 1 = 1
+                    // CHECK:  UINT cmx_port_muxing_disable at 14 size 1 = 0
+                    // CHECK:  UINT write_sp at 15 size 1 = 0
+                    // CHECK:  UINT write_ac at 17 size 1 = 1
+                    // CHECK:  UINT mode at 18 size 2 = 0
+                    // CHECK:  UINT swizzle_key at 21 size 3 = 5
+                    // CHECK:  UINT nthw at 25 size 2 = 3
+                    // CHECK:  UINT permutation at 27 size 3 = 3
                     // CHECK:  UINT wcb_bypass at 31 size 1 = 0
-                    // CHECK:  UINT te_dim_y at 0 size 13 = 0x20,
+                    // CHECK:  UINT te_dim_y at 0 size 13 = 0x20
                     // CHECK:  UINT te_dim_z at 13 size 13 = 0x10
                     // CHECK:  UINT te_dim_x at 0 size 13 = 0x40
 
@@ -218,25 +218,25 @@ module @Test {
                         VPUIPDPU.PPEIntClamp clamp_low(0) clamp_high(255)
                         VPUIPDPU.PPEIntConvert convert_mode(NONE)
                     }
-                    // CHECK:  SINT ppe_g8_bias_c at 0 size 9 = 0,
-                    // CHECK:  ppe_bias offset 144 size 32 = SINT 0,
-                    // CHECK:  UINT ppe_scale_shift at 2 size 6 = 0,
-                    // CHECK:  UINT ppe_scale_round at 10 size 2 = 3,
+                    // CHECK:  SINT ppe_g8_bias_c at 0 size 9 = 0
+                    // CHECK:  ppe_bias offset 144 size 32 = SINT 0
+                    // CHECK:  UINT ppe_scale_shift at 2 size 6 = 0
+                    // CHECK:  UINT ppe_scale_round at 10 size 2 = 3
                     // CHECK:  SINT ppe_scale_mult at 16 size 16 = 1
-                    // CHECK:  UINT ppe_scale_override at 0 size 1 = 1,
-                    // CHECK:  UINT ppe_prelu_shift at 8 size 5 = 0,
-                    // CHECK:  ppe_scale_hclamp offset 160 size 32 = SINT 0xFF,
-                    // CHECK:  ppe_scale_lclamp offset 164 size 32 = SINT 0,
+                    // CHECK:  UINT ppe_scale_override at 0 size 1 = 1
+                    // CHECK:  UINT ppe_prelu_shift at 8 size 5 = 0
+                    // CHECK:  ppe_scale_hclamp offset 160 size 32 = SINT 0xFF
+                    // CHECK:  ppe_scale_lclamp offset 164 size 32 = SINT 0
                     // CHECK:  UINT ppe_i32_convert at 8 size 2 = 0
-                    // CHECK:  UINT ppe_fp_convert at 0 size 3 = 0,
-                    // CHECK:  UINT ppe_fp_bypass at 3 size 1 = 1,
+                    // CHECK:  UINT ppe_fp_convert at 0 size 3 = 0
+                    // CHECK:  UINT ppe_fp_bypass at 3 size 1 = 1
 
                     VPUIPDPU.BarrierCfg waits([0 : ui8]) updates([]) start_after(0) clean_after(0)
                     // CHECK:  UINT barriers_wait_mask_hi_ at 0 size 32 = 0
-                    // CHECK:  barriers_wait_mask_lo_ offset 296 size 64 = UINT 1,
+                    // CHECK:  barriers_wait_mask_lo_ offset 296 size 64 = UINT 1
                     // CHECK:  UINT barriers_post_mask_hi_ at 0 size 32 = 0
-                    // CHECK:  barriers_post_mask_lo_ offset 312 size 64 = UINT 0,
-                    // CHECK:  UINT group_ at 0 size 8 = 1,
+                    // CHECK:  barriers_post_mask_lo_ offset 312 size 64 = UINT 0
+                    // CHECK:  UINT group_ at 0 size 8 = 1
                     // CHECK:  UINT mask_ at 8 size 8 = 1
                 }
 
@@ -267,27 +267,27 @@ module @Test {
                         VPUIPDPU.ODUMemoryMode mem_mode(MODE_DENSE)
                         VPUIPDPU.ODUCmxPorts cmx_ports(CMX_PORTS_ALL)
                     }
-                    // CHECK:  UINT dtype at 0 size 3 = 5,
-                    // CHECK:  UINT wcb_ac_mode at 3 size 1 = 1,
-                    // CHECK:  UINT wcb_sp_mode at 4 size 1 = 1,
-                    // CHECK:  UINT sp_value at 5 size 8 = 6,
-                    // CHECK:  UINT sp_out_en at 13 size 1 = 1,
-                    // CHECK:  UINT cmx_port_muxing_disable at 14 size 1 = 0,
-                    // CHECK:  UINT write_sp at 15 size 1 = 1,
-                    // CHECK:  UINT write_ac at 17 size 1 = 1,
-                    // CHECK:  UINT mode at 18 size 2 = 0,
-                    // CHECK:  UINT swizzle_key at 21 size 3 = 1,
-                    // CHECK:  UINT nthw at 25 size 2 = 2,
-                    // CHECK:  UINT permutation at 27 size 3 = 1,
+                    // CHECK:  UINT dtype at 0 size 3 = 5
+                    // CHECK:  UINT wcb_ac_mode at 3 size 1 = 1
+                    // CHECK:  UINT wcb_sp_mode at 4 size 1 = 1
+                    // CHECK:  UINT sp_value at 5 size 8 = 6
+                    // CHECK:  UINT sp_out_en at 13 size 1 = 1
+                    // CHECK:  UINT cmx_port_muxing_disable at 14 size 1 = 0
+                    // CHECK:  UINT write_sp at 15 size 1 = 1
+                    // CHECK:  UINT write_ac at 17 size 1 = 1
+                    // CHECK:  UINT mode at 18 size 2 = 0
+                    // CHECK:  UINT swizzle_key at 21 size 3 = 1
+                    // CHECK:  UINT nthw at 25 size 2 = 2
+                    // CHECK:  UINT permutation at 27 size 3 = 1
                     // CHECK:  UINT wcb_bypass at 31 size 1 = 0
-                    // CHECK:  UINT te_dim_y at 0 size 13 = 0x40,
+                    // CHECK:  UINT te_dim_y at 0 size 13 = 0x40
                     // CHECK:  UINT te_dim_z at 13 size 13 = 0x10
                     // CHECK:  UINT te_dim_x at 0 size 13 = 0x40
 
                     VPUIPDPU.MPECfg {
                         VPUIPDPU.MPEDenormalOperandsFTZ
                     }
-                    // CHECK:  UINT mpe_daz at 22 size 1 = 1,
+                    // CHECK:  UINT mpe_daz at 22 size 1 = 1
 
                     VPUIPDPU.PPECfg {
                         VPUIPDPU.PPEFpAddMultBypass bypass_mode(ON)
@@ -300,12 +300,12 @@ module @Test {
                         VPUIPDPU.PPEIntConvert convert_mode(FP16)
                         VPUIPDPU.PPEIntClamp clamp_high(70) // 70 corresponds to RELU6
                     }
-                    // CHECK:  UINT ppe_scale_override at 0 size 1 = 0,
+                    // CHECK:  UINT ppe_scale_override at 0 size 1 = 0
                     // CHECK:  UINT ppe_prelu_mult at 16 size 11 = 0
-                    // CHECK:  ppe_scale_hclamp offset 160 size 32 = SINT 0x46,
+                    // CHECK:  ppe_scale_hclamp offset 160 size 32 = SINT 0x46
                     // CHECK:  UINT ppe_i32_convert at 8 size 2 = 1
-                    // CHECK:  UINT ppe_fp_convert at 0 size 3 = 0,
-                    // CHECK:  UINT ppe_fp_bypass at 3 size 1 = 1,
+                    // CHECK:  UINT ppe_fp_convert at 0 size 3 = 0
+                    // CHECK:  UINT ppe_fp_bypass at 3 size 1 = 1
                 }
 
             // Use case #3: fp16 DPU in, fp16 DPU out
@@ -335,28 +335,28 @@ module @Test {
                         VPUIPDPU.ODUMemoryMode mem_mode(MODE_DENSE)
                         VPUIPDPU.ODUCmxPorts cmx_ports(CMX_PORTS_ALL)
                     }
-                    // CHECK:  UINT dtype at 0 size 3 = 3,
-                    // CHECK:  UINT wcb_ac_mode at 3 size 1 = 1,
-                    // CHECK:  UINT wcb_sp_mode at 4 size 1 = 0,
-                    // CHECK:  UINT sp_value at 5 size 8 = 6,
-                    // CHECK:  UINT sp_out_en at 13 size 1 = 1,
-                    // CHECK:  UINT cmx_port_muxing_disable at 14 size 1 = 0,
-                    // CHECK:  UINT write_sp at 15 size 1 = 1,
-                    // CHECK:  UINT write_ac at 17 size 1 = 1,
-                    // CHECK:  UINT mode at 18 size 2 = 0,
-                    // CHECK:  UINT swizzle_key at 21 size 3 = 1,
-                    // CHECK:  UINT nthw at 25 size 2 = 2,
-                    // CHECK:  UINT permutation at 27 size 3 = 1,
+                    // CHECK:  UINT dtype at 0 size 3 = 3
+                    // CHECK:  UINT wcb_ac_mode at 3 size 1 = 1
+                    // CHECK:  UINT wcb_sp_mode at 4 size 1 = 0
+                    // CHECK:  UINT sp_value at 5 size 8 = 6
+                    // CHECK:  UINT sp_out_en at 13 size 1 = 1
+                    // CHECK:  UINT cmx_port_muxing_disable at 14 size 1 = 0
+                    // CHECK:  UINT write_sp at 15 size 1 = 1
+                    // CHECK:  UINT write_ac at 17 size 1 = 1
+                    // CHECK:  UINT mode at 18 size 2 = 0
+                    // CHECK:  UINT swizzle_key at 21 size 3 = 1
+                    // CHECK:  UINT nthw at 25 size 2 = 2
+                    // CHECK:  UINT permutation at 27 size 3 = 1
                     // CHECK:  UINT wcb_bypass at 31 size 1 = 0
-                    // CHECK:  UINT te_dim_y at 0 size 13 = 0x40,
+                    // CHECK:  UINT te_dim_y at 0 size 13 = 0x40
                     // CHECK:  UINT te_dim_z at 13 size 13 = 0x1FFF
                     // CHECK:  UINT te_dim_x at 0 size 13 = 0x40
 
                     VPUIPDPU.MPECfg {
                         VPUIPDPU.MPEActivationBias act_bias(12)
                     }
-                    // CHECK:  UINT mpe_actbias at 8 size 8 = 0xC,
-                    // CHECK:  UINT mpe_daz at 22 size 1 = 0,
+                    // CHECK:  UINT mpe_actbias at 8 size 8 = 0xC
+                    // CHECK:  UINT mpe_daz at 22 size 1 = 0
 
                     VPUIPDPU.PPECfg {
                         VPUIPDPU.PPEFpBiasAdd %weight_table:memref<16x1x1x1xi64, #NHWC, [@CMX_NN, 0]>
@@ -373,25 +373,25 @@ module @Test {
                         VPUIPDPU.PPEIntClamp clamp_low(-2147483648) clamp_high(2147483647) // (MIN_I32, MAX_I32)
                         VPUIPDPU.PPEIntConvert convert_mode(NONE)
                     }
-                    // CHECK:  SINT ppe_g8_bias_c at 0 size 9 = 0,
-                    // CHECK:  ppe_bias offset 144 size 32 = SINT 0,
-                    // CHECK:  UINT ppe_scale_shift at 2 size 6 = 0x28,
-                    // CHECK:  UINT ppe_scale_round at 10 size 2 = 3,
+                    // CHECK:  SINT ppe_g8_bias_c at 0 size 9 = 0
+                    // CHECK:  ppe_bias offset 144 size 32 = SINT 0
+                    // CHECK:  UINT ppe_scale_shift at 2 size 6 = 0x28
+                    // CHECK:  UINT ppe_scale_round at 10 size 2 = 3
                     // CHECK:  SINT ppe_scale_mult at 16 size 16 = 1
-                    // CHECK:  UINT ppe_scale_override at 0 size 1 = 1,
+                    // CHECK:  UINT ppe_scale_override at 0 size 1 = 1
                     // CHECK:  UINT ppe_fp_scale_override at 1 size 1 = 0
-                    // CHECK:  UINT ppe_prelu_shift at 8 size 5 = 0,
+                    // CHECK:  UINT ppe_prelu_shift at 8 size 5 = 0
                     // CHECK:  UINT ppe_prelu_mult at 16 size 11 = 1
-                    // CHECK:  ppe_scale_hclamp offset 160 size 32 = SINT 0x7FFFFFFF,
-                    // CHECK:  ppe_scale_lclamp offset 164 size 32 = SINT 0x80000000,
+                    // CHECK:  ppe_scale_hclamp offset 160 size 32 = SINT 0x7FFFFFFF
+                    // CHECK:  ppe_scale_lclamp offset 164 size 32 = SINT 0x80000000
                     // Note:              0x80000000(Hex) = 2147483648(Dec:uint64_t) is 2's complement representation of = -2147483648(Dec:int32_t)
-                    // CHECK:  UINT ppe_fp16_ftz at 6 size 1 = 0,
-                    // CHECK:  UINT ppe_fp16_clamp at 7 size 1 = 1,
+                    // CHECK:  UINT ppe_fp16_ftz at 6 size 1 = 0
+                    // CHECK:  UINT ppe_fp16_clamp at 7 size 1 = 1
                     // CHECK:  UINT ppe_i32_convert at 8 size 2 = 0
-                    // CHECK:  ppe_fp_prelu offset 180 size 32 = FP 0x3DCCCCCD,
+                    // CHECK:  ppe_fp_prelu offset 180 size 32 = FP 0x3DCCCCCD
                     // Note:              0x3DCCCCCD(Hex) = 1036831949(Dec) = 0.1 in IEEE floating-point format
-                    // CHECK:  UINT ppe_fp_convert at 0 size 3 = 1,
-                    // CHECK:  UINT ppe_fp_bypass at 3 size 1 = 0,
+                    // CHECK:  UINT ppe_fp_convert at 0 size 3 = 1
+                    // CHECK:  UINT ppe_fp_bypass at 3 size 1 = 0
                     // CHECK:  UINT ppe_fp_prelu_en at 5 size 1 = 1
                 }
 
@@ -419,28 +419,28 @@ module @Test {
                         VPUIPDPU.ODUMemoryMode mem_mode(MODE_DENSE)
                         VPUIPDPU.ODUCmxPorts cmx_ports(CMX_PORTS_ALL)
                     }
-                    // CHECK:  UINT dtype at 0 size 3 = 5,
-                    // CHECK:  UINT wcb_ac_mode at 3 size 1 = 0,
-                    // CHECK:  UINT wcb_sp_mode at 4 size 1 = 0,
-                    // CHECK:  UINT sp_value at 5 size 8 = 0,
-                    // CHECK:  UINT sp_out_en at 13 size 1 = 0,
-                    // CHECK:  UINT cmx_port_muxing_disable at 14 size 1 = 0,
-                    // CHECK:  UINT write_sp at 15 size 1 = 0,
-                    // CHECK:  UINT write_ac at 17 size 1 = 1,
-                    // CHECK:  UINT mode at 18 size 2 = 0,
-                    // CHECK:  UINT swizzle_key at 21 size 3 = 1,
-                    // CHECK:  UINT nthw at 25 size 2 = 1,
-                    // CHECK:  UINT permutation at 27 size 3 = 1,
+                    // CHECK:  UINT dtype at 0 size 3 = 5
+                    // CHECK:  UINT wcb_ac_mode at 3 size 1 = 0
+                    // CHECK:  UINT wcb_sp_mode at 4 size 1 = 0
+                    // CHECK:  UINT sp_value at 5 size 8 = 0
+                    // CHECK:  UINT sp_out_en at 13 size 1 = 0
+                    // CHECK:  UINT cmx_port_muxing_disable at 14 size 1 = 0
+                    // CHECK:  UINT write_sp at 15 size 1 = 0
+                    // CHECK:  UINT write_ac at 17 size 1 = 1
+                    // CHECK:  UINT mode at 18 size 2 = 0
+                    // CHECK:  UINT swizzle_key at 21 size 3 = 1
+                    // CHECK:  UINT nthw at 25 size 2 = 1
+                    // CHECK:  UINT permutation at 27 size 3 = 1
                     // CHECK:  UINT wcb_bypass at 31 size 1 = 0
-                    // CHECK:  UINT te_dim_y at 0 size 13 = 0x40,
+                    // CHECK:  UINT te_dim_y at 0 size 13 = 0x40
                     // CHECK:  UINT te_dim_z at 13 size 13 = 0x10
                     // CHECK:  UINT te_dim_x at 0 size 13 = 0x40
 
                     VPUIPDPU.MPECfg {
                         VPUIPDPU.MPEWeightsBias weights_bias(10)
                     }
-                    // CHECK:  UINT mpe_wtbias at 0 size 8 = 0xA,
-                    // CHECK:  UINT mpe_daz at 22 size 1 = 0,
+                    // CHECK:  UINT mpe_wtbias at 0 size 8 = 0xA
+                    // CHECK:  UINT mpe_daz at 22 size 1 = 0
 
                     VPUIPDPU.PPECfg {
                         VPUIPDPU.PPEFpBiasAdd %weight_table:memref<16x1x1x1xi64, #NHWC, [@CMX_NN, 0]>
@@ -457,20 +457,20 @@ module @Test {
                         VPUIPDPU.PPEIntClamp clamp_low(0) clamp_high(255)
                         VPUIPDPU.PPEIntConvert convert_mode(NONE)
                     }
-                    // CHECK:  SINT ppe_g8_bias_c at 0 size 9 = 0x180,
+                    // CHECK:  SINT ppe_g8_bias_c at 0 size 9 = 0x180
                     // Note:              0x180(Hex) = 384(Dec:uint64_t) is 2's complement representation of -128(Dec:int64_t)
-                    // CHECK:  ppe_bias offset 144 size 32 = SINT 0,
-                    // CHECK:  UINT ppe_scale_shift at 2 size 6 = 0,
-                    // CHECK:  UINT ppe_scale_round at 10 size 2 = 3,
+                    // CHECK:  ppe_bias offset 144 size 32 = SINT 0
+                    // CHECK:  UINT ppe_scale_shift at 2 size 6 = 0
+                    // CHECK:  UINT ppe_scale_round at 10 size 2 = 3
                     // CHECK:  SINT ppe_scale_mult at 16 size 16 = 1
-                    // CHECK:  UINT ppe_scale_override at 0 size 1 = 1,
+                    // CHECK:  UINT ppe_scale_override at 0 size 1 = 1
                     // CHECK:  UINT ppe_fp_scale_override at 1 size 1 = 0
-                    // CHECK:  UINT ppe_prelu_shift at 8 size 5 = 0,
+                    // CHECK:  UINT ppe_prelu_shift at 8 size 5 = 0
                     // CHECK:  UINT ppe_prelu_mult at 16 size 11 = 1
-                    // CHECK:  ppe_scale_hclamp offset 160 size 32 = SINT 0xFF,
-                    // CHECK:  ppe_scale_lclamp offset 164 size 32 = SINT 0,
-                    // CHECK:  UINT ppe_fp_convert at 0 size 3 = 4,
-                    // CHECK:  UINT ppe_fp_bypass at 3 size 1 = 0,
+                    // CHECK:  ppe_scale_hclamp offset 160 size 32 = SINT 0xFF
+                    // CHECK:  ppe_scale_lclamp offset 164 size 32 = SINT 0
+                    // CHECK:  UINT ppe_fp_convert at 0 size 3 = 4
+                    // CHECK:  UINT ppe_fp_bypass at 3 size 1 = 0
                 }
 
             // Use case #5: default initialized values
@@ -494,19 +494,19 @@ module @Test {
                     VPUIPDPU.PPECfg {
                         VPUIPDPU.PPEFpAddMultBypass bypass_mode(ON)
                     }
-                    // CHECK:  cmx_slice0_low_addr offset 0 size 32 = UINT 0x4000000,
-                    // CHECK:  cmx_slice1_low_addr offset 4 size 32 = UINT 0x4000000,
-                    // CHECK:  cmx_slice2_low_addr offset 8 size 32 = UINT 0x4000000,
-                    // CHECK:  cmx_slice3_low_addr offset 12 size 32 = UINT 0x4000000,
-                    // CHECK:  cmx_slice_size offset 16 size 32 = UINT 0x18000,
-                    // CHECK:  UINT cm_sp_pattern at 13 size 16 = 0,
-                    // CHECK:  UINT pool_wt_data at 4 size 16 = 0,
-                    // CHECK:  UINT ppe_scale_round at 10 size 2 = 3,
-                    // CHECK:  UINT ppe_scale_override at 0 size 1 = 0,
+                    // CHECK:  cmx_slice0_low_addr offset 0 size 32 = UINT 0x4000000
+                    // CHECK:  cmx_slice1_low_addr offset 4 size 32 = UINT 0x4000000
+                    // CHECK:  cmx_slice2_low_addr offset 8 size 32 = UINT 0x4000000
+                    // CHECK:  cmx_slice3_low_addr offset 12 size 32 = UINT 0x4000000
+                    // CHECK:  cmx_slice_size offset 16 size 32 = UINT 0x18000
+                    // CHECK:  UINT cm_sp_pattern at 13 size 16 = 0
+                    // CHECK:  UINT pool_wt_data at 4 size 16 = 0
+                    // CHECK:  UINT ppe_scale_round at 10 size 2 = 3
+                    // CHECK:  UINT ppe_scale_override at 0 size 1 = 0
                     // CHECK:  UINT ppe_fp_scale_override at 1 size 1 = 0
                     // CHECK:  UINT ppe_prelu_mult at 16 size 11 = 1
-                    // CHECK:  ppe_scale_hclamp offset 160 size 32 = SINT 0x7FFFFFFF,
-                    // CHECK:  ppe_scale_lclamp offset 164 size 32 = SINT 0x80000000,
+                    // CHECK:  ppe_scale_hclamp offset 160 size 32 = SINT 0x7FFFFFFF
+                    // CHECK:  ppe_scale_lclamp offset 164 size 32 = SINT 0x80000000
                     // Note:              0x80000000(Hex) = 2147483648(Dec:uint64_t) is 2's complement representation of = -2147483648(Dec:int32_t)
                 }
         }
@@ -563,8 +563,8 @@ module @ProfilingTest {
                         VPUIPDPU.PPEFpAddMultBypass bypass_mode(ON)
                     }
                     // CHECK:  hwp_ctrl offset 192 size 32
-                    // CHECK:  UINT hwp_en at 0 size 1 = 1,
-                    // CHECK:  UINT hwp_stat_mode at 1 size 3 = 3,
+                    // CHECK:  UINT hwp_en at 0 size 1 = 1
+                    // CHECK:  UINT hwp_stat_mode at 1 size 3 = 3
                 }
         }
     }

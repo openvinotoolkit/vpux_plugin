@@ -291,9 +291,9 @@ mlir::LogicalResult OptimizeEltwise::matchAndRewrite(IE::MemPermuteOp memPermute
 
         newAddInputs.push_back(inLayoutCastOp.getOutput());
     }
-    auto newAddOp =
-            rewriter.create<IE::AddOp>(addOp.getLoc(), addOp.getType(), newAddInputs[0], newAddInputs[1],
-                                       addOp.getAutoBroadcastAttr(), addOp.getPostOpAttr(), addOp.getClampAttr());
+    auto newAddOp = rewriter.create<IE::AddOp>(
+            addOp.getLoc(), addOp.getType(), newAddInputs[0], newAddInputs[1], addOp.getAutoBroadcastAttr(),
+            addOp.getPostOpAttr(), addOp.getClampAttr(), addOp.getOutputChannelsAttr(), addOp.getInputChannelsAttr());
 
     const auto nceOutLayout = DimsOrder::fromValue(memPermuteOp.getOutput());
     const auto orderOutAttr = mlir::AffineMapAttr::get(nceOutLayout.toAffineMap(ctx));
@@ -438,9 +438,9 @@ void OptimizeShapeCastedEltwise::createNewOutputWithAlignedShape(IE::MemPermuteO
     //     IE.MemPermute -> IE.MemPermute -> IE.PermuteCast -> IE.Add -> IE.PermuteCast -> [IE.QuantCast]
     auto ctx = memPermuteOp->getContext();
     auto newAddOpType = addOp.getType().cast<vpux::NDTypeInterface>().changeShape(newAlignedShape);
-    auto newAddOp =
-            rewriter.create<IE::AddOp>(addOp.getLoc(), newAddOpType, newInputs[0], newInputs[1],
-                                       addOp.getAutoBroadcastAttr(), addOp.getPostOpAttr(), addOp.getClampAttr());
+    auto newAddOp = rewriter.create<IE::AddOp>(
+            addOp.getLoc(), newAddOpType, newInputs[0], newInputs[1], addOp.getAutoBroadcastAttr(),
+            addOp.getPostOpAttr(), addOp.getClampAttr(), addOp.getOutputChannelsAttr(), addOp.getInputChannelsAttr());
 
     auto memPermOutType = memPermuteOp.getResult().getType().cast<vpux::NDTypeInterface>();
     auto newOutPermuteCastType = memPermOutType.changeElemType(newAddOpType.getElementType());

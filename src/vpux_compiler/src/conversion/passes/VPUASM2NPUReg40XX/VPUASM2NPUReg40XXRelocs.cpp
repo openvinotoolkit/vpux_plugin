@@ -20,55 +20,26 @@
 using namespace vpux;
 using namespace vpux::VPURegMapped;
 using namespace npu40xx;
+using namespace NPUReg40XX;
+using namespace NPUReg40XX::Descriptors;
 
 namespace {
 
-template <typename REG_TYPE>
 uint64_t getTensorMode(mlir::Type type) {
-    static_assert(std::is_same<REG_TYPE, NPUReg40XX::RegField_amodeType>::value ||
-                          std::is_same<REG_TYPE, NPUReg40XX::RegField_wmodeType>::value ||
-                          std::is_same<REG_TYPE, NPUReg40XX::RegField_dma_acc_info_compress_dtypeType>::value ||
-                          std::is_same<REG_TYPE, NPUReg40XX::RegField_dma_acc_info_decompress_dtypeType>::value,
-                  "getTensorMode: Unsupported template argument REG_TYPE");
-
-    if (auto quantized = type.dyn_cast<mlir::quant::QuantizedType>()) {
-        return getTensorMode<REG_TYPE>(quantized.getStorageType());
+    if (auto quantized = mlir::dyn_cast<mlir::quant::QuantizedType>(type)) {
+        return getTensorMode(quantized.getStorageType());
     }
-    if (std::is_same<REG_TYPE, NPUReg40XX::RegField_amodeType>::value ||
-        std::is_same<REG_TYPE, NPUReg40XX::RegField_wmodeType>::value) {
-        if (type.isF16()) {
-            return static_cast<uint64_t>(nn_public::VpuInputTensorDType::FP16);
-        } else if (type.isUnsignedInteger(8)) {
-            return static_cast<uint64_t>(nn_public::VpuInputTensorDType::U8);
-        } else if (type.isInteger(8)) {
-            return static_cast<uint64_t>(nn_public::VpuInputTensorDType::I8);
-        } else if (type.isInteger(4)) {
-            return static_cast<uint64_t>(nn_public::VpuInputTensorDType::I4);
-        } else if (type.isInteger(2)) {
-            return static_cast<uint64_t>(nn_public::VpuInputTensorDType::I2);
-        } else if (type.isBF16()) {
-            return static_cast<uint64_t>(nn_public::VpuInputTensorDType::BF16);
-        } else if (type.isUnsignedInteger(4)) {
-            return static_cast<uint64_t>(nn_public::VpuInputTensorDType::U4);
-        } else if (type.isInteger(1)) {
-            return static_cast<uint64_t>(nn_public::VpuInputTensorDType::BIN);
-        }
-        VPUX_THROW("Invalid tensor type for DPU configuration {0}", type);
-    } else if (std::is_same<REG_TYPE, NPUReg40XX::RegField_dma_acc_info_compress_dtypeType>::value ||
-               std::is_same<REG_TYPE, NPUReg40XX::RegField_dma_acc_info_decompress_dtypeType>::value) {
-        if (type.isSignedInteger() || type.isUnsignedInteger() || type.isSignlessInteger()) {
-            return DMA_ACC_DTYPE_INT8_UINT8;
-        } else {
-            return DMA_ACC_DTYPE_FP16_BF16;
-        }
+
+    if (type.isSignedInteger() || type.isUnsignedInteger() || type.isSignlessInteger()) {
+        return DMA_ACC_DTYPE_INT8_UINT8;
+    } else {
+        return DMA_ACC_DTYPE_FP16_BF16;
     }
 
     VPUX_THROW("Invalid tensor type for DMA Acceleration configuration {0}", type);
 }
 
-using RegisterMap = std::map<std::string, std::map<std::string, uint64_t>>;
-
-void setDMAConversionMode(RegisterMap& initValues, mlir::Type inputType, uint64_t srcSize, mlir::Type outputType,
+void setDMAConversionMode(DMARegister& initValues, mlir::Type inputType, uint64_t srcSize, mlir::Type outputType,
                           uint64_t dstSize) {
     uint64_t conversionCfg = 0;
     if (inputType != outputType) {
@@ -82,15 +53,8 @@ void setDMAConversionMode(RegisterMap& initValues, mlir::Type inputType, uint64_
 
         VPUX_THROW_WHEN(dstSize != (srcSize / 2), "Source and destination length do not match");
     }
-    VPURegMapped::updateRegMappedInitializationValues(
-            initValues,
-            {
-                    {"dma_cfg_fields",
-                     {
-                             {"dma_cfg_fields_conversion_cfg",
-                              checked_cast_reg<NPUReg40XX::RegField_dma_cfg_fields_conversion_cfgType>(conversionCfg)},
-                     }},
-            });
+
+    initValues.write<Fields::dma_cfg_fields_conversion_cfg>(conversionCfg);
 }
 
 uint32_t getActCompressionEntryTileMask(VPUASM::NNDMAOp dmaOp) {
@@ -108,16 +72,8 @@ uint32_t getActCompressionEntryTileMask(VPUASM::NNDMAOp dmaOp) {
     return 0;
 }
 
-void setDMAAccelerationCompress(RegisterMap& initValues, VPUASM::NNDMAOp origOp, mlir::MemRefType inputType,
+void setDMAAccelerationCompress(DMARegister& initValues, VPUASM::NNDMAOp origOp, mlir::MemRefType inputType,
                                 mlir::MemRefType outputType) {
-    auto accCfg = checked_cast_reg<NPUReg40XX::RegField_dma_cfg_fields_acceleration_cfgType>(DMA_ACCEL_COMPRESS);
-    auto dtype = checked_cast_reg<NPUReg40XX::RegField_dma_acc_info_compress_dtypeType>(
-            getTensorMode<NPUReg40XX::RegField_dma_acc_info_compress_dtypeType>(inputType.getElementType()));
-    auto remoteWidthSetEn = checked_cast_reg<NPUReg40XX::RegField_dma_cfg_fields_rws_enType>(
-            origOp.getActCompressionSizeEntry().has_value());
-
-    uint32_t dmaActCompEntryTileMask = getActCompressionEntryTileMask(origOp);
-
     const auto dmaDescriptor = origOp.getDmaDescriptor();
     const auto srcWidth = dmaDescriptor.getSrcWidth().getInt();
     const auto dstWidth = outputType.cast<vpux::NDTypeInterface>().getTotalAllocSize().count();
@@ -127,52 +83,32 @@ void setDMAAccelerationCompress(RegisterMap& initValues, VPUASM::NNDMAOp origOp,
                       "Uncompressed buffer size '{0}' needs to be larger then '{1}'", uncompressedBufSize,
                       ACT_COMPRESSION_MIN_BUF_SIZE);
 
-    VPURegMapped::updateRegMappedInitializationValues(
-            initValues,
-            {{"dma_cfg_fields",
-              {
-                      {"dma_cfg_fields_rws_en", remoteWidthSetEn},
-                      {"dma_cfg_fields_acceleration_cfg", accCfg},
-              }},
-             {"dma_acc_info_compress",
-              {
-                      {"dma_acc_info_compress_dtype",
-                       checked_cast_reg<NPUReg40XX::RegField_dma_acc_info_compress_dtypeType>(dtype)},
-                      {"dma_acc_info_compress_bitc_en",
-                       checked_cast_reg<NPUReg40XX::RegField_dma_acc_info_compress_bitc_enType>(uint64_t(1))},
-              }},
-             {"dma_width", {{"dma_width_src", srcWidth}, {"dma_width_dst", dstWidth}}},
-             {"dma_remote_width_store", {{"dma_remote_width_store", dmaActCompEntryTileMask}}}});
+    initValues.write<Fields::dma_width_src>(srcWidth);
+    initValues.write<Fields::dma_width_dst>(dstWidth);
+
+    if (origOp.getActCompressionSizeEntry().has_value()) {
+        initValues.write<Fields::dma_cfg_fields_rws_en>(true);
+        initValues.write<Fields::dma_remote_width_store>(getActCompressionEntryTileMask(origOp));
+    }
+
+    initValues.write<Fields::dma_cfg_fields_acceleration_cfg>(DMA_ACCEL_COMPRESS);
+    initValues.write<Fields::dma_acc_info_compress_dtype>(getTensorMode(inputType.getElementType()));
+    initValues.write<Fields::dma_acc_info_compress_bitc_en>(1);
 }
 
-void setDMAAccelerationDecompress(RegisterMap& initValues, VPUASM::NNDMAOp origOp, mlir::MemRefType outputType) {
-    auto accCfg = checked_cast_reg<NPUReg40XX::RegField_dma_cfg_fields_acceleration_cfgType>(DMA_ACCEL_DECOMPRESS);
-    auto dtype = checked_cast_reg<NPUReg40XX::RegField_dma_acc_info_decompress_dtypeType>(
-            getTensorMode<NPUReg40XX::RegField_dma_acc_info_decompress_dtypeType>(outputType.getElementType()));
+void setDMAAccelerationDecompress(DMARegister& initValues, VPUASM::NNDMAOp origOp, mlir::MemRefType outputType) {
     auto actCompressionSizeEntry = origOp.getActCompressionSizeEntry();
-    auto remoteWidthFetchEn =
-            checked_cast_reg<NPUReg40XX::RegField_dma_cfg_fields_rwf_enType>(actCompressionSizeEntry.has_value());
+    if (actCompressionSizeEntry.has_value()) {
+        initValues.write<Fields::dma_cfg_fields_rwf_en>(true);
+        initValues.write<Fields::dma_remote_width_fetch>(getActCompressionEntryTileMask(origOp));
+    }
 
-    uint32_t dmaActDecompEntryTileMask = getActCompressionEntryTileMask(origOp);
-
-    VPURegMapped::updateRegMappedInitializationValues(
-            initValues,
-            {{"dma_cfg_fields",
-              {
-                      {"dma_cfg_fields_rwf_en", remoteWidthFetchEn},
-                      {"dma_cfg_fields_acceleration_cfg", accCfg},
-              }},
-             {"dma_acc_info_decompress",
-              {
-                      {"dma_acc_info_decompress_dtype",
-                       checked_cast_reg<NPUReg40XX::RegField_dma_acc_info_decompress_dtypeType>(dtype)},
-                      {"dma_acc_info_decompress_bitc_en",
-                       checked_cast_reg<NPUReg40XX::RegField_dma_acc_info_decompress_bitc_enType>(uint64_t(1))},
-              }},
-             {"dma_remote_width_fetch", {{"dma_remote_width_fetch", dmaActDecompEntryTileMask}}}});
+    initValues.write<Fields::dma_cfg_fields_acceleration_cfg>(DMA_ACCEL_DECOMPRESS);
+    initValues.write<Fields::dma_acc_info_decompress_dtype>(getTensorMode(outputType.getElementType()));
+    initValues.write<Fields::dma_acc_info_decompress_bitc_en>(1);
 }
 
-void setDMAAccelerationMode(RegisterMap& initValues, VPUASM::NNDMAOp origOp, mlir::MemRefType inputType,
+void setDMAAccelerationMode(DMARegister& initValues, VPUASM::NNDMAOp origOp, mlir::MemRefType inputType,
                             mlir::MemRefType outputType) {
     auto accMode = origOp.getAccelerationMode();
     switch (accMode) {
@@ -191,20 +127,10 @@ void setDMAAccelerationMode(RegisterMap& initValues, VPUASM::NNDMAOp origOp, mli
     }
 }
 
-void setEnableMemorySideCaching(RegisterMap& initValues) {
-    auto srcMscMode = vpux::VPURegMapped::checked_cast_reg<vpux::NPUReg40XX::RegField_dma_src_aubType>(DMA_AUB_SRC_DST);
-    auto dstMscMode = vpux::VPURegMapped::checked_cast_reg<vpux::NPUReg40XX::RegField_dma_dst_aubType>(DMA_AUB_SRC_DST);
-    auto aubCfgMode =
-            vpux::VPURegMapped::checked_cast_reg<vpux::NPUReg40XX::RegField_dma_cfg_fields_axi_user_bits_cfgType>(
-                    DMA_AUB_SRC_DST);
-
-    VPURegMapped::updateRegMappedInitializationValues(initValues,
-                                                      {
-                                                              {"dma_src_aub", {{"dma_src_aub", srcMscMode}}},
-                                                              {"dma_dst_aub", {{"dma_dst_aub", dstMscMode}}},
-                                                      });
-    VPURegMapped::updateRegMappedInitializationValues(
-            initValues, {{"dma_cfg_fields", {{"dma_cfg_fields_axi_user_bits_cfg", aubCfgMode}}}});
+void setEnableMemorySideCaching(DMARegister& initValues) {
+    initValues.write<Fields::dma_src_aub>(DMA_AUB_SRC_DST);
+    initValues.write<Fields::dma_dst_aub>(DMA_AUB_SRC_DST);
+    initValues.write<Fields::dma_cfg_fields_axi_user_bits_cfg>(DMA_AUB_SRC_DST);
 }
 
 struct NPUReg40XX_3D_DmaConfig {
@@ -249,29 +175,29 @@ NPUReg40XX_3D_DmaConfig configure3DDma(VPUIP::DMADescriptorAttr vpu27Config) {
     } else {
         numDims = DMA_2D;
     }
-    vpu4config.numDims = checked_cast_reg<NPUReg40XX::RegField_dma_cfg_fields_num_dimType>(numDims);
+    vpu4config.numDims = numDims;
 
     switch (numDims) {
     case DMA_3D:
         VPUX_THROW_WHEN(numPlanes == 0, "numPlanes cannot be 0 for a 3D transaction");
-        vpu4config.srcDimSize2 = checked_cast_reg<NPUReg40XX::RegField_dma_dim_size_2_srcType>(numPlanes - 1);
-        vpu4config.dstDimSize2 = checked_cast_reg<NPUReg40XX::RegField_dma_dim_size_2_dstType>(numPlanes - 1);
+        vpu4config.srcDimSize2 = numPlanes - 1;
+        vpu4config.dstDimSize2 = numPlanes - 1;
 
-        vpu4config.srcStride2 = checked_cast_reg<NPUReg40XX::RegField_dma_stride_src_2Type>(srcPlaneStride);
-        vpu4config.dstStride2 = checked_cast_reg<NPUReg40XX::RegField_dma_stride_dst_2Type>(dstPlaneStride);
+        vpu4config.srcStride2 = srcPlaneStride;
+        vpu4config.dstStride2 = dstPlaneStride;
 
         [[fallthrough]];
     case DMA_2D:
-        vpu4config.srcDimSize1 = checked_cast_reg<NPUReg40XX::RegField_dma_dim_size_1_srcType>(srcDimSize1);
-        vpu4config.dstDimSize1 = checked_cast_reg<NPUReg40XX::RegField_dma_dim_size_1_dstType>(dstDimSize1);
+        vpu4config.srcDimSize1 = srcDimSize1;
+        vpu4config.dstDimSize1 = dstDimSize1;
 
-        vpu4config.srcStride1 = checked_cast_reg<NPUReg40XX::RegField_dma_stride_src_1Type>(srcStride);
-        vpu4config.dstStride1 = checked_cast_reg<NPUReg40XX::RegField_dma_stride_dst_1Type>(dstStride);
+        vpu4config.srcStride1 = srcStride;
+        vpu4config.dstStride1 = dstStride;
 
         [[fallthrough]];
     case DMA_1D:
-        vpu4config.srcWidth = checked_cast_reg<NPUReg40XX::RegField_dma_width_srcType>(srcWidth);
-        vpu4config.dstWidth = checked_cast_reg<NPUReg40XX::RegField_dma_width_dstType>(dstWidth);
+        vpu4config.srcWidth = srcWidth;
+        vpu4config.dstWidth = dstWidth;
         break;
     default:
         VPUX_THROW("Error at configure3DDma. Unsupported numDims={0}", numDims);
@@ -293,20 +219,16 @@ public:
 
 private:
     bool isWorkLoadManagementDMA(mlir::Operation* op) const {
-        if (mlir::isa<VPUASM::DPUInvariantOp>(op) || mlir::isa<VPUASM::DPUVariantOp>(op) ||
-            mlir::isa<VPUIPDPU::DPUInvariantOp>(op) || mlir::isa<VPUIPDPU::DPUVariantOp>(op) ||
-            mlir::isa<VPUASM::ActKernelInvocationOp>(op) || mlir::isa<VPUASM::ActKernelRangeOp>(op) ||
-            mlir::isa<VPUASM::DeclareTaskBufferOp>(op)) {
-            return true;
-        }
-        return false;
+        return mlir::isa<VPUASM::DPUInvariantOp, VPUASM::DPUVariantOp, VPUIPDPU::DPUInvariantOp, VPUIPDPU::DPUVariantOp,
+                         VPUASM::ActKernelInvocationOp, VPUASM::ActKernelRangeOp, VPUASM::DeclareTaskBufferOp>(op);
     }
+
     Logger _log;
     ELF::SymbolReferenceMap& _symRefMap;
 };
 
 // Hardware supports Gather/Scatter mode, currently only Gather is supported by compiler.
-void setGatherMode(ELF::SymbolReferenceMap& _symRefMap, const ::mlir::SymbolRefAttr& indices, RegisterMap& initValues,
+void setGatherMode(ELF::SymbolReferenceMap& _symRefMap, const ::mlir::SymbolRefAttr& indices, DMARegister& initValues,
                    const mlir::MemRefType& outputType, Bit elemOutSize) {
     mlir::MemRefType indicesType;
     auto indicesBufferRep = _symRefMap.lookupSymbol(indices);
@@ -321,22 +243,13 @@ void setGatherMode(ELF::SymbolReferenceMap& _symRefMap, const ::mlir::SymbolRefA
     // size bigger than 1. There condition will be enforced on upper level dialects.
     const auto dma_element_size =
             (outputType.getNumElements() / indicesType.getNumElements()) * elemOutSize.to<Byte>().count();
-    VPURegMapped::updateRegMappedInitializationValues(
-            initValues,
-            {
-                    {"dma_cfg_fields",
-                     {{"dma_cfg_fields_src_list_cfg",
-                       DMA_LIST_REL_INDEX},  // or DMA_LIST_ABS_INDEX - absolute or relative indexing
-                      {"dma_cfg_fields_dst_list_cfg", 0}}},
-                    {"dma_list_size",
-                     {{"dma_list_size_src", indicesType.getNumElements()}}},  //  the number of indices in the list.
-                    {"dma_stride_dst_1", {{"dma_stride_dst_1", dma_element_size}}},  // element_size_cmx_padded
-                    {"dma_width", {{"dma_width_src", dma_element_size}}},            // element_size_ddr_packed
-                    {"dma_dim_size", {{"dma_dim_size_1_dst", 0}}}
-                    // Data written must be equal to data read, Src_width* Src_list_size = Dst_width*(Dst_dim_size[1]+1)
-                    // Dst_width = Src_width* Src_list_size so Dst_dim_size[1] should be always 0 (This is GatherDMA
-                    // specific)
-            });
+
+    initValues.write<Fields::dma_cfg_fields_src_list_cfg>(DMA_LIST_REL_INDEX);
+    initValues.write<Fields::dma_cfg_fields_dst_list_cfg>(0);
+    initValues.write<Fields::dma_list_size_src>(indicesType.getNumElements());
+    initValues.write<Fields::dma_stride_dst_1>(dma_element_size);
+    initValues.write<Fields::dma_width_src>(dma_element_size);
+    initValues.write<Fields::dma_dim_size_1_dst>(0);
 }
 
 mlir::LogicalResult NNDMARewriter::matchAndRewrite(VPUASM::NNDMAOp origOp, mlir::PatternRewriter& rewriter) const {
@@ -350,7 +263,7 @@ mlir::LogicalResult NNDMARewriter::matchAndRewrite(VPUASM::NNDMAOp origOp, mlir:
     mlir::MemRefType inputType;
 
     uint32_t inputTileMask = 0;
-    bool isWLMNNDMAOp = false;
+    bool isDMAInputForWLMDMA = false;
     if (mlir::isa<VPUASM::DeclareBufferOp>(inputBufferRef)) {
         auto inputBuffer = mlir::cast<VPUASM::DeclareBufferOp>(inputBufferRef);
         inputType = inputBuffer.getBufferType().getMemref();
@@ -359,7 +272,7 @@ mlir::LogicalResult NNDMARewriter::matchAndRewrite(VPUASM::NNDMAOp origOp, mlir:
         auto inputBuffer = mlir::cast<VPUASM::ConstBufferOp>(inputBufferRef);
         inputType = inputBuffer.getBufferType().getMemref();
     } else if (isWorkLoadManagementDMA(inputBufferRef)) {
-        isWLMNNDMAOp = true;
+        isDMAInputForWLMDMA = true;
     } else {
         VPUX_THROW("Could not find symbol name entry for {0}", origOp.getInput());
     }
@@ -371,15 +284,6 @@ mlir::LogicalResult NNDMARewriter::matchAndRewrite(VPUASM::NNDMAOp origOp, mlir:
                     1 << (buffIndex + NPUReg40XX::CMX_TILE_SELECT_OFFSET);  // Bits 21 to 26 are used for tile select
         }
     }
-
-    auto prodMaskLo = checked_cast_reg<NPUReg40XX::RegField_dma_barrier_prod_mask_lowerType>(
-            vpux::VPUMI40XX::computeMaskLo(origOp.getUpdateBarriers()));
-    auto prodMaskHi = checked_cast_reg<NPUReg40XX::RegField_dma_barrier_prod_mask_upperType>(
-            vpux::VPUMI40XX::computeMaskHi(origOp.getUpdateBarriers()));
-    auto consMaskLo = checked_cast_reg<NPUReg40XX::RegField_dma_barrier_cons_mask_lowerType>(
-            vpux::VPUMI40XX::computeMaskLo(origOp.getWaitBarriers()));
-    auto consMaskHi = checked_cast_reg<NPUReg40XX::RegField_dma_barrier_cons_mask_upperType>(
-            vpux::VPUMI40XX::computeMaskHi(origOp.getWaitBarriers()));
 
     const int barrierEn = 1;
     const int ord = !origOp.getIsOutOfOrder();
@@ -396,67 +300,53 @@ mlir::LogicalResult NNDMARewriter::matchAndRewrite(VPUASM::NNDMAOp origOp, mlir:
 
     auto vpu4config = configure3DDma(origOp.getDmaDescriptor());
 
-    auto startAfter = checked_cast_reg<NPUReg40XX::RegField_start_after_Type>(origOp.getStartAfter());
-    auto cleanAfter = checked_cast_reg<NPUReg40XX::RegField_clean_after_Type>(origOp.getCleanAfter());
-
-    // prepare DMARegister
-    auto initValues = vpux::NPUReg40XX::RegMapped_DMARegisterType::getResetInitilizationValues();
-
-    VPURegMapped::updateRegMappedInitializationValues(
-            initValues,
-            {
-                    {"dma_cfg_fields",
-                     {{"dma_cfg_fields_num_dim", vpu4config.numDims},
-                      {"dma_cfg_fields_barrier_en", barrierEn},
-                      {"dma_cfg_fields_atp_en", 1},
-                      {"dma_cfg_fields_src_burst_length", 15},
-                      {"dma_cfg_fields_dst_burst_length", 15},
-                      {"dma_cfg_fields_arb_qos", 255},
-                      {"dma_cfg_fields_ord", ord},
-                      {"dma_cfg_fields_hwp_id_en", 1},
-                      {"dma_cfg_fields_hwp_id", origOp.getDmaHwpId().value_or(0)}}},
-                    {"dma_dim_size",
-                     {{"dma_dim_size_1_src", vpu4config.srcDimSize1}, {"dma_dim_size_1_dst", vpu4config.dstDimSize1}}},
-                    {"dma_stride_src_1", {{"dma_stride_src_1", vpu4config.srcStride1}}},
-                    {"dma_stride_dst_1", {{"dma_stride_dst_1", vpu4config.dstStride1}}},
-                    {"dma_dim_size_2",
-                     {{"dma_dim_size_2_src", vpu4config.srcDimSize2}, {"dma_dim_size_2_dst", vpu4config.dstDimSize2}}},
-                    {"dma_stride_src_2", {{"dma_stride_src_2", vpu4config.srcStride2}}},
-                    {"dma_src_addr", {{"dma_src", inputTileMask}}},
-                    {"dma_dst_addr", {{"dma_dst", broadcastTileMask}}},
-                    {"dma_barrier_prod_mask_lower", {{"dma_barrier_prod_mask_lower", prodMaskLo}}},
-                    {"dma_barrier_cons_mask_lower", {{"dma_barrier_cons_mask_lower", consMaskLo}}},
-                    {"dma_barrier_prod_mask_upper", {{"dma_barrier_prod_mask_upper", prodMaskHi}}},
-                    {"dma_barrier_cons_mask_upper", {{"dma_barrier_cons_mask_upper", consMaskHi}}},
-                    {"dma_link_address", {{"dma_link_address", linkAddressTileMask}}},
-                    {"dma_barriers_sched", {{"start_after_", startAfter}, {"clean_after_", cleanAfter}}},
-            });
+    DMARegister descriptor;
+    descriptor.write<Fields::dma_cfg_fields_num_dim>(vpu4config.numDims);
+    descriptor.write<Fields::dma_cfg_fields_barrier_en>(barrierEn);
+    descriptor.write<Fields::dma_cfg_fields_atp_en>(1);
+    descriptor.write<Fields::dma_cfg_fields_src_burst_length>(15);
+    descriptor.write<Fields::dma_cfg_fields_dst_burst_length>(15);
+    descriptor.write<Fields::dma_cfg_fields_arb_qos>(255);
+    descriptor.write<Fields::dma_cfg_fields_ord>(ord);
+    descriptor.write<Fields::dma_cfg_fields_hwp_id_en>(1);
+    descriptor.write<Fields::dma_cfg_fields_hwp_id>(origOp.getDmaHwpId().value_or(0));
+    descriptor.write<Fields::dma_dim_size_1_src>(vpu4config.srcDimSize1);
+    descriptor.write<Fields::dma_dim_size_1_dst>(vpu4config.dstDimSize1);
+    descriptor.write<Fields::dma_stride_src_1>(vpu4config.srcStride1);
+    descriptor.write<Fields::dma_stride_dst_1>(vpu4config.dstStride1);
+    descriptor.write<Fields::dma_dim_size_2_src>(vpu4config.srcDimSize2);
+    descriptor.write<Fields::dma_dim_size_2_dst>(vpu4config.dstDimSize2);
+    descriptor.write<Fields::dma_stride_src_2>(vpu4config.srcStride2);
+    descriptor.write<Fields::dma_src>(inputTileMask);
+    descriptor.write<Fields::dma_dst>(broadcastTileMask);
+    descriptor.write<Fields::dma_barrier_prod_mask_lower>(vpux::VPUMI40XX::computeMaskLo(origOp.getUpdateBarriers()));
+    descriptor.write<Fields::dma_barrier_cons_mask_lower>(vpux::VPUMI40XX::computeMaskLo(origOp.getWaitBarriers()));
+    descriptor.write<Fields::dma_barrier_prod_mask_upper>(vpux::VPUMI40XX::computeMaskHi(origOp.getUpdateBarriers()));
+    descriptor.write<Fields::dma_barrier_cons_mask_upper>(vpux::VPUMI40XX::computeMaskHi(origOp.getWaitBarriers()));
+    descriptor.write<Fields::dma_link_address>(linkAddressTileMask);
+    descriptor.write<Fields::start_after_>(origOp.getStartAfter());
+    descriptor.write<Fields::clean_after_>(origOp.getCleanAfter());
 
     if (auto enableMemorySideCaching = origOp.getEnableMscAttr()) {
-        setEnableMemorySideCaching(initValues);
+        setEnableMemorySideCaching(descriptor);
     }
-    auto accMode = origOp.getAccelerationMode();
+
     auto actCompFlag = origOp.getActCompressionSizeEntry().has_value();
-    auto indices = origOp.getIndices();
-    // Some registers are conflicting with compression related registers and in such case they should not be programmed
+    auto accMode = origOp.getAccelerationMode();
     if (!actCompFlag) {
         // dma_width register conflicts with remote_width_fetch and should not be programmed in case of decompression
         // In case of compression it should not be programmed because dstWidth requires adjustment for worst case size
-        VPURegMapped::updateRegMappedInitializationValues(
-                initValues, {{"dma_width",
-                              {{"dma_width_src", vpu4config.srcWidth},
-                               {"dma_width_dst", vpu4config.dstWidth}}}});  // conflict with remote_width_fetch
+        descriptor.write<Fields::dma_width_src>(vpu4config.srcWidth);
+        descriptor.write<Fields::dma_width_dst>(vpu4config.dstWidth);
     }
 
     if (!actCompFlag || accMode != vpux::VPUIP::DMAAccMode::COMPRESSION) {
         // dma_stride_dst_2 register conflicts with remote_width_store and should not be programmed in case of
         // compression
-        VPURegMapped::updateRegMappedInitializationValues(
-                initValues, {{"dma_stride_dst_2",
-                              {{"dma_stride_dst_2", vpu4config.dstStride2}}}});  // conflict with remote_width_store
+        descriptor.write<Fields::dma_stride_dst_2>(vpu4config.dstStride2);
     }
 
-    if (!isWLMNNDMAOp) {
+    if (!isDMAInputForWLMDMA) {
         auto outputBufferSym = origOp.getOutputBuffs()[0].dyn_cast_or_null<mlir::SymbolRefAttr>();
         VPUX_THROW_UNLESS(outputBufferSym, "`output_buffs` attribute should contain SymbolRefAttr but it doesn't");
 
@@ -465,23 +355,17 @@ mlir::LogicalResult NNDMARewriter::matchAndRewrite(VPUASM::NNDMAOp origOp, mlir:
         VPUX_THROW_UNLESS(outputBuffer, "Could not find symbol name entry for {0}", outputBufferRef);
         auto outputType = outputBuffer.getBufferType().getMemref();
 
-        const Bit elemInSize = vpux::getElemTypeSize(inputType);
-        const Bit elemOutSize = vpux::getElemTypeSize(outputType);
+        const auto elemInSize = vpux::getElemTypeSize(inputType);
+        const auto elemOutSize = vpux::getElemTypeSize(outputType);
 
         auto totalInSizeBits = alignMemSize(inputType.getNumElements() * elemInSize, Byte(1));
         auto totalOutSizeBits = alignMemSize(outputType.getNumElements() * elemOutSize, Byte(1));
-        auto srcWidthSize =
-                checked_cast_reg<NPUReg40XX::RegField_dma_width_srcType>(totalInSizeBits.to<Byte>().count());
-        auto dstWidthSize =
-                checked_cast_reg<NPUReg40XX::RegField_dma_width_dstType>(totalOutSizeBits.to<Byte>().count());
 
         // DMA only does FP32 -> FP16/BF16 conversions,
         // Because of this, dstDimSize1 will always be half of the original value
         if (inputType.getElementType() != outputType.getElementType() && vpu4config.dstDimSize1) {
             long newDstDimSize1 = ((vpu4config.dstDimSize1 + 1) / 2) - 1;
-            VPURegMapped::updateRegMappedInitializationValues(
-                    initValues,
-                    {{"dma_dim_size", {{"dma_dim_size_1_dst", newDstDimSize1}}}});  // update value for conversion mode
+            descriptor.write<Fields::dma_dim_size_1_dst>(newDstDimSize1);
         }
 
         if (accMode != vpux::VPUIP::DMAAccMode::DISABLE) {
@@ -489,19 +373,20 @@ mlir::LogicalResult NNDMARewriter::matchAndRewrite(VPUASM::NNDMAOp origOp, mlir:
                                     vpu4config.dstDimSize2 != 0 || vpu4config.srcStride2 != 0 ||
                                     vpu4config.dstStride2 != 0,
                             "Activation compression is supported only for 1D DMAs");
-            setDMAAccelerationMode(initValues, origOp, inputType, outputType);
+            setDMAAccelerationMode(descriptor, origOp, inputType, outputType);
         } else {
             // Convertion
-            setDMAConversionMode(initValues, inputType.getElementType(), srcWidthSize, outputType.getElementType(),
-                                 dstWidthSize);
+            setDMAConversionMode(descriptor, inputType.getElementType(), totalInSizeBits.to<Byte>().count(),
+                                 outputType.getElementType(), totalOutSizeBits.to<Byte>().count());
         }
+
+        auto indices = origOp.getIndices();
         if (indices.has_value()) {
-            setGatherMode(_symRefMap, indices.value(), initValues, outputType, elemOutSize);
+            setGatherMode(_symRefMap, indices.value(), descriptor, outputType, elemOutSize);
         }
     }
 
-    auto regDMADescriptorAttr =
-            VPURegMapped::getRegMappedAttributeWithValues<NPUReg40XX::RegMapped_DMARegisterType>(rewriter, initValues);
+    auto regDMADescriptorAttr = DMARegisterAttr::get(rewriter.getContext(), std::move(descriptor));
 
     auto dma = rewriter.create<NPUReg40XX::NNDMAOp>(origOp->getLoc(), origOp.getSymNameAttr(), regDMADescriptorAttr,
                                                     origOp.getInputAttr(), origOp.getOutputBuffsAttr(),
@@ -517,6 +402,8 @@ mlir::LogicalResult NNDMARewriter::matchAndRewrite(VPUASM::NNDMAOp origOp, mlir:
 
     return mlir::success();
 }
+
+using RegisterMap = std::map<std::string, std::map<std::string, vpux::VPURegMapped::RegFieldValue>>;
 
 void setNormFactor(RegisterMap& initValues, ::mlir::ArrayAttr normFactor) {
     const auto getRawFP16 = [](auto val) {
@@ -1047,8 +934,6 @@ mlir::LogicalResult ActKernelInvocationRewriter::matchAndRewrite(VPUASM::ActKern
         perfPacketTileMask = NPUReg40XX::getTileSelectMaskForBuffer(perfPacketBufferOp);
     }
 
-    auto invoIndex = origOp.getTaskIndex().getValue();
-
     auto waitMaskHi = VPUMI40XX::computeMaskHi(origOp.getWaitBarriers());
     auto waitMaskLo = VPUMI40XX::computeMaskLo(origOp.getWaitBarriers());
     auto postMaskHi = VPUMI40XX::computeMaskHi(origOp.getUpdateBarriers());
@@ -1069,7 +954,6 @@ mlir::LogicalResult ActKernelInvocationRewriter::matchAndRewrite(VPUASM::ActKern
                                {"barriers_group_mask_act", {{"group_act", barrier_group}, {"mask_act", barrier_mask}}},
                                {"act_invo_barriers_sched",
                                 {{"start_after_", origOp.getStartAfter()}, {"clean_after_", origOp.getCleanAfter()}}},
-                               {"invo_index", {{"invo_index", invoIndex}}},
                                {"invo_tile", {{"invo_tile", origOp.getTile()}}},
                                {"kernel_range_index", {{"kernel_range_index", kernelRangeIndex}}},
                                {"perf_packet_out", {{"perf_packet_out", perfPacketTileMask}}}});
@@ -1132,31 +1016,31 @@ void ConvertVPUASM2NPUReg40XXRelocsPass::safeRunOnModule() {
     target.addLegalDialect<NPUReg40XX::NPUReg40XXDialect>();
     target.addLegalDialect<VPUASM::VPUASMDialect>();
 
-    target.addIllegalOp<VPUASM::ActKernelInvocationOp>();
-    target.addIllegalOp<VPUASM::ActKernelRangeOp>();
-    target.addIllegalOp<VPUASM::ActShaveRtOp>();
-    target.addIllegalOp<VPUASM::M2IOp>();
-    target.addIllegalOp<VPUASM::NNDMAOp>();
-
-    mlir::RewritePatternSet patterns(&ctx);
-
     auto mainOps = to_small_vector(netFunc.getOps<ELF::MainOp>());
     VPUX_THROW_UNLESS(mainOps.size() == 1, "Expected exactly one ELF mainOp. Got {0}", mainOps.size());
     auto elfMain = mainOps[0];
 
     ELF::SymbolReferenceMap symRefMap(elfMain, true);
 
-    patterns.add<NNDMARewriter>(&ctx, _log, symRefMap);
+    mlir::RewritePatternSet patternNNDMA(&ctx);
+    patternNNDMA.add<NNDMARewriter>(&ctx, _log, symRefMap);
+    target.addIllegalOp<VPUASM::NNDMAOp>();
+    if (mlir::failed(mlir::applyPartialConversion(netFunc, target, std::move(patternNNDMA)))) {
+        signalPassFailure();
+    }
+
+    mlir::RewritePatternSet patterns(&ctx);
     patterns.add<M2IRewriter>(&ctx, _log, symRefMap);
     patterns.add<ActShaveRtRewriter>(&ctx, _log);
     patterns.add<ActKernelInvocationRewriter>(&ctx, _log, symRefMap);
     patterns.add<ActKernelRangeRewriter>(&ctx, _log, symRefMap);
-
+    target.addIllegalOp<VPUASM::M2IOp>();
+    target.addIllegalOp<VPUASM::ActShaveRtOp>();
+    target.addIllegalOp<VPUASM::ActKernelInvocationOp>();
+    target.addIllegalOp<VPUASM::ActKernelRangeOp>();
     if (mlir::failed(mlir::applyPartialConversion(netFunc, target, std::move(patterns)))) {
         signalPassFailure();
     }
-
-    return;
 }
 
 }  // namespace

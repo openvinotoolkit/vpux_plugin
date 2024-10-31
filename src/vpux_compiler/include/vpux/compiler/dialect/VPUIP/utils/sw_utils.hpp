@@ -68,12 +68,16 @@ const SmallVector<StringLiteral> SW_KERNELS_SUPPORTING_TILING = {"mvn1",
                                                                  "detection_output_sort",
                                                                  "lstm_gates",
                                                                  "lstm_cell",
-                                                                 "round_fp16"};
+                                                                 "lstm_sequence",
+                                                                 "round_fp16",
+                                                                 "accumulate",
+                                                                 "populate_weight_table"};
 
-const SmallVector<StringLiteral> SW_KERNELS_SUPPORTING_STRIDE = {"mvn1", "lstm_cell"};
+const SmallVector<StringLiteral> SW_KERNELS_SUPPORTING_STRIDE = {"mvn1", "lstm_cell", "lstm_sequence"};
 
-const SmallVector<std::string_view> SW_KERNELS_SUPPORTING_SHAVE_BALANCING = {"softmax", "eltwise_mul", "activation_sin",
-                                                                             "activation_cos"};
+const SmallVector<std::string_view> SW_KERNELS_SUPPORTING_SHAVE_BALANCING = {
+        "softmax",          "eltwise_mul",      "activation_sin", "activation_cos",
+        "activation_swish", "activation_clamp", "eltwise_min",    "eltwise_max"};
 
 const SmallVector<StringLiteral> SW_KERNELS_LAYOUT_AGNOSTIC = {
         "activation_swish", "activation_gelu",    "activation_hswish", "activation_hardsigmoid",
@@ -89,6 +93,8 @@ const SmallVector<StringLiteral> SW_ACTIVATION_KERNELS = {
         "prelu_fp16"};
 
 constexpr StringLiteral SW_KERNEL_NAME_PREFIX = "builtin_";
+constexpr StringLiteral populateWeightTableWithShave = "populateWeightTable";
+constexpr StringLiteral weightsPtrsPerClusterAttr = "weightsPtrsPerClusterAttr";
 
 // SwKernel list can get better performance with tiling alignment configured
 const SmallVector<StringLiteral> SW_KERNELS_NEED_TILING_ALIGNMENT = {"mvn1",
@@ -150,7 +156,10 @@ SmallVector<mlir::Attribute> getSwkernelNewAttrsAfterTiling(VPUIP::SwKernelOp sw
                                                             const TilingInfo& inputTiling, const TileInfo& outTile,
                                                             Logger log);
 
-SmallVector<vpux::NDTypeInterface> getSwKernelTiledTypes(VPUIP::SwKernelOp swKernelOp);
+SmallVector<int64_t> getPopulateWeightTableSwKernelEntries(VPUIP::SwKernelOp swKernelOp);
+void updatePopulateWeightTableSwKernel(VPUIP::SwKernelOp swKernelOp, int64_t currOffset, Logger log);
+
+SmallVector<vpux::NDTypeInterface> getSwKernelTiledTypes(VPUIP::SwKernelOp swKernelOp, Dim tileDim);
 
 bool isCacheOpTaskType(std::optional<::mlir::SymbolRefAttr> kernelTaskType, bool includePrefetch = true);
 bool isCacheOpTaskType(mlir::SymbolRefAttr kernelTaskType, bool includePrefetch = true);

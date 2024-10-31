@@ -11,6 +11,7 @@
 #include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPURT/IR/task.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
+#include "vpux/compiler/utils/platform_resources.hpp"
 #include "vpux/compiler/utils/types.hpp"
 #include "vpux/hwtest/hwtest_utils.hpp"
 #include "vpux/hwtest/ops/act_shave_op.hpp"
@@ -165,6 +166,20 @@ void buildM2iTest(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp mod
     if (params.doNorm) {
         VPUX_THROW_UNLESS(params.normCoefs.size() > 0, "buildM2iTest: norm coeffs missing");
     }
+
+    // set runtime resources
+    mlir::PassManager pmBuilderInit(module->getName(), mlir::OpPassManager::Nesting::Implicit);
+
+    auto dpuTiles = 1;
+    if (params.doTiling) {
+        const auto arch = testDesc.getArchitecture();
+        dpuTiles = VPU::getMaxArchDPUClusterNum(arch);
+    }
+
+    auto initCompilerOptions = VPU::InitCompilerOptions(testDesc.getArchitecture(), VPU::CompilationMode::DefaultHW);
+    initCompilerOptions.numberOfDPUGroups = dpuTiles;
+    VPU::buildInitCompilerPipeline(pmBuilderInit, initCompilerOptions, log);
+    VPUX_THROW_UNLESS(mlir::succeeded(pmBuilderInit.run(module)), "Init compilation failed");
 
     int64_t m2iProfilingBufferSizeBytes = 0;
     int64_t totalProfilingBufferSizeBytes = 0;
@@ -577,14 +592,6 @@ void buildM2iTest(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp mod
     }
 
     funcBuilder.create<mlir::func::ReturnOp>(builder.getUnknownLoc(), funcOutputs);
-
-    // set runtime resources
-    mlir::PassManager pm(module->getName(), mlir::OpPassManager::Nesting::Implicit);
-    auto dpuTiles = params.doTiling ? VPU::getMaxArchDPUClusterNum(testDesc.getArchitecture()) : 1;
-    auto initCompilerOptions = VPU::InitCompilerOptions(testDesc.getArchitecture(), VPU::CompilationMode::DefaultHW);
-    initCompilerOptions.numberOfDPUGroups = dpuTiles;
-    VPU::buildInitCompilerPipeline(pm, initCompilerOptions, log);
-    VPUX_THROW_UNLESS(mlir::succeeded(pm.run(module)), "Compilation failed");
 
     // IE.CNNNetwork
     mlir::SmallVector<ProfilingDataSection> profilingDataSections;

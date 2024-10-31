@@ -38,9 +38,7 @@ TEST_P(DMAReductionTest, GetParams) {
     const auto expectedReducedDims = params.expectedReducedDims;
     const auto expectedReducedStrides = params.expectedReducedStrides;
 
-    mlir::DialectRegistry registry;
-    vpux::registerDialects(registry);
-    vpux::registerCommonInterfaces(registry);
+    auto registry = vpux::createDialectRegistry();
     mlir::MLIRContext ctx(registry);
 
     const auto shape = Shape(dims);
@@ -245,9 +243,7 @@ TEST_P(DMAReductionTestExpectFail, GetParams) {
     const auto expectedReducedDims = params.expectedReducedDims;
     const auto expectedReducedStrides = params.expectedReducedStrides;
 
-    mlir::DialectRegistry registry;
-    vpux::registerDialects(registry);
-    vpux::registerCommonInterfaces(registry);
+    auto registry = vpux::createDialectRegistry();
     mlir::MLIRContext ctx(registry);
 
     const auto shape = Shape(dims);

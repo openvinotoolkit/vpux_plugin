@@ -68,7 +68,7 @@ func.func @ConvertInterpolateWithChannelNeedAlignFourTimes(%arg0: tensor<1x1x80x
     return %0 : tensor<1x1x320x320xf16>
 
     // CHECK-NOT: IE.Interpolate
-    // CHECK:           [[CST:%.+]] = const.Declare tensor<1x1x8x1xf16, {order = #NHWC}> = dense<1.250000e-01> : tensor<1x1x8x1xf32>, [#const.ConvertElemType<f16>, #const.Reorder<#NHWC>]
+    // CHECK:           [[CST:%.+]] = const.Declare tensor<1x1x8x1xf16, {order = #NHWC}> = dense<1.250000e-01> : tensor<1x1x8x1xf32>, [#const.CastElemType<f16>, #const.Reorder<#NHWC>]
     // CHECK:           [[INPUTREORDER:%.+]] = IE.Reorder({{[^:]+}}) {dstOrder = #NHWC} : tensor<1x1x80x80xf16> -> tensor<1x1x80x80xf16, {order = #NHWC}>
 
     // CHECK:           [[CONCAT0:%.+]] = IE.Concat([[INPUTREORDER]], [[INPUTREORDER]], [[INPUTREORDER]], [[INPUTREORDER]], [[INPUTREORDER]], [[INPUTREORDER]], [[INPUTREORDER]], [[INPUTREORDER]])
@@ -124,7 +124,7 @@ func.func @ConvertInterpolateWithChannelNeedAlign3XTimes(%arg0: tensor<1x1x80x80
     return %0 : tensor<1x1x240x240xf16>
 
     // CHECK-NOT: IE.Interpolate
-    // CHECK:           [[CST:%.+]] = const.Declare tensor<1x1x3x1xf16, {order = #NHWC}> = dense<0.333333343> : tensor<1x1x3x1xf32>, [#const.ConvertElemType<f16>, #const.Reorder<#NHWC>]
+    // CHECK:           [[CST:%.+]] = const.Declare tensor<1x1x3x1xf16, {order = #NHWC}> = dense<0.333333343> : tensor<1x1x3x1xf32>, [#const.CastElemType<f16>, #const.Reorder<#NHWC>]
 
     // CHECK:           [[INPUTREORDER:%.+]] = IE.Reorder({{[^:]+}}) {dstOrder = #NHWC} : tensor<1x1x80x80xf16> -> tensor<1x1x80x80xf16, {order = #NHWC}>
 

@@ -57,3 +57,13 @@ void ELF::CreateRelocationSectionOp::serialize(elf::Writer& writer, ELF::Section
 
     sectionMap[getOperation()] = section;
 }
+
+void vpux::ELF::CreateRelocationSectionOp::preserialize(elf::Writer& writer, vpux::ELF::SectionMapType& sectionMap,
+                                                        vpux::ELF::SymbolReferenceMap&) {
+    VPUX_UNUSED(writer);
+    VPUX_UNUSED(sectionMap);
+
+    // don't implement and go into elf::Writer internal state first
+    // as there're relocation entries to be updated first
+    // E#136375
+}

@@ -9,6 +9,7 @@
 #include "vpux/compiler/dialect/IE/utils/const_attributes.hpp"
 #include "vpux/compiler/dialect/IE/utils/convolution_utils.hpp"
 #include "vpux/compiler/dialect/IE/utils/expand_utils.hpp"
+#include "vpux/compiler/dialect/IE/utils/permute_quantize_utils.hpp"
 #include "vpux/compiler/dialect/IE/utils/shape_infer.hpp"
 #include "vpux/compiler/dialect/VPU/utils/generate_tiling.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_invariant.hpp"
@@ -134,7 +135,8 @@ void ExpandEltwisePattern::checkAndCorrectGroupConv() {
     auto newGroupConvOp = builder.create<IE::GroupConvolutionOp>(
             groupConvOp->getLoc(), groupConvOp.getInput(), groupConvOp.getFilter(), groupConvOp.getBias(),
             groupConvOp.getStridesAttr(), groupConvOp.getPadsBeginAttr(), groupConvOp.getPadsEnd(),
-            groupConvOp.getDilationsAttr(), newGroupAttr, groupConvOp.getPostOpAttr(), groupConvOp.getClampAttr());
+            groupConvOp.getDilationsAttr(), newGroupAttr, groupConvOp.getPostOpAttr(), groupConvOp.getClampAttr(),
+            groupConvOp.getOutputChannelsAttr(), groupConvOp.getInputChannelsAttr());
     groupConvOp->replaceAllUsesWith(newGroupConvOp);
     auto origOutputType = groupConvOp.getType().cast<vpux::NDTypeInterface>();
     newGroupConvOp.getOutput().setType(
@@ -209,6 +211,37 @@ bool ExpandEltwisePattern::init() {
         }
     }
     log.trace("{0} Slice setOutput(s) found", _sliceOutputs.size());
+
+    /* If user is AlignedChannelsOpInterface, the op always need channel alignment, so expand is needed after reshape
+       For example, if the pattern like:
+        Expand     channel_aligned_input
+           |         |
+           \         /
+             Eltwise
+            /       \
+           Op1      Op2
+      to:
+        ShapeCast   channel_aligned_input
+           |          |
+           |       Slice
+           \         /
+             Eltwise
+               |
+             Expand
+             /    \
+            Op1   Op2
+       Here will introduce an extra slice
+    */
+    if (!_expandInputs.empty() && !_nonExpandInputs.empty() && _sliceOutputs.size() == 0) {
+        // If there is no slice output(s), that means no need expand after shapecast. The exception is if users are
+        // eltwise, like expand -> add -> add, continue the optimization.
+        for (auto user : _eltwiseOp->getResult(0).getUsers()) {
+            auto groupConvOp = mlir::dyn_cast<IE::GroupConvolutionOp>(user);
+            if (!mlir::isa<IE::MultiplyOp, IE::SubtractOp, IE::AddOp>(user) && !groupConvIsEltwise(groupConvOp)) {
+                return false;
+            }
+        }
+    }
 
     // save the original shape and generate new shape
     auto expandInputOp = *_expandInputs.begin();
@@ -400,13 +433,13 @@ mlir::LogicalResult ExpandEltwisePattern::rewrite() {
     for (auto constDeclare : _constInputs) {
         auto contentAttr = constDeclare.getContentAttr();
         Const::ContentAttr newContentAttr;
+
         auto newConstOutputType = constDeclare.getOutput().getType().cast<vpux::NDTypeInterface>();
         // For IE::MultiplyOp, IE::SubtractOp, IE::AddOp, we just undo expand by adding subview and then reshape
         if (mlir::isa<IE::MultiplyOp, IE::SubtractOp, IE::AddOp>(_eltwiseOp)) {
-            newContentAttr = contentAttr;
             const auto subOffset = Shape(_unExpandedShape.size(), int64_t(0));
-            newContentAttr = newContentAttr.subview(subOffset, _unExpandedShape);
-            newContentAttr = newContentAttr.reshape(_newExpandedShape);
+            newContentAttr =
+                    contentAttr.transform().subview(subOffset, _unExpandedShape).reshape(_newExpandedShape).get();
             newConstOutputType = newConstOutputType.changeShape(_newExpandedShape);
         }
         // Only support two kinds of constant input for IE::GroupConvolutionOp
@@ -425,14 +458,14 @@ mlir::LogicalResult ExpandEltwisePattern::rewrite() {
             // To avoid conflict between "const.Reshape" and "const.broadcast", set the "const.Reshape" with ones
             // and update shape with "const.broadcast".
             auto baseContent = contentAttr.getBaseContent();
-            newContentAttr = Const::ContentAttr::get(baseContent);
+            auto newContentAttrSetup = Const::ContentAttr::transform(baseContent);
             auto newConstantShape = Shape(newConstOutputType.getShape().size(), int64_t(1));
             for (auto attr : contentAttr.getTransformations()) {
                 if (!attr.isa<Const::PadWithZeroAttr, Const::BroadcastAttr, Const::ReshapeAttr>()) {
-                    newContentAttr = Const::ContentAttr::addTransformation(newContentAttr, attr);
+                    newContentAttrSetup = newContentAttrSetup.addTransformation(attr);
                 }
                 if (attr.isa<Const::ReshapeAttr>()) {
-                    newContentAttr = newContentAttr.reshape(newConstantShape);
+                    newContentAttrSetup = newContentAttrSetup.reshape(newConstantShape);
                 }
             }
 
@@ -443,7 +476,7 @@ mlir::LogicalResult ExpandEltwisePattern::rewrite() {
             if (baseContentNum.value() > 1) {
                 const auto subOffset = Shape(newConstOutputType.getShape().size(), int64_t(0));
                 const auto subShape = Shape(newConstOutputType.getShape().size(), int64_t(1));
-                newContentAttr = newContentAttr.subview(subOffset, subShape);
+                newContentAttrSetup = newContentAttrSetup.subview(subOffset, subShape);
             }
 
             auto constOutShape = getShape(constDeclare.getOutput()).toValues();
@@ -457,14 +490,15 @@ mlir::LogicalResult ExpandEltwisePattern::rewrite() {
             // Weights should only output channel (Dims4D::Act::N) larger than one. e.g. 16x1x1x1xfp16
             // Bias should only channel (Dims4D::Act::C) larger than one. e.g. 1x16x1x1xfp16
             const auto broadcastDim = constOutShape[Dims4D::Act::N] > 1 ? Dims4D::Act::N : Dims4D::Act::C;
-            newContentAttr = newContentAttr.broadcast(broadcastDim, _newExpandedShape[Dims4D::Act::C]);
             newConstantShape[broadcastDim] = _newExpandedShape[Dims4D::Act::C];
             newConstOutputType = newConstOutputType.changeShape(newConstantShape);
-            newContentAttr = newContentAttr.reshape(newConstantShape);
+            newContentAttr = newContentAttrSetup.broadcast(broadcastDim, _newExpandedShape[Dims4D::Act::C])
+                                     .reshape(newConstantShape)
+                                     .get();
         }
         builder.setInsertionPoint(_eltwiseOp);
         auto newConstDeclare =
-                builder.create<Const::DeclareOp>(constDeclare.getLoc(), newConstOutputType, newContentAttr);
+                builder.create<Const::DeclareOp>(constDeclare.getLoc(), newConstOutputType, std::move(newContentAttr));
         constDeclare.getOutput().replaceUsesWithIf(newConstDeclare.getOutput(), [&](mlir::OpOperand& opOperand) {
             return opOperand.getOwner() == _eltwiseOp;
         });
@@ -811,7 +845,6 @@ mlir::LogicalResult ExpandSingleChannelPoolingPattern::rewrite() {
     auto ctx = builder.getContext();
 
     auto inShape = getShape(expand.getInput());
-    auto inType = expand.getInput().getType().cast<vpux::NDTypeInterface>();
     auto newInShape = SmallVector<int64_t>{inShape[Dims4D::Act::N], inShape[Dims4D::Act::W], inShape[Dims4D::Act::H],
                                            inShape[Dims4D::Act::C]};
 
@@ -820,8 +853,8 @@ mlir::LogicalResult ExpandSingleChannelPoolingPattern::rewrite() {
 
     // input for the new pooling op
     mlir::Value input;
-    const auto alignedInputC =
-            alignValUp(newInShape[Dims4D::Act::C.ind()], VPU::NCEInvariant::getAlignment(inType.getElementType()));
+    auto channelsInfo = mlir::cast<IE::AlignedChannelsOpInterface>(op);
+    const auto alignedInputC = alignValUp(newInShape[Dims4D::Act::C.ind()], channelsInfo.getInputChannelAlignment());
     auto needInsertExpandForNewInputShape = alignedInputC > newInShape[Dims4D::Act::C.ind()];
     if (needInsertExpandForNewInputShape) {
         // Adjust Channel size to meet alignment requirement
@@ -1142,51 +1175,12 @@ mlir::LogicalResult AdjustPermuteQuantizeRewriter::matchAndRewrite(IE::PermuteQu
         return mlir::failure();
     }
 
-    const auto getHW = [](int64_t lengthOfAlignment, int64_t inputToDivide,
-                          int64_t inputToMultiply) -> SmallVector<int64_t> {
-        const auto maxFactor = std::max(checked_cast<int64_t>(2), divUp(lengthOfAlignment, checked_cast<int64_t>(2)));
-        for (const auto i : irange<int64_t>(2, maxFactor)) {
-            if (lengthOfAlignment % i == 0) {
-                const auto newShrink = inputToDivide / i;
-                if (newShrink > VPU::NCEInvariant::VPU_DIMENSION_LIMIT) {
-                    continue;
-                }
-                const auto newExpand = inputToMultiply * i;
-                if (newExpand > VPU::NCEInvariant::VPU_DIMENSION_LIMIT) {
-                    return {};
-                }
-
-                return {newShrink, newExpand};
-            }
-        }
-        return {};
-    };
-
-    if (W > VPU::NCEInvariant::VPU_DIMENSION_LIMIT) {
-        // For exmaple:
-        //     tensor<1x1x1x245760> => tensor<1x1x30x8192>
-        //
-        const auto alignment = VPU::NCEInvariant::getAlignment(inputType.getElementType());
-        const auto numberOfAlignment = W / alignment;
-        const auto newHW = getHW(numberOfAlignment, W, H);
-        if (newHW.empty()) {
-            return mlir::failure();
-        }
-
-        W = newHW[0];
-        H = newHW[1];
-    } else {
-        // For exmaple:
-        //     tensor<1x1x245760x16> => tensor<1x1x8192x480>
-        //
-        const auto newHW = getHW(H, H, W);
-        if (newHW.empty()) {
-            return mlir::failure();
-        }
-
-        H = newHW[0];
-        W = newHW[1];
+    auto adjustHW = IE::getAdjustHW(VPU::NCEInvariant::getAlignment(inputType), W, H);
+    if (!adjustHW.has_value()) {
+        return mlir::failure();
     }
+    W = adjustHW.value().front();
+    H = adjustHW.value().back();
 
     const auto outputType = layerOp.getOutput().getType().cast<vpux::NDTypeInterface>();
     const auto newShape = Shape({inputShape[Dims4D::Act::N], inputShape[Dims4D::Act::C], H, W});
@@ -1322,7 +1316,8 @@ mlir::LogicalResult EltwiseShapeRewriter<EltwiseOp>::matchAndRewrite(EltwiseOp l
         // Update EltwiseOp
         auto newEltwise = rewriter.template create<EltwiseOp>(
                 layerOp->getLoc(), newEltwiseOutputType, newInputValues[0], newInputValues[1],
-                layerOp.getAutoBroadcast(), layerOp.getPostOpAttr(), layerOp.getClampAttr());
+                layerOp.getAutoBroadcast(), layerOp.getPostOpAttr(), layerOp.getClampAttr(),
+                layerOp.getOutputChannelsAttr(), layerOp.getInputChannelsAttr());
         mlir::Value newOutput = newEltwise->getResult(0);
         // Update QuantizeCastOp
         if (quantizeCastOp) {
@@ -1336,7 +1331,8 @@ mlir::LogicalResult EltwiseShapeRewriter<EltwiseOp>::matchAndRewrite(EltwiseOp l
         // Update EltwiseOp
         auto newEltwise = rewriter.template create<EltwiseOp>(
                 layerOp->getLoc(), newEltwiseOutputType, origShapeOp->getOperand(0), origShapeOp->getOperand(0),
-                layerOp.getAutoBroadcast(), layerOp.getPostOpAttr(), layerOp.getClampAttr());
+                layerOp.getAutoBroadcast(), layerOp.getPostOpAttr(), layerOp.getClampAttr(),
+                layerOp.getOutputChannelsAttr(), layerOp.getInputChannelsAttr());
         mlir::Value origOutput = layerOp->getResult(0);
         mlir::Value newOutput = newEltwise->getResult(0);
         // Update QuantizeCastOp
@@ -1379,7 +1375,7 @@ void AdjustInputShapePass::safeRunOnFunc() {
     // There is case for `EltwiseShapeRewriter` that the iteration time larger than default value
     // TODO: E#126695 Refactor to avoid specific maxIterations
     auto greedyRewriteConfig = getDefaultGreedyRewriteConfig();
-    greedyRewriteConfig.maxIterations *= 2;
+    greedyRewriteConfig.maxIterations *= 20;
     if (mlir::failed(mlir::applyPatternsAndFoldGreedily(func, std::move(patterns), greedyRewriteConfig))) {
         signalPassFailure();
         return;

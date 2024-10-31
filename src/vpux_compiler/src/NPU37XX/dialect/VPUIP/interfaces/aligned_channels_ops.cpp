@@ -5,8 +5,10 @@
 
 #include "vpux/compiler/NPU37XX/dialect/VPUIP/IR/ops_interfaces.hpp"
 
+#include "vpux/compiler/dialect/IE/IR/dialect.hpp"
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/IE/IR/ops_interfaces.hpp"
+#include "vpux/compiler/dialect/VPU/utils/compressed_convolution_utils.hpp"
 #include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPUIP/interfaces/nce_invariant.hpp"
 
@@ -30,7 +32,6 @@ public:
 
         return VPUIP::NCEInvariant::verifyChannels(mlir::cast<MainOpType>(op));
     }
-
     int64_t getInputChannelAlignment(mlir::Operation* op) const {
         if (!canBeExecutedOnNCE(op)) {
             // SW version of the operation has no specific requirements
@@ -54,13 +55,19 @@ public:
             }
 
             const auto weightsType = op->getOperand(1).getType().cast<vpux::NDTypeInterface>();
-            const bool isFP16 = inputType.getElementType().isF16() || weightsType.getElementType().isF16();
             // E#106393 future work to enable compress conv for sub byte types
             const bool isSubByte = vpux::isSubByteType(inputType.getElementType()) ||
                                    vpux::isSubByteType(weightsType.getElementType());
-            if (!isFP16 && !isSubByte && inputC < VPU::NCEInvariant::VPU_COMPRESSED_INPUT_CHANNEL_NUM &&
-                filterIsConstOp) {
-                return VPU::NCEInvariant::VPU_COMPRESSED_INPUT_CHANNEL_NUM;
+            if (VPU::hasFP16CompressedConv(op)) {
+                if (!isSubByte && inputC < VPU::NCEInvariant::VPU_COMPRESSED_INPUT_CHANNEL_NUM && filterIsConstOp) {
+                    return VPU::NCEInvariant::VPU_COMPRESSED_INPUT_CHANNEL_NUM;
+                }
+            } else {
+                const bool isFP16 = inputType.getElementType().isF16() || weightsType.getElementType().isF16();
+                if (!isFP16 && !isSubByte && inputC < VPU::NCEInvariant::VPU_COMPRESSED_INPUT_CHANNEL_NUM &&
+                    filterIsConstOp) {
+                    return VPU::NCEInvariant::VPU_COMPRESSED_INPUT_CHANNEL_NUM;
+                }
             }
         }
 

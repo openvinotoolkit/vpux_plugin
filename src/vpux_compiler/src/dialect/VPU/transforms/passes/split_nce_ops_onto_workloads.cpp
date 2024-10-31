@@ -116,10 +116,9 @@ void generateWorkloads(mlir::OpBuilder& builder, VPU::NCEOpInterface origOp,
     const auto bestSplitInd = std::min_element(splitPoolCosts.begin(), splitPoolCosts.end()) - splitPoolCosts.begin();
     if (splitPoolCosts[bestSplitInd] >= VPU::INVALID_COST_BASE) {
         log.setName("GenerateWorkloads");
-        log.warning(
-                "An INVALID_COST is caught for bestSplit when calling VPUNN. You can pass a logCb with LOG_ERROR "
-                "level to print debug info in `computeSplitCostByArch` function and report to E#83609 if necessary");
-        log.nest().warning("bestSplit cost value: {0}", splitPoolCosts[bestSplitInd]);
+        log.debug("An INVALID_COST is caught for bestSplit when calling VPUNN. You can pass a logCb with LOG_ERROR "
+                  "level to print debug info in `computeSplitCostByArch` function and report to E#83609 if necessary");
+        log.nest().debug("bestSplit cost value: {0}", splitPoolCosts[bestSplitInd]);
     }
     const auto& bestSplit = splitPool[bestSplitInd];
 

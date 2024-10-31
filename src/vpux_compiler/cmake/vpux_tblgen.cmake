@@ -80,6 +80,22 @@ function(add_vpux_type ops_namespace)
     add_dependencies(MLIRVPUXIncGenList MLIRVPUX${ops_namespace}TypesIncGen)
 endfunction()
 
+# copy-pasted from <build folder>/lib/cmake/mlir/AddMLIR.cmake generated from
+# thirdparty/llvm-project/llvm/cmake/modules/TableGen.cmake
+function(npureg_tablegen ofn)
+  set(NPU_TABLEGEN_EXE "npureg-tblgen")
+  tablegen(NPU ${ARGV})
+  set(TABLEGEN_OUTPUT ${TABLEGEN_OUTPUT} ${CMAKE_CURRENT_BINARY_DIR}/${ofn}
+      PARENT_SCOPE)
+endfunction()
+
+function(add_npu_reg_type ops_namespace)
+    set(LLVM_TARGET_DEFINITIONS types.td)
+    npureg_tablegen(npu_reg_types.hpp.inc --generate)
+    add_public_tablegen_target(MLIRNPUNRegTypesIncGen)
+    add_dependencies(MLIRVPUXIncGenList MLIRNPUNRegTypesIncGen)
+endfunction()
+
 function(add_vpux_rewrite td_file ops_namespace)
     set(LLVM_TARGET_DEFINITIONS rewriters/${td_file}.td)
     mlir_tablegen(${td_file}.hpp.inc -gen-rewriters)

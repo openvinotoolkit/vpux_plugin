@@ -285,5 +285,39 @@ void updateTilingStrategyInJSONForOperations(llvm::json::Value& json,
     }
 }
 
+void saveMCSideLoadStrategyToFile(mlir::func::FuncOp func, StringRef strategyJsonPath,
+                                  const mlir::DenseMap<mlir::Operation*, size_t>& opToHash, StringRef modelHash) {
+    constexpr StringLiteral MODEL_HASH_KEY = "ModelHash";
+    constexpr StringLiteral OP_HASH_KEY = "Op";
+
+    llvm::json::Object model{};
+    model[MODEL_HASH_KEY.str()] = modelHash.str();
+    llvm::json::Object opsToStrategies{};
+    func->walk([&](VPU::LayerOpInterface op) {
+        auto isNCEOp = mlir::isa<VPU::NCEOpInterface>(op.getOperation());
+        auto isSWOp = mlir::isa<VPU::SWOpInterface>(op.getOperation());
+        if (!isNCEOp && !isSWOp) {
+            return;
+        }
+        auto clusteredOp = mlir::dyn_cast<VPU::ClusteredOpInterface>(op.getOperation());
+        if (clusteredOp == nullptr) {
+            return;
+        }
+        VPUX_THROW_WHEN(opToHash.find(op.getOperation()) == opToHash.end(), "Can not find hash at '{0}'", op.getLoc());
+
+        auto strategyValue = clusteredOp.getMultiClusterStrategy().has_value()
+                                     ? convertAttrToJSON(op->getAttr(vpux::multiClusterStrategy))
+                                     : llvm::json::Value(defaultNoValue);
+
+        llvm::json::Object layerAttributes{};
+        layerAttributes[vpux::multiClusterStrategy.str()] = std::move(strategyValue);
+        const auto layerHashStr = std::to_string(opToHash.at(op.getOperation()));
+        opsToStrategies[layerHashStr] = llvm::json::Value(std::move(layerAttributes));
+    });
+    model[OP_HASH_KEY.str()] = std::move(opsToStrategies);
+    auto json = llvm::json::Value(std::move(model));
+    writeManualStrategyJSON(strategyJsonPath, json);
+}
+
 }  // namespace VPU
 }  // namespace vpux

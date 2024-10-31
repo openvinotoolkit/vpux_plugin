@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -27,7 +27,7 @@ namespace vpux {
 namespace VPU {
 
 class PaddingAttr;
-class DistributedTensorNative;
+class DistributionInfo;
 
 }  // namespace VPU
 }  // namespace vpux
@@ -161,30 +161,13 @@ PaddingAttr getPaddingAttr(mlir::MLIRContext* ctx, const PadInfo& pad);
 PadInfo toPadInfo(PaddingAttr attr);
 
 //
-// PPETaskAttr
+// OpaquePPEAttr
 //
-
-PPETaskAttr getPPETaskAttr(mlir::MLIRContext* ctx, VPU::PPEMode mode);
-
-PPETaskAttr getPPETaskAttr(mlir::MLIRContext* ctx, VPU::PPEMode mode, int64_t clampLow, int64_t clampHigh,
-                           int64_t lreluMult, int64_t lreluShift);
-
-PPETaskAttr getPPETaskAttr(mlir::MLIRContext* ctx, VPU::PPEMode mode, int64_t clampLow, int64_t clampHigh,
-                           int64_t lreluMult, int64_t lreluShift, ArrayRef<int64_t> quantMult,
-                           ArrayRef<int64_t> quantShift, int64_t quantPostShift);
-
-PPETaskAttr getPPETaskAttr(mlir::MLIRContext* ctx, VPU::PPEMode mode, int64_t clampLow, int64_t clampHigh,
-                           int64_t lreluMult, int64_t lreluShift, ArrayRef<double> quantScale);
-
-PPETaskAttr getPPETaskAttr(mlir::MLIRContext* ctx, VPU::PPEMode mode, int64_t clampLow, int64_t clampHigh,
-                           int64_t lreluMult, int64_t lreluShift, ArrayRef<int64_t> quantMult,
-                           ArrayRef<int64_t> quantShift, int64_t quantPostShift, ArrayRef<int64_t> in1QuantMult,
-                           ArrayRef<int64_t> in2QuantMult, double fpPReluAlpha = 1.0);
 
 VPU::PPEMode getPPEMode(VPU::EltwiseType type);
 
 //
-// DistributedTensorAttr
+// DistributionInfoAttr
 //
 
 struct OverlapDistributionParams {
@@ -292,44 +275,47 @@ private:
     SmallVector<SmallVector<int64_t>> _computeOffsets = {};
 };
 
-mlir::LogicalResult verify(FuncRef<mlir::InFlightDiagnostic()> emitError, DistributedTensorAttr distributedAttr,
+mlir::LogicalResult verify(FuncRef<mlir::InFlightDiagnostic()> emitError, DistributionInfoAttr distributedAttr,
                            ArrayRef<int64_t> shape);
 mlir::LogicalResult canTheDistributionModesBeCompatible(DistributionMode sourceMode, DistributionMode targetMode);
+mlir::LogicalResult areDistributionNumClustersCompatible(int64_t sourceNumClusters, int64_t targetNumClusters);
 mlir::LogicalResult areDistributionNumClustersCompatible(mlir::IntegerAttr sourceNumClusters,
                                                          mlir::IntegerAttr targetNumClusters);
 mlir::LogicalResult areDistributionElementTypesCompatible(mlir::Type inType, mlir::Type outType);
 //
-std::optional<SmallVector<Shape>> getPerClusterMemoryShapes(ShapeRef shapeRef, DistributedTensorAttr distributionAttr);
-SmallVector<Shape> getPerClusterMemoryShapeOffsets(ShapeRef shapeRef, DistributedTensorAttr distributionAttr);
-SmallVector<Shape> getPerClusterComputeShapes(ShapeRef shapeRef, DistributedTensorAttr distributionAttr);
-SmallVector<Shape> getPerClusterComputeShapeOffsets(ShapeRef shapeRef, DistributedTensorAttr distributionAttr);
+std::optional<SmallVector<Shape>> getPerClusterMemoryShapes(ShapeRef shapeRef, DistributionInfoAttr distributionAttr);
+SmallVector<Shape> getPerClusterMemoryShapeOffsets(ShapeRef shapeRef, DistributionInfoAttr distributionAttr);
+SmallVector<Shape> getPerClusterComputeShapes(ShapeRef shapeRef, DistributionInfoAttr distributionAttr);
+SmallVector<Shape> getPerClusterComputeShapeOffsets(ShapeRef shapeRef, DistributionInfoAttr distributionAttr);
 //
 std::optional<SmallVector<Shape>> getPerClusterMemoryShapes(ShapeRef shapeRef,
-                                                            const VPU::DistributedTensorNative& distribution);
-SmallVector<Shape> getPerClusterMemoryShapeOffsets(ShapeRef shapeRef, const VPU::DistributedTensorNative& distribution);
-SmallVector<Shape> getPerClusterComputeShapes(ShapeRef shapeRef, const VPU::DistributedTensorNative& distribution);
-SmallVector<Shape> getPerClusterComputeShapeOffsets(ShapeRef shapeRef,
-                                                    const VPU::DistributedTensorNative& distribution);
+                                                            const VPU::DistributionInfo& distribution);
+SmallVector<Shape> getPerClusterMemoryShapeOffsets(ShapeRef shapeRef, const VPU::DistributionInfo& distribution);
+SmallVector<Shape> getPerClusterComputeShapes(ShapeRef shapeRef, const VPU::DistributionInfo& distribution);
+SmallVector<Shape> getPerClusterComputeShapeOffsets(ShapeRef shapeRef, const VPU::DistributionInfo& distribution);
 //
-SmallVector<PadInfo> getPerClusterPadding(DistributedTensorAttr distributionAttr, PadInfo kernelPadding);
+SmallVector<PadInfo> getPerClusterPadding(DistributionInfoAttr distributionAttr, PadInfo kernelPadding);
 SmallVector<StridedShape> getPerClusterMemoryStridedShapes(ShapeRef shape, StridesRef strides, DimsOrder dimsOrder,
                                                            DistributionModeAttr mode, ArrayRef<Shape> memoryShapes);
 SmallVector<Shape> getOverlappedPerClusterNewMemoryShapes(ShapeRef newShape, ShapeRef origShape,
-                                                          DistributedTensorAttr distributionAttr);
+                                                          DistributionInfoAttr distributionAttr);
 SmallVector<Shape> getOverlappedPerClusterNewMemoryShapeOffsets(ShapeRef shapeRef,
-                                                                DistributedTensorAttr distributionAttr);
+                                                                DistributionInfoAttr distributionAttr);
 int64_t getDistributedTilingAxis(ArrayRef<int64_t> tilingScheme);
-bool isDistributedAttrWithExplicitShapesAndOffsets(DistributedTensorAttr distributionAttr);
+bool isDistributedAttrWithExplicitShapesAndOffsets(DistributionInfoAttr distributionAttr);
+bool isDistributionWithExplicitShapesAndOffsets(const DistributionInfo& distribution);
 bool isUniformDistributedSegmentsSupported(mlir::Operation* op);
 SmallVector<Shape> arrayAttrToVecOfShapes(mlir::ArrayAttr arr);
 
-bool isSegmentedOverH(VPU::DistributedTensorAttr distAttr);
-bool isSegmentedOverC(VPU::DistributedTensorAttr distAttr);
-bool isSegmentedDuplicatedOverC(VPU::DistributedTensorAttr distAttr);
-bool isSegmentedOverN(VPU::DistributedTensorAttr distAttr);
-bool isOverlappedOverH(VPU::DistributedTensorAttr distAttr);
-bool isOverlappedOverW(VPU::DistributedTensorAttr distAttr);
-bool isDuplicated(VPU::DistributedTensorAttr distAttr);
+bool isSegmentedOverH(VPU::DistributionInfoAttr distAttr);
+bool isSegmentedOverC(VPU::DistributionInfoAttr distAttr);
+bool isSegmentedDuplicatedOverC(VPU::DistributionInfoAttr distAttr);
+bool isSegmentedOverN(VPU::DistributionInfoAttr distAttr);
+bool isOverlappedOverH(VPU::DistributionInfoAttr distAttr);
+bool isOverlappedOverW(VPU::DistributionInfoAttr distAttr);
+bool isOverlappedOverH(VPU::DistributionInfo& distribution);
+bool isOverlappedOverW(VPU::DistributionInfo& distribution);
+bool isDuplicated(VPU::DistributionInfoAttr distAttr);
 
 //
 // SparsityCompressionAttr

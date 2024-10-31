@@ -12,11 +12,10 @@
 func.func @addMapSingleLayer(%arg0: tensor<1x16x16x16xf16, {order = #NHWC}>) -> tensor<1x16x16x16xf16, {order = #NHWC}> {
     %0 = VPU.Sparsify(%arg0) : tensor<1x16x16x16xf16, {order = #NHWC}> -> !VPU.SparseTensor<data=tensor<1x16x16x16xf16, {order = #NHWC}>>
     %weights_table = const.Declare tensor<16x1x1x4xsi32, {order = #NCHW}> = dense<10> : tensor<16x1x1x4xsi32>
-    %activation_window = const.Declare tensor<1x1x1x16xui8, {order = #NCHW}> = dense<1> : tensor<1x1x1x16xui8>
-    %1 = VPU.NCE.MaxPool(%0, %weights_table, %activation_window) {
-        activation_window_channel_length = 18 : i64,
+    %1 = VPU.NCE.MaxPool(%0, %weights_table) {
         kernel_size = [3, 3],
         pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
+        opaque_ppe = #VPU.PPEStub<>,
         strides = [1, 1]
       } -> !VPU.SparseTensor<data=tensor<1x16x16x16xf16, {order = #NHWC}>>
     %2 = VPU.Desparsify(%1) : !VPU.SparseTensor<data=tensor<1x16x16x16xf16, {order = #NHWC}>> -> tensor<1x16x16x16xf16, {order = #NHWC}>
@@ -24,7 +23,7 @@ func.func @addMapSingleLayer(%arg0: tensor<1x16x16x16xf16, {order = #NHWC}>) -> 
 
     // CHECK:       [[VAL0:%.+]] = VPU.Sparsify(%arg0) : tensor<1x16x16x16xf16, {order = #NHWC}>
     // CHECK-SAME:      -> !VPU.SparseTensor<data=tensor<1x16x16x16xf16, {order = #NHWC}>, sparsity_map=tensor<1x16x16x16xi1, {order = #NHWC}>>
-    // CHECK:       [[VAL1:%.+]] = VPU.NCE.MaxPool([[VAL0]], %cst , %cst_0 )
+    // CHECK:       [[VAL1:%.+]] = VPU.NCE.MaxPool([[VAL0]], %cst )
     // CHECK-SAME:      -> !VPU.SparseTensor<data=tensor<1x16x16x16xf16, {order = #NHWC}>, sparsity_map=tensor<1x16x16x16xi1, {order = #NHWC}>>
     // CHECK:       [[VAL2:%.+]] = VPU.Desparsify([[VAL1]])
     // CHECK:       return [[VAL2]]
@@ -41,24 +40,23 @@ func.func @addMapPropagateType(%arg0: tensor<1x16x16x32xf16, {order = #NHWC}>) -
     %1 = VPU.Slice %0 [0, 0, 0, 0] [1, 16, 16, 16] : !VPU.SparseTensor<data=tensor<1x16x16x32xf16, {order = #NHWC}>> to !VPU.SparseTensor<data=tensor<1x16x16x16xf16, {order = #NHWC}>>
 
     %weights_table = const.Declare tensor<16x1x1x4xsi32, {order = #NCHW}> = dense<10> : tensor<16x1x1x4xsi32>
-    %activation_window = const.Declare tensor<1x1x1x16xui8, {order = #NCHW}> = dense<1> : tensor<1x1x1x16xui8>
-    %2 = VPU.NCE.MaxPool(%1, %weights_table, %activation_window) {
-        activation_window_channel_length = 18 : i64,
+    %2 = VPU.NCE.MaxPool(%1, %weights_table) {
         kernel_size = [3, 3],
         pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
+        opaque_ppe = #VPU.PPEStub<>,
         strides = [1, 1]
       } -> !VPU.SparseTensor<data=tensor<1x16x16x16xf16, {order = #NHWC}>>
-    %3 = VPU.NCE.MaxPool(%2, %weights_table, %activation_window) {
-        activation_window_channel_length = 18 : i64,
+    %3 = VPU.NCE.MaxPool(%2, %weights_table) {
         kernel_size = [3, 3],
         pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
+        opaque_ppe = #VPU.PPEStub<>,
         strides = [1, 1]
     } -> !VPU.SparseTensor<data=tensor<1x16x16x16xf16, {order = #NHWC}>>
     %4 = VPU.Slice %2 [0, 0, 0, 0] [1, 16, 16, 8] : !VPU.SparseTensor<data=tensor<1x16x16x16xf16, {order = #NHWC}>> to !VPU.SparseTensor<data=tensor<1x16x16x8xf16, {order = #NHWC}>>
-    %5 = VPU.NCE.MaxPool(%4, %weights_table, %activation_window) {
-        activation_window_channel_length = 18 : i64,
+    %5 = VPU.NCE.MaxPool(%4, %weights_table) {
         kernel_size = [3, 3],
         pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
+        opaque_ppe = #VPU.PPEStub<>,
         strides = [1, 1]
     } -> !VPU.SparseTensor<data=tensor<1x16x16x8xf16, {order = #NHWC}>>
     %6 = VPU.Desparsify(%3) : !VPU.SparseTensor<data=tensor<1x16x16x16xf16, {order = #NHWC}>> -> tensor<1x16x16x16xf16, {order = #NHWC}>
@@ -70,14 +68,14 @@ func.func @addMapPropagateType(%arg0: tensor<1x16x16x32xf16, {order = #NHWC}>) -
     // CHECK:       [[VAL1:%.+]] = VPU.Slice [[VAL0]] [0, 0, 0, 0] [1, 16, 16, 16]
     // CHECK-SAME:      : !VPU.SparseTensor<data=tensor<1x16x16x32xf16, {order = #NHWC}>, sparsity_map=tensor<1x16x16x32xi1, {order = #NHWC}>>
     // CHECK-SAME:      to !VPU.SparseTensor<data=tensor<1x16x16x16xf16, {order = #NHWC}>, sparsity_map=tensor<1x16x16x16xi1, {order = #NHWC}>>
-    // CHECK:       [[VAL2:%.+]] = VPU.NCE.MaxPool([[VAL1]], %cst , %cst_0 )
+    // CHECK:       [[VAL2:%.+]] = VPU.NCE.MaxPool([[VAL1]], %cst )
     // CHECK-SAME:      -> !VPU.SparseTensor<data=tensor<1x16x16x16xf16, {order = #NHWC}>, sparsity_map=tensor<1x16x16x16xi1, {order = #NHWC}>>
-    // CHECK:       [[VAL3:%.+]] = VPU.NCE.MaxPool([[VAL2]], %cst , %cst_0 )
+    // CHECK:       [[VAL3:%.+]] = VPU.NCE.MaxPool([[VAL2]], %cst )
     // CHECK-SAME:      -> !VPU.SparseTensor<data=tensor<1x16x16x16xf16, {order = #NHWC}>, sparsity_map=tensor<1x16x16x16xi1, {order = #NHWC}>>
     // CHECK:       [[VAL4:%.+]] = VPU.Slice [[VAL2]] [0, 0, 0, 0] [1, 16, 16, 8]
     // CHECK-SAME:      : !VPU.SparseTensor<data=tensor<1x16x16x16xf16, {order = #NHWC}>, sparsity_map=tensor<1x16x16x16xi1, {order = #NHWC}>>
     // CHECK-SAME:      to !VPU.SparseTensor<data=tensor<1x16x16x8xf16, {order = #NHWC}>, sparsity_map=tensor<1x16x16x8xi1, {order = #NHWC}>>
-    // CHECK:       [[VAL5:%.+]] = VPU.NCE.MaxPool([[VAL4]], %cst , %cst_0 )
+    // CHECK:       [[VAL5:%.+]] = VPU.NCE.MaxPool([[VAL4]], %cst )
     // CHECK-SAME:      -> !VPU.SparseTensor<data=tensor<1x16x16x8xf16, {order = #NHWC}>, sparsity_map=tensor<1x16x16x8xi1, {order = #NHWC}>>
     // CHECK:       [[VAL6:%.+]] = VPU.Desparsify([[VAL3]])
     // CHECK-SAME:      -> tensor<1x16x16x16xf16, {order = #NHWC}>
@@ -99,6 +97,7 @@ func.func @propagateTypeConcatMixedConsumers(%arg0: tensor<1x8x16x16xf16, {order
     %2 = VPU.Desparsify(%1) : !VPU.SparseTensor<data=tensor<1x16x16x16xf16, {order = #NHWC}>> -> tensor<1x16x16x16xf16, {order = #NHWC}>
     %3 = VPU.NCE.Convolution(%1, %arg2, %arg1) {
       pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
+      opaque_ppe = #VPU.PPEStub<>,
       rawFilterShape = [16, 16, 1, 1],
       strides = [1, 1]
     } -> tensor<1x16x16x16xf16, {order = #NHWC}>
@@ -132,11 +131,10 @@ func.func @propagateTypeConcatMixedConsumers(%arg0: tensor<1x8x16x16xf16, {order
 func.func @addMapSingleLayerAndCopy(%arg0: tensor<1x16x16x16xf16, {order = #NHWC}>) -> tensor<1x16x16x16xf16, {order = #NHWC}> {
     %0 = VPU.Sparsify(%arg0) : tensor<1x16x16x16xf16, {order = #NHWC}> -> !VPU.SparseTensor<data=tensor<1x16x16x16xf16, {order = #NHWC}>>
     %weights_table = const.Declare tensor<16x1x1x4xsi32, {order = #NCHW}> = dense<10> : tensor<16x1x1x4xsi32>
-    %activation_window = const.Declare tensor<1x1x1x16xui8, {order = #NCHW}> = dense<1> : tensor<1x1x1x16xui8>
-    %1 = VPU.NCE.MaxPool(%0, %weights_table, %activation_window) {
-        activation_window_channel_length = 18 : i64,
+    %1 = VPU.NCE.MaxPool(%0, %weights_table) {
         kernel_size = [3, 3],
         pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
+        opaque_ppe = #VPU.PPEStub<>,
         strides = [1, 1]
       } -> !VPU.SparseTensor<data=tensor<1x16x16x16xf16, {order = #NHWC}>>
     %2 = VPU.Copy(%1) {out_mem_space = [@CMX_NN, 0]} : !VPU.SparseTensor<data=tensor<1x16x16x16xf16, {order = #NHWC}>> -> !VPU.SparseTensor<data=tensor<1x16x16x16xf16, {mem_space = [@CMX_NN, 0], order = #NHWC}>>
@@ -145,7 +143,7 @@ func.func @addMapSingleLayerAndCopy(%arg0: tensor<1x16x16x16xf16, {order = #NHWC
 
     // CHECK:       [[VAL0:%.+]] = VPU.Sparsify(%arg0) : tensor<1x16x16x16xf16, {order = #NHWC}>
     // CHECK-SAME:      -> !VPU.SparseTensor<data=tensor<1x16x16x16xf16, {order = #NHWC}>, sparsity_map=tensor<1x16x16x16xi1, {order = #NHWC}>>
-    // CHECK:       [[VAL1:%.+]] = VPU.NCE.MaxPool([[VAL0]], %cst , %cst_0 )
+    // CHECK:       [[VAL1:%.+]] = VPU.NCE.MaxPool([[VAL0]], %cst )
     // CHECK-SAME:      -> !VPU.SparseTensor<data=tensor<1x16x16x16xf16, {order = #NHWC}>, sparsity_map=tensor<1x16x16x16xi1, {order = #NHWC}>>
     // CHECK:       [[VAL2:%.+]] = VPU.Copy([[VAL1]])
     // CHECK-SAME:      -> !VPU.SparseTensor<data=tensor<1x16x16x16xf16, {mem_space = [@CMX_NN, 0], order = #NHWC}>, sparsity_map=tensor<1x16x16x16xi1, {mem_space = [@CMX_NN, 0], order = #NHWC}>>

@@ -53,6 +53,38 @@ bool ReduceSumToConvRewriter::isValidShape(vpux::ShapeRef inputShape, Logger log
     return true;
 }
 
+// We have two optimization pass for ReduceSum on DimC. 1. convert to convolution
+// in this pass. 2. convert to avgpool in the coming pass. Let's assume the case
+// is 1x32x64x128[NCHW], reduce to 1x1x64x128.
+// For option1: 32 is channel, need to be the lowest dim, so there is transpose needed
+// to convert from NCHW to NHWC.
+// For option2: we can permute cast to NHWC layout, then H = 32, and the avgpool happen
+// on DimH, then we actually don't need the transpose.
+// So here we add isBeneficial to convert when:
+// 1. there is a NCE parent or child
+// 2. W is not aligned.
+
+bool isBeneficialToConvert(IE::ReduceSumOp origOp, Logger log) {
+    auto outShape = getShape(origOp.getOutput());
+    auto outType = mlir::cast<vpux::NDTypeInterface>(origOp.getOutput().getType());
+    auto alignment = VPU::NCEInvariant::getAlignment(outType.getElementType());
+    if (outShape[Dims4D::Act::W] % alignment != 0) {
+        return true;
+    }
+
+    auto parentOp = origOp.getInput().getDefiningOp();
+    if (parentOp != nullptr && mlir::succeeded(VPU::NCEInvariant::isSupported(parentOp, log))) {
+        return true;
+    }
+
+    for (auto user : origOp.getOutput().getUsers()) {
+        if (mlir::succeeded(VPU::NCEInvariant::isSupported(user, log))) {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool ReduceSumToConvRewriter::isSupportedReduceSum(IE::ReduceSumOp origOp, Logger log) const {
     // Check shape
     const auto inputShape = getShape(origOp.getInput());
@@ -92,7 +124,7 @@ IE::ConvolutionOp ReduceSumToConvRewriter::createConvolution(mlir::Value activat
     const auto kernelPadsEnd = getIntArrayAttr(ctx, SmallVector<int64_t>{0, 0});
     const auto dilations = getIntArrayAttr(ctx, SmallVector<int64_t>{1, 1});
     return rewriter.create<IE::ConvolutionOp>(newLoc, activation, weights, nullptr, strides, kernelPadsBegin,
-                                              kernelPadsEnd, dilations, nullptr, nullptr, nullptr);
+                                              kernelPadsEnd, dilations, nullptr, nullptr, nullptr, nullptr, nullptr);
 }
 
 //
@@ -128,6 +160,10 @@ mlir::LogicalResult ReduceSumToConvRewriter::matchAndRewrite(IE::ReduceSumOp ori
         return mlir::failure();
     }
 
+    if (!isBeneficialToConvert(origOp, _log)) {
+        return mlir::failure();
+    }
+
     const auto origLoc = origOp->getLoc();
     _log.trace("[{0}] Got ReduceSum layer at '{1}'", getDebugName(), origLoc);
 
@@ -135,7 +171,7 @@ mlir::LogicalResult ReduceSumToConvRewriter::matchAndRewrite(IE::ReduceSumOp ori
     auto weights = createConvFilter(origOp.getInput(), rewriter);
 
     // Create convolution
-    const auto convLoc = appendLoc(origLoc, "_convolution");
+    const auto convLoc = appendLoc(origLoc, "as_convolution");
     auto conv = createConvolution(origOp.getInput(), weights, convLoc, rewriter);
 
     rewriter.replaceOp(origOp, conv.getOutput());

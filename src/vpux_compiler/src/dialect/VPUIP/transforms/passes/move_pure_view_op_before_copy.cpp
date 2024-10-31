@@ -4,6 +4,7 @@
 //
 
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
+#include "vpux/compiler/dialect/VPU/utils/distributed_tensor_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/explicit_distribution_utils.hpp"
 #include "vpux/compiler/dialect/VPUIP/transforms/passes.hpp"
 #include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
@@ -142,11 +143,14 @@ mlir::LogicalResult LayerRewriterBase::matchAndRewrite(mlir::ViewLikeOpInterface
                VPU::bitEnumContainsAny(mode, VPU::DistributionMode::MULTICASTED);
     };
     if (distributedType != nullptr) {
-        const auto isSupportSegmented = [&](const VPU::DistributionMode& mode) {
+        const auto isSupportSegmented = [&](const VPUIP::DistributedBufferType distType) {
             // TODO: The num_tiles attribute also has to be adapted in case of different ranks
             if (isRankChangedByViewOp) {
                 return false;
             }
+
+            auto distribution = distType.getDistribution();
+            const auto mode = distribution.getMode().getValue();
 
             if (mode != VPU::DistributionMode::SEGMENTED) {
                 return false;
@@ -173,11 +177,14 @@ mlir::LogicalResult LayerRewriterBase::matchAndRewrite(mlir::ViewLikeOpInterface
                     // If op is non-trival reorder, do not move this op
                     return vpux::isTrivialReorder(inOrder, dstOrder, inShape);
                 }
-                // Move PermuteCast which is converted from transpose
-                const auto inMemShape = inOrder.toMemoryOrder(inShape);
-                const auto perm = vpux::getPermutationFromOrders(inOrder, dstOrder, permuteOp.getContext());
-                const auto transposedShape = DimsOrder::fromAffineMap(perm).toLogicalOrder(inMemShape);
-                return transposedShape == outShape;
+
+                const auto inMemShape = mlir::cast<NDTypeInterface>(permuteOp.getSource().getType()).getMemShape();
+                const auto outMemShape = mlir::cast<NDTypeInterface>(permuteOp.getResult().getType()).getMemShape();
+                auto numTiles = parseIntArrayAttr<int64_t>(distribution.getNumTiles());
+                const auto numTileDims = vpux::VPU::getNonOneDimInds(numTiles);
+                // Only support permuteCast with single tiling dim. And memory shape shouldn't change else we may have
+                // accuracy issue
+                return (numTileDims.size() == 1) && (inMemShape == outMemShape);
             }
 
             if (mlir::isa<VPUIP::ShapeCastOp, VPUIP::GenericReshapeOp>(origOp)) {
@@ -214,6 +221,25 @@ mlir::LogicalResult LayerRewriterBase::matchAndRewrite(mlir::ViewLikeOpInterface
                 }
             }
 
+            if (auto permuteOp = mlir::dyn_cast<VPUIP::PermuteCastOp>(origOp.getOperation())) {
+                const auto inShape = getShape(permuteOp.getSource());
+                const auto outShape = getShape(permuteOp.getResult());
+                const auto inOrder = DimsOrder::fromValue(permuteOp.getSource());
+                const auto dstOrder = DimsOrder::fromAffineMap(permuteOp.getDstOrder());
+                if (inShape == outShape) {
+                    // If op is non-trival reorder, do not move this op
+                    return vpux::isTrivialReorder(inOrder, dstOrder, inShape);
+                }
+
+                const auto inMemShape = mlir::cast<NDTypeInterface>(permuteOp.getSource().getType()).getMemShape();
+                const auto outMemShape = mlir::cast<NDTypeInterface>(permuteOp.getResult().getType()).getMemShape();
+                auto numTiles = parseIntArrayAttr<int64_t>(distribution.getNumTiles());
+                const auto numTileDims = vpux::VPU::getNonOneDimInds(numTiles);
+                // Only support permuteCast with single tiling dim. And memory shape shouldn't change else we may have
+                // accuracy issue
+                return (numTileDims.size() == 1) && (inMemShape == outMemShape);
+            }
+
             if (mlir::isa<VPUIP::ShapeCastOp, VPUIP::GenericReshapeOp>(origOp)) {
                 return VPUIP::isOverlappedDistributedCompatibleAfterShapeChangeForViewOps(
                         distributedType, viewOpOutputShape, viewOpOutputType.getDimsOrder());
@@ -222,7 +248,7 @@ mlir::LogicalResult LayerRewriterBase::matchAndRewrite(mlir::ViewLikeOpInterface
             return false;
         };
         const auto mode = distributedType.getDistribution().getMode().getValue();
-        if (!isSupportedDuplicated(mode) && !isSupportSegmented(mode) &&
+        if (!isSupportedDuplicated(mode) && !isSupportSegmented(distributedType) &&
             !isSupportedOverlapping(distributedType, origOp, copyOpInput)) {
             _log.trace("Not supported distributed type");
             return mlir::failure();
@@ -236,12 +262,9 @@ mlir::LogicalResult LayerRewriterBase::matchAndRewrite(mlir::ViewLikeOpInterface
         return mlir::failure();
     }
 
-    _log.trace("Set new input for '{0}': '{1}'", origOp->getName(), copyOpInput);
-    origOp->setOperand(0, copyOpInput);
-
     vpux::NDTypeInterface newViewOpOutputType;
 
-    auto getDistributionForViewOpOutput = [&]() -> VPU::DistributedTensorAttr {
+    auto getDistributionForViewOpOutput = [&]() -> VPU::DistributionInfoAttr {
         auto ctx = origOp->getContext();
         const auto arch = VPU::getArch(origOp.getOperation());
         const auto mode = distributedType.getDistribution().getMode().getValue();
@@ -251,10 +274,10 @@ mlir::LogicalResult LayerRewriterBase::matchAndRewrite(mlir::ViewLikeOpInterface
             auto inPermuteType = permuteCast->getOperand(0).getType().cast<vpux::NDTypeInterface>();
             auto outPermuteType = permuteCast->getResult(0).getType().cast<vpux::NDTypeInterface>();
 
-            return applyPermutationOnDistributedTensorAttr(distributedType, permuteCast.getMemPerm(),
-                                                           inPermuteType.getDimsOrder(), outPermuteType.getDimsOrder(),
-                                                           inPermuteType.getShape(), outPermuteType.getShape())
-                    .value();
+            return applyPermutationOnDistributionInfoAttr(distributedType, permuteCast.getMemPerm(),
+                                                          inPermuteType.getDimsOrder(), outPermuteType.getDimsOrder(),
+                                                          inPermuteType.getShape(), outPermuteType.getShape())
+                    .value_or(nullptr);
         }
 
         const bool isShapeChangeOp = mlir::isa<VPUIP::ShapeCastOp, VPUIP::GenericReshapeOp>(origOp);
@@ -277,7 +300,7 @@ mlir::LogicalResult LayerRewriterBase::matchAndRewrite(mlir::ViewLikeOpInterface
         if (!VPU::isDistributedAttrWithExplicitShapesAndOffsets(origDistribution)) {
             if (isRankChangedByViewOp) {
                 auto axesMapping = getDistributedAxesMapping.value();
-                return VPUIP::changeDistributedAxisOnDistributedTensorAttr(
+                return VPUIP::changeDistributedAxisOnDistributionInfoAttr(
                         origDistribution, axesMapping.first, axesMapping.second, viewOpOutputType.getShape());
             }
             return origDistribution;
@@ -299,13 +322,21 @@ mlir::LogicalResult LayerRewriterBase::matchAndRewrite(mlir::ViewLikeOpInterface
     if (distributedType != nullptr) {
         auto ctx = origOp->getContext();
         const auto order = mlir::AffineMapAttr::get(viewOpOutputType.getDimsOrder().toAffineMap(ctx));
+        auto viewOutDistributedAttr = getDistributionForViewOpOutput();
+
+        if (viewOutDistributedAttr == nullptr) {
+            return mlir::failure();
+        }
 
         newViewOpOutputType =
                 VPUIP::DistributedBufferType::get(ctx, viewOpOutputShape.raw(), viewOpOutputElemType, order,
-                                                  distributedType.getMemSpace(), getDistributionForViewOpOutput());
+                                                  distributedType.getMemSpace(), viewOutDistributedAttr);
     } else {
         newViewOpOutputType = viewOpOutputType.changeMemSpace(copyOpInputType.getMemSpace());
     }
+
+    _log.trace("Set new input for '{0}': '{1}'", origOp->getName(), copyOpInput);
+    origOp->setOperand(0, copyOpInput);
 
     _log.trace("Set new result type for '{0}': '{1}'", origOp->getName(), newViewOpOutputType);
     origOp->getResult(0).setType(newViewOpOutputType);

@@ -35,11 +35,11 @@ size_t vpux::VPUASM::NNDMAOp::getAlignmentRequirements() {
     return alignof(nn_public::VpuDMATask);
 }
 
-vpux::ELF::SectionFlagsAttr vpux::VPUASM::NNDMAOp::getAccessingProcs(mlir::SymbolUserMap&) {
-    return ELF::SectionFlagsAttr::VPU_SHF_PROC_DMA;
+vpux::ELF::SectionFlagsAttr vpux::VPUASM::NNDMAOp::getPredefinedMemoryAccessors() {
+    return ELF::SectionFlagsAttr::SHF_EXECINSTR | ELF::SectionFlagsAttr::VPU_SHF_PROC_DMA;
 }
 
-vpux::ELF::SectionFlagsAttr vpux::VPUASM::NNDMAOp::getUserProcs() {
+vpux::ELF::SectionFlagsAttr vpux::VPUASM::NNDMAOp::getMemoryAccessingProc() {
     return ELF::SectionFlagsAttr::VPU_SHF_PROC_DMA;
 }
 

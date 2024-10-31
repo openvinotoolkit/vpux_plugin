@@ -14,16 +14,14 @@ namespace ov {
 namespace test {
 
 class ConversionLayerTestCommon : public ConversionLayerTest, virtual public VpuOv2LayerTest {};
+class ConversionLayerTestCommon_HW : public ConversionLayerTest, virtual public VpuOv2LayerTest {};
 
-class ConversionLayerTest_NPU3720 : public ConversionLayerTestCommon {};
-class ConversionLayerTest_NPU4000 : public ConversionLayerTestCommon {};
-
-TEST_P(ConversionLayerTest_NPU3720, HW) {
+TEST_P(ConversionLayerTestCommon_HW, NPU3720_HW) {
     setDefaultHardwareMode();
     run(Platform::NPU3720);
 }
 
-TEST_P(ConversionLayerTest_NPU4000, SW) {
+TEST_P(ConversionLayerTestCommon, NPU4000_SW) {
     setReferenceSoftwareMode();
     run(Platform::NPU4000);
 }
@@ -46,7 +44,7 @@ const std::vector<std::vector<ov::Shape>> inShapeTiling = {{{2000, 2000}}};
 const std::vector<std::vector<ov::Shape>> inShapeOdd = {{{1, 1, 1, 111}}};
 
 const std::vector<ov::element::Type> netPrecisions = {ov::element::f32, ov::element::f16, ov::element::u8,
-                                                      ov::element::i8, ov::element::i32};
+                                                      ov::element::i8,  ov::element::i32, ov::element::f64};
 
 const auto configParams =
         ::testing::Combine(::testing::ValuesIn(conversionOpTypes),                              // Conversion type
@@ -76,33 +74,33 @@ const auto configParamsU4OddShape =
                            ::testing::ValuesIn({ov::element::f16, ov::element::u8, ov::element::i8}),  // Convert type
                            ::testing::Values(DEVICE_NPU));
 
-// ------ NPU3720 ------
+// ------ HW ------
 
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_Conversion, ConversionLayerTest_NPU3720, configParams,
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_Conversion, ConversionLayerTestCommon_HW, configParams,
                          ConversionLayerTest::getTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_i4_Conversion, ConversionLayerTest_NPU3720, configParamsI4Tiling,
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_i4_Conversion, ConversionLayerTestCommon_HW, configParamsI4Tiling,
                          ConversionLayerTest::getTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_u4_Conversion, ConversionLayerTest_NPU3720, configParamsU4Tiling,
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_u4_Conversion, ConversionLayerTestCommon_HW, configParamsU4Tiling,
                          ConversionLayerTest::getTestCaseName);
 
 // Tracking number [E#128077]
-INSTANTIATE_TEST_SUITE_P(DISABLED_TMP_smoke_precommit_u4_odd_Conversion, ConversionLayerTest_NPU3720,
+INSTANTIATE_TEST_SUITE_P(DISABLED_TMP_smoke_precommit_u4_odd_Conversion, ConversionLayerTestCommon_HW,
                          configParamsU4OddShape, ConversionLayerTest::getTestCaseName);
 
-// ------ NPU4000 ------
+// ------ SW ------
 
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_Conversion, ConversionLayerTest_NPU4000, configParams,
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_Conversion, ConversionLayerTestCommon, configParams,
                          ConversionLayerTest::getTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_i4_Conversion, ConversionLayerTest_NPU4000, configParamsI4Tiling,
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_i4_Conversion, ConversionLayerTestCommon, configParamsI4Tiling,
                          ConversionLayerTest::getTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_u4_Conversion, ConversionLayerTest_NPU4000, configParamsU4Tiling,
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_u4_Conversion, ConversionLayerTestCommon, configParamsU4Tiling,
                          ConversionLayerTest::getTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_u4_odd_Conversion, ConversionLayerTest_NPU4000, configParamsU4OddShape,
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_u4_odd_Conversion, ConversionLayerTestCommon, configParamsU4OddShape,
                          ConversionLayerTest::getTestCaseName);
 
 }  // namespace

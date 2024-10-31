@@ -39,13 +39,14 @@ func.func @FuseInterpolateNearestWithConv(%arg0: tensor<1x16x3x3xf16, {order = #
         mode = #VPU.nce_interpolate_mode<NEAREST>,
         multiClusterStrategy = #VPU.multi_cluster_strategy<Clustering>,
         scales_attr = [2, 2],
-        ppe = #VPU.PPETask<clamp_high = 2147483647, clamp_low = 0, lrelu_mult = 1, lrelu_shift = 0, mode = <NOOP>>
+        opaque_ppe = #VPU.PPEStub<>
     } -> tensor<1x16x6x6xf16, {order = #NHWC}>
 
     %conv_weights = const.Declare tensor<32x16x1x1xf16, {order = #NHWC}> = dense<1.0> : tensor<32x16x1x1xf16>, [#const.Reorder<#NHWC>]
     %conv_weights_table = const.Declare tensor<32x1x1x4xsi32> = dense<1> : tensor<32x1x1x4xsi32>
 
     %conv_output = VPU.NCE.Convolution(%interp_output, %conv_weights, %conv_weights_table) {
+            opaque_ppe = #VPU.PPEStub<>,
             pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
             rawFilterShape = [32, 16, 1, 1],
             strides = [1, 1]
@@ -82,6 +83,7 @@ func.func @FuseInterpolateNearestWithConv(%arg0: tensor<1x16x3x3xf16, {order = #
     // CHECK-NOT:  VPU.NCE.Interpolate
 
     // CHECK:      [[CONV_OUTPUT:%.+]] = VPU.NCE.Convolution([[INPUT_SPARSE]], [[CST_WEIGHTS]], [[CST_WEIGHTS_TABLE]]) {
+    // CHECK-SAME:     opaque_ppe = #VPU.PPEStub<>,
     // CHECK-SAME:     pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
     // CHECK-SAME:     rawFilterShape = [32, 16, 1, 1],
     // CHECK-SAME:     strides = [1, 1]
@@ -124,13 +126,14 @@ func.func @DoNotFuseInterpolateBilinearWithConv(%arg0: tensor<1x16x3x3xf16, {ord
         mode = #VPU.nce_interpolate_mode<BILINEAR>,
         multiClusterStrategy = #VPU.multi_cluster_strategy<Clustering>,
         scales_attr = [2, 2],
-        ppe = #VPU.PPETask<clamp_high = 2147483647, clamp_low = 0, lrelu_mult = 1, lrelu_shift = 0, mode = <NOOP>>
+        opaque_ppe = #VPU.PPEStub<>
     } -> tensor<1x16x6x6xf16, {order = #NHWC}>
 
     %conv_weights = const.Declare tensor<32x16x1x1xf16, {order = #NHWC}> = dense<1.0> : tensor<32x16x1x1xf16>, [#const.Reorder<#NHWC>]
     %conv_weights_table = const.Declare tensor<32x1x1x4xsi32> = dense<1> : tensor<32x1x1x4xsi32>
 
     %conv_output = VPU.NCE.Convolution(%interp_output, %conv_weights, %conv_weights_table) {
+            opaque_ppe = #VPU.PPEStub<>,
             pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
             rawFilterShape = [32, 16, 1, 1],
             strides = [1, 1]

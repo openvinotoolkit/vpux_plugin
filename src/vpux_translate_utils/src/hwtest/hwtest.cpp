@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -17,8 +17,9 @@
 #include "vpux/compiler/NPU40XX/conversion.hpp"
 #include "vpux/compiler/NPU40XX/pipelines.hpp"
 #include "vpux/compiler/dialect/IE/utils/resources.hpp"
+#include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/dialect.hpp"
 #include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
-#include "vpux/compiler/dialect/VPUIP/graph-schema/export.hpp"
 #include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
 #include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
 #include "vpux/compiler/init.hpp"
@@ -32,24 +33,6 @@
 
 #include "vpux/compiler/dialect/VPUMI37XX/dialect.hpp"
 #include "vpux/compiler/dialect/VPUMI40XX/dialect.hpp"
-
-namespace {
-
-void serialize(const uint8_t* data, size_t size, const vpux::Logger& log, mlir::StringRef fileName = "vpuip.blob") {
-    std::string err;
-    auto outFile = mlir::openOutputFile(fileName, &err);
-    if (!outFile) {
-        log.error("Failed to open file {0} to write blob: {1}", fileName, err);
-        return;
-    }
-
-    outFile->os().write(reinterpret_cast<const char*>(data), size);
-    outFile->keep();
-    log.info("Saved blob to {0}", outFile->getFilename());
-}
-
-}  // namespace
-
 namespace vpux {
 
 mlir::OwningOpRef<mlir::ModuleOp> importHWTEST(llvm::StringRef sourceJson, mlir::MLIRContext* ctx) {
@@ -177,7 +160,11 @@ mlir::OwningOpRef<mlir::ModuleOp> importHWTEST(llvm::StringRef sourceJson, mlir:
         break;
     }
     case nb::CaseType::ActShave: {
-        hwtest::buildActShave(jsonDesc, module, builder, log, input_types, output_type);
+        if (jsonDesc.getActShaveBroadcastingParams().dstLocations.size() == 1) {
+            hwtest::buildActShave(jsonDesc, module, builder, log, input_types, output_type);
+        } else {
+            hwtest::buildActShaveBroadcast(jsonDesc, module, builder, log, input_types, output_type);
+        }
         break;
     }
     case nb::CaseType::ReadAfterWriteDPUDMA: {
@@ -271,13 +258,9 @@ mlir::OwningOpRef<mlir::ModuleOp> importHWTEST(llvm::StringRef sourceJson, mlir:
 
     VPUX_THROW_UNLESS(mlir::succeeded(mlir::verify(module)), "Failed to create a valid MLIR module for the IR model");
 
-    const std::vector<std::shared_ptr<const ov::Node>> params;
-    const std::vector<std::shared_ptr<const ov::Node>> results;
-
     mlir::PassManager pm(module->getName(), mlir::OpPassManager::Nesting::Implicit);
 
-    auto getLoweringPipeline = [&jsonDesc](vpux::VPU::ArchKind arch, nb::ProfilingParams, mlir::OpPassManager& pm,
-                                           Logger log) {
+    auto getLoweringPipeline = [&jsonDesc](vpux::VPU::ArchKind arch, mlir::OpPassManager& pm, Logger log) {
         switch (arch) {
         case vpux::VPU::ArchKind::NPU40XX: {
             auto backendCompilationOptions40XX = BackendCompilationOptions40XX();
@@ -293,18 +276,10 @@ mlir::OwningOpRef<mlir::ModuleOp> importHWTEST(llvm::StringRef sourceJson, mlir:
             return vpux::arch37xx::buildLowerVPUIP2ELFPipeline(pm, log);
         }
     };
-    auto getExportToELFfunc = [](vpux::VPU::ArchKind arch) {
-        if (arch == vpux::VPU::ArchKind::NPU40XX)
-            return ELF::exportToELF;
-        return ELFNPU37XX::exportToELF;
-    };
 
-    getLoweringPipeline(jsonDesc.getArchitecture(), jsonDesc.getProfilingParams(), pm, log);
+    getLoweringPipeline(jsonDesc.getArchitecture(), pm, log);
 
     VPUX_THROW_UNLESS(mlir::succeeded(pm.run(module)), "Failed to lower test model to ELF");
-    auto blob = getExportToELFfunc(jsonDesc.getArchitecture())(module, params, results, log);
-
-    serialize(blob.data(), blob.size(), log);
 
     return module;
 }

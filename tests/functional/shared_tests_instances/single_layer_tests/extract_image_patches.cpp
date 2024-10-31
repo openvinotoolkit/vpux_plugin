@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation
+// Copyright (C) 2022-2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -15,18 +15,16 @@ namespace test {
 
 class ExtractImagePatchesLayerTestCommon : public ExtractImagePatchesTest, virtual public VpuOv2LayerTest {};
 
-class ExtractImagePatchesLayerTest_NPU3720 : public ExtractImagePatchesLayerTestCommon {};
-class ExtractImagePatchesLayerTest_NPU4000 : public ExtractImagePatchesLayerTestCommon {};
-
-TEST_P(ExtractImagePatchesLayerTest_NPU3720, SW) {
+TEST_P(ExtractImagePatchesLayerTestCommon, NPU3720_SW) {
     setReferenceSoftwareMode();
     run(Platform::NPU3720);
 }
 
-TEST_P(ExtractImagePatchesLayerTest_NPU4000, SW) {
+TEST_P(ExtractImagePatchesLayerTestCommon, NPU4000_SW) {
     setReferenceSoftwareMode();
     run(Platform::NPU4000);
 }
+
 }  // namespace test
 }  // namespace ov
 
@@ -48,11 +46,8 @@ const auto test1ExtractImagePatchesParams = ::testing::Combine(
         ::testing::ValuesIn({PadType::VALID}),                                                   // pad type
         ::testing::ValuesIn({ov::element::f16}), ::testing::Values(DEVICE_NPU));
 
-INSTANTIATE_TEST_CASE_P(smoke1_ExtractImagePatches, ExtractImagePatchesLayerTest_NPU3720,
-                        test1ExtractImagePatchesParams, ExtractImagePatchesTest::getTestCaseName);
-
-INSTANTIATE_TEST_CASE_P(smoke1_ExtractImagePatches, ExtractImagePatchesLayerTest_NPU4000,
-                        test1ExtractImagePatchesParams, ExtractImagePatchesTest::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke1_ExtractImagePatches, ExtractImagePatchesLayerTestCommon, test1ExtractImagePatchesParams,
+                         ExtractImagePatchesTest::getTestCaseName);
 
 const auto test2ExtractImagePatchesParams = ::testing::Combine(
         ::testing::ValuesIn({static_shapes_to_test_representation({ov::Shape{1, 1, 10, 10}})}),  // input shape
@@ -62,11 +57,8 @@ const auto test2ExtractImagePatchesParams = ::testing::Combine(
         ::testing::ValuesIn({PadType::VALID}),                                                   // pad type
         ::testing::ValuesIn({ov::element::f16}), ::testing::Values(DEVICE_NPU));
 
-INSTANTIATE_TEST_CASE_P(smoke2_ExtractImagePatches, ExtractImagePatchesLayerTest_NPU3720,
-                        test2ExtractImagePatchesParams, ExtractImagePatchesTest::getTestCaseName);
-
-INSTANTIATE_TEST_CASE_P(smoke2_ExtractImagePatches, ExtractImagePatchesLayerTest_NPU4000,
-                        test2ExtractImagePatchesParams, ExtractImagePatchesTest::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke2_ExtractImagePatches, ExtractImagePatchesLayerTestCommon, test2ExtractImagePatchesParams,
+                         ExtractImagePatchesTest::getTestCaseName);
 
 const auto test3ExtractImagePatchesParams = ::testing::Combine(
         ::testing::ValuesIn({static_shapes_to_test_representation({ov::Shape{1, 1, 10, 10}})}),  // input shape
@@ -76,11 +68,8 @@ const auto test3ExtractImagePatchesParams = ::testing::Combine(
         ::testing::ValuesIn({PadType::SAME_UPPER}),                                              // pad type
         ::testing::ValuesIn({ov::element::f16}), ::testing::Values(DEVICE_NPU));
 
-INSTANTIATE_TEST_CASE_P(smoke3_ExtractImagePatches, ExtractImagePatchesLayerTest_NPU3720,
-                        test3ExtractImagePatchesParams, ExtractImagePatchesTest::getTestCaseName);
-
-INSTANTIATE_TEST_CASE_P(smoke3_ExtractImagePatches, ExtractImagePatchesLayerTest_NPU4000,
-                        test3ExtractImagePatchesParams, ExtractImagePatchesTest::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke3_ExtractImagePatches, ExtractImagePatchesLayerTestCommon, test3ExtractImagePatchesParams,
+                         ExtractImagePatchesTest::getTestCaseName);
 
 const auto test4ExtractImagePatchesParams = ::testing::Combine(
         ::testing::ValuesIn({static_shapes_to_test_representation({ov::Shape{1, 2, 5, 5}})}),  // input shape
@@ -90,11 +79,8 @@ const auto test4ExtractImagePatchesParams = ::testing::Combine(
         ::testing::ValuesIn({PadType::VALID}),                                                 // pad type
         ::testing::ValuesIn({ov::element::f16}), ::testing::Values(DEVICE_NPU));
 
-INSTANTIATE_TEST_CASE_P(smoke4_ExtractImagePatches, ExtractImagePatchesLayerTest_NPU3720,
-                        test4ExtractImagePatchesParams, ExtractImagePatchesTest::getTestCaseName);
-
-INSTANTIATE_TEST_CASE_P(smoke4_ExtractImagePatches, ExtractImagePatchesLayerTest_NPU4000,
-                        test4ExtractImagePatchesParams, ExtractImagePatchesTest::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke4_ExtractImagePatches, ExtractImagePatchesLayerTestCommon, test4ExtractImagePatchesParams,
+                         ExtractImagePatchesTest::getTestCaseName);
 
 const auto test5ExtractImagePatchesParams = ::testing::Combine(
         ::testing::ValuesIn({static_shapes_to_test_representation({ov::Shape{1, 64, 26, 26}})}),  // input shape
@@ -104,11 +90,8 @@ const auto test5ExtractImagePatchesParams = ::testing::Combine(
         ::testing::ValuesIn({PadType::SAME_LOWER}),                                               // pad type
         ::testing::ValuesIn({ov::element::f16}), ::testing::Values(DEVICE_NPU));
 
-INSTANTIATE_TEST_CASE_P(smoke5_ExtractImagePatches, ExtractImagePatchesLayerTest_NPU3720,
-                        test5ExtractImagePatchesParams, ExtractImagePatchesTest::getTestCaseName);
-
-INSTANTIATE_TEST_CASE_P(smoke5_ExtractImagePatches, ExtractImagePatchesLayerTest_NPU4000,
-                        test5ExtractImagePatchesParams, ExtractImagePatchesTest::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke5_ExtractImagePatches, ExtractImagePatchesLayerTestCommon, test5ExtractImagePatchesParams,
+                         ExtractImagePatchesTest::getTestCaseName);
 
 const auto test6ExtractImagePatchesParams = ::testing::Combine(
         ::testing::ValuesIn({static_shapes_to_test_representation({ov::Shape{2, 1, 10, 10}})}),  // input shape
@@ -118,11 +101,8 @@ const auto test6ExtractImagePatchesParams = ::testing::Combine(
         ::testing::ValuesIn({PadType::SAME_UPPER, PadType::SAME_LOWER}),                         // pad type
         ::testing::ValuesIn({ov::element::f16}), ::testing::Values(DEVICE_NPU));
 
-INSTANTIATE_TEST_CASE_P(smoke6_ExtractImagePatches, ExtractImagePatchesLayerTest_NPU3720,
-                        test6ExtractImagePatchesParams, ExtractImagePatchesTest::getTestCaseName);
-
-INSTANTIATE_TEST_CASE_P(smoke6_ExtractImagePatches, ExtractImagePatchesLayerTest_NPU4000,
-                        test6ExtractImagePatchesParams, ExtractImagePatchesTest::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke6_ExtractImagePatches, ExtractImagePatchesLayerTestCommon, test6ExtractImagePatchesParams,
+                         ExtractImagePatchesTest::getTestCaseName);
 
 const auto test7ExtractImagePatchesParams = ::testing::Combine(
         ::testing::ValuesIn({static_shapes_to_test_representation({ov::Shape{2, 3, 13, 37}})}),  // input shape
@@ -132,11 +112,8 @@ const auto test7ExtractImagePatchesParams = ::testing::Combine(
         ::testing::ValuesIn({PadType::VALID, PadType::SAME_LOWER}),                              // pad type
         ::testing::ValuesIn({ov::element::f16}), ::testing::Values(DEVICE_NPU));
 
-INSTANTIATE_TEST_CASE_P(smoke7_ExtractImagePatches, ExtractImagePatchesLayerTest_NPU3720,
-                        test7ExtractImagePatchesParams, ExtractImagePatchesTest::getTestCaseName);
-
-INSTANTIATE_TEST_CASE_P(smoke7_ExtractImagePatches, ExtractImagePatchesLayerTest_NPU4000,
-                        test7ExtractImagePatchesParams, ExtractImagePatchesTest::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke7_ExtractImagePatches, ExtractImagePatchesLayerTestCommon, test7ExtractImagePatchesParams,
+                         ExtractImagePatchesTest::getTestCaseName);
 
 const auto test8ExtractImagePatchesParams = ::testing::Combine(
         ::testing::ValuesIn({static_shapes_to_test_representation({ov::Shape{2, 3, 13, 37}})}),  // input shape
@@ -146,11 +123,8 @@ const auto test8ExtractImagePatchesParams = ::testing::Combine(
         ::testing::ValuesIn({PadType::SAME_UPPER}),                                              // pad type
         ::testing::ValuesIn({ov::element::f16}), ::testing::Values(DEVICE_NPU));
 
-INSTANTIATE_TEST_CASE_P(smoke8_ExtractImagePatches, ExtractImagePatchesLayerTest_NPU3720,
-                        test8ExtractImagePatchesParams, ExtractImagePatchesTest::getTestCaseName);
-
-INSTANTIATE_TEST_CASE_P(smoke8_ExtractImagePatches, ExtractImagePatchesLayerTest_NPU4000,
-                        test8ExtractImagePatchesParams, ExtractImagePatchesTest::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke8_ExtractImagePatches, ExtractImagePatchesLayerTestCommon, test8ExtractImagePatchesParams,
+                         ExtractImagePatchesTest::getTestCaseName);
 
 // I32
 const auto test9ExtractImagePatchesParams = ::testing::Combine(
@@ -161,11 +135,8 @@ const auto test9ExtractImagePatchesParams = ::testing::Combine(
         ::testing::ValuesIn(paddingType),                                                         // pad type
         ::testing::ValuesIn({ov::element::i32}), ::testing::Values(DEVICE_NPU));
 
-INSTANTIATE_TEST_CASE_P(smoke9_ExtractImagePatches, ExtractImagePatchesLayerTest_NPU3720,
-                        test9ExtractImagePatchesParams, ExtractImagePatchesTest::getTestCaseName);
-
-INSTANTIATE_TEST_CASE_P(smoke9_ExtractImagePatches, ExtractImagePatchesLayerTest_NPU4000,
-                        test9ExtractImagePatchesParams, ExtractImagePatchesTest::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke9_ExtractImagePatches, ExtractImagePatchesLayerTestCommon, test9ExtractImagePatchesParams,
+                         ExtractImagePatchesTest::getTestCaseName);
 
 const auto testPrecommitExtractImagePatchesParams = ::testing::Combine(
         ::testing::ValuesIn({static_shapes_to_test_representation({ov::Shape{1, 3, 10, 10}})}),  // input shape
@@ -175,10 +146,7 @@ const auto testPrecommitExtractImagePatchesParams = ::testing::Combine(
         ::testing::ValuesIn({PadType::VALID}),                                                   // pad type
         ::testing::ValuesIn({ov::element::f16}), ::testing::Values(DEVICE_NPU));
 
-INSTANTIATE_TEST_CASE_P(smoke_precommit_ExtractImagePatches, ExtractImagePatchesLayerTest_NPU3720,
-                        testPrecommitExtractImagePatchesParams, ExtractImagePatchesTest::getTestCaseName);
-
-INSTANTIATE_TEST_CASE_P(smoke_precommit_ExtractImagePatches, ExtractImagePatchesLayerTest_NPU4000,
-                        testPrecommitExtractImagePatchesParams, ExtractImagePatchesTest::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_ExtractImagePatches, ExtractImagePatchesLayerTestCommon,
+                         testPrecommitExtractImagePatchesParams, ExtractImagePatchesTest::getTestCaseName);
 
 }  // namespace

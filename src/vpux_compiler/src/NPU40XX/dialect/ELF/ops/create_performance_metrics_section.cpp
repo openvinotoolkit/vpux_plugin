@@ -16,7 +16,7 @@ using namespace vpux;
 using namespace npu40xx;
 
 void vpux::ELF::PerformanceMetricsOp::serialize(elf::writer::BinaryDataSection<uint8_t>& binDataSection) {
-    nn_public::VpuPerformanceMetrics perf{};
+    VpuPerformanceMetrics perf{};
 
     auto freqTable = VPU::arch40xx::getFrequencyTable();
     perf.freq_base = freqTable.base;
@@ -51,19 +51,11 @@ void vpux::ELF::PerformanceMetricsOp::serialize(elf::writer::BinaryDataSection<u
 }
 
 size_t vpux::ELF::PerformanceMetricsOp::getBinarySize() {
-    return sizeof(nn_public::VpuPerformanceMetrics);
+    return sizeof(VpuPerformanceMetrics);
 }
 
 size_t vpux::ELF::PerformanceMetricsOp::getAlignmentRequirements() {
-    return alignof(nn_public::VpuPerformanceMetrics);
-}
-
-vpux::ELF::SectionFlagsAttr vpux::ELF::PerformanceMetricsOp::getAccessingProcs(mlir::SymbolUserMap&) {
-    return ELF::SectionFlagsAttr::SHF_NONE;
-}
-
-vpux::ELF::SectionFlagsAttr vpux::ELF::PerformanceMetricsOp::getUserProcs() {
-    return ELF::SectionFlagsAttr::SHF_NONE;
+    return alignof(VpuPerformanceMetrics);
 }
 
 std::optional<ELF::SectionSignature> vpux::ELF::PerformanceMetricsOp::getSectionSignature() {

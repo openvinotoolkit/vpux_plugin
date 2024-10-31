@@ -25,7 +25,7 @@ using namespace npu40xx;
         return hwWVpuTaskBarrierMapDesc;                                                                 \
     }()
 
-using mappedRegValues = std::map<std::string, std::map<std::string, uint64_t>>;
+using mappedRegValues = std::map<std::string, std::map<std::string, vpux::VPURegMapped::RegFieldValue>>;
 
 class NPUReg40XX_VpuTaskBarrierMapTest :
         public testing::TestWithParam<std::pair<mappedRegValues, nn_public::VpuTaskBarrierMap>> {
@@ -34,8 +34,7 @@ class NPUReg40XX_VpuTaskBarrierMapTest :
 
 public:
     NPUReg40XX_VpuTaskBarrierMapTest() {
-        mlir::DialectRegistry registry;
-        vpux::registerDialects(registry);
+        auto registry = vpux::createDialectRegistry();
 
         ctx = std::make_unique<mlir::MLIRContext>();
         ctx->loadDialect<vpux::NPUReg40XX::NPUReg40XXDialect>();
@@ -95,5 +94,5 @@ std::vector<std::pair<mappedRegValues, nn_public::VpuTaskBarrierMap>> TaskBarrie
          CREATE_HW_DMA_DESC(reserved, 0xFFFFFFFF)},
 };
 
-INSTANTIATE_TEST_CASE_P(NPUReg40XX_MappedRegs, NPUReg40XX_VpuTaskBarrierMapTest,
-                        testing::ValuesIn(TaskBarrierFieldSet));
+INSTANTIATE_TEST_SUITE_P(NPUReg40XX_MappedRegs, NPUReg40XX_VpuTaskBarrierMapTest,
+                         testing::ValuesIn(TaskBarrierFieldSet));

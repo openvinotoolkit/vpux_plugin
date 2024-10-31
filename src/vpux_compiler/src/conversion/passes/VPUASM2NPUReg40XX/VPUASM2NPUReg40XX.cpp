@@ -167,7 +167,6 @@ mlir::LogicalResult ManagedBarrierRewriter::matchAndRewrite(VPUASM::ManagedBarri
     uint32_t workItemRegVal = 0;
     uint32_t enqueueCount = 0;
 
-    // alwasys assume only one workItem per barrier for now
     if (workItemIdx.has_value()) {
         enqueueCount = origOp.getWorkItemCount();
         workItemRegVal = workItemIdx.value().getValue();
@@ -229,8 +228,8 @@ mlir::LogicalResult ManagedMappedInferenceRewriter::matchAndRewrite(VPUASM::Mana
         dmaCountCMX.push_back(dmaCount[dmaTileIndex][static_cast<size_t>(VPUMI40XX::DmaNnSrcType::CMX_NN)]);
     }
 
-    const auto dmaCountDDRAttr = getIntArrayAttr(origOp.getContext(), makeArrayRef(dmaCountDDR));
-    const auto dmaCountCMXAttr = getIntArrayAttr(origOp.getContext(), makeArrayRef(dmaCountCMX));
+    const auto dmaCountDDRAttr = getIntArrayAttr(origOp.getContext(), ArrayRef(dmaCountDDR));
+    const auto dmaCountCMXAttr = getIntArrayAttr(origOp.getContext(), ArrayRef(dmaCountCMX));
 
     rewriter.create<NPUReg40XX::ManagedMappedInferenceOp>(origOp->getLoc(),                    //
                                                           origOp.getSymNameAttr(),             //
@@ -240,7 +239,12 @@ mlir::LogicalResult ManagedMappedInferenceRewriter::matchAndRewrite(VPUASM::Mana
                                                           origOp.getWorkItemsCount(),          //
                                                           origOp.getBarrierCount(),            //
                                                           origOp.getBootsrapWorkItemsCount(),  //
-                                                          origOp.getBootstrapTasksCount());    //
+                                                          origOp.getBootstrapTasksCount(),     //
+                                                          origOp.getActshvUsed(),              //
+                                                          origOp.getDpuUsed(),                 //
+                                                          origOp.getMediaUsed(),               //
+                                                          origOp.getDmaFromDdrUsed(),          //
+                                                          origOp.getDmaFromCmxUsed());         //
     rewriter.eraseOp(origOp);
 
     return mlir::success();

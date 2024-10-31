@@ -6,6 +6,7 @@
 #include "vpux/compiler/dialect/IE/transforms/passes.hpp"
 
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
+#include "vpux/compiler/dialect/IE/utils/broadcast_utils.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 #include "vpux/compiler/utils/types.hpp"
@@ -64,11 +65,12 @@ IE::TransposeOp createTransposeForLayerInput(mlir::PatternRewriter& rewriter, ml
     return rewriter.create<IE::TransposeOp>(newLoc, input, nullptr, orderAttr);
 }
 
-void reshapeForEltwiseAdd(IE::AddOp addOp, mlir::PatternRewriter& rewriter) {
-    const auto ctx = addOp->getContext();
-    auto inputShape1 = getShape(addOp.getInput1());
-    auto inputShape2 = getShape(addOp.getInput2());
-    auto outputShape = getShape(addOp.getOutput());
+template <class ConcreteEltwiseOp>
+void reshapeForEltwiseOp(ConcreteEltwiseOp eltwiseOp, mlir::PatternRewriter& rewriter) {
+    const auto ctx = eltwiseOp->getContext();
+    auto inputShape1 = getShape(eltwiseOp.getInput1());
+    auto inputShape2 = getShape(eltwiseOp.getInput2());
+    auto outputShape = getShape(eltwiseOp.getOutput());
 
     Shape newInShape1 = Shape(inputShape1);
     newInShape1[Dims4D::Act::N] = 1;
@@ -76,17 +78,56 @@ void reshapeForEltwiseAdd(IE::AddOp addOp, mlir::PatternRewriter& rewriter) {
     Shape newInShape2 = Shape(inputShape2);
     newInShape2[Dims4D::Act::N] = 1;
     newInShape2[Dims4D::Act::C] = inputShape2[Dims4D::Act::C] * inputShape2[Dims4D::Act::N];
+    Shape newOutputShape = Shape(outputShape);
+    newOutputShape[Dims4D::Act::N] = 1;
+    newOutputShape[Dims4D::Act::C] = outputShape[Dims4D::Act::C] * outputShape[Dims4D::Act::N];
+    const auto resultType =
+            mlir::RankedTensorType::get(newOutputShape.raw(), eltwiseOp.getOutput().getType().getElementType());
 
-    auto inShapeCast1 =
-            rewriter.create<IE::ShapeCastOp>(addOp->getLoc(), addOp.getInput1(), getIntArrayAttr(ctx, newInShape1));
-    auto inShapeCast2 =
-            rewriter.create<IE::ShapeCastOp>(addOp->getLoc(), addOp.getInput2(), getIntArrayAttr(ctx, newInShape2));
+    auto inShapeCast1 = rewriter.create<IE::ShapeCastOp>(eltwiseOp->getLoc(), eltwiseOp.getInput1(),
+                                                         getIntArrayAttr(ctx, newInShape1));
+    auto inShapeCast2 = rewriter.create<IE::ShapeCastOp>(eltwiseOp->getLoc(), eltwiseOp.getInput2(),
+                                                         getIntArrayAttr(ctx, newInShape2));
 
-    auto newAddOp =
-            rewriter.create<IE::AddOp>(addOp->getLoc(), inShapeCast1.getResult(), inShapeCast2.getResult(),
-                                       addOp.getAutoBroadcastAttr(), addOp.getPostOpAttr(), addOp.getClampAttr());
+    auto newEltwiseOp = rewriter.create<ConcreteEltwiseOp>(
+            eltwiseOp->getLoc(), resultType, inShapeCast1.getResult(), inShapeCast2.getResult(),
+            eltwiseOp.getAutoBroadcastAttr(), eltwiseOp.getPostOpAttr(), eltwiseOp.getClampAttr(),
+            eltwiseOp.getOutputChannelsAttr(), eltwiseOp.getInputChannelsAttr());
 
-    rewriter.replaceOpWithNewOp<IE::ShapeCastOp>(addOp, newAddOp.getOutput(), getIntArrayAttr(ctx, outputShape));
+    rewriter.replaceOpWithNewOp<IE::ShapeCastOp>(eltwiseOp, newEltwiseOp.getOutput(),
+                                                 getIntArrayAttr(ctx, outputShape));
+}
+
+void reshapeForGroupConv(IE::GroupConvolutionOp groupConvOp, mlir::PatternRewriter& rewriter) {
+    const auto ctx = groupConvOp->getContext();
+
+    Shape newInputShape = Shape(getShape(groupConvOp.getInput()));
+    newInputShape[Dims4D::Act::C] = newInputShape[Dims4D::Act::N];
+    newInputShape[Dims4D::Act::N] = 1;
+    Shape newOutputShape = Shape(getShape(groupConvOp.getOutput()));
+    newOutputShape[Dims4D::Act::C] = newOutputShape[Dims4D::Act::N];
+    newOutputShape[Dims4D::Act::N] = 1;
+    auto group = newInputShape[Dims4D::Act::C];
+
+    auto inShapeCast = rewriter.create<IE::ShapeCastOp>(groupConvOp->getLoc(), groupConvOp.getInput(),
+                                                        getIntArrayAttr(ctx, newInputShape));
+
+    const auto filter = groupConvOp.getFilter();
+    auto targetConstShape = Shape(getShape(filter));
+    targetConstShape[Dims4D::Filter::OC] = group;
+    auto targetShapeConst =
+            vpux::IE::createShapeConstForBroadCast(rewriter, ctx, groupConvOp->getLoc(), targetConstShape);
+    auto newFilter = rewriter.create<IE::BroadcastOp>(groupConvOp->getLoc(), filter, targetShapeConst,
+                                                      /*axes_mapping*/ nullptr,
+                                                      IE::BroadcastTypeAttr::get(ctx, IE::BroadcastType::NUMPY));
+    auto newGroupConvOp = rewriter.create<IE::GroupConvolutionOp>(
+            groupConvOp->getLoc(), inShapeCast.getResult(), newFilter.getOutput(), groupConvOp.getBias(),
+            groupConvOp.getStridesAttr(), groupConvOp.getPadsBeginAttr(), groupConvOp.getPadsEndAttr(),
+            groupConvOp.getDilationsAttr(), getIntAttr(ctx, group), groupConvOp.getPostOpAttr(),
+            groupConvOp.getClampAttr(), groupConvOp.getOutputChannelsAttr(), groupConvOp.getInputChannelsAttr());
+
+    rewriter.replaceOpWithNewOp<IE::ShapeCastOp>(groupConvOp, newGroupConvOp.getOutput(),
+                                                 getIntArrayAttr(ctx, getShape(groupConvOp.getOutput())));
 }
 
 //
@@ -113,28 +154,69 @@ template <class ConcreteOp>
 mlir::LogicalResult LayerConverter<ConcreteOp>::matchAndRewrite(ConcreteOp origOp,
                                                                 mlir::PatternRewriter& rewriter) const {
     _log.trace("Got layer at '{0}'", origOp->getLoc());
+
     auto addOp = mlir::dyn_cast<IE::AddOp>(*origOp);
     if (addOp != nullptr && !getDimEqualsToOne({addOp.getInput1(), addOp.getInput2()}).has_value()) {
-        reshapeForEltwiseAdd(addOp, rewriter);
-        _log.trace("Reshape directly for not suitable transpose cases");
+        reshapeForEltwiseOp<IE::AddOp>(addOp, rewriter);
+        _log.trace("Reshape AddOp directly for not suitable transpose cases");
+        return mlir::success();
+    }
+    auto multiplyOp = mlir::dyn_cast<IE::MultiplyOp>(*origOp);
+    if (multiplyOp != nullptr && !getDimEqualsToOne({multiplyOp.getInput1(), multiplyOp.getInput2()}).has_value()) {
+        reshapeForEltwiseOp<IE::MultiplyOp>(multiplyOp, rewriter);
+        _log.trace("Reshape MultiplyOp directly for not suitable transpose cases");
+        return mlir::success();
+    }
+
+    auto groupConvOp = mlir::dyn_cast<IE::GroupConvolutionOp>(*origOp);
+    if (groupConvOp != nullptr && isEqualToOne(groupConvOp.getInput(), Dims4D::Act::C)) {
+        reshapeForGroupConv(groupConvOp, rewriter);
+        _log.trace("Reshape GroupConvOp directly for not suitable transpose cases");
         return mlir::success();
     }
 
     mlir::AffineMapAttr transPermAttr = nullptr;
-    auto mapper = mapOperands(origOp, transPermAttr, rewriter);
-    VPUX_THROW_WHEN(transPermAttr == nullptr, "Can not get order value from input tranpose");
-    auto* newOp = rewriter.clone(*origOp.getOperation(), mapper);
-    vpux::inferReturnTypes(newOp, vpux::InferShapedTypeMode::ALL);
-
+    mlir::Value output = nullptr;
+    auto convOp = mlir::dyn_cast<IE::ConvolutionOp>(*origOp);
+    if (convOp != nullptr && convOp.getInput() == convOp.getFilter()) {
+        auto dim = getDimEqualsToOne({convOp.getInput()}).value();
+        auto inTranspose = createTransposeForLayerInput(rewriter, convOp.getInput(), dim, convOp->getLoc());
+        transPermAttr = inTranspose.getOrderValueAttr();
+        VPUX_THROW_WHEN(transPermAttr == nullptr, "Can not get order value from input tranpose");
+        output = rewriter.create<IE::ConvolutionOp>(convOp->getLoc(), inTranspose.getOutput(), convOp.getFilter(),
+                                                    convOp.getBias(), convOp.getStridesAttr(),
+                                                    convOp.getPadsBeginAttr(), convOp.getPadsEndAttr(),
+                                                    convOp.getDilationsAttr(), convOp.getPostOpAttr(),
+                                                    convOp.getClampAttr(), convOp.getStaticScaleAttr(),
+                                                    convOp.getOutputChannelsAttr(), convOp.getInputChannelsAttr())
+                         .getOutput();
+    } else if (groupConvOp != nullptr && groupConvOp.getInput() == groupConvOp.getFilter()) {
+        auto dim = getDimEqualsToOne({groupConvOp.getInput()}).value();
+        auto inTranspose = createTransposeForLayerInput(rewriter, groupConvOp.getInput(), dim, groupConvOp->getLoc());
+        transPermAttr = inTranspose.getOrderValueAttr();
+        VPUX_THROW_WHEN(transPermAttr == nullptr, "Can not get order value from input tranpose");
+        output = rewriter.create<IE::GroupConvolutionOp>(
+                                 groupConvOp->getLoc(), inTranspose.getOutput(), groupConvOp.getFilter(),
+                                 groupConvOp.getBias(), groupConvOp.getStridesAttr(), groupConvOp.getPadsBeginAttr(),
+                                 groupConvOp.getPadsEndAttr(), groupConvOp.getDilationsAttr(),
+                                 groupConvOp.getGroupsAttr(), groupConvOp.getPostOpAttr(), groupConvOp.getClampAttr(),
+                                 groupConvOp.getOutputChannelsAttr(), groupConvOp.getInputChannelsAttr())
+                         .getOutput();
+    } else {
+        auto mapper = mapOperands(origOp, transPermAttr, rewriter);
+        VPUX_THROW_WHEN(transPermAttr == nullptr, "Can not get order value from input tranpose");
+        auto* newOp = rewriter.clone(*origOp.getOperation(), mapper);
+        vpux::inferReturnTypes(newOp, vpux::InferShapedTypeMode::ALL);
+        output = newOp->getResult(0);
+    }
     // Support mixed precision convolution i8 -> fp16
     // In this case, the inferred type has become i8, and we have to set it back to fp16
     auto elemType = origOp.getOutput().getType().template dyn_cast<vpux::NDTypeInterface>().getElementType();
-    auto output = newOp->getResult(0);
     auto outType = output.getType().template dyn_cast<vpux::NDTypeInterface>();
     output.setType(mlir::cast<mlir::RankedTensorType>(outType.changeElemType(elemType)));
-    _log.trace("Insert new layer without batch: {0}", newOp);
-    auto outTranspose =
-            rewriter.replaceOpWithNewOp<IE::TransposeOp>(origOp, newOp->getResult(0), nullptr, transPermAttr);
+
+    _log.trace("Insert new layer without batch: {0}", output);
+    auto outTranspose = rewriter.replaceOpWithNewOp<IE::TransposeOp>(origOp, output, nullptr, transPermAttr);
     _log.trace("Insert transpose {0} for output", outTranspose);
 
     return mlir::success();
@@ -144,35 +226,36 @@ template <class ConcreteOp>
 mlir::IRMapping LayerConverter<ConcreteOp>::mapOperands(ConcreteOp origOp, mlir::AffineMapAttr& orderAttr,
                                                         mlir::PatternRewriter& rewriter) const {
     mlir::IRMapping mapper;
-    auto dim = getDimEqualsToOne({origOp.getInput()}).value();
-    auto inTranspose = createTransposeForLayerInput(rewriter, origOp.getInput(), dim, origOp->getLoc());
-    orderAttr = inTranspose.getOrderValueAttr();
-    _log.trace("Insert transpose for input: {0}", inTranspose);
-    mapper.map(origOp.getInput(), inTranspose.getOutput());
-    return mapper;
-}
-
-template <>
-mlir::IRMapping LayerConverter<IE::AddOp>::mapOperands(IE::AddOp origOp, mlir::AffineMapAttr& orderAttr,
-                                                       mlir::PatternRewriter& rewriter) const {
-    mlir::IRMapping mapper;
-    auto dim = getDimEqualsToOne({origOp.getInput1(), origOp.getInput2()}).value();
-
-    auto inTranspose1 = createTransposeForLayerInput(rewriter, origOp.getInput1(), dim, origOp->getLoc());
-    _log.trace("Insert transpose for input1: {0}", inTranspose1);
-    mapper.map(origOp.getInput1(), inTranspose1.getOutput());
-    orderAttr = inTranspose1.getOrderValueAttr();
-
-    auto inTranspose2 = createTransposeForLayerInput(rewriter, origOp.getInput2(), dim, origOp->getLoc());
-    _log.trace("Insert transpose for input2: {0}", inTranspose2);
-    mapper.map(origOp.getInput2(), inTranspose2.getOutput());
+    SmallVector<mlir::Value> inputVals;
+    mlir::Operation* op = origOp;
+    for (auto input : origOp.getInputs() | indexed) {
+        if (!op->hasTrait<IE::EltwiseOp>() && input.index() > 0) {
+            continue;
+        }
+        inputVals.push_back(input.value());
+    }
+    auto dim = getDimEqualsToOne(inputVals).value();
+    for (auto input : inputVals) {
+        auto inTranspose = createTransposeForLayerInput(rewriter, input, dim, origOp->getLoc());
+        orderAttr = orderAttr == nullptr ? inTranspose.getOrderValueAttr() : orderAttr;
+        _log.trace("Insert transpose for input: {0}", inTranspose);
+        mapper.map(input, inTranspose.getOutput());
+    }
     return mapper;
 }
 
 template <class ConcreteOp>
-bool isLegalConvOp(ConcreteOp op) {
+bool isLegalGeneric(ConcreteOp op) {
     auto hasPerAxisQuantization = isPerAxisQuant(op.getInput()) || isPerAxisQuant(op.getOutput());
     if (!isShapeRankEq4(op.getInput()) || isEqualToOne(op.getInput(), Dims4D::Act::N) || hasPerAxisQuantization) {
+        return true;
+    }
+    return false;
+}
+
+template <class ConcreteOp>
+bool isLegalConvOp(ConcreteOp op) {
+    if (isLegalGeneric(op)) {
         return true;
     }
     auto transposedDim = getDimEqualsToOne({op.getInput()});
@@ -181,8 +264,7 @@ bool isLegalConvOp(ConcreteOp op) {
 
 template <class ConcreteOp>
 bool isLegalPoolOp(ConcreteOp op) {
-    auto hasPerAxisQuantization = isPerAxisQuant(op.getInput()) || isPerAxisQuant(op.getOutput());
-    if (!isShapeRankEq4(op.getInput()) || isEqualToOne(op.getInput(), Dims4D::Act::N) || hasPerAxisQuantization) {
+    if (isLegalGeneric(op)) {
         return true;
     }
     auto transposedDim = getDimEqualsToOne({op.getInput()});
@@ -196,6 +278,15 @@ bool isLegalPoolOp(ConcreteOp op) {
         return kernelSize[Dims4D::Kernel::X.ind()] != 1;
     }
     return true;
+}
+
+bool isLegalGroupConvOp(IE::GroupConvolutionOp op) {
+    if (isLegalGeneric(op)) {
+        return true;
+    }
+    auto transposedDim = getDimEqualsToOne({op.getInput()});
+    return (!transposedDim.has_value() || !isEqualToOne(op.getFilter(), transposedDim.value())) &&
+           !isEqualToOne(op.getInput(), Dims4D::Act::C);
 }
 
 //
@@ -301,7 +392,7 @@ void ConvertBatchedLayerTo1NPass::safeRunOnFunc() {
     });
 
     target.addDynamicallyLegalOp<IE::GroupConvolutionOp>([&](IE::GroupConvolutionOp op) -> bool {
-        return isLegalConvOp(op);
+        return isLegalGroupConvOp(op);
     });
 
     target.addDynamicallyLegalOp<IE::MaxPoolOp>([&](IE::MaxPoolOp op) -> bool {
@@ -312,18 +403,23 @@ void ConvertBatchedLayerTo1NPass::safeRunOnFunc() {
         return isLegalPoolOp(op);
     });
 
-    target.addDynamicallyLegalOp<IE::AddOp>([&](IE::AddOp op) -> bool {
-        auto hasPerAxisQuantization =
-                isPerAxisQuant(op.getInput1()) || isPerAxisQuant(op.getInput2()) || isPerAxisQuant(op.getOutput());
-        auto inShape1 = getShape(op.getInput1());
-        auto inShape2 = getShape(op.getInput2());
-        if (!isShapeRankEq4(op.getInput2()) || isEqualToOne(op.getInput1(), Dims4D::Act::N) ||
-            !isShapeRankEq4(op.getInput1()) || inShape1[Dims4D::Act::N] != inShape2[Dims4D::Act::N] ||
+    auto isLegalEltwiseOp = [&](mlir::Operation* op) -> bool {
+        if (op->getNumOperands() < 2) {
+            return true;
+        }
+        auto hasPerAxisQuantization = isPerAxisQuant(op->getOperand(0)) || isPerAxisQuant(op->getOperand(1)) ||
+                                      isPerAxisQuant(op->getResult(0));
+        auto inShape1 = getShape(op->getOperand(0));
+        auto inShape2 = getShape(op->getOperand(1));
+        if (!isShapeRankEq4(op->getOperand(1)) || isEqualToOne(op->getOperand(0), Dims4D::Act::N) ||
+            !isShapeRankEq4(op->getOperand(0)) || inShape1[Dims4D::Act::N] != inShape2[Dims4D::Act::N] ||
             hasPerAxisQuantization) {
             return true;
         }
         return false;
-    });
+    };
+    target.addDynamicallyLegalOp<IE::AddOp>(isLegalEltwiseOp);
+    target.addDynamicallyLegalOp<IE::MultiplyOp>(isLegalEltwiseOp);
 
     target.addDynamicallyLegalOp<IE::SigmoidOp>([&](IE::SigmoidOp op) -> bool {
         auto hasPerAxisQuantization = isPerAxisQuant(op.getInput()) || isPerAxisQuant(op.getOutput());
@@ -335,7 +431,9 @@ void ConvertBatchedLayerTo1NPass::safeRunOnFunc() {
 
     target.addLegalOp<IE::TransposeOp>();
     target.addLegalOp<IE::ShapeCastOp>();
+    target.addLegalOp<IE::BroadcastOp>();
     target.addLegalOp<IE::AffineReshapeOp>();
+    target.addLegalOp<Const::DeclareOp>();
 
     mlir::RewritePatternSet patterns(&ctx);
     patterns.add<LayerConverter<IE::ConvolutionOp>>(&ctx, _log);
@@ -343,6 +441,7 @@ void ConvertBatchedLayerTo1NPass::safeRunOnFunc() {
     patterns.add<LayerConverter<IE::MaxPoolOp>>(&ctx, _log);
     patterns.add<LayerConverter<IE::AvgPoolOp>>(&ctx, _log);
     patterns.add<LayerConverter<IE::AddOp>>(&ctx, _log);
+    patterns.add<LayerConverter<IE::MultiplyOp>>(&ctx, _log);
     patterns.add<SigmoidConverter>(&ctx, _log);
 
     auto func = getOperation();

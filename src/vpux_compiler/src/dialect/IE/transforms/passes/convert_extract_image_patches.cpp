@@ -146,8 +146,8 @@ mlir::LogicalResult ConvertToReduceSumRewriter::matchAndRewrite(IE::ExtractImage
         // Create the array attribute containing the fused reduction axes
         mlir::MLIRContext* ctx = origOp->getContext();
         auto axesAttr = getIntArrayAttr(ctx, ArrayRef(aboveReduceSumOpAxes));
-        auto newReduceSumOp = rewriter.create<IE::ReduceSumOp>(origOp->getLoc(), aboveReduceSumOp.getInput(), nullptr,
-                                                               axesAttr, false);
+        auto newReduceSumOp = rewriter.create<IE::ReduceSumOp>(takeOpLoc(origOp, "reduce_sum_in"),
+                                                               aboveReduceSumOp.getInput(), nullptr, axesAttr, false);
         mlir::SmallVector<int64_t> unsqueezeAxis{vpux::Dims4D::Act::H.ind()};
         if (belowReduceSumOp.getKeepDims()) {
             unsqueezeAxis.push_back(belowReduceSumOpAxes[0]);
@@ -254,15 +254,16 @@ mlir::LogicalResult ConvertToSliceConcatRewriter::matchAndRewrite(IE::ExtractIma
             staticOffsets[vpux::Dims4D::Act::H.ind()] = idx;
             mlir::SmallVector<int64_t> staticSizes = to_small_vector(dataShape.raw());
             staticSizes[vpux::Dims4D::Act::H.ind()] = sizesHeight;
-            auto sliceOp = rewriter.create<IE::SliceOp>(origOp->getLoc(), origOp.getData(),
-                                                        getIntArrayAttr(ctx, staticOffsets),
+            auto sliceOp = rewriter.create<IE::SliceOp>(takeOpLoc(origOp, StringLiteral("slice_{0}"), idx),
+                                                        origOp.getData(), getIntArrayAttr(ctx, staticOffsets),
                                                         getIntArrayAttr(ctx, staticSizes));
             sliceOpValues.push_back(sliceOp.getResult());
         }
         if (suitableReshape) {
             rewriter.replaceOpWithNewOp<IE::ConcatOp>(affineReshapeOp, sliceOpValues, vpux::Dims4D::Act::C);
         } else {
-            auto concatOp = rewriter.create<IE::ConcatOp>(origOp->getLoc(), sliceOpValues, vpux::Dims4D::Act::C);
+            auto concatOp = rewriter.create<IE::ConcatOp>(takeOpLoc(origOp, "out_reshape"), sliceOpValues,
+                                                          vpux::Dims4D::Act::C);
 
             const auto transposeShape = transposeOp.getType().getShape();
             const auto transposeShapeAttr = getIntArrayAttr(ctx, transposeShape);

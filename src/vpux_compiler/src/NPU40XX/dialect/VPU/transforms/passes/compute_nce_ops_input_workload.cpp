@@ -20,9 +20,10 @@ namespace {
 
 int64_t getInputWorkloadStartCh(NCEOpInterface nceOp, const int64_t outputStartCh) {
     return llvm::TypeSwitch<mlir::Operation*, int64_t>(nceOp.getOperation())
-            .Case<NCEConvolutionOp, NCECompressConvolutionOp, NCEInterpolateOp>([&](mlir::Operation* /*op*/) {
-                return 0;
-            })
+            .Case<NCEConvolutionOp, NCECompressConvolutionOp, NCEInterpolateOp, NCEReduceOp>(
+                    [&](mlir::Operation* /*op*/) {
+                        return 0;
+                    })
             .Case<NCEEltwiseOp>([&](mlir::Operation* /*op*/) {
                 VPUX_THROW_WHEN(outputStartCh != 0,
                                 "HW Eltwise does not support workload segmentation over K. Output workload start = {0}",
@@ -46,7 +47,7 @@ int64_t getInputWorkloadStartCh(NCEOpInterface nceOp, const int64_t outputStartC
 int64_t getInputWorkloadSizeCh(NCEOpInterface nceOp, const int64_t outputSizeCh, const int64_t outputStartCh,
                                const int64_t fullInputChannels) {
     return llvm::TypeSwitch<mlir::Operation*, int64_t>(nceOp.getOperation())
-            .Case<NCEConvolutionOp, NCEInterpolateOp>([&](mlir::Operation* /*op*/) {
+            .Case<NCEConvolutionOp, NCEInterpolateOp, NCEReduceOp>([&](mlir::Operation* /*op*/) {
                 return fullInputChannels;
             })
             .Case<NCEEltwiseOp>([&](mlir::Operation* /*op*/) {

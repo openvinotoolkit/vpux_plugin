@@ -6,7 +6,6 @@
 #include "vpux/compiler/NPU40XX/dialect/ELF/passes.hpp"
 #include "vpux/compiler/NPU40XX/dialect/VPU/transforms/passes.hpp"
 #include "vpux/compiler/NPU40XX/dialect/VPUIP/transforms/passes.hpp"
-#include "vpux/compiler/NPU40XX/dialect/VPUIPDPU/passes.hpp"
 #include "vpux/compiler/conversion.hpp"
 #include "vpux/compiler/core/passes.hpp"
 #include "vpux/compiler/dialect/ELFNPU37XX/passes.hpp"
@@ -14,6 +13,8 @@
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
 #include "vpux/compiler/dialect/VPUASM/passes.hpp"
 #include "vpux/compiler/dialect/VPUIP/transforms/passes.hpp"
+#include "vpux/compiler/dialect/VPUIPDPU/dialect.hpp"
+#include "vpux/compiler/dialect/VPUIPDPU/passes.hpp"
 #include "vpux/compiler/dialect/VPUMI37XX/passes.hpp"
 #include "vpux/compiler/dialect/VPUMI40XX/passes.hpp"
 #include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
@@ -40,12 +41,7 @@ int main(int argc, char* argv[]) {
     try {
         const auto archKind = vpux::parseArchKind(argc, argv);
 
-        mlir::DialectRegistry registry;
-        vpux::registerDialects(registry);
-        // TODO: need to rework this unconditional replacement for dummy ops
-        // there is an option for vpux-translate we can do it in the same way
-        // Ticket: E#50937
-        vpux::registerCommonInterfaces(registry, /*enableDummyOp*/ true);
+        auto registry = vpux::createDialectRegistry(vpux::DummyOpMode::ENABLED);
 
         auto interfacesRegistry = vpux::createInterfacesRegistry(archKind);
         interfacesRegistry->registerInterfaces(registry);

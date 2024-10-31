@@ -9,7 +9,7 @@
 
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
 #include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
-#include "vpux/compiler/dialect/VPUIP/graph-schema/schema.hpp"
+#include "vpux/compiler/dialect/VPUIP/device.hpp"
 
 #include <llvm/Support/JSON.h>
 
@@ -73,7 +73,7 @@ std::string to_string(MemoryLocation memoryLocation);
 
 DType to_dtype(llvm::StringRef str);
 std::string to_string(DType dtype);
-MVCNN::Permutation to_odu_permutation(llvm::StringRef str);
+vpux::VPUIP::Permutation to_odu_permutation(llvm::StringRef str);
 struct QuantParams {
     bool present = false;
     std::vector<double> scale;
@@ -82,7 +82,7 @@ struct QuantParams {
     std::int64_t high_range = 0;
 };
 
-enum class SegmentationType { SOK = 1, SOH = 2, SOW = 3, SOHW = 4, SOHK = 5 };
+enum class SegmentationType { SOK = 1, SOH = 2, SOW = 3, SOHW = 4, SOHK = 5, SOHK3 = 6, SOHW3 = 7 };
 std::string to_string(SegmentationType segmentationType);
 
 enum class SwizzlingKey { key0, key1, key2, key3, key4, key5 };
@@ -144,7 +144,7 @@ struct ConvLayer {
 enum class ICM_MODE { DEFAULT = 0, MODE_0 = 1, MODE_1 = 2, MODE_2 = 3 };
 struct EltwiseLayer {
     std::int64_t seSize = 0;
-    vpux::VPU::PPEMode mode = vpux::VPU::PPEMode::ADD;
+    vpux::VPU::EltwiseType mode = vpux::VPU::EltwiseType::ADD;
     ICM_MODE iduCmxMuxMode = ICM_MODE::DEFAULT;
 };
 
@@ -283,6 +283,12 @@ struct WLMParams {
     bool isWLMPartialEnabled = false;
 };
 
+struct ActShaveBroadcastingParams {
+    MemoryLocation srcLocation = MemoryLocation::Unknown;
+    // one or many destination locations for ActShave broadcast
+    std::vector<MemoryLocation> dstLocations;
+};
+
 class TestCaseJsonDescriptor {
 public:
     TestCaseJsonDescriptor(llvm::StringRef jsonString = "");
@@ -348,7 +354,7 @@ public:
     vpux::VPU::PPEMode getPPELayerType() const {
         return ppeLayerType_;
     }
-    MVCNN::Permutation getODUPermutation() const {
+    vpux::VPUIP::Permutation getODUPermutation() const {
         return odu_permutation_;
     }
     std::size_t getIterationCount() const {
@@ -385,6 +391,10 @@ public:
         return WLMParams_;
     }
 
+    ActShaveBroadcastingParams getActShaveBroadcastingParams() const {
+        return actShaveBroadcastingParams_;
+    }
+
 private:
     llvm::SmallVector<InputLayer> loadInputLayer(llvm::json::Object* jsonObj);
     llvm::SmallVector<WeightLayer> loadWeightLayer(llvm::json::Object* jsonObj);
@@ -411,6 +421,7 @@ private:
     SwizzlingKey loadSwizzlingKey(llvm::json::Object* obj, std::string keyType);
     ProfilingParams loadProfilingParams(llvm::json::Object* obj);
     WLMParams loadWLMParams(llvm::json::Object* obj);
+    ActShaveBroadcastingParams loadActShaveBroadcastingParams(llvm::json::Object* obj);
 
     CaseType caseType_ = CaseType::Unknown;
     DMAparams DMAparams_;
@@ -428,7 +439,7 @@ private:
     std::string kernelFilename_;
     std::string caseTypeStr_;
     vpux::VPU::PPEMode ppeLayerType_ = vpux::VPU::PPEMode::ADD;
-    MVCNN::Permutation odu_permutation_ = MVCNN::Permutation::Permutation_ZXY;
+    vpux::VPUIP::Permutation odu_permutation_ = vpux::VPUIP::Permutation::Permutation_ZXY;
     std::size_t iterationCount_ = 0;
     std::size_t clusterNumber_ = 0;
     std::size_t numClusters_ = 0;
@@ -443,6 +454,7 @@ private:
     vpux::VPU::ArchKind architecture_ = vpux::VPU::ArchKind::UNKNOWN;
     ProfilingParams profilingParams_;
     WLMParams WLMParams_;
+    ActShaveBroadcastingParams actShaveBroadcastingParams_;
 };
 
 }  // namespace nb

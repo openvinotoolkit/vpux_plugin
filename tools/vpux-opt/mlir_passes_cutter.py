@@ -23,6 +23,7 @@ parser.add_argument(
     "-o", "--offset", help='Applied to "--start-from"', type=int, default=0
 )
 
+
 def get_if_exist(keys_list, tree):
     if len(keys_list) == 0:
         return tree
@@ -34,11 +35,14 @@ def get_if_exist(keys_list, tree):
     keys_list_copy.pop(0)
     return get_if_exist(keys_list_copy, tree[root])
 
+
 OBJECT_ID_GEN_INCR = 0
+
 
 def canonize_name(name):
     index = name.find('[')
     return name[:index] if index != -1 else name
+
 
 def uniquify_name(name):
     global OBJECT_ID_GEN_INCR
@@ -46,12 +50,16 @@ def uniquify_name(name):
     OBJECT_ID_GEN_INCR += 1
     return name
 
+
 def is_object(name):
     return True if "module" in name or "func.func" in name else False
+
 
 '''
 State Machine conditions
 '''
+
+
 def make_trans(cond, func, new_state):
     def state_change_wrapper(*args, **kwargs):
         ctx = func(*args, **kwargs)
@@ -59,11 +67,14 @@ def make_trans(cond, func, new_state):
         return ctx
     return (cond, state_change_wrapper)
 
+
 def is_sym(sym):
     return lambda x: (x == sym)
 
+
 def is_name():
     return lambda x: (x.isalpha() or x == "." or x == "-")
+
 
 def is_abc():
     return lambda x: (x.isalpha() or x.isdigit() or x == "." or x == "-")
@@ -72,6 +83,8 @@ def is_abc():
 '''
 State Machine transitions
 '''
+
+
 def on_create_object(pipeline, context):
     context.nested_objects.append(context.accumulated_string)
     pipeline = context.create_pipeline_node_from_tree_path(pipeline)
@@ -79,15 +92,18 @@ def on_create_object(pipeline, context):
     context.accumulated_string = ""
     return context
 
+
 def on_finalize_object(pipeline, context):
     context = on_finalize_entity(pipeline, context)
     context.nested_objects.pop()
     context.accumulated_string = ""
     return context
 
+
 def on_accumulate_entity(pipeline, context):
     context.accumulated_string += context.textual_pipeline[context.begin_index]
     return context
+
 
 def on_finalize_entity(pipeline, context):
     if len(context.accumulated_string) == 0:
@@ -100,6 +116,7 @@ def on_finalize_entity(pipeline, context):
     context.accumulated_string = ""
     return context
 
+
 def onCreatePass(pipeline, context):
     context.nested_objects.append(context.accumulated_string)
     pipeline = context.create_pipeline_node_from_tree_path(pipeline)
@@ -107,33 +124,40 @@ def onCreatePass(pipeline, context):
     context.accumulated_string = ""
     return context
 
+
 def on_finalize_pass(pipeline, context):
     context = on_finalize_option_value(pipeline, context)
     context.nested_objects.pop()
     context.accumulated_string = ""
     return context
 
+
 def on_finalize_option_name(pipeline, context):
     node = get_if_exist(context.nested_objects, pipeline)
     node[context.accumulated_string] = ""
-    context.option_name=context.accumulated_string
+    context.option_name = context.accumulated_string
 
     context.accumulated_string = ""
     return context
+
 
 def on_finalize_option_value(pipeline, context):
     node = get_if_exist(context.nested_objects, pipeline)
     node[context.option_name] = context.accumulated_string
-    context.option_name=""
+    context.option_name = ""
     context.accumulated_string = ""
     return context
+
 
 def forbidden(pipeline, context):
     raise Exception(f"Forbidden transitions, ctx: {context.dump()}")
 
+
 '''
 Pipeline printout operations
 '''
+
+
 def print_object(object_name, object_value, sep):
     object_name = canonize_name(object_name)
     if len(object_value) == 0:
@@ -143,6 +167,7 @@ def print_object(object_name, object_value, sep):
     print(object_name + "(", end='')
     print_pipeline(object_value)
     print(")", end=sep)
+
 
 def print_options(options):
     if len(options) == 0:
@@ -156,6 +181,7 @@ def print_options(options):
             options_std_to_print += "  "
     print(options_std_to_print[0:-1], end='')
 
+
 def print_pass(pass_name, pass_value, sep):
     pass_name = canonize_name(pass_name)
     if len(pass_value) == 0:
@@ -166,25 +192,29 @@ def print_pass(pass_name, pass_value, sep):
     print_options(pass_value)
     print("}", end=sep)
 
+
 def print_pipeline(pipeline):
     if len(pipeline) == 0:
         return
 
-    for k,v in pipeline.items():
+    for k, v in pipeline.items():
         sep = ',' if list(pipeline.keys()).index(k) != len(pipeline) - 1 else ''
         if is_object(k):
             print_object(k, v, sep)
-        elif isinstance(v,dict):
+        elif isinstance(v, dict):
             print_pass(k, v, sep)
+
 
 '''
 Pipeline shrink operations
 '''
-def process_pipeline(pipeline, from_pass_regex, offset_from_pass = 0, current_offset = None):
+
+
+def process_pipeline(pipeline, from_pass_regex, offset_from_pass=0, current_offset=None):
 
     list_keys_to_delete = []
-    for k,v in pipeline.items():
-        processed=False
+    for k, v in pipeline.items():
+        processed = False
         if is_object(k):
             processed, current_offset = process_pipeline(v, from_pass_regex, offset_from_pass, current_offset)
 
@@ -211,6 +241,7 @@ def process_pipeline(pipeline, from_pass_regex, offset_from_pass = 0, current_of
     for d in list_keys_to_delete:
         pipeline.pop(d)
     return len(pipeline) != 0, current_offset
+
 
 class Context:
     def __init__(self, textual_pipeline, initial_state):
@@ -241,35 +272,36 @@ class Context:
     def dump(self):
         print(f"state: {self.state}, index: {self.begin_index}, accumulated_string: {self.accumulated_string}, parsed tree path: {'/'.join(nested_objects)}")
 
+
 args = parser.parse_args()
 start_from_pass_regex = re.compile(args.start_from)
 
-raw_pipeline=sys.stdin.read()
+raw_pipeline = sys.stdin.read()
 parsed_pipeline = OrderedDict()
-state_table = { "INIT":     [
-                                make_trans(is_sym("("), on_create_object,     "OBJECT"),
-                                make_trans(is_sym(")"), forbidden,          None),
-                                make_trans(is_sym("{"), forbidden,          None),
-                                make_trans(is_sym("}"), forbidden,          None),
-                                make_trans(is_sym("="), forbidden,          None),
-                                make_trans(is_sym(" "), forbidden,          None),
-                                make_trans(is_abc(),    on_accumulate_entity, "OBJECT")
-                            ],
-                "OBJECT" :  [
-                                make_trans(is_sym("("), on_create_object,     "OBJECT"),
-                                make_trans(is_sym(")"), on_finalize_object,   "OBJECT"),
-                                make_trans(is_sym("{"), onCreatePass,       "PASS"),
-                                make_trans(is_sym(","), on_finalize_entity,   "OBJECT"),
-                                make_trans(is_sym("}"), forbidden,          None),
-                                make_trans(is_abc(),    on_accumulate_entity, "OBJECT")
-                            ],
-                "PASS" :    [
-                                make_trans(is_sym("}"), on_finalize_pass,         "OBJECT"),
-                                make_trans(is_sym("="), on_finalize_option_name,   "PASS"),
-                                make_trans(is_sym(" "), on_finalize_option_value,  "PASS"),
-                                make_trans(is_abc(),    on_accumulate_entity,     "PASS")
-                            ]
-            }
+state_table = {"INIT": [
+    make_trans(is_sym("("), on_create_object, "OBJECT"),
+    make_trans(is_sym(")"), forbidden, None),
+    make_trans(is_sym("{"), forbidden, None),
+    make_trans(is_sym("}"), forbidden, None),
+    make_trans(is_sym("="), forbidden, None),
+    make_trans(is_sym(" "), forbidden, None),
+    make_trans(is_abc(), on_accumulate_entity, "OBJECT")
+],
+    "OBJECT": [
+    make_trans(is_sym("("), on_create_object, "OBJECT"),
+    make_trans(is_sym(")"), on_finalize_object, "OBJECT"),
+    make_trans(is_sym("{"), onCreatePass, "PASS"),
+    make_trans(is_sym(","), on_finalize_entity, "OBJECT"),
+    make_trans(is_sym("}"), forbidden, None),
+    make_trans(is_abc(), on_accumulate_entity, "OBJECT")
+],
+    "PASS": [
+    make_trans(is_sym("}"), on_finalize_pass, "OBJECT"),
+    make_trans(is_sym("="), on_finalize_option_name, "PASS"),
+    make_trans(is_sym(" "), on_finalize_option_value, "PASS"),
+    make_trans(is_abc(), on_accumulate_entity, "PASS")
+]
+}
 
 ctx = Context(raw_pipeline, "INIT")
 while ctx.begin_index < ctx.end_index:

@@ -5,9 +5,13 @@
 
 #include "vpux/compiler/dialect/VPURT/transforms/passes.hpp"
 
+#include "vpux/compiler/core/barrier_info.hpp"
+#include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
 #include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPURT/interfaces/barrier_simulator.hpp"
+#include "vpux/compiler/dialect/VPURT/utils/color_bin_barrier_assignment.hpp"
 
+#include <llvm/ADT/SetOperations.h>
 #include <mlir/Transforms/DialectConversion.h>
 
 using namespace vpux;
@@ -45,18 +49,60 @@ mlir::LogicalResult VirtualBarrierRewrite::matchAndRewrite(VPURT::DeclareVirtual
 }
 
 //
+// BarrierColorBinVirtualBarrierRewrite
+//
+
+class BarrierColorBinVirtualBarrierRewrite final : public mlir::OpRewritePattern<VPURT::DeclareVirtualBarrierOp> {
+public:
+    BarrierColorBinVirtualBarrierRewrite(mlir::MLIRContext* ctx, BarrierGraphInfo& BarrierGraphInfo,
+                                         VPURT::BarrierColorBin& BarrierColorBinAssignment, Logger log)
+            : mlir::OpRewritePattern<VPURT::DeclareVirtualBarrierOp>(ctx),
+              _BarrierGraphInfo(BarrierGraphInfo),
+              _BarrierColorBin(BarrierColorBinAssignment),
+              _log(log) {
+    }
+
+public:
+    mlir::LogicalResult matchAndRewrite(VPURT::DeclareVirtualBarrierOp origOp,
+                                        mlir::PatternRewriter& rewriter) const final;
+
+private:
+    BarrierGraphInfo& _BarrierGraphInfo;
+    VPURT::BarrierColorBin& _BarrierColorBin;
+    Logger _log;
+};
+
+mlir::LogicalResult BarrierColorBinVirtualBarrierRewrite::matchAndRewrite(VPURT::DeclareVirtualBarrierOp origOp,
+                                                                          mlir::PatternRewriter& rewriter) const {
+    _log.trace("Found DeclareVirtualBarrierOp Operation '{0}'", origOp->getLoc());
+
+    auto& barrierInfo = _BarrierGraphInfo.getBarrierInfo();
+    auto barrierid = barrierInfo.getIndex(origOp);
+    auto physicalId = _BarrierColorBin.getPhysicalBarrier(barrierid);
+
+    rewriter.replaceOpWithNewOp<VPURT::ConfigureBarrierOp>(origOp, physicalId, origOp.getIsFinalBarrier());
+    return mlir::success();
+}
+
+//
 // AssignPhysicalBarriersPass
 //
 
 class AssignPhysicalBarriersPass final : public VPURT::AssignPhysicalBarriersBase<AssignPhysicalBarriersPass> {
 public:
-    explicit AssignPhysicalBarriersPass(const bool wlmFlag, Logger log): _wlmFlag(wlmFlag) {
+    explicit AssignPhysicalBarriersPass(const bool wlmFlag, const bool barrierColorBinFlag,
+                                        std::optional<int> virtualBarrierThresholdforWlm, Logger log)
+            : _wlmFlag(wlmFlag),
+              _barrierColorBinFlag(barrierColorBinFlag),
+              _virtualBarrierThresholdforWlm(virtualBarrierThresholdforWlm) {
         Base::initLogger(log, Base::getArgumentName());
     }
 
 private:
     void safeRunOnFunc() final;
     bool _wlmFlag;
+    bool _barrierColorBinFlag;
+    std::optional<int> _virtualBarrierThresholdforWlm = std::nullopt;
 };
 
 void AssignPhysicalBarriersPass::safeRunOnFunc() {
@@ -64,16 +110,31 @@ void AssignPhysicalBarriersPass::safeRunOnFunc() {
     auto func = getOperation();
 
     const auto numBarriers =
-            numBarriersOpt.hasValue() ? std::optional<int64_t>(numBarriersOpt.getValue()) : std::nullopt;
+            numBarriersOpt.hasValue() ? numBarriersOpt.getValue() : VPUIP::getNumAvailableBarriers(func);
 
-    const auto wlmFlag = wlmEnableOpt.hasValue() ? static_cast<bool>(wlmEnableOpt.getValue()) : _wlmFlag;
+    auto wlmFlag = wlmEnableOpt.hasValue() ? static_cast<bool>(wlmEnableOpt.getValue()) : _wlmFlag;
 
-    VPURT::BarrierSimulator barrierSim(func, wlmFlag);
+    const auto barrierColorBinFlag =
+            colorBinEnableOpt.hasValue() ? static_cast<bool>(colorBinEnableOpt.getValue()) : _barrierColorBinFlag;
+
+    VPURT::BarrierSimulator barrierSim(func);
+
+    auto barriers = func.getOps<VPURT::DeclareVirtualBarrierOp>();
+    auto numVirtualBarriers = static_cast<int64_t>(std::distance(barriers.begin(), barriers.end()));
+
+    if (wlmFlag && _virtualBarrierThresholdforWlm.has_value() &&
+        numVirtualBarriers > _virtualBarrierThresholdforWlm.value()) {
+        _log.trace("WLM flag turned off because number of barrier is above threshold {0} > {1}", numVirtualBarriers,
+                   _virtualBarrierThresholdforWlm.value());
+        wlmFlag = false;
+    }
+
+    auto module = getOperation();
+    module->setAttr(vpux::VPUIP::numberOfVirtualBarriers, getIntAttr(&ctx, numVirtualBarriers));
 
     if (!barrierSim.isDynamicBarriers()) {
         return;
     }
-
     if (mlir::failed(barrierSim.checkProducerCount(_log.nest()))) {
         signalPassFailure();
         return;
@@ -82,29 +143,69 @@ void AssignPhysicalBarriersPass::safeRunOnFunc() {
         signalPassFailure();
         return;
     }
-    if (mlir::failed(barrierSim.simulateBarriers(_log.nest(), numBarriers))) {
-        signalPassFailure();
-        return;
+
+    if (barrierColorBinFlag && numVirtualBarriers <= numBarriers) {
+        _log.info("BarrierColorBin optimization requested but will not be used because physical barrier amount {0} is "
+                  "enough to cover all virtual barriers {1}",
+                  numBarriers, numVirtualBarriers);
     }
 
+    mlir::RewritePatternSet patterns(&ctx);
     mlir::ConversionTarget target(ctx);
     target.addIllegalOp<VPURT::DeclareVirtualBarrierOp>();
     target.addLegalOp<VPURT::ConfigureBarrierOp>();
 
-    mlir::RewritePatternSet patterns(&ctx);
-    patterns.add<VirtualBarrierRewrite>(&ctx, barrierSim, _log);
+    if (barrierColorBinFlag && numVirtualBarriers > numBarriers) {
+        auto& barrierGraphInfo = getAnalysis<BarrierGraphInfo>();
+        auto arch = VPU::getArch(func);
+        VPURT::BarrierColorBin BarrierColorBinAssignment(numBarriers, arch, _log);
 
-    if (mlir::failed(mlir::applyPartialConversion(func, target, std::move(patterns)))) {
-        signalPassFailure();
+        // Apply color binning algorithm for physical barrier assignment
+        VPUX_THROW_UNLESS(BarrierColorBinAssignment.calculateBinSize(barrierGraphInfo),
+                          "BarrierColorBin failed during bin size calulation");
+        VPUX_THROW_UNLESS(BarrierColorBinAssignment.assignPhysicalBarrier(barrierGraphInfo, barrierSim),
+                          "BarrierColorBin failed during barrier assignment");
+
+        BarrierColorBinAssignment.reorderBarriers(barrierGraphInfo, func);
+        patterns.add<BarrierColorBinVirtualBarrierRewrite>(&ctx, barrierGraphInfo, BarrierColorBinAssignment, _log);
+
+        if (mlir::failed(mlir::applyPartialConversion(func, target, std::move(patterns)))) {
+            signalPassFailure();
+        }
+        barrierGraphInfo.clearAttributes();
+
+    } else {
+        // Use old round-robin method of assigining physical barriers
+        if (wlmFlag) {
+            auto barrierInfo = vpux::BarrierInfo{func};
+            barrierSim.configureForWlm(barrierInfo);
+            if (mlir::failed(barrierSim.simulateBarriers(_log.nest(), numBarriers))) {
+                signalPassFailure();
+                return;
+            }
+            barrierInfo.clearAttributes();
+        } else {
+            if (mlir::failed(barrierSim.simulateBarriers(_log.nest(), numBarriers))) {
+                signalPassFailure();
+                return;
+            }
+        }
+        patterns.add<VirtualBarrierRewrite>(&ctx, barrierSim, _log);
+
+        if (mlir::failed(mlir::applyPartialConversion(func, target, std::move(patterns)))) {
+            signalPassFailure();
+        }
     }
 }
-
 }  // namespace
 
 //
 // createAssignPhysicalBarriersPass
 //
 
-std::unique_ptr<mlir::Pass> vpux::VPURT::createAssignPhysicalBarriersPass(const bool wlmFlag, Logger log) {
-    return std::make_unique<AssignPhysicalBarriersPass>(wlmFlag, log);
+std::unique_ptr<mlir::Pass> vpux::VPURT::createAssignPhysicalBarriersPass(
+        const bool wlmFlag, const bool barrierColorBinFlag, std::optional<int> virtualBarrierThresholdforWlm,
+        Logger log) {
+    return std::make_unique<AssignPhysicalBarriersPass>(wlmFlag, barrierColorBinFlag, virtualBarrierThresholdforWlm,
+                                                        log);
 }

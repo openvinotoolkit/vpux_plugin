@@ -1057,7 +1057,7 @@ func.func @IterativeBarrierMerge() -> memref<1x16x1x1xf16, #NHWC, @DDR> {
     //    1-5      0,6,7,8
     //    \/          x
     //    b1        b0 b2
-    //     |       /    |  
+    //     |       /    |
     //  10,11,12  /     |
     //     |     /      |
     //    b3    /       |
@@ -1195,9 +1195,9 @@ func.func @IterativeBarrierMerge() -> memref<1x16x1x1xf16, #NHWC, @DDR> {
     return %buf1 : memref<1x16x1x1xf16, #NHWC, @DDR>
 
     //      1,2,3   0
-    //       \/   /  \   
-    //        | /     \  
-    //       b1        \ 
+    //       \/   /  \
+    //        | /     \
+    //       b1        \
     //      /  \        \
     //    4,5   6,7      |
     //     \    / \      |
@@ -1205,7 +1205,7 @@ func.func @IterativeBarrierMerge() -> memref<1x16x1x1xf16, #NHWC, @DDR> {
     //       |      \    |
     //       8       \   |
     //       | \      \  |
-    //       b3  \     \ |  
+    //       b3  \     \ |
     //       |     \    \|
     //   10,11,12    \   |
     //       |         \ |
@@ -1235,7 +1235,7 @@ func.func @IterativeBarrierMerge() -> memref<1x16x1x1xf16, #NHWC, @DDR> {
     // task 8
     // CHECK: VPURT.Task waits([[BAR2]] : !VPURT.Barrier) updates([[BAR0]], [[BAR3]] : !VPURT.Barrier, !VPURT.Barrier)
     // task 9
-    // CHECK: VPURT.Task waits([[BAR0]] : !VPURT.Barrier) 
+    // CHECK: VPURT.Task waits([[BAR0]] : !VPURT.Barrier)
     // task 10,11,12
     // CHECK: VPURT.Task waits([[BAR3]] : !VPURT.Barrier) updates([[BAR4]] : !VPURT.Barrier)
     // CHECK: VPURT.Task waits([[BAR3]] : !VPURT.Barrier) updates([[BAR4]] : !VPURT.Barrier)
@@ -1245,4 +1245,3 @@ func.func @IterativeBarrierMerge() -> memref<1x16x1x1xf16, #NHWC, @DDR> {
     // CHECK: VPURT.Task waits([[BAR4]] : !VPURT.Barrier)
     // CHECK: VPURT.Task waits([[BAR4]] : !VPURT.Barrier)
 }
-

@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2023 Intel Corporation
+// Copyright (C) 2019-2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -35,21 +35,18 @@ private:
         VpuOv2LayerTest::TearDown();
     }
 };
-class ReshapeLayerTest_NPU3720 : public ReshapeLayerTestCommon {};
-class ReshapeLayerTest_NPU4000 : public ReshapeLayerTestCommon {};
 
-TEST_P(ReshapeLayerTest_NPU3720, SW) {
+TEST_P(ReshapeLayerTestCommon, NPU3720_SW) {
     VpuOv2LayerTest::setReferenceSoftwareMode();
     VpuOv2LayerTest::run(Platform::NPU3720);
 }
 
-TEST_P(ReshapeLayerTest_NPU4000, SW) {
+TEST_P(ReshapeLayerTestCommon, NPU4000_SW) {
     VpuOv2LayerTest::setReferenceSoftwareMode();
     VpuOv2LayerTest::run(Platform::NPU4000);
 }
 
 }  // namespace test
-
 }  // namespace ov
 
 using namespace ov::test;
@@ -90,48 +87,25 @@ const auto paramGeneric2 = ::testing::Combine(
         ::testing::Values(true), ::testing::ValuesIn(modelTypes), ::testing::Values(std::vector<size_t>{1, 4, 2, 2}),
         ::testing::Values(std::vector<int64_t>{1, 2, 4, 2}), ::testing::Values(DEVICE_NPU));
 
-// NPU3720
-INSTANTIATE_TEST_SUITE_P(smoke_ReshapeCollapse1, ReshapeLayerTest_NPU3720, paramCollapse1,
-                         ReshapeLayerTest_NPU3720::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_ReshapeCollapse1, ReshapeLayerTestCommon, paramCollapse1,
+                         ReshapeLayerTestCommon::getTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(smoke_ReshapeCollapse2, ReshapeLayerTest_NPU3720, paramCollapse2,
-                         ReshapeLayerTest_NPU3720::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_ReshapeCollapse2, ReshapeLayerTestCommon, paramCollapse2,
+                         ReshapeLayerTestCommon::getTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(smoke_ReshapeExpand1, ReshapeLayerTest_NPU3720, paramExpand1,
-                         ReshapeLayerTest_NPU3720::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_ReshapeExpand1, ReshapeLayerTestCommon, paramExpand1,
+                         ReshapeLayerTestCommon::getTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(smoke_ReshapeExpand2, ReshapeLayerTest_NPU3720, paramExpand2,
-                         ReshapeLayerTest_NPU3720::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_ReshapeExpand2, ReshapeLayerTestCommon, paramExpand2,
+                         ReshapeLayerTestCommon::getTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(smoke_ReshapeExpand3, ReshapeLayerTest_NPU3720, paramExpand3,
-                         ReshapeLayerTest_NPU3720::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_ReshapeExpand3, ReshapeLayerTestCommon, paramExpand3,
+                         ReshapeLayerTestCommon::getTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(smoke_ReshapeGeneric1, ReshapeLayerTest_NPU3720, paramGeneric1,
-                         ReshapeLayerTest_NPU3720::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_ReshapeGeneric1, ReshapeLayerTestCommon, paramGeneric1,
+                         ReshapeLayerTestCommon::getTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(smoke_ReshapeGeneric2, ReshapeLayerTest_NPU3720, paramGeneric2,
-                         ReshapeLayerTest_NPU3720::getTestCaseName);
-
-// NPU4000
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_ReshapeCollapse1, ReshapeLayerTest_NPU4000, paramCollapse1,
-                         ReshapeLayerTest_NPU4000::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_ReshapeCollapse2, ReshapeLayerTest_NPU4000, paramCollapse2,
-                         ReshapeLayerTest_NPU4000::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_ReshapeExpand1, ReshapeLayerTest_NPU4000, paramExpand1,
-                         ReshapeLayerTest_NPU4000::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_ReshapeExpand2, ReshapeLayerTest_NPU4000, paramExpand2,
-                         ReshapeLayerTest_NPU4000::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_ReshapeExpand3, ReshapeLayerTest_NPU4000, paramExpand3,
-                         ReshapeLayerTest_NPU4000::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_ReshapeGeneric1, ReshapeLayerTest_NPU4000, paramGeneric1,
-                         ReshapeLayerTest_NPU4000::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_ReshapeGeneric2, ReshapeLayerTest_NPU4000, paramGeneric2,
-                         ReshapeLayerTest_NPU4000::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_ReshapeGeneric2, ReshapeLayerTestCommon, paramGeneric2,
+                         ReshapeLayerTestCommon::getTestCaseName);
 
 }  // namespace

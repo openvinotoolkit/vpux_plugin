@@ -621,7 +621,7 @@ func.func @ConvertTileToDMAWithThreeAxisExpansion(%arg0: memref<1x2x3x4xf16, #NH
 
 func.func @convertUpsampling2DMANoMemSpaceWithNHWC(%arg0: memref<1x256x16x32xf16, #NHWC>) -> memref<1x256x32x64xf16, #NHWC> {
     %0 = memref.alloc() : memref<1x256x32x64xf16, #NHWC>
-    %1 = VPUIP.UpsamplingUPA {
+    %1 = VPUIP.Upsampling {
                 pad = #IE.UpsamplingPad<pads_channel = [0, 0], pads_height = [0, 1], pads_width = [0, 1]>,
                 upsampling_factor = [2, 2, 1]}
             inputs(%arg0 : memref<1x256x16x32xf16, #NHWC>)
@@ -651,7 +651,7 @@ func.func @convertUpsampling2DMANoMemSpaceWithNHWC(%arg0: memref<1x256x16x32xf16
 
 func.func @convertUpsampling2DMAHasMemSpaceWithNHWC(%arg0: memref<1x256x16x32xf16, #NHWC>) -> memref<1x256x32x64xf16, #NHWC, @DDR> {
     %0 = memref.alloc() : memref<1x256x32x64xf16, #NHWC, @DDR>
-    %1 = VPUIP.UpsamplingUPA {
+    %1 = VPUIP.Upsampling {
                 pad = #IE.UpsamplingPad<pads_channel = [0, 0], pads_height = [0, 1], pads_width = [0, 1]>,
                 upsampling_factor = [2, 2, 1]}
             inputs(%arg0 : memref<1x256x16x32xf16, #NHWC>)
@@ -681,7 +681,7 @@ func.func @convertUpsampling2DMAHasMemSpaceWithNHWC(%arg0: memref<1x256x16x32xf1
 
 func.func @convertUpsampling2DMANoMemSpaceWithNCHW(%arg0: memref<1x256x16x32xf16>) -> memref<1x256x32x64xf16> {
     %0 = memref.alloc() : memref<1x256x32x64xf16>
-    %1 = VPUIP.UpsamplingUPA {
+    %1 = VPUIP.Upsampling {
                 pad = #IE.UpsamplingPad<pads_channel = [0, 0], pads_height = [0, 1], pads_width = [0, 1]>,
                 upsampling_factor = [2, 2, 1]}
             inputs(%arg0 : memref<1x256x16x32xf16>)
@@ -711,7 +711,7 @@ func.func @convertUpsampling2DMANoMemSpaceWithNCHW(%arg0: memref<1x256x16x32xf16
 
 func.func @NotMoveUpsamplingDMAInCMXWithLargeSize(%arg0: memref<1x64x128x128xf16>) -> memref<1x64x256x256xf16> {
     %0 = memref.alloc() : memref<1x64x256x256xf16>
-    %1 = VPUIP.UpsamplingUPA {
+    %1 = VPUIP.Upsampling {
                 pad = #IE.UpsamplingPad<pads_channel = [0, 0], pads_height = [0, 1], pads_width = [0, 1]>,
                 upsampling_factor = [2, 2, 1]}
             inputs(%arg0 : memref<1x64x128x128xf16>)
@@ -743,6 +743,8 @@ VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 409
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
   }
 
+// CHECK-LABEL: @NotConvertD0IsInPermutationCase0
+// CHECK-SAME:    [[INPUT:%.+]]:  memref<10x16x4x76xf16, #NCWH, @DDR>
 func.func @NotConvertD0IsInPermutationCase0(%arg0: memref<10x16x4x76xf16, #NCWH, @DDR>)
         -> memref<10x16x4x76xf16, #NHWC, @DDR> {
     %0 = memref.alloc() : memref<10x16x4x76xf16, #NCWH, [@CMX_NN, 0]>
@@ -755,18 +757,18 @@ func.func @NotConvertD0IsInPermutationCase0(%arg0: memref<10x16x4x76xf16, #NCWH,
     %4 = VPUIP.Copy inputs(%results : memref<10x16x4x76xf16, #NHWC, [@CMX_NN, 0]>) outputs(%3 : memref<10x16x4x76xf16, #NHWC, @DDR>) -> memref<10x16x4x76xf16, #NHWC, @DDR>
     return %4: memref<10x16x4x76xf16, #NHWC, @DDR>
 
-    // CHECK:   [[VAR0:%.*]] = memref.alloc() : memref<10x16x4x76xf16, #NCWH, [@CMX_NN, 0]>
-    // CHECK:   [[COPY0:%.*]] = VPUIP.Copy inputs(%arg0 : memref<10x16x4x76xf16, #NCWH, @DDR>) outputs([[VAR0]] : memref<10x16x4x76xf16, #NCWH, [@CMX_NN, 0]>) -> memref<10x16x4x76xf16, #NCWH, [@CMX_NN, 0]>
-    // CHECK:   [[VAR1:%.*]] = memref.alloc() : memref<10x16x4x76xf16, #NHWC, [@CMX_NN, 0]>
-    // CHECK:   [[RESULTS:%.*]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_MemPermute
-    // CHECK-SAME: inputs([[COPY0]] as %arg1: memref<10x16x4x76xf16, #NCWH, [@CMX_NN, 0]>)
-    // CHECK-SAME: outputs([[VAR1]] as %arg2: memref<10x16x4x76xf16, #NHWC, [@CMX_NN, 0]>) on tile 0 -> memref<10x16x4x76xf16, #NHWC, [@CMX_NN, 0]>{
-    // CHECK:     VPUIP.SW.Kernel.run {attrs = [
-    // CHECK:     [3, 1, 2, 0]
-    // CHECK:     ]}(%arg1, %arg2) : memref<10x16x4x76xf16, #NCWH, [@CMX_NN, 0]>, memref<10x16x4x76xf16, #NHWC, [@CMX_NN, 0]>
-    // CHECK:   }
-    // CHECK:   [[VAR2:%.*]] = memref.alloc() : memref<10x16x4x76xf16, #NHWC, @DDR>
-    // CHECK:   [[COPY1:%.*]] = VPUIP.Copy inputs([[RESULTS]] : memref<10x16x4x76xf16, #NHWC, [@CMX_NN, 0]>) outputs([[VAR2]] : memref<10x16x4x76xf16, #NHWC, @DDR>) -> memref<10x16x4x76xf16, #NHWC, @DDR>
+    // CHECK:   [[VAR0:%.+]] = memref.alloc() : memref<10x16x4x76xf16, #NCWH, [@CMX_NN, 0]>
+    // CHECK:   [[COPY0:%.+]] = VPUIP.Copy inputs([[INPUT]] : memref<10x16x4x76xf16, #NCWH, @DDR>) outputs([[VAR0]] : memref<10x16x4x76xf16, #NCWH, [@CMX_NN, 0]>) -> memref<10x16x4x76xf16, #NCWH, [@CMX_NN, 0]>
+    // CHECK:   [[PERMUTE_CAST:%.+]] = VPUIP.PermuteCast {dst_order = #NHWC, mem_perm = #NCHW} inputs([[COPY0]] : memref<10x16x4x76xf16, #NCWH, [@CMX_NN, 0]>) -> memref<10x4x16x76xf16, #NHWC, [@CMX_NN, 0]>
+    // CHECK:   [[GENERIC_RESHAPE0:%.+]] = VPUIP.GenericReshape inputs([[PERMUTE_CAST]] : memref<10x4x16x76xf16, #NHWC, [@CMX_NN, 0]>) -> memref<1x4x10x1216xf16, #NHWC, [@CMX_NN, 0]>
+    // CHECK:   [[VAR1:%.+]] = memref.alloc() : memref<1x4x1216x10xf16, #NHWC, [@CMX_NN, 0]>
+    // CHECK:   [[PERMUTE_DMA0:%.+]] = VPUIP.PermuteDMA {mem_perm = #NHCW} inputs([[GENERIC_RESHAPE0]] : memref<1x4x10x1216xf16, #NHWC, [@CMX_NN, 0]>) outputs([[VAR1]] : memref<1x4x1216x10xf16, #NHWC, [@CMX_NN, 0]>) -> memref<1x4x1216x10xf16, #NHWC, [@CMX_NN, 0]>
+    // CHECK:   [[GENERIC_RESHAPE1:%.+]] = VPUIP.GenericReshape inputs([[PERMUTE_DMA0]] : memref<1x4x1216x10xf16, #NHWC, [@CMX_NN, 0]>) -> memref<1x1x4864x10xf16, #NHWC, [@CMX_NN, 0]>
+    // CHECK:   [[VAR2:%.+]] = memref.alloc() : memref<1x1x10x4864xf16, #NHWC, [@CMX_NN, 0]>
+    // CHECK:   [[PERMUTE_DMA1:%.+]] = VPUIP.PermuteDMA {mem_perm = #NHCW} inputs([[GENERIC_RESHAPE1]] : memref<1x1x4864x10xf16, #NHWC, [@CMX_NN, 0]>) outputs([[VAR2]] : memref<1x1x10x4864xf16, #NHWC, [@CMX_NN, 0]>) -> memref<1x1x10x4864xf16, #NHWC, [@CMX_NN, 0]>
+    // CHECK:   [[GENERIC_RESHAPE2:%.+]] = VPUIP.GenericReshape inputs([[PERMUTE_DMA1]] : memref<1x1x10x4864xf16, #NHWC, [@CMX_NN, 0]>) -> memref<10x16x4x76xf16, #NHWC, [@CMX_NN, 0]>
+    // CHECK:   [[VAR3:%.+]] = memref.alloc() : memref<10x16x4x76xf16, #NHWC, @DDR>
+    // CHECK:   [[COPY1:%.+]] = VPUIP.Copy inputs([[GENERIC_RESHAPE2]] : memref<10x16x4x76xf16, #NHWC, [@CMX_NN, 0]>) outputs([[VAR3]] : memref<10x16x4x76xf16, #NHWC, @DDR>) -> memref<10x16x4x76xf16, #NHWC, @DDR>
     // CHECK:   return [[COPY1]] : memref<10x16x4x76xf16, #NHWC, @DDR>
 }
 

@@ -47,6 +47,13 @@ namespace hwtest {
 
 void buildDualChannelDMATest(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp module, mlir::OpBuilder builder,
                              Logger& log, mlir::Type inputType, mlir::Type outputType) {
+    // set runtime resources
+    mlir::PassManager pmBuilderInit(module->getName(), mlir::OpPassManager::Nesting::Implicit);
+    auto initCompilerOptions = VPU::InitCompilerOptions(testDesc.getArchitecture(), VPU::CompilationMode::DefaultHW);
+    initCompilerOptions.numberOfDPUGroups = 2;
+    VPU::buildInitCompilerPipeline(pmBuilderInit, initCompilerOptions, log);
+    VPUX_THROW_UNLESS(mlir::succeeded(pmBuilderInit.run(module)), "Init compilation failed");
+
     auto loc = builder.getUnknownLoc();
 
     auto input = testDesc.getInputLayerList().front();
@@ -144,13 +151,6 @@ void buildDualChannelDMATest(const nb::TestCaseJsonDescriptor& testDesc, mlir::M
 
     funcBuilder.create<mlir::func::ReturnOp>(loc,
                                              mlir::ValueRange{funcOutput_0, funcOutput_1, funcOutput_2, funcOutput_3});
-
-    mlir::PassManager pm(module->getName(), mlir::OpPassManager::Nesting::Implicit);
-    auto initCompilerOptions = VPU::InitCompilerOptions(testDesc.getArchitecture(), VPU::CompilationMode::DefaultHW);
-    initCompilerOptions.numberOfDPUGroups = 2;
-    VPU::buildInitCompilerPipeline(pm, initCompilerOptions, log);
-
-    VPUX_THROW_UNLESS(mlir::succeeded(pm.run(module)), "Compilation failed");
 
     buildCNNOp(builder, func.getName(), {getTensorType(ShapeRef(inShape), inputType, DimsOrder::NHWC, nullptr)},
                {getTensorType(ShapeRef(outShape), outputType, DimsOrder::NHWC, nullptr),

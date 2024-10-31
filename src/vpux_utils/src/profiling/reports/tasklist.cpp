@@ -24,6 +24,13 @@ bool isTaskType(const TaskInfo& task) {
     return task.exec_type == Value;
 }
 
+template <typename InT>
+enable_t<InT, std::is_integral<InT>, not_<std::is_signed<InT>>> checked_add(InT a, InT b) {
+    VPUX_THROW_UNLESS(b <= std::numeric_limits<InT>::max() - a,
+                      "Can not safely add two values {0} and {1} of type {2} ", a, b, llvm::getTypeName<InT>());
+    return a + b;
+}
+
 TaskList::TaskList() {
 }
 
@@ -39,10 +46,6 @@ TaskList TaskList::selectTasksOfType() const {
 
 TaskList TaskList::selectDPUtasks() const {
     return selectTasksOfType<TaskInfo::ExecType::DPU>();
-}
-
-TaskList TaskList::selectUPAtasks() const {
-    return selectTasksOfType<TaskInfo::ExecType::UPA>();
 }
 
 TaskList TaskList::selectDMAtasks() const {
@@ -109,31 +112,32 @@ unsigned TaskList::getClusterCount() const {
     return checked_cast<unsigned>(clusterLevelThreadNames.size());
 }
 
-int TaskList::getSumOfDurations() const {
-    return std::accumulate(begin(), end(), 0, [](const int& totalTime, const TaskInfo& task) {
-        return totalTime + task.duration_ns;
-    });
+uint64_t TaskList::getSumOfDurations() const {
+    return std::accumulate(begin(), end(), static_cast<uint64_t>(0),
+                           [](const uint64_t& totalTime, const TaskInfo& task) {
+                               return checked_add(totalTime, task.duration_ns);
+                           });
 }
 
-int TaskList::getStartTime() const {
+uint64_t TaskList::getStartTime() const {
     VPUX_THROW_WHEN(empty(), "Minimal time in empty TaskList is not defined.");
 
     auto minElementIt = min_element(begin(), end(), [](const TaskInfo& a, const TaskInfo& b) {
         return a.start_time_ns < b.start_time_ns;
     });
-    return checked_cast<int>(minElementIt->start_time_ns);
+    return minElementIt->start_time_ns;
 }
 
-int TaskList::getEndTime() const {
+uint64_t TaskList::getEndTime() const {
     VPUX_THROW_WHEN(empty(), "Maximal time in empty TaskList is not defined.");
 
     auto maxElementIt = max_element(begin(), end(), [](const TaskInfo& a, const TaskInfo& b) {
-        return a.start_time_ns + a.duration_ns < b.start_time_ns + b.duration_ns;
+        return checked_add(a.start_time_ns, a.duration_ns) < checked_add(b.start_time_ns, b.duration_ns);
     });
-    return checked_cast<int>(maxElementIt->start_time_ns + maxElementIt->duration_ns);
+    return maxElementIt->start_time_ns + maxElementIt->duration_ns;
 }
 
-int TaskList::getTotalDuration() const {
+uint64_t TaskList::getTotalDuration() const {
     if (empty()) {
         return 0;
     }

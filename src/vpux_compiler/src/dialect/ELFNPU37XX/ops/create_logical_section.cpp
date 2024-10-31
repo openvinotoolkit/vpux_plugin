@@ -10,18 +10,23 @@
 void vpux::ELFNPU37XX::CreateLogicalSectionOp::serialize(elf::Writer& writer,
                                                          vpux::ELFNPU37XX::SectionMapType& sectionMap,
                                                          vpux::ELFNPU37XX::SymbolMapType& symbolMap) {
+    VPUX_UNUSED(writer);
+    VPUX_UNUSED(sectionMap);
     VPUX_UNUSED(symbolMap);
+}
+
+void vpux::ELFNPU37XX::CreateLogicalSectionOp::preserialize(elf::Writer& writer,
+                                                            vpux::ELFNPU37XX::SectionMapType& sectionMap) {
     const auto name = getSecName().str();
     auto section = writer.addEmptySection(name);
     section->maskFlags(static_cast<elf::Elf_Xword>(getSecFlags()));
     section->setAddrAlign(getSecAddrAlign());
 
-    size_t maxOffset = 0;
     auto block = getBody();
     auto ops = block->getOps<ELFNPU37XX::PutOpInSectionOp>();
 
     size_t nonBufferAllocs = 0;
-
+    size_t maxOffset = 0;
     for (auto op : ops) {
         auto pointingOp = op.getInputArg().getDefiningOp();
 
@@ -37,7 +42,6 @@ void vpux::ELFNPU37XX::CreateLogicalSectionOp::serialize(elf::Writer& writer,
             nonBufferAllocs += binOp.getBinarySize();
         }
     }
-
     section->setSize(maxOffset + nonBufferAllocs);
 
     sectionMap[getOperation()] = section;

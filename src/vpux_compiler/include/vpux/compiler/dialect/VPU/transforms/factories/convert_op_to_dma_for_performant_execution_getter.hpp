@@ -15,6 +15,6 @@ namespace vpux::VPU {
 /*
    Find right class to get strategies for particular platform
 */
-std::unique_ptr<IConversionPassStrategy> CreateConvertOpToDMAForPerformantExecutionStrategy(ArchKind arch);
+std::unique_ptr<IConversionPassStrategy> createConvertOpToDMAForPerformantExecutionStrategy(ArchKind arch);
 
 }  // namespace vpux::VPU

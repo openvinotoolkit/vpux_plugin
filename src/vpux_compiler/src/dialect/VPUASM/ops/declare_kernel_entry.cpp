@@ -19,7 +19,7 @@ using namespace vpux;
 uint32_t vpux::VPUASM::DeclareKernelEntryOp::getKernelEntry() {
     const auto elfBlob = ELF::getKernelELF(getOperation(), getKernelPath());
 
-    auto accessor = elf::ElfDDRAccessManager(elfBlob.data(), elfBlob.size());
+    auto accessor = elf::DDRAccessManager<elf::DDRAlwaysEmplace>(elfBlob.data(), elfBlob.size());
     auto elf_reader = elf::Reader<elf::ELF_Bitness::Elf32>(&accessor);
 
     auto actKernelHeader = elf_reader.getHeader();

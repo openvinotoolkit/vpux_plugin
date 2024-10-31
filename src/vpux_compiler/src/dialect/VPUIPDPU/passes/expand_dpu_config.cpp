@@ -10,6 +10,7 @@
 #include "vpux/compiler/utils/ELF/utils.hpp"
 
 #include <mlir/IR/IRMapping.h>
+#include <mlir/IR/MLIRContext.h>
 
 using namespace vpux;
 using namespace VPUIPDPU;
@@ -22,13 +23,23 @@ namespace {
 
 class ExpandDPUConfigPass final : public VPUIPDPU::ExpandDPUConfigBase<ExpandDPUConfigPass> {
 public:
-    explicit ExpandDPUConfigPass(Logger log) {
+    ExpandDPUConfigPass(Logger log) {
         Base::initLogger(log, Base::getArgumentName());
     }
+
+    mlir::LogicalResult initialize(mlir::MLIRContext* ctx) override;
 
 private:
     void safeRunOnFunc() final;
 };
+
+mlir::LogicalResult ExpandDPUConfigPass::initialize(mlir::MLIRContext* ctx) {
+    if (mlir::failed(Base::initialize(ctx))) {
+        return mlir::failure();
+    }
+
+    return mlir::success();
+}
 
 void ExpandDPUConfigPass::safeRunOnFunc() {
     auto netFunc = getOperation();

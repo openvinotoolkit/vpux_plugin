@@ -21,7 +21,5 @@ namespace Const {
 
 bool isSubByte(const size_t bitWidth);
 
-SmallVector<char> getConstBuffer(const char* sourceData, const size_t bitWidth, const int64_t numElems);
-
 }  // namespace Const
 }  // namespace vpux

@@ -25,7 +25,7 @@ const int64_t GROUP_TRANSPOSED_CONV_KY_DIM_INDEX = 3;
 const int64_t GROUP_TRANSPOSED_CONV_KX_DIM_INDEX = 4;
 
 template <class ConcreteOp>
-mlir::FailureOr<mlir::Value> createUpsampling(mlir::PatternRewriter& rewriter, ConcreteOp origOp,
+mlir::FailureOr<mlir::Value> createUpsampling(mlir::PatternRewriter& rewriter, mlir::Location loc, ConcreteOp origOp,
                                               vpux::Shape& padsOutput, bool isGroupTransposedConv) {
     auto ctx = rewriter.getContext();
 
@@ -54,10 +54,24 @@ mlir::FailureOr<mlir::Value> createUpsampling(mlir::PatternRewriter& rewriter, C
                            filterShape.size());
         }
 
+        // Update the pad based on whether the outputShape is specified. For example:
+        // Input: 1x16x128x128xf16    Weights: 32x16x2x2xf16    OutputShape: 2xsi32 = dense<128>
+        //                   \                |               /
+        //                   TransposedConv: 1x32x128x128xf16
+        //                   (strides = [2, 2], output_padding = [0, 0], pads_begin = [64, 64], pads_end = [64, 64])
+        // The padL/padR/padT/padB should be non-negative integer, here will be set to 0 instead of -63.
+        // Then the Upsampling output shape will be 1x32x255x255xf16 with strides = [2, 2].
+        // So the sliceOp wiil be added after NCEConv (1x32x254x254xf16) for crop to 1x32x128x128xf16.
         padL = filterShape[Dims4D::Filter::KX] - 1 - padsBeginVector[Dims4D::PadsBegin::Left];
         padR = filterShape[Dims4D::Filter::KX] - 1 - padsEndVector[Dims4D::PadsEnd::Right];
         padT = filterShape[Dims4D::Filter::KY] - 1 - padsBeginVector[Dims4D::PadsBegin::Top];
         padB = filterShape[Dims4D::Filter::KY] - 1 - padsEndVector[Dims4D::PadsEnd::Bottom];
+        if (origOp.getOutputShape() != nullptr) {
+            padL = std::max<int64_t>(padL, 0);
+            padR = std::max<int64_t>(padR, 0);
+            padT = std::max<int64_t>(padT, 0);
+            padB = std::max<int64_t>(padB, 0);
+        }
     }
 
     // Output padding refers to copying convolutional input data. If the value of output padding is less than the value
@@ -83,8 +97,7 @@ mlir::FailureOr<mlir::Value> createUpsampling(mlir::PatternRewriter& rewriter, C
     auto upsamplingFactor = getIntArrayAttr(
             ctx, SmallVector<int64_t>{stridesVector[Dims4D::Strides::X], stridesVector[Dims4D::Strides::Y], 1});
 
-    return rewriter.create<IE::UpsamplingOp>(origOp->getLoc(), origOp.getInput(), upsamplingFactor, padAttr)
-            .getOutput();
+    return rewriter.create<IE::UpsamplingOp>(loc, origOp.getInput(), upsamplingFactor, padAttr).getOutput();
 }
 
 mlir::Value createPadding(mlir::PatternRewriter& rewriter, mlir::Location loc, mlir::Value input, Dim axis,

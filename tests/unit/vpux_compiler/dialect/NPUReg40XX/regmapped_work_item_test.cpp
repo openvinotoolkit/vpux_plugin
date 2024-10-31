@@ -1,3 +1,8 @@
+//
+// Copyright (C) 2024 Intel Corporation.
+// SPDX-License-Identifier: Apache 2.0
+//
+
 #include "vpux/compiler/init.hpp"
 
 #include "vpux/compiler/dialect/VPUMI37XX/ops.hpp"
@@ -25,7 +30,7 @@ using namespace npu40xx;
         return hwWorkItemDesc;                                                       \
     }()
 
-using mappedRegValues = std::map<std::string, std::map<std::string, uint64_t>>;
+using mappedRegValues = std::map<std::string, std::map<std::string, vpux::VPURegMapped::RegFieldValue>>;
 
 class NPUReg40XX_VpuWorkItemTest : public testing::TestWithParam<std::pair<mappedRegValues, nn_public::VpuWorkItem>> {
     std::unique_ptr<mlir::MLIRContext> ctx;
@@ -33,8 +38,7 @@ class NPUReg40XX_VpuWorkItemTest : public testing::TestWithParam<std::pair<mappe
 
 public:
     NPUReg40XX_VpuWorkItemTest() {
-        mlir::DialectRegistry registry;
-        vpux::registerDialects(registry);
+        auto registry = vpux::createDialectRegistry();
 
         ctx = std::make_unique<mlir::MLIRContext>();
         ctx->loadDialect<vpux::NPUReg40XX::NPUReg40XXDialect>();
@@ -82,4 +86,4 @@ std::vector<std::pair<mappedRegValues, nn_public::VpuWorkItem>> workItemFieldSet
          CREATE_HW_DMA_DESC(sub_unit, 0xFF)},
 };
 
-INSTANTIATE_TEST_CASE_P(NPUReg40XX_MappedRegs, NPUReg40XX_VpuWorkItemTest, testing::ValuesIn(workItemFieldSet));
+INSTANTIATE_TEST_SUITE_P(NPUReg40XX_MappedRegs, NPUReg40XX_VpuWorkItemTest, testing::ValuesIn(workItemFieldSet));

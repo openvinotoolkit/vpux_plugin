@@ -74,7 +74,10 @@ const std::vector<std::vector<ov::Shape>> shapesHighDims = {
         {{2, 3, 4, 5, 6}, {2, 3, 4, 5, 6}, {2, 3, 4, 5, 6}},
 };
 
-const std::vector<std::vector<ov::Shape>> inShapes = {{{10, 2, 1, 1}, {10, 2, 1, 1}, {1, 2, 1, 1}}};
+const std::vector<std::vector<ov::Shape>> inShapes = {
+        {{10, 2, 1, 1}, {10, 2, 1, 1}, {1, 2, 1, 1}},     {{1, 1, 1, 32}, {1, 1, 1, 1}, {1, 4, 16, 32}},
+        {{1, 1, 1, 32}, {1, 4, 16, 32}, {1, 1, 1, 1}},    {{1, 1, 1, 1024}, {1, 1, 1, 1}, {1, 1, 1, 1024}},
+        {{1, 1, 1, 1024}, {1, 1, 1, 1024}, {1, 1, 1, 1}}, {{1, 1, 1, 1024}, {1, 1, 1, 1024}, {1, 1, 1, 1024}}};
 
 const auto selectTestParams0 = ::testing::Combine(
         ::testing::ValuesIn(ov::test::static_shapes_to_test_representation(shapes)), ::testing::ValuesIn(inputTypes),
@@ -91,12 +94,12 @@ const auto selectTestParams1 = ::testing::Combine(
 
 // --------- NPU3720 ---------
 
-INSTANTIATE_TEST_CASE_P(smoke_Select, SelectLayerTest_NPU3720, selectTestParams1,
-                        SelectLayerTest_NPU3720::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_Select, SelectLayerTest_NPU3720, selectTestParams1,
+                         SelectLayerTest_NPU3720::getTestCaseName);
 
 // --------- NPU4000 ---------
 
-INSTANTIATE_TEST_CASE_P(smoke_precommit_Select, SelectLayerTest_NPU4000, selectTestParams1,
-                        SelectLayerTest_NPU4000::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_Select, SelectLayerTest_NPU4000, selectTestParams1,
+                         SelectLayerTest_NPU4000::getTestCaseName);
 
 }  // namespace

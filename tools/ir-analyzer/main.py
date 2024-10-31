@@ -225,17 +225,19 @@ def get_layer_info(root: dict, edges, layers, bin_file, read_const) -> typing.Li
                     const_array = get_const_data(get_id(root), get_id(input_info), layers, edges, bin_file)
                     if const_array:
                         layer_info.append('const in: ' + str(list(map(lambda x: int(x), dims))) + ' (' + ''.join(layout) + " " + get_precision(input_info) + ') ' +
-                                            'data: [' + ','.join(list(map(lambda x: str(x),const_array))) + ']')
+                                          'data: [' + ','.join(list(map(lambda x: str(x), const_array))) + ']')
                         continue
-                layer_info.append('in: ' + str(list(map(lambda x: int(x), dims))) + ' (' + ''.join(layout) + " " + get_precision(input_info) + ')')
+                layer_info.append('in: ' + str(list(map(lambda x: int(x), dims))) +
+                                  ' (' + ''.join(layout) + " " + get_precision(input_info) + ')')
         if outputs:
             for output_info in outputs:
                 dims = get_dims(output_info)
                 layout = get_layout_from_ndims(len(dims))
-                layer_info.append('out: ' + str(list(map(lambda x: int(x), dims))) + ' (' + ''.join(layout) + " " + get_precision(output_info) + ')')
+                layer_info.append('out: ' + str(list(map(lambda x: int(x), dims))) +
+                                  ' (' + ''.join(layout) + " " + get_precision(output_info) + ')')
         if attributes:
             for k, v in attributes.items():
-                layer_info.append('='.join([k[1:],v]))
+                layer_info.append('='.join([k[1:], v]))
         output_data.append(layer_info)
         if "body" in root.keys():
             ti_body = root["body"]
@@ -248,7 +250,7 @@ def get_layer_info(root: dict, edges, layers, bin_file, read_const) -> typing.Li
         return output_data
 
 
-def get_layers_info(root: dict, is_only_unique: bool, need_sort: bool, read_const:bool, bin_file) -> typing.List[typing.List[str]]:
+def get_layers_info(root: dict, is_only_unique: bool, need_sort: bool, read_const: bool, bin_file) -> typing.List[typing.List[str]]:
     net = root["net"]
     layers = get_layers(net)
     edges = get_edges(net)
@@ -271,7 +273,8 @@ if __name__ == "__main__":
         data_dict = xmltodict.parse(xml_file.read())
 
     with open(args.path_to_model[:-3] + "bin", "rb") as bin_file:
-        output_data = get_layers_info(data_dict, bool(args.remove_duplicates), bool(args.sort), bool(args.read_constants), bin_file)
+        output_data = get_layers_info(data_dict, bool(args.remove_duplicates),
+                                      bool(args.sort), bool(args.read_constants), bin_file)
 
     with open(args.path_to_output, "w") as output_file:
         output_writer = csv.writer(output_file, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)

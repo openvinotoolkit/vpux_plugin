@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2023 Intel Corporation
+// Copyright (C) 2019-2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -34,21 +34,18 @@ class RegionYoloLayerTestCommon : public RegionYoloLayerTest, virtual public Vpu
         VpuOv2LayerTest::TearDown();
     }
 };
-class RegionYoloLayerTest_NPU3720 : public RegionYoloLayerTestCommon {};
-class RegionYoloLayerTest_NPU4000 : public RegionYoloLayerTestCommon {};
 
-TEST_P(RegionYoloLayerTest_NPU3720, SW) {
+TEST_P(RegionYoloLayerTestCommon, NPU3720_SW) {
     VpuOv2LayerTest::setReferenceSoftwareMode();
     VpuOv2LayerTest::run(Platform::NPU3720);
 }
 
-TEST_P(RegionYoloLayerTest_NPU4000, SW) {
+TEST_P(RegionYoloLayerTestCommon, NPU4000_SW) {
     VpuOv2LayerTest::setReferenceSoftwareMode();
     VpuOv2LayerTest::run(Platform::NPU4000);
 }
 
 }  // namespace test
-
 }  // namespace ov
 
 using namespace ov::test;
@@ -80,16 +77,10 @@ const auto regionYoloPrecommitParams = ::testing::Combine(testing::ValuesIn(inpu
                                                           testing::Values(3),  // endAxis
                                                           testing::ValuesIn(modelTypes), testing::Values(DEVICE_NPU));
 
-INSTANTIATE_TEST_CASE_P(smoke_RegionYolo, RegionYoloLayerTest_NPU3720, regionYoloParams,
-                        RegionYoloLayerTestCommon::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_RegionYolo, RegionYoloLayerTestCommon, regionYoloParams,
+                         RegionYoloLayerTestCommon::getTestCaseName);
 
-INSTANTIATE_TEST_CASE_P(smoke_precommit_RegionYolo, RegionYoloLayerTest_NPU3720, regionYoloPrecommitParams,
-                        RegionYoloLayerTestCommon::getTestCaseName);
-
-INSTANTIATE_TEST_CASE_P(smoke_RegionYolo, RegionYoloLayerTest_NPU4000, regionYoloParams,
-                        RegionYoloLayerTestCommon::getTestCaseName);
-
-INSTANTIATE_TEST_CASE_P(smoke_precommit_RegionYolo, RegionYoloLayerTest_NPU4000, regionYoloPrecommitParams,
-                        RegionYoloLayerTestCommon::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_RegionYolo, RegionYoloLayerTestCommon, regionYoloPrecommitParams,
+                         RegionYoloLayerTestCommon::getTestCaseName);
 
 }  // namespace

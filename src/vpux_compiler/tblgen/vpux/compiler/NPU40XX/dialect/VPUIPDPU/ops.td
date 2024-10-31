@@ -75,13 +75,38 @@ def VPUIPDPU_ODUWriteCombineBufferOp :
 }
 
 //
+// ODUHaloCfg
+//
+
+def VPUIPDPU_ODUHaloCfgOp :
+        VPUIPDPU_Op<"ODUHaloCfg",
+            [
+                HasParent<"vpux::VPUIPDPU::DPUVariantOp">,
+                NoTerminator
+            ]
+        > {
+    let summary = "ODU Halo configuration";
+
+    let regions = (region
+        SizedRegion<1>:$region
+    );
+
+    let assemblyFormat = [{
+        attr-dict-with-keyword
+        $region
+    }];
+
+    let hasVerifier = 1;
+}
+
+//
 // ODUHaloRegionOp
 //
 
 def VPUIPDPU_ODUHaloRegionOp :
         VPUIPDPU_Op<"ODUHaloRegion",
             [
-                HasParent<"vpux::VPUIPDPU::DPUVariantOp">
+                HasParent<"vpux::VPUIPDPU::ODUHaloCfgOp">
             ]
         > {
     let summary = "ODU define halo region configuration";

@@ -33,7 +33,8 @@ mlir::LogicalResult arch37xx::AveragePoolRewriter::matchAndRewrite(IE::AvgPoolOp
         return rewriter.create<IE::AvgPoolOp>(origOp.getLoc(), newOutputType, expandedInput, origOp.getKernelSize(),
                                               origOp.getStrides(), origOp.getPadsBegin(), origOp.getPadsEnd(),
                                               origOp.getRoundingType(), origOp.getExcludePads(), origOp.getPostOpAttr(),
-                                              origOp.getClampAttr());
+                                              origOp.getClampAttr(), origOp.getStaticScaleAttr(),
+                                              origOp.getOutputChannelsAttr(), origOp.getInputChannelsAttr());
     };
 
     return generalRewrite(origOp, rewriter, opCreator, extractMeaningfulOutput, _log.nest());

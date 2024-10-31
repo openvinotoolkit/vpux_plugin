@@ -133,7 +133,7 @@ def ClusterTypeInterface : TypeInterface<"ClusterTypeInterface"> {
             memory_shapes/memory_offsets/computes_shapes/compute_offsets adjusted for the new shape.
             }],
             "vpux::NDTypeInterface", "changeShapeForExplicitDistribution",
-                (ins "vpux::ShapeRef":$shape, "vpux::VPU::DistributedTensorAttr":$distributedAttr)
+                (ins "vpux::ShapeRef":$shape, "vpux::VPU::DistributionInfoAttr":$distributedAttr)
         >,
 
         InterfaceMethod<[{
@@ -142,7 +142,7 @@ def ClusterTypeInterface : TypeInterface<"ClusterTypeInterface"> {
             memory_shapes/memory_offsets/computes_shapes/compute_offsets adjusted for the new shape.
             }],
             "vpux::NDTypeInterface", "changeShapeElemTypeForExplicitDistribution",
-                (ins "vpux::ShapeRef":$shape, "mlir::Type":$elemType, "vpux::VPU::DistributedTensorAttr":$distributedAttr)
+                (ins "vpux::ShapeRef":$shape, "mlir::Type":$elemType, "vpux::VPU::DistributionInfoAttr":$distributedAttr)
         >,
 
         InterfaceMethod<[{
@@ -152,7 +152,7 @@ def ClusterTypeInterface : TypeInterface<"ClusterTypeInterface"> {
             adjusted for the new shape. Otherwise, it leaves the DistributedAttr untouched.
             }],
             "vpux::NDTypeInterface", "changeTypeComponentsForExplicitDistribution",
-                (ins "const TypeComponents&":$typeComponents, "vpux::VPU::DistributedTensorAttr":$distributedAttr)
+                (ins "const TypeComponents&":$typeComponents, "vpux::VPU::DistributionInfoAttr":$distributedAttr)
         >,
 
         InterfaceMethod<[{
@@ -162,7 +162,7 @@ def ClusterTypeInterface : TypeInterface<"ClusterTypeInterface"> {
             adjusted for the resulting dense tile.
             }],
             "vpux::NDTypeInterface", "extractDenseTileForExplicitDistribution",
-                (ins "vpux::ShapeRef":$tileOffsets, "vpux::ShapeRef":$tileShape, "vpux::VPU::DistributedTensorAttr":$distributedAttr)
+                (ins "vpux::ShapeRef":$tileOffsets, "vpux::ShapeRef":$tileShape, "vpux::VPU::DistributionInfoAttr":$distributedAttr)
         >,
 
         InterfaceMethod<[{
@@ -173,7 +173,7 @@ def ClusterTypeInterface : TypeInterface<"ClusterTypeInterface"> {
             }],
             "vpux::NDTypeInterface", "extractViewTileForExplicitDistribution",
                 (ins "vpux::ShapeRef":$tileOffsets, "vpux::ShapeRef":$tileShape, "vpux::ShapeRef":$tileElemStrides,
-                "vpux::VPU::DistributedTensorAttr":$distributedAttr)
+                "vpux::VPU::DistributionInfoAttr":$distributedAttr)
         >,
     ];
 }
@@ -211,12 +211,12 @@ def VPU_DistributedTypeInterface : TypeInterface<"DistributedTypeInterface"> {
         >,
 
         InterfaceMethod<[{
-            @brief Change the type's shapes when the DistributedType has an explicit DistributedTensorAttr.
-            Each type implementing this interface will decide the appropriate explicit DistributedTensorAttr
+            @brief Change the type's shapes when the DistributedType has an explicit DistributionInfoAttr.
+            Each type implementing this interface will decide the appropriate explicit DistributionInfoAttr
             for its components, based on the one that was passed as an arg.
             }],
             "vpux::NDTypeInterface", "changeShapeForExplicitDistribution",
-                (ins "vpux::ShapeRef":$shape, "vpux::VPU::DistributedTensorAttr":$distributedAttr),
+                (ins "vpux::ShapeRef":$shape, "vpux::VPU::DistributionInfoAttr":$distributedAttr),
             [{}],
             [{
                 return $_type.changeShapeForExplicitDistribution(shape, distributedAttr);
@@ -224,12 +224,12 @@ def VPU_DistributedTypeInterface : TypeInterface<"DistributedTypeInterface"> {
         >,
 
         InterfaceMethod<[{
-            @brief Change the type's shapes and elem type when the DistributedType has an explicit DistributedTensorAttr.
-            Each type implementing this interface will decide the appropriate explicit DistributedTensorAttr
+            @brief Change the type's shapes and elem type when the DistributedType has an explicit DistributionInfoAttr.
+            Each type implementing this interface will decide the appropriate explicit DistributionInfoAttr
             for its components, based on the one that was passed as an arg.
             }],
             "vpux::NDTypeInterface", "changeShapeElemTypeForExplicitDistribution",
-                (ins "vpux::ShapeRef":$shape, "mlir::Type":$elemType, "vpux::VPU::DistributedTensorAttr":$distributedAttr),
+                (ins "vpux::ShapeRef":$shape, "mlir::Type":$elemType, "vpux::VPU::DistributionInfoAttr":$distributedAttr),
             [{}],
             [{
                 return $_type.changeShapeElemTypeForExplicitDistribution(shape, elemType, distributedAttr);
@@ -237,12 +237,12 @@ def VPU_DistributedTypeInterface : TypeInterface<"DistributedTypeInterface"> {
         >,
 
         InterfaceMethod<[{
-            @brief Change the type's components when the DistributedType has an explicit DistributedTensorAttr.
-            Each type implementing this interface will decide the appropriate explicit DistributedTensorAttr
+            @brief Change the type's components when the DistributedType has an explicit DistributionInfoAttr.
+            Each type implementing this interface will decide the appropriate explicit DistributionInfoAttr
             for its components, based on the one that was passed as an arg.
             }],
             "vpux::NDTypeInterface", "changeTypeComponentsForExplicitDistribution",
-                (ins "const TypeComponents&":$typeComponents, "vpux::VPU::DistributedTensorAttr":$distributedAttr),
+                (ins "const TypeComponents&":$typeComponents, "vpux::VPU::DistributionInfoAttr":$distributedAttr),
             [{}],
             [{
                 return $_type.changeTypeComponentsForExplicitDistribution(typeComponents, distributedAttr);
@@ -250,12 +250,12 @@ def VPU_DistributedTypeInterface : TypeInterface<"DistributedTypeInterface"> {
         >,
 
         InterfaceMethod<[{
-            @brief Extract a dense tile from a DistributedType with an explicit DistributedTensorAttr.
-            Each type implementing this interface will decide the appropriate explicit DistributedTensorAttr
+            @brief Extract a dense tile from a DistributedType with an explicit DistributionInfoAttr.
+            Each type implementing this interface will decide the appropriate explicit DistributionInfoAttr
             for its components, based on the one that was passed as an arg.
             }],
             "vpux::NDTypeInterface", "extractDenseTileForExplicitDistribution",
-                (ins "vpux::ShapeRef":$tileOffsets, "vpux::ShapeRef":$tileShape, "vpux::VPU::DistributedTensorAttr":$distributedAttr),
+                (ins "vpux::ShapeRef":$tileOffsets, "vpux::ShapeRef":$tileShape, "vpux::VPU::DistributionInfoAttr":$distributedAttr),
             [{}],
             [{
                 return $_type.extractDenseTileForExplicitDistribution(tileOffsets, tileShape, distributedAttr);
@@ -263,13 +263,13 @@ def VPU_DistributedTypeInterface : TypeInterface<"DistributedTypeInterface"> {
         >,
 
         InterfaceMethod<[{
-            @brief Extract a view tile from a DistributedType with an explicit DistributedTensorAttr.
-            Each type implementing this interface will decide the appropriate explicit DistributedTensorAttr
+            @brief Extract a view tile from a DistributedType with an explicit DistributionInfoAttr.
+            Each type implementing this interface will decide the appropriate explicit DistributionInfoAttr
             for its components, based on the one that was passed as an arg.
             }],
             "vpux::NDTypeInterface", "extractViewTileForExplicitDistribution",
                 (ins "vpux::ShapeRef":$tileOffsets, "vpux::ShapeRef":$tileShape, "vpux::ShapeRef":$tileElemStrides,
-                "vpux::VPU::DistributedTensorAttr":$distributedAttr),
+                "vpux::VPU::DistributionInfoAttr":$distributedAttr),
             [{}],
             [{
                 return $_type.extractViewTileForExplicitDistribution(tileOffsets, tileShape, tileElemStrides, distributedAttr);

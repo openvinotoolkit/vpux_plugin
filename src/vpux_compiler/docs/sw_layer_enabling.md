@@ -15,6 +15,9 @@
   - [Optional: Transformation pass](#optional-transformation-pass)
 - [VPU Dialect](#vpu-dialect)
   - [VPU Operation table gen](#vpu-operation-table-gen)
+  - [VPU op tiling](#vpu-op-tiling)
+    - [Tiling lit-test](#tiling-lit-test)
+    - [Tiling functional tests](#tiling-functional-tests)
   - [VPU Output shape resolver](#vpu-output-shape-resolver)
   - [Optional: Attributes, canonicalization, transformations](#optional-attributes-canonicalization-transformations)
 - [IE → VPU lowering](#ie--vpu-lowering)
@@ -22,17 +25,19 @@
 - [You're half way there.](#youre-half-way-there)
 - [VPUIP Dialect](#vpuip-dialect)
   - [VPUIP table gen](#vpuip-table-gen)
-  - [VPUIP UPATask builder](#vpuip-upatask-builder)
   - [Redirect interfaces for IE and VPUIP](#redirect-interfaces-for-ie-and-vpuip)
   - [VPUIP verifier](#vpuip-verifier)
+  - [Kernel binaries](#kernel-binaries)
+  - [Add kernel information](#add-kernel-information)
 - [VPU → VPUIP lowering](#vpu--vpuip-lowering)
+  - [Special solution for optional inputs](#special-solution-for-optional-inputs)
   - [VPU → VPUIP lowering lit-test](#vpu--vpuip-lowering-lit-test)
 - [IERT Dialect](#iert-dialect)
   - [IERT Table gen](#iert-table-gen)
 - [IE → IERT lowering](#ie--iert-lowering)
   - [IE → IERT lowering lit-test](#ie--iert-lowering-lit-test)
 # Introduction
- For NPU3720 software layer, please refer [npu2_7_sw_layer_enabling.md](../docs/npu2_7_sw_layer_enabling.md)
+This instruction will guide you through steps of adding a new software layer to the MLIR compiler. It has step-by-step plan of actions using `Sigmoid` layer as an example. 
 > Be aware, that MLIR compiler is in a rapid development and code snippets might be out of date.
 
 # Debugging tips and tricks
@@ -45,24 +50,18 @@ Make sure to take a look at [debugging documentation](guides/how_to_debug.md) to
 
 ## Examine layer specification
 
-Let's implement [CTCGreedyDecoder](https://docs.openvinotoolkit.org/latest/openvino_docs_ops_sequence_CTCGreedyDecoder_1.html) operation from `OpenVINO opset-1`.
+Let's implement [Sigmoid](https://docs.openvino.ai/2022.3/openvino_docs_ops_activation_Sigmoid_1.html) operation from `OpenVINO opset-1`.
 
-Even though, `ctc_merge_repeated` parameter is `Optional`, ov don't treat it as such.
-
-https://github.com/openvinotoolkit/openvino/blob/master/src/core/include/openvino/op/ctc_greedy_decoder.hpp
+https://github.com/openvinotoolkit/openvino/blob/master/src/core/include/openvino/op/sigmoid.hpp
 If you found, that ov don't follow the operation specification, you should create a bug ticket.
-Considering `CTCGreedyDecoder-1` supposed to be repalced with `CTCGreedyDecoderSeqLen-6`, we will ignore that inconsistency.
 
-`CTCGreedyDecoder-1`:
-Attributes:
-* `ctc_merge_repeated` of type boolean.
+`Sigmoid-1`:
 
 Inputs:
-* `data` is a floating point tensor of shape `[T, N, C]`.
-* `sequence_mask` is a floating point tensor of shape `[T, N]`.
+* `input` is a floating point tensor of shape.
 
 Outputs:
-* `output` tensor with shape `[N, T, 1, 1]` and integer elements.
+* `output` is a floating point tensor with shape and type matching the input tensor.
 
 > Things to keep in mind:
 > * Input count, size and type.
@@ -81,60 +80,69 @@ Useful links:
 [How to run tests](../../../guides/how-to-test.md)
 
 ## Create a new file with a test
-[tests/functional/shared_tests_instances/single_layer_tests/ctc_greedy_decoder.cpp](../../../tests/functional/shared_tests_instances/single_layer_tests/ctc_greedy_decoder.cpp)
+[tests/functional/shared_tests_instances/single_layer_tests/activation.cpp](../../../tests/functional/shared_tests_instances/single_layer_tests/activation.cpp)
 ```cpp
 #include "single_op_tests/ctc_greedy_decoder.hpp"
 #include "vpu_ov2_layer_test.hpp"
 #include <vector>
 
-using namespace ov::test;
 using namespace ov::test::utils;
+using ov::test::ActivationParamLayerTest;
 
-namespace LayerTestsDefinitions {
-class CTCGreedyDecoderLayerTestCommon :
-        public CTCGreedyDecoderLayerTest,
-        virtual public VpuOv2LayerTest {};
+namespace ov::test {
+class ActivationLayerTestCommon : public ActivationLayerTest, virtual public VpuOv2LayerTest {};
 
-class CTCGreedyDecoderLayerTest_NPU3720 :
-        public CTCGreedyDecoderLayerTestCommon {
-};
+class ActivationLayerTest_SW_FP16 : public ActivationLayerTestCommon {};
+class ActivationLayerTest_HW_FP16 : public ActivationLayerTestCommon {};
 
-TEST_P(CTCGreedyDecoderLayerTest_NPU3720, HW) { // HW to reflect which pipeline is used, in this case it is DefaultHW
+// SW
+TESTP(ActivationLayerTest_SW_FP16, NPU3720) {
+    abs_threshold = 0.0056;
+    setReferenceSoftwareMode();
+    run(Platform::NPU3720);
+}
+
+// HW
+TEST_P(ActivationLayerTest_HW_FP16, NPU3720) {
+    abs_threshold = 0.0056;
     setDefaultHardwareMode();
     run(Platform::NPU3720);
 }
 
-}  // namespace LayerTestsDefinitions
+}  // namespace ov::test
 
-using namespace ov::helpers;
-using namespace LayerTestsDefinitions;
+using namespace ov::test;
 
 namespace {
 
-const std::vector<ov::element::Type> modelType = {
-    ov::element::f32,
+const std::vector<ov::element::Type> netPrecisions = {ov::element::f16};
+
+const std::map<ActivationTypes, std::vector<std::vector<float>>> activationTypes = {
+        {Sigmoid, {{1.0f}}},
+        ...
 };
 
-const std::vector<bool> mergeRepeated = {true, false};
+std::map<std::vector<ov::Shape>, std::vector<ov::Shape>> basic = {{{{1, 50, 1, 1}}, {}}, {{{1, 128, 1, 1}}, {}}};
 
-const std::vector<std::vector<ov::Shape>> inputShapes = {
-    std::vector<ov::Shape>{{ 88, 1, 71 }},
-    std::vector<ov::Shape>{{ 10, 1, 16 }},
-};
+auto static_shapes_param_transform =
+        [](const std::vector<std::pair<std::vector<ov::Shape>, ov::Shape>>& original_shapes) {
+            std::vector<std::pair<std::vector<ov::test::InputShape>, ov::Shape>> new_shapes;
+            for (const auto& shape_element : original_shapes) {
+                new_shapes.emplace_back(ov::test::static_shapes_to_test_representation(shape_element.first),
+                                        shape_element.second);
+            }
+            return new_shapes;
+        };
 
-const auto params = testing::Combine(
-    testing::ValuesIn(modelType),
-    testing::ValuesIn(static_shapes_to_test_representation(inputShapes)),
-    testing::ValuesIn(mergeRepeated),
-    testing::Values(DEVICE_NPU)
-);
+const auto basicCases =
+        ::testing::Combine(::testing::ValuesIn(::combineParams(activationTypes)),  // Activation type and constant
+                           ::testing::ValuesIn(netPrecisions),                     // Model type
+                           ::testing::ValuesIn(static_shapes_param_transform(
+                                   ov::test::utils::combineParams(basic))),  // Input shapes and input const shape
+                           ::testing::Values(DEVICE_NPU));                   // Target device name
 
-INSTANTIATE_TEST_CASE_P(
-    smoke_CTCGreedyDecoder,
-    CTCGreedyDecoderLayerTest_NPU3720,
-    params,
-    CTCGreedyDecoderLayerTest::getTestCaseName
-);
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_Activation, ActivationLayerTest_SW_FP16, basicCases,
+                         ActivationLayerTest::getTestCaseName);
 ```
 
 # IE Dialect
@@ -158,26 +166,23 @@ Let's create a table-gen representation of our layer.
 * let arguments – input parameters for the layer. Possible types can be found here: https://github.com/llvm/llvm-project/blob/main/mlir/include/mlir/IR/OpBase.td
 * let results – outputs of the operation
 
-[src/vpux_compiler/tblgen/vpux/compiler/dialect/IE/ops.td#L2752](../tblgen/vpux/compiler/dialect/IE/ops.td#L2752)
+[src/vpux_compiler/tblgen/vpux/compiler/dialect/IE/ops.td#L2018](../tblgen/vpux/compiler/dialect/IE/ops.td#L2018)
 ```swift
 //
-// CTCGreedyDecoderOp
+// SigmoidOp
 //
 
-def IE_CTCGreedyDecoderOp :
+def IE_SigmoidOp :
         IE_LayerOp<
-            "CTCGreedyDecoder",
+            "Sigmoid",
             [
-                ResultsAreFloatLike
+                IE_EltwiseOp
             ]
         > {
-    let summary = "InferenceEngine CTCGreedyDecoder layer";
+    let summary = "InferenceEngine Sigmoid layer";
 
     let arguments = (ins
-        RankedTensorOf<[F16, F32]>:$input,
-        RankedTensorOf<[F16, F32]>:$sequenceLengths,
-
-        UnitAttr:$mergeRepeated
+        RankedTensorOf<[F16, F32]>:$input
     );
 
     let results = (outs
@@ -190,76 +195,77 @@ def IE_CTCGreedyDecoderOp :
 
 Define parseNode function, that will transform ov operation to MLIR representation.
 
-[src/vpux_compiler/src/frontend/IE.cpp#L151](../src/frontend/IE.cpp#L151)
+[src/vpux_compiler/include/vpux/compiler/frontend/IE.hpp#L123](../include/vpux/compiler/frontend/IE.hpp#L123)
 ```cpp
 class NGraphImporter final {
 public:
-    NGraphImporter(mlir::MLIRContext* ctx, std::shared_ptr<const ov::Model> netGraph, bool sharedConstants,
-                   Logger log)
+    NGraphImporter(mlir::MLIRContext* ctx, std::shared_ptr<const ov::Model> netGraph, bool sharedConstants, Logger log)
             : _ctx(ctx), _netGraph(std::move(netGraph)), _sharedConstants(sharedConstants), _log(log) {
     }
 
     // Declare parser for ov operation
-    void parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::CTCGreedyDecoder>& origNode);
+    void parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::Sigmoid>& origNode);
 }
 ```
 Check input tensors and parse ov operation.
 
-[src/vpux_compiler/src/frontend/IE.cpp#L1167](../src/frontend/IE.cpp#L1167)
+[src/vpux_compiler/src/frontend/IE.cpp#L1722](../src/frontend/IE.cpp#L1722)
 ```cpp
-void NGraphImporter::parseNode(mlir::OpBuilder& builder,
-                               const std::shared_ptr<ov::opset7::CTCGreedyDecoder>& origNode) {
-    static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v0::CTCGreedyDecoder>::value,
+void NGraphImporter::parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::Sigmoid>& origNode) {
+    static_assert(std::is_same<std::decay<decltype(*origNode)>::type, ov::op::v0::Sigmoid>::value,
                   "opset operation mismatch");
+
     const auto inputs = getInputs(origNode);
-    VPUX_THROW_UNLESS(inputs.size() == 2, "nGraph CTCGreedyDecoder node '{0}' has unsupported number of inputs '{1}'",
+    VPUX_THROW_UNLESS(inputs.size() == 1, "nGraph Sigmoid node '{0}' has unsupported number of inputs '{1}'",
                       origNode->get_friendly_name(), inputs.size());
 
-    auto op = builder.create<IE::CTCGreedyDecoderOp>(createLocation(origNode), inputs[0], inputs[1],
-                                                     origNode->get_ctc_merge_repeated());
+    auto op = builder.create<IE::SigmoidOp>(createLocation(origNode), inputs[0]);
+
     addOutputs(origNode, op);
 }
 ```
 Add map entry for operation dispatcher.
 
-[src/vpux_compiler/src/frontend/IE.cpp#L248](../src/frontend/IE.cpp#L248)
+[src/vpux_compiler/src/frontend/IE.cpp#L144](../src/frontend/IE.cpp#L144)
 ```cpp
-mlir::func::FuncOp NGraphImporter::buildMainFunc(mlir::OpBuilder& moduleBuilder, StringRef funcName) {
-    using Callback = void (NGraphImporter::*)(mlir::OpBuilder & builder, const OrigNodePtr& origNode);
+NGraphImporter::Callback NGraphImporter::getParser(const std::shared_ptr<ov::Node>& op) {
     using DispatchMap = std::map<ov::NodeTypeInfo, Callback>;
 
-    static const DispatchMap dispatchMap{
+#define MAP_ENTRY(_NodeType_) \
+    { _NodeType_::get_type_info_static(), &NGraphImporter::parseDispatch<_NodeType_> }
 
-            MAP_ENTRY(ov::ov::opset7::CTCGreedyDecoder),
+    static const DispatchMap dispatchMap{
+            {ov::op::v0::Parameter::get_type_info_static(), &NGraphImporter::parseEmpty},
+            {ov::op::v0::Result::get_type_info_static(), &NGraphImporter::parseEmpty},
+
+            MAP_ENTRY(ov::opset1::Sigmoid),
     };
+
+#undef MAP_ENTRY
+
+    const auto dispatchIt = dispatchMap.find(op->get_type_info());
+    return (dispatchIt != dispatchMap.end()) ? dispatchIt->second : nullptr;
 }
 ```
 
 ## IE Output shape resolver
 Create a new file that defines the `vpux::IE::<OpName>::inferReturnTypeComponents` function.
 Given input tensors and layer parameters, this function computes output shapes and types of the operation.
-[(new) src/vpux_compiler/src/dialect/IE/IR/ops/ctc_greedy_decoder.cpp](../src/dialect/IE/IR/ops/ctc_greedy_decoder.cpp)
+[(new) src/vpux_compiler/src/dialect/IE/IR/ops/sigmoid.cpp](../src/dialect/IE/IR/ops/sigmoid.cpp)
 ```cpp
-mlir::LogicalResult vpux::IE::CTCGreedyDecoderOp::inferReturnTypeComponents(
-        mlir::MLIRContext* ctx, Optional<mlir::Location> optLoc, mlir::ValueRange operands, mlir::DictionaryAttr attrs,
-        mlir::OpaqueProperties prop, mlir::RegionRange, SmallVectorImpl<mlir::ShapedTypeComponents>& inferredReturnShapes) {
+mlir::LogicalResult vpux::IE::SigmoidOp::inferReturnTypeComponents(
+        mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueShapeRange operands,
+        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange,
+        SmallVectorImpl<mlir::ShapedTypeComponents>& inferredReturnShapes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    IE::CTCGreedyDecoderOpAdaptor ctc(operands, attrs, prop);
-    if (mlir::failed(ctc.verify(loc))) {
+    IE::SigmoidOpAdaptor sigmoid(operands, attrs, prop);
+    if (mlir::failed(sigmoid.verify(loc))) {
         return mlir::failure();
     }
 
-    const auto inType = ctc.input().getType().cast<mlir::ShapedType>();
-    const auto inShape = inType.getShape();
-
-    if (inShape.size() != 3) {
-        return errorAt(loc, "First input tensor should have 3 dimensions");
-    }
-
-    SmallVector<int64_t> outputShape{inShape[1], inShape[0], 1, 1};
-
-    inferredReturnShapes.emplace_back(outputShape, inType.getElementType());
+    const auto inType = sigmoid.getInput().getType().cast<mlir::ShapedType>();
+    inferredReturnShapes.emplace_back(inType.getShape(), inType.getElementType());
 
     return mlir::success();
 }
@@ -314,7 +320,7 @@ Such manipulation should be done on IE Dialect level, not ngraph parser, because
 
 Most used case is converting inputs (e.g. parameters from weights) into attributes. In this case we will simplify our graph (less edges between constant and layer) and simplify approach how to work with attributes (because in case of working / manipulating with inputs, we need first check, that it's constant, then transform it, etc.)
 
-Swish operation canonicalizer example
+`Swish` operation canonicalizer example
 [src/vpux_compiler/src/dialect/IE/IR/ops/swish.cpp#L41](../src/dialect/IE/IR/ops/swish.cpp#L41)
 ```cpp
 //
@@ -557,30 +563,105 @@ Let's create a table-gen representation of our layer.
 * let arguments – input parameters for the layer. Possible types can be found here: https://github.com/llvm/llvm-project/blob/main/mlir/include/mlir/IR/OpBase.td
 * let results – outputs of the operation
 
-[src/vpux_compiler/tblgen/vpux/compiler/dialect/VPU/ops.td#L1992](../tblgen/vpux/compiler/dialect/VPU/ops.td#L1992)
+[src/vpux_compiler/tblgen/vpux/compiler/dialect/VPU/ops.td#L2132](../tblgen/vpux/compiler/dialect/VPU/ops.td#L2132)
 ```swift
 //
-// CTCGreedyDecoder
+// Sigmoid
 //
 
-def VPU_CTCGreedyDecoderOp :
+def VPU_SigmoidOp :
         VPU_LayerOp<
-            "CTCGreedyDecoder"
+            "Sigmoid",
+            [
+                DeclareOpInterfaceMethods<VPU_TilingBuilderOpInterface>,
+                DeclareOpInterfaceMethods<VPU_SWOpInterface>,
+                DeclareOpInterfaceMethods<VPU_ClusteredOpInterface>,
+                VPU_EltwiseOp,
+                DeclareOpInterfaceMethods<VPU_VerticalFusionOpInterface>
+            ]
         > {
-    let summary = "CTCGreedyDecoder VPU layer";
+    let summary = "Sigmoid VPU layer";
 
     let arguments = (ins
-        RankedTensorOf<[F16, F32]>:$input,
-        RankedTensorOf<[F16, F32]>:$sequenceLengths,
+        AnyTypeOf<[RankedTensorOf<[F16, F32]>, VPU_DistributedTensor]>:$input,
 
-        UnitAttr:$mergeRepeated
+        OptionalAttr<VPU_MultiClusterStrategyAttr>:$multiClusterStrategy
     );
 
     let results = (outs
-        RankedTensorOf<[F16, F32]>:$output
+        AnyTypeOf<[RankedTensorOf<[F16, F32]>, VPU_DistributedTensor]>:$output
     );
+
+    let extraClassDeclaration = [{
+        bool fitIntoCMX(::llvm::ArrayRef<vpux::NDTypeInterface> buffers, Byte reservedMem);
+
+        bool fitIntoCMX(::llvm::ArrayRef<vpux::NDTypeInterface> buffers);
+    }] # baseExtraClassDeclaration;
+
+    let builders = [
+        OpBuilder<(ins
+            "::mlir::Value":$input
+        )>
+    ];
+
+    let elemComparisonModes = [IE_TypeComparisonMode_ALLOW_DISTRIBUTED_OUTPUT];
 }
 ```
+
+## VPU op tiling
+
+Software ops need to have their data fit into NNCMX in order to execute. Therefore, they should be tiled into multiple smaller operations if they do not fit. For this to happen, every operation needs to have:
+
+- the `VPU::TilingBuilderOpInterface` interface attached or inerhited;
+- an implementation for the `VPU::TilingBuilderOpInterface::backInferTileInfo` method, which returns the information on the tiles of the input operands when given an output tile (i.e. a smaller part of the output);
+- an implementation for the `VPU::TilingBuilderOpInterface::getTilingStrategy` methods, which returns the optimal output tiling scheme
+  fot this particular operation;
+- the `VPU::TilingInfoOpInterface` interface attached or inherited;
+- an implementation for the `VPU::TilingInfoOpInterface::isSupportedTiling` method, which returns whether the data used by the operation for a given output tile fits into memory; it generally makes use of the `backInferTileInfo` mentioned above to take the inferred input tiles into account.
+
+The simplest case of enabling tiling for a software operation is when the operation is element-wise: one element in the output corresponds to one element in the input. In such cases, it is enough to have the operation inherit the two following interfaces in [src/vpux_compiler/tblgen/vpux/compiler/dialect/VPU/ops.td](../tblgen/vpux/compiler/dialect/VPU/ops.td):
+
+```
+VPU_TilingBuilderOpInterface,
+VPU_EltwiseOp
+```
+
+The `VPU::EltwiseOp` interface comes with an implementation for the `backInferTileInfo` method that returns the input tile(s) equal to the output tile. Then, `VPU::TilingInfoOpInterface` can be attached to the operation in [src/vpux_compiler/src/dialect/VPUIP/ops.cpp](../src/dialect/VPUIP/ops.cpp). Example:
+
+```cpp
+VPU::SigmoidOp::attachInterface<SwLayerTilingInfoOpModel<VPU::SigmoidOp>>(*ctx);
+```
+
+`SwLayerTilingInfoOpModel` is an implementation of `VPU::TilingInfoOpInterface` for software layer tiling that contains dispatch methods for computing the NNCMX usage based on the operation type. For element-wise operations, a generic method adds up the size of the output and input tiles.
+
+In case your operation is more complex, it might be necessary to provide a dedicated implementation for the `backInferTileInfo` method and/or the dispatch method used by `isSupportedTiling`. See `VPU.MemPermute` as an example.
+
+### Tiling lit-test
+
+To ensure that tiling is functional for your operation, a lit-test should be created. `PrefetchTiling` is recommended and should be checked with two steps:
+- Check if the op is assigned with the desired tiling strategy: [tests/lit/NPU/dialect/VPU/passes/tiling_strategy_assignment_prefetch.mlir](../../../tests/lit/NPU/dialect/VPU/passes/tiling_strategy_assignment_prefetch.mlir)
+- Check if the op is tiled correctly with assigned strategy: [tests/lit/NPU/dialect/VPU/passes/apply_tiling.mlir](../../../tests/lit/NPU/dialect/VPU/passes/apply_tiling.mlir)
+
+### Tiling functional tests
+
+To verify at runtime that the tiling logic is applied, a functional test case with large input values should be added. Example from the [Activation group](../../../tests/functional/shared_tests_instances/single_layer_tests/activation.cpp):
+
+```cpp
+std::map<std::vector<size_t>, std::vector<std::vector<size_t>>> basicTiling = {{{1, 8, 80, 1280}, {{}}}};
+
+```
+
+For groups, such as Eltwise, Activation, Comparison etc. it is not mandatory to have functional test cases on the main developing branch for all of the operators that are enabled, as the tiling logic is the same and also to avoid overloading the CI. They should be tested locally beforehand.
+
+An example would be the `activationTypesTiling` variable, which does not contain all of the Activation operators:
+
+```
+const std::map<ActivationTypes, std::vector<std::vector<float>>> activationTypesTiling = {
+        {Sigmoid, {{1.0f}}}, {Elu, {{1.0f}}},        {Sqrt, {{1.0f}}}, {Exp, {{1.0f}}},  {Clamp, {{-1.0f, 1.0f}}},
+        {Tanh, {{1.0f}}},    {LeakyRelu, {{0.01f}}}, {Log, {{1.0f}}},  {Relu, {{1.0f}}}, {Negative, {{0.01f}}}};
+```
+
+ In case of an operator that is standalone, a test case where the tiling logic is tested should always be present. Please see Interpolate [example](../../../tests/functional/shared_tests_instances/single_layer_tests/interpolate.cpp).
 
 ## VPU Output shape resolver
 Create a new file that defines the `vpux::VPU::<OpName>::inferReturnTypes` function.
@@ -588,30 +669,21 @@ Compared to the IE dialect, this function will return the output types of the op
 
 It is recommended to opt for `vpux::NDTypeInterface` while working with tensor types in this dialect, since this interface is compatible with all MLIR and custom types.
 
-[(new) src/vpux_compiler/src/dialect/VPU/ops/ctc_greedy_decoder.cpp](../src/dialect/VPU/ops/ctc_greedy_decoder.cpp)
+[(new) src/vpux_compiler/src/dialect/VPU/IR/ops/sigmoid.cpp](../src/dialect/VPU/IR/ops/sigmoid.cpp)
 ```cpp
-mlir::LogicalResult vpux::VPU::CTCGreedyDecoderOp::inferReturnTypes(
-        mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc, mlir::ValueRange operands,
-        mlir::DictionaryAttr attrs, mlir::OpaqueProperties prop, mlir::RegionRange /*regions*/,
-        mlir::SmallVectorImpl<mlir::Type>& inferredReturnTypes) {
+mlir::LogicalResult vpux::VPU::SigmoidOp::inferReturnTypes(mlir::MLIRContext* ctx, std::optional<mlir::Location> optLoc,
+                                                           mlir::ValueRange operands, mlir::DictionaryAttr attrs,
+                                                           mlir::OpaqueProperties prop, mlir::RegionRange /*regions*/,
+                                                           mlir::SmallVectorImpl<mlir::Type>& inferredReturnTypes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    VPU::CTCGreedyDecoderOpAdaptor ctc(operands, attrs, prop);
-    if (mlir::failed(ctc.verify(loc))) {
+    VPU::SigmoidOpAdaptor sigmoid(operands, attrs, prop);
+    if (mlir::failed(sigmoid.verify(loc))) {
         return mlir::failure();
     }
 
-    const auto inType = ctc.input().getType().cast<vpux::NDTypeInterface>();
-    const auto inShape = inType.getShape().raw();
-
-    if (inShape.size() != 3) {
-        return errorAt(loc, "First input tensor should have 3 dimensions");
-    }
-
-    SmallVector<int64_t> outputShape{inShape[1], inShape[0], 1, 1};
-
-    const auto outType = inType.changeShape(Shape(outputShape));
-    inferredReturnTypes.push_back(outType);
+    const auto inType = sigmoid.getInput().getType();
+    inferredReturnTypes.push_back(inType);
 
     return mlir::success();
 }
@@ -631,19 +703,18 @@ Generally, it will be enough to add the lowering logic in [convert_layers_to_VPU
 
 ```swift
 //
-// IE.CTCGreedyDecoder -> VPU.CTCGreedyDecoder
+// IE.Sigmoid -> VPU.Sigmoid
 //
 
-def createCTCGreedyDecoderOp :
+def createSigmoidOp :
         NativeCodeCall<[{
-            $_builder.create<vpux::VPU::CTCGreedyDecoderOp>(
-                $_loc, $0, $1, $2)
+            $_builder.create<vpux::VPU::SigmoidOp>($_loc, $0)
         }]>;
 
-def RewriteCTCGreedyDecoder :
+def RewriteSigmoid :
         Pat<
-            (IE_CTCGreedyDecoderOp $input, $sequenceLengths, $mergeRepeated),
-            (createCTCGreedyDecoderOp $input, $sequenceLengths, $mergeRepeated)
+            (IE_SigmoidOp $input),
+            (createSigmoidOp $input)
         >;
 ```
 
@@ -651,7 +722,7 @@ This tablegen declaration will automatically generate the C++ code that does the
 - operation has a variadic number of results;
 - operation has multiple results and at least one optional/variadic operand.
 
-For such cases, it will be necessary to manually create the lowering logic in [convert_layers_to_VPU.cpp](../src/conversion/passes/IE2VPU/convert_layers_to_VPU.cpp). Although this is not applicable for CTCGreedyDecoder used as example, its manual lowering logic would have looked like:
+For such cases, it will be necessary to manually create the lowering logic in [convert_layers_to_VPU.cpp](../src/conversion/passes/IE2VPU/convert_layers_to_VPU.cpp). Although this is not applicable for `CTCGreedyDecoder` used as example, its manual lowering logic would have looked like:
 
 ```cpp
 //
@@ -695,7 +766,7 @@ void ConvertLayers2VPUPass::safeRunOnFunc() {
 
 ### IE → VPU lowering lit-test
 
-The lowering logic should also be tested. For this, create a dedicated lit-test in [convert_layers_to_VPU.mlir](../../../tests/lit/NPU/conversion/passes/IE2VPU/convert_layers_to_VPU.mlir) containing the IE operation as input and checks for the resulting VPU operation. If needed, other operations such as constants can be included.
+The lowering logic should also be tested. For this, create a dedicated lit-test in [convert_layers_to_VPU.mlir](../../../tests/lit/NPU/conversion/passes/IE2VPU/convert_layers_to_VPU.mlir) containing the IE operation as input and checks for the resulting VPU operation. If needed, other operations such as constants can be included. Example for `VPU.CTCGreedyDecoder` operation:
 
 ```cpp
 // CHECK-LABEL: @CTCGreedyDecoder
@@ -710,11 +781,11 @@ func.func @CTCGreedyDecoder(%arg0: tensor<20x8x128xf16>, %arg1: tensor<20x8xf16>
 ```
 
 ## You're half way there.
-You should be able to compile code now. Run single layer test and look for "Unable to legalize VPU::OperationName" message. That means that MLIR compiler was not able to convert VPU::OperationName to VPUIP::OperationName. This will be the next step.
+You should be able to compile code now. Run single layer test and look for `Unable to legalize VPU::OperationName` message. That means that MLIR compiler was not able to convert VPU::OperationName to VPUIP::OperationName. This will be the next step.
 
 # VPUIP Dialect
 
-The VPUIP Dialect represents bufferized version of the VPU Dialect, with platform-specific variants of some operations. For example, hardware operations are all represented as `VPUIP::NCEClusterTaskOp`. Software operations for NPU37XX use `VPUIP::SWKernelOp`. We will be creating the UPA operation for the new layer. It is worth mentioning that in some cases, multiple VPU operations can be lowered to the same UPA task; e.g. `VPU.AddOp` & `VPU.MultiplyOp` both get lowered to `VPUIP.EltwiseUPAOp`.
+In VPUIP dialect all NPU3720 software layers are represented via `VPUIP::SwKernelOp` operation.
 
 This dialect no longer works with tensor data. Instead, buffers are utilized by making use of `MemRefType`.
 
@@ -729,97 +800,85 @@ Documentation
 [src/vpux_compiler/tblgen/vpux/compiler/dialect/VPUIP/ops.td#L2078](../tblgen/vpux/compiler/dialect/VPUIP/ops.td#L2419)
 ```swift
 //
-// CTCGreedyDecoderUPAOp
+// VPUIP_SwKernelOp
 //
 
-def VPUIP_CTCGreedyDecoderUPAOp :
-        VPUIP_UPATaskOp<1, "CTCGreedyDecoderUPA",
+def VPUIP_SwKernelOp :
+        VPUIP_TaskOp<1, "SW.Kernel",
             [
-                ViewLikeOpInterface
+                MultiViewOpInterface,
+                IsolatedFromAbove,
+                AttrSizedOperandSegments,
+                AttrSizedResultSegments,
+                DeclareOpInterfaceMethods<VPUIP_CycleCostInterface>
             ]
+            # GraphRegionNoTerminator.traits
         > {
-    let summary = "CTCGreedyDecoder UPA SHAVE kernel";
+
+    let summary = "Software Layer Task";
+
+    let description = [{
+        This operation defines Activation shave task.
+        There are two different modes or handling inputs with dynamic shapes
+        - In the first mode, dynamic inputs are accepted as BoundedBuffers, which combine data and dynamic shape into one type.
+        dynamicInputShapes and dynamicInputShapesMap are not used in that case:
+                inputs[3]: [BoundedBuffer, MemRef, BoundedBuffer]
+                dynamicInputShapes[]: []
+                dynamicInputShapesMap[]: nullptr
+        - In the second mode all BoundedBuffer's are unrolled by ungroup-bounded-buffers pass: E#111348.
+        Separate handling of dynamic data and dynamic shape is needed because feasible allocation doesn't support multiple root buffers per input
+                inputs[3]: [MemRef, MemRef, MemRef]
+                dynamicInputShapes[2]: [MemRef, MemRef]
+                dynamicInputShapesMap[3]: [0, -1, 1]
+        For outputs, the same applies.
+    }];
 
     let arguments = (ins
-        F16MemRef:$input,
-        F16MemRef:$sequenceLengths,
-        F16MemRef:$output_buff,
-
-        UnitAttr:$mergeRepeated,
+        SymbolRefAttr:$kernelFunction,
+        Variadic<AnyTypeOf<[AnyMemRef, VPUIP_DistributedBuffer, VPUIP_BoundedBuffer]>>:$inputs,
+        Variadic<MemRefOf<[SI32]>>:$dynamicInputShapes,
+        OptionalAttr<DenseI32ArrayAttr>:$dynamicInputShapesMap,
+        Variadic<AnyTypeOf<[AnyMemRef, VPUIP_DistributedBuffer, VPUIP_BoundedBuffer]>>:$output_buffs,
+        Variadic<MemRefOf<[SI32]>>:$dynamicOutputShapeBuffs,
+        OptionalAttr<DenseI32ArrayAttr>:$dynamicOutputShapesMap,
+        Optional<AnyTypeOf<[MemRefOf<[UI32]>, VPUIP_DistributedBuffer]>>:$profiling_data,
+        OptionalAttr<IntAttr>:$tileIndex,
+        OptionalAttr<I64ArrayOfArraysAttr>:$strides,
+        OptionalAttr<VPUIP_SwProfilingMetadataAttr>:$profilingMetadata
     );
 
     let results = (outs
-        F16MemRef:$output
+        Variadic<AnyTypeOf<[AnyMemRef, VPUIP_DistributedBuffer, VPUIP_BoundedBuffer]>>:$results,
+        Variadic<MemRefOf<[SI32]>>:$dynamicOutputShapes,
+        Optional<AnyTypeOf<[MemRefOf<[UI32]>, VPUIP_DistributedBuffer]>>:$profiling_output
     );
 
-    // Describe inputs, outputs and parameters with C++ types
+    let regions = (region
+        SizedRegion<1>:$body
+    );
+
     let builders = [
-        OpBuilder<
-            (ins
-                "mlir::Value":$input, "mlir::Value":$sequenceLengths,
-                "mlir::Value":$output,
-                "mlir::UnitAttr":$mergeRepeated
-            )
-        >
+        ...
     ];
 
-    let assemblyFormat = [{
-        attr-dict
-        `inputs` `(` $input `:` type($input) `,` $sequenceLengths `:` type($sequenceLengths) `)`
-        `outputs` `(` $output_buff `:` type($output_buff) `)`
-        (`waits` `(` $waitBarriers^ `:` type($waitBarriers) `)`)?
-        (`updates` `(` $updateBarriers^ `:` type($updateBarriers) `)`)?
-        `->` type(results)
+    let extraClassDeclaration = [{
+        static vpux::VPU::ExecutorKind getExecutorKind() {
+            return vpux::VPU::ExecutorKind::SHAVE_ACT;
+        }
+
+        static mlir::LogicalResult inferReturnTypes(mlir::MLIRContext* ctx, std::optional<mlir::Location> loc,
+                                                    mlir::ValueRange operands, mlir::DictionaryAttr attrs, mlir::OpaqueProperties,
+                                                    mlir::RegionRange regions,
+                                                    mlir::SmallVectorImpl<mlir::Type>& inferredTypes);
+
+        static vpux::VPUIP::KernelInfo getKernelInfo(mlir::Operation* origOp);
+        static vpux::VPUIP::KernelInfo getDummyKernelInfo();
+
+        void print(::mlir::OpAsmPrinter& p);
+        static ::mlir::ParseResult parse(::mlir::OpAsmParser& parser, ::mlir::OperationState& result);
     }];
-}
-```
-## VPUIP UPATask builder
-Serialize layer to UPATask using elf interface.
 
-[(new) src/vpux_compiler/src/dialect/VPUIP/ops/upa_ctc_greedy_decoder.cpp](../src/dialect/VPUIP/ops/upa_ctc_greedy_decoder.cpp)
-```cpp
-void vpux::VPUIP::CTCGreedyDecoderUPAOp::build(mlir::OpBuilder& builder, mlir::OperationState& state, mlir::Value input,
-                                               mlir::Value sequenceLengths, mlir::Value output,
-                                               mlir::UnitAttr mergeRepeated) {
-    // pass parameters that were described in table gen arguments variable
-    build(builder, state, input, sequenceLengths, output, mlir::ValueRange{}, mlir::ValueRange{}, mergeRepeated,
-          nullptr, nullptr);
-}
-
-VPUIP::BlobWriter::SpecificTask vpux::VPUIP::CTCGreedyDecoderUPAOp::serialize(VPUIP::BlobWriter& writer) {
-    MVCNN::CTCDecoderParamsBuilder builder(writer);
-    builder.add_ctc_merge_repeated(mergeRepeated());
-    const auto paramsOff = builder.Finish();
-
-    return writer.createUPALayerTask(*this, {paramsOff.Union(), MVCNN::SoftwareLayerParams_CTCDecoderParams});
-}
-```
-## Redirect interfaces for IE and VPUIP
-Add two lines of code to register interfaces that resolves dependencies between dialects.
-
-[src/vpux_compiler/src/dialect/VPUIP/ops.cpp](../src/dialect/VPUIP/ops.cpp)
-```cpp
-//
-// redirectOpInterfacesForIE
-//
-
-template <template <class, class> class OpModelForHW, template <class> class OpModelForSW>
-void redirectOpInterfacesForIE(mlir::DialectRegistry& registry) {
-    // ...
-    IE::CTCGreedyDecoderOp::attachInterface<OpModelForSW<VPUIP::CTCGreedyDecoderUPAOp>>(*ctx);
-}
-```
-
-[src/vpux_compiler/src/dialect/VPUIP/ops.cpp](../src/dialect/VPUIP/ops.cpp)
-```cpp
-//
-// redirectOpInterfacesForVPUIP
-//
-
-template <class OpModelForHW, class OpModelForDMA, class OpModelForSW>
-void redirectOpInterfacesForVPUIP(mlir::DialectRegistry& registry) {
-    // ...
-    VPUIP::CTCGreedyDecoderUPAOp::attachInterface<OpModelForSW>(*ctx);
+    let hasVerifier = 1;
 }
 ```
 
@@ -833,51 +892,118 @@ Add verifier to the VPUIP table gen.
 let hasVerifier = 1;
 ```
 Implement verify function.
-[src/vpux_compiler/src/dialect/VPUIP/ops/upa_ctc_greedy_decoder.cpp](../src/dialect/VPUIP/ops/upa_ctc_greedy_decoder.cpp)
+[src/vpux_compiler/src/dialect/VPUIP/IR/ops/dma.cpp](../src/dialect/VPUIP/IR/ops/dma.cpp)
 ```cpp
-mlir::LogicalResult vpux::VPUIP::CTCGreedyDecoderUPAOp::verify() {
-    const auto inShape = getShape(input());
+mlir::LogicalResult SwKernelOp::verify() {
+    const auto op = getOperation();
+    if (VPUIP::isCacheHandlingOp(*this)) {
+        if (!op->getOperands().empty()) {
+            return errorAt(op, "SW Kernel Cache Op should have no operands");
+        }
+        if (!op->getResults().empty()) {
+            return errorAt(op, "SW Kernel Cache Op should have no results");
+        }
+        auto kernelFunc =
+                op->getParentOfType<mlir::ModuleOp>().lookupSymbol<mlir::func::FuncOp>(getKernelFunctionAttr());
+        if (kernelFunc.getFunctionType().getNumInputs() != 0) {
+            return errorAt(op, "SW Kernel Cache Op func should have no inputs");
+        }
 
-    if (inShape.size() != 3) {
-        return errorAt(*this, "Input shape should have 3 dimensions");
+        if (kernelFunc.getFunctionType().getNumResults() != 0) {
+            return errorAt(op, "SW Kernel Cache Op func should have no results");
+        }
+        return mlir::success();
     }
-
-    if (inShape[Dim(1)] != 1) {
-        return errorAt(*this, "Input tensor [T N C] = [{0} {1} {2}] has unsupported dimension size N != 1",
-                       inShape[Dim(0)], inShape[Dim(1)], inShape[Dim(2)]);
-    }
-
+    ...
     return mlir::success();
+}
+```
+
+## Kernel binaries
+
+[act_shave_bin](../../../sw_runtime_kernels/kernels/prebuild/act_shave_bin) folder should contain the following data:
+
+- sk.`<entry point>`.`<platform>`.data
+- sk.`<entry point>`.`<platform>`.text
+
+If not please follow this instruction: [How to create act-shave kernel](../../../sw_runtime_kernels/README.md)
+
+## Add kernel information
+
+To serialize the kernel, you need to provide additional information about the arguments of the kernel, the name of entry point and source file. This information is stored in the structure:
+
+[src/vpux_compiler/include/vpux/compiler/dialect/VPUIP/IR/ops_interfaces.hpp](../include/vpux/compiler/dialect/VPUIP/IR/ops_interfaces.hpp)
+
+```cpp
+struct KernelInfo final {
+    SmallVector<mlir::Attribute> args;
+    SmallString entryName;
+    SmallString sourceFileName;
+};
+```
+
+Provide the necessary information:
+[src/vpux_compiler/src/dialect/VPUIP/IR/ops/sw_kernel.cpp](../src/dialect/VPUIP/IR/ops/sw_kernel.cpp)
+
+```cpp
+VPUIP::KernelInfo SwKernelOp::getKernelInfo(mlir::Operation* origOp) {
+    return llvm::TypeSwitch<mlir::Operation*, VPUIP::KernelInfo>(origOp)
+            .Case<VPU::SigmoidOp>([&](VPU::SigmoidOp) {
+                return VPUIP::KernelInfo{SmallVector<mlir::Attribute>{}, {"activation_sigmoid"}};
+            })
+            .Default([](mlir::Operation* unknownOp) -> VPUIP::KernelInfo {
+                VPUX_THROW("Operation '{0}' is not supported by the act-shaves", unknownOp->getName());
+            });
 }
 ```
 
 ## VPU → VPUIP lowering
 Convert previous representation of a layer in VPU dialect down to the VPUIP dialect.
 
-Create a `createRTLayer` method for your VPU operation:
-
-[src/vpux_compiler/src/conversion/passes/VPU2VPUIP/convert_layers_to_VPUIP.cpp#L389](../src/conversion/passes/VPU2VPUIP/convert_layers_to_VPUIP.cpp#L389)
+[src/vpux_compiler/src/conversion/passes/VPU2VPUIP/bufferize_sw_ops_interface.cpp](../src/conversion/passes/VPU2VPUIP/bufferize_sw_ops_interface.cpp)
 ```cpp
-mlir::Operation* createRTLayer(VPU::CTCGreedyDecoderOp origOp, ArrayRef<mlir::Value> allBufs, mlir::OpBuilder& b) {
-    VPUIP::CTCGreedyDecoderUPAOp::Adaptor newOp(allBufs);
-    return b.create<VPUIP::CTCGreedyDecoderUPAOp>(origOp.getLoc(), newOp.input(), newOp.sequenceLengths(),
-                                                  newOp.output_buff(), origOp.mergeRepeatedAttr());
+void vpux::registerSoftwareLayerBufferizableOpInterfaces(mlir::DialectRegistry& registry) {
+    registry.addExtension(+[](mlir::MLIRContext* ctx, VPU::VPUDialect*, VPUIP::VPUIPDialect*) {
+        ...
+        VPU::SigmoidOp::attachInterface<SoftwareLayerOpBufferizeModel<VPU::SigmoidOp>>(*ctx);
+        ...
 }
 ```
 
-Then register it in the `LayerRewriter` so that it is utilized:
+### Special solution for optional inputs
+Some operations like FullyConnected/EmbeddingBagPackedSum have optional input, adding a delimeter to help check the count of MemRefData(operands are represented by MemRefData) in specifc case.
 
+##### Adding delimiter attr at VPUIP layer
+[src/vpux_compiler/src/dialect/VPUIP/IR/ops/sw_kernel.cpp](../src/vpux_compiler/src/dialect/VPUIP/IR/ops/sw_kernel.cpp)
 ```cpp
-mlir::LogicalResult LayerRewrite::matchAndRewrite(mlir::Operation* origOp, ArrayRef<mlir::Value> newOperands,
-                                                  mlir::ConversionPatternRewriter& rewriter) const {
-    using CreateFunc =
-            mlir::Operation* (*)(mlir::Operation * origOp, ArrayRef<mlir::Value> allBufs, mlir::OpBuilder & b);
-    // ...
-    // Add new case for the new operation
-    CASE(VPU::CTCGreedyDecoderOp)
+    const auto delimiterAttr = getIntAttr(ctx, INT64_MAX);
+    return VPUIP::KernelInfo{SmallVector<mlir::Attribute>{delimiterAttr}, {"fully_connected"}};
 ```
 
-Some operations can end up lowered to more than a single UPA task at this step. For such cases, a dedicated rewriter should be created instead. An example can be found with `VPU.LSTMCellOp` which has the `LSTMCellRewrite` class in the same pass.
+##### Param struct of optional inputs 
+```cpp
+struct LayerData {
+    struct MemRefData tensors[MAX_TENSOR_COUNT]; // MAX_TENSOR_COUNT==N
+    int64_t memRefDelimiter;
+}
+```
+
+#### Example
+```cpp
+// actual data:
+[in1, optional<in2>, nullptr, nullptr, delimiter, attr1, attr2]
+// optional<in3>,..., optional<in(MAX_TENSOR_COUNT-1)> are absent
+
+//init inputs in kernel
+auto memrefCount = countMemrefs(layerData, MAX_TENSOR_COUNT);
+in1 = nullptr;
+in2 = nullptr;
+...
+inN = nullptr;
+For memrefIdx from 0 to memrefCount - 1:
+    in[memrefIdx] = layerData[memrefIdx]
+
+```
 
 ### VPU → VPUIP lowering lit-test
 Similar to IE->VPU, the lowering logic will be tested by creating a lit-test in [bufferize_sw_ops_to_VPUIP_sw_kernel_37XX+.mlir](../../../tests/lit/NPU/conversion/passes/VPU2VPUIP/bufferize_sw_ops_to_VPUIP_sw_kernel_37XX+.mlir). If there are instances where the lowering logic behaves differently for various configurations of the operation, please make sure to cover them all with different tests.
@@ -927,29 +1053,20 @@ Documentation:
 [src/vpux_compiler/tblgen/vpux/compiler/dialect/IERT/ops.td](../tblgen/vpux/compiler/dialect/IERT/ops.td)
 ```swift
 //
-// CTCGreedyDecoderOp
+// SigmoidOp
 //
 
-def IERT_CTCGreedyDecoderOp :
-        // the `1` indicates number of outputs
-        IERT_LayerOp<1, "CTCGreedyDecoder",
+def IERT_SigmoidOp :
+        IERT_LayerOp<1, "Sigmoid",
             [
-                // Use MultiViewOpInterface instead for operations with many outputs
                 ViewLikeOpInterface
             ]
         > {
-    let summary = "InferenceEngine run-time CTCGreedyDecoder layer";
+    let summary = "InferenceEngine run-time Sigmoid layer";
 
     let arguments = (ins
         MemRefOf<[F16, F32]>:$input,
-        MemRefOf<[F16, F32]>:$sequenceLengths,
-
-        // Output memory buffer is an input argument of the operation
-        // It acts as an in/out parameter
-        // Please follow a naming convension and add _buff postfix to the output name
-        MemRefOf<[F16, F32]>:$output_buff,
-
-        UnitAttr:$mergeRepeated
+        MemRefOf<[F16, F32]>:$output_buff
     );
 
     let results = (outs
@@ -958,7 +1075,7 @@ def IERT_CTCGreedyDecoderOp :
 
     let assemblyFormat = [{
         attr-dict
-        `inputs` `(` $input `:` type($input) `,` $sequenceLengths `:` type($sequenceLengths) `)`
+        `inputs` `(` $input `:` type($input) `)`
         `outputs` `(` $output_buff `:` type($output_buff) `)`
         `->` type(results)
     }];
@@ -969,10 +1086,9 @@ Convert previous representation of a layer in IE dialect down to the IERT dialec
 
 [src/vpux_compiler/src/conversion/passes/IE2IERT/bufferize_IE.cpp](../src/conversion/passes/IE2IERT/bufferize_IE.cpp)
 ```cpp
-mlir::Operation* createRTLayer(IE::CTCGreedyDecoderOp origOp, ArrayRef<mlir::Value> allBufs, mlir::OpBuilder& b) {
-    IERT::CTCGreedyDecoderOp::Adaptor newOp(allBufs);
-    return b.create<IERT::CTCGreedyDecoderOp>(origOp.getLoc(), newOp.input(), newOp.sequenceLengths(),
-                                              newOp.output_buff(), origOp.mergeRepeatedAttr());
+mlir::Operation* createRTLayer(IE::SigmoidOp origOp, ArrayRef<mlir::Value> allBufs, mlir::OpBuilder& b) {
+    IERT::SigmoidOp::Adaptor newOp(allBufs);
+    return b.create<IERT::SigmoidOp>(origOp.getLoc(), newOp.getInput(), newOp.getOutputBuff());
 }
 ```
 Verifiers are used to validate state of the operation. It is common to check input size, layout and strides for correctness. Add checks for kernel limitations if present.
@@ -984,13 +1100,13 @@ mlir::LogicalResult LayerRewrite::matchAndRewrite(mlir::Operation* origOp, Array
  const CreateFunc createFunc =
             llvm::TypeSwitch<mlir::Operation*, CreateFunc>(origOp) CASE(mlir::quant::QuantizeCastOp)
     // Add new case for the new operation
-    CASE(IE::CTCGreedyDecoderOp)
+    CASE(IE::SigmoidOp)
 
 }
 ```
 ### IE → IERT lowering lit-test
 
-The bufferization logic will be tested by creating a lit-test in [bufferize_IE_37XX_40XX.mlir](../../../tests/lit/NPU/conversion/passes/IE2IERT/bufferize_IE_37XX_40XX.mlir):
+The bufferization logic will be tested by creating a lit-test in [bufferize_IE_37XX_40XX.mlir](../../../tests/lit/NPU/conversion/passes/IE2IERT/bufferize_IE_37XX_40XX.mlir) for `IE.CTCGreedyDecoder` operation as an example:
 
 ```cpp
 // CHECK-LABEL: @CTCGreedyDecoder

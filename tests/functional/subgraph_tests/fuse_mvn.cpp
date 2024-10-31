@@ -107,8 +107,8 @@ std::vector<bool> isEpsInside = {true, false};
 const auto epsCase = ::testing::Combine(::testing::Values(inputShape), ::testing::Values(targetShape),
                                         ::testing::Values(axis), ::testing::ValuesIn(isEpsInside));
 
-INSTANTIATE_TEST_CASE_P(precommit_FuseMVN, FuseMVNTest_NPU3720, epsCase, FuseMVNTestCommon::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(precommit_FuseMVN, FuseMVNTest_NPU3720, epsCase, FuseMVNTestCommon::getTestCaseName);
 
-INSTANTIATE_TEST_CASE_P(precommit_FuseMVN, FuseMVNTest_NPU4000, epsCase, FuseMVNTestCommon::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(precommit_FuseMVN, FuseMVNTest_NPU4000, epsCase, FuseMVNTestCommon::getTestCaseName);
 
 }  // namespace

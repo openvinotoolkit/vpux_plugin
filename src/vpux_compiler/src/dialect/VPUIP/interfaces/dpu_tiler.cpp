@@ -303,11 +303,7 @@ void vpux::VPUIP::DpuTiler::tileOverHWMixedPrecision(WorkloadSplitPool& splitPoo
 VPUNN::Operation vpux::VPUIP::getOperationType(VPUIP::NCETaskType taskType) {
     switch (taskType) {
     case VPUIP::NCETaskType::CONV:
-        // Here for a compressConv, we still map it to VPUNN CONVOLUTION
-        // VPUNN will process CONVOLUTION as CM_CONVOLUTION when IC < 16 by itself
-        // That means for VPUNN, CM_CONVOLUTION means
-        // * CMajor CONV for IC >= 16
-        // * compressConv for IC <16
+        // Here for a compressConv, we still map it to VPUNN CONVOLUTION for IC < 16
         return VPUNN::Operation::CONVOLUTION;
     case VPUIP::NCETaskType::DWCONV:
         return VPUNN::Operation::DW_CONVOLUTION;
@@ -317,11 +313,8 @@ VPUNN::Operation vpux::VPUIP::getOperationType(VPUIP::NCETaskType taskType) {
         return VPUNN::Operation::AVEPOOL;
     case VPUIP::NCETaskType::ELTWISE:
         return VPUNN::Operation::ELTWISE;
-    case VPUIP::NCETaskType::CMCONV:
-        return VPUNN::Operation::CM_CONVOLUTION;
     // unsupported type for vpunn, use convolution as work around
     case VPUIP::NCETaskType::IDENTITY:
-    case VPUIP::NCETaskType::FCL:
         return VPUNN::Operation::CONVOLUTION;
     default:
         VPUX_THROW("Unsupported operation type: '{0}'", taskType);

@@ -83,6 +83,17 @@ void buildDMABroadcast(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleO
                    nb::to_string(dmaParams.srcLocation));
     }
 
+    // Set runtime resources
+    mlir::PassManager pmBuilderInit(module->getName(), mlir::OpPassManager::Nesting::Implicit);
+    std::optional<int> numTiles = static_cast<int>(maxTileIdx) + 1;
+    std::optional<vpux::Byte> availableCMXMemory = std::nullopt;
+
+    auto initCompilerOptions = VPU::InitCompilerOptions(testArchitecture, VPU::CompilationMode::DefaultHW);
+    initCompilerOptions.setNumberOfDPUGroups(numTiles);
+    initCompilerOptions.setAvailableCMXMemory(availableCMXMemory);
+    VPU::buildInitCompilerPipeline(pmBuilderInit, initCompilerOptions, log);
+    VPUX_THROW_UNLESS(mlir::succeeded(pmBuilderInit.run(module)), "Init compilation failed");
+
     // Handle mlir::func::FuncOp
 
     const auto inputParamType = getMemRefType(VPURT::BufferSection::NetworkInput, inShape, inputType, DimsOrder::NHWC);
@@ -162,9 +173,9 @@ void buildDMABroadcast(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleO
     const auto duplicatedDistrModeAttr = VPU::DistributionModeAttr::get(ctx, VPU::DistributionMode::DUPLICATED);
     const auto numClustersAttr = getIntAttr(ctx, numBroadcastTiles);
 
-    auto distrTensorAttr = VPU::DistributedTensorAttr::get(ctx, duplicatedDistrModeAttr, nullptr, nullptr, nullptr,
-                                                           nullptr, numClustersAttr, nullptr, nullptr, nullptr, nullptr,
-                                                           nullptr, nullptr, nullptr);
+    auto distrTensorAttr = VPU::DistributionInfoAttr::get(ctx, duplicatedDistrModeAttr, nullptr, nullptr, nullptr,
+                                                          nullptr, numClustersAttr, nullptr, nullptr, nullptr, nullptr,
+                                                          nullptr, nullptr, nullptr);
 
     auto distributedCMXOutputType = VPUIP::DistributedBufferType::get(ctx, outShape, tensorTypeIf.getElementType(),
                                                                       layout, dimsSpace, distrTensorAttr);
@@ -201,21 +212,12 @@ void buildDMABroadcast(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleO
 
     funcbuilder.create<mlir::func::ReturnOp>(builder.getUnknownLoc(), funcOutputs);
 
-    // Set runtime resources
-    mlir::PassManager pm(module->getName(), mlir::OpPassManager::Nesting::Implicit);
-    std::optional<int> numTiles = static_cast<int>(maxTileIdx) + 1;
-    std::optional<vpux::Byte> availableCMXMemory = std::nullopt;
-
-    auto initCompilerOptions = VPU::InitCompilerOptions(testArchitecture, VPU::CompilationMode::DefaultHW);
-    initCompilerOptions.setNumberOfDPUGroups(numTiles);
-    initCompilerOptions.setAvailableCMXMemory(availableCMXMemory);
-    VPU::buildInitCompilerPipeline(pm, initCompilerOptions, log);
-
+    mlir::PassManager pmBuilderEnd(module->getName(), mlir::OpPassManager::Nesting::Implicit);
     // Assign physical barriers instead of virtual barriers
-    pm.addPass(VPURT::createAssignPhysicalBarriersPass(false, log));
-    pm.addPass(VPURT::createBarrierSimulationPass(log));
+    pmBuilderEnd.addPass(VPURT::createAssignPhysicalBarriersPass(false, false, std::nullopt, log));
+    pmBuilderEnd.addPass(VPURT::createBarrierSimulationPass(log));
 
-    VPUX_THROW_UNLESS(mlir::succeeded(pm.run(module)), "Compilation failed");
+    VPUX_THROW_UNLESS(mlir::succeeded(pmBuilderEnd.run(module)), "Compilation failed");
 
     SmallVector<mlir::Type> outputTensorTypes(
             numBroadcastTiles, getTensorType(ShapeRef(outShape), outputType, vpux::DimsOrder::NHWC, nullptr));

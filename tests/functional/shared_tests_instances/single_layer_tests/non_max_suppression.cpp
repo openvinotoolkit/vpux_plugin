@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -14,7 +14,6 @@
 #include "single_op_tests/non_max_suppression.hpp"
 
 namespace ov {
-
 namespace test {
 
 class NmsLayerTestCommon : public NmsLayerTest, virtual public VpuOv2LayerTest {
@@ -133,26 +132,20 @@ protected:
     }
 };
 
-class NmsLayerTest_NPU3720 : public NmsLayerTestCommon {};
-class NmsLayerTest_NPU4000 : public NmsLayerTestCommon {};
-
-TEST_P(NmsLayerTest_NPU3720, HW) {
+TEST_P(NmsLayerTestCommon, NPU3720_HW) {
     setDefaultHardwareMode();
     run(Platform::NPU3720);
 }
 
-TEST_P(NmsLayerTest_NPU4000, HW) {
+TEST_P(NmsLayerTestCommon, NPU4000_HW) {
     setDefaultHardwareMode();
     run(Platform::NPU4000);
 }
 
 }  // namespace test
-
 }  // namespace ov
 
-using ov::test::NmsLayerTest_NPU3720;
-using ov::test::NmsLayerTest_NPU4000;
-
+using namespace ov::test;
 namespace {
 
 const std::vector<ov::test::InputShapeParams> inShapeParams = {
@@ -181,7 +174,6 @@ std::vector<ov::element::Type> thrType = {
         ov::element::f16,
 };
 
-// ------- NPU3720/4000 full scope -------
 const auto nmsParams = ::testing::Combine(
         ::testing::ValuesIn(inShapeParams),
         ::testing::Combine(::testing::ValuesIn(paramsType), ::testing::ValuesIn(maxBoxType),
@@ -190,12 +182,9 @@ const auto nmsParams = ::testing::Combine(
         ::testing::ValuesIn(sigmaThreshold), ::testing::ValuesIn(encodType), ::testing::ValuesIn(sortResDesc),
         ::testing::ValuesIn(outType), ::testing::Values(ov::test::utils::DEVICE_NPU));
 
-INSTANTIATE_TEST_CASE_P(DISABLED_TMP_smoke_NmsLayerTest, NmsLayerTest_NPU3720, nmsParams,
-                        NmsLayerTest_NPU3720::getTestCaseName);
-INSTANTIATE_TEST_CASE_P(DISABLED_TMP_smoke_NmsLayerTest, NmsLayerTest_NPU4000, nmsParams,
-                        NmsLayerTest_NPU4000::getTestCaseName);
+INSTANTIATE_TEST_CASE_P(DISABLED_TMP_smoke_NmsLayerTest, NmsLayerTestCommon, nmsParams,
+                        NmsLayerTestCommon::getTestCaseName);
 
-// --------- NPU3720 precommit scope ---------
 const std::vector<ov::test::InputShapeParams> inShapeParamsSmoke = {ov::test::InputShapeParams{2, 9, 12}};
 const std::vector<int32_t> maxOutBoxPerClassSmoke = {5};
 const std::vector<float> iouThresholdSmoke = {0.3f};
@@ -212,6 +201,6 @@ const auto nmsParamsSmoke =
                          ::testing::ValuesIn(encodTypeSmoke), ::testing::ValuesIn(sortResDesc),
                          ::testing::ValuesIn(outType), ::testing::Values(ov::test::utils::DEVICE_NPU));
 
-INSTANTIATE_TEST_CASE_P(smoke_precommit_NmsLayerTest, NmsLayerTest_NPU3720, nmsParamsSmoke,
-                        NmsLayerTest_NPU3720::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_NmsLayerTest, NmsLayerTestCommon, nmsParamsSmoke,
+                         NmsLayerTestCommon::getTestCaseName);
 }  // namespace

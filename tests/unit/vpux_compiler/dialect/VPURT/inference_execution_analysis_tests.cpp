@@ -249,7 +249,6 @@ TEST_F(MLIR_InferenceExecutionAnalysis, CheckCycleUpdateOnMultiQueueIR) {
                 %bar3 = VPURT.ConfigureBarrier<3> -> !VPURT.Barrier
 
                 %cst_WT = const.Declare memref<16x1x1x4xsi32> = dense<2> : tensor<16x1x1x4xsi32>
-                %cst_AW = const.Declare memref<1x1x1x16xui8> = dense<1> : tensor<1x1x1x16xui8>
 
                 %netin = VPURT.DeclareBuffer <NetworkInput> [0] <0> -> memref<1x16x24x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, @DDR>
                 %buf_ddr_0 = VPURT.DeclareBuffer <DDR> <0> -> memref<1x16x24x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, @DDR>
@@ -258,8 +257,6 @@ TEST_F(MLIR_InferenceExecutionAnalysis, CheckCycleUpdateOnMultiQueueIR) {
                 %buf_cmx1_0 = VPURT.DeclareBuffer <CMX_NN> [1] <0> -> memref<1x16x24x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 1]>
                 %buf_cmx0_WT = VPURT.DeclareBuffer <CMX_NN> [0] <0> -> memref<16x1x1x4xsi32, [@CMX_NN, 0]>
                 %buf_cmx1_WT = VPURT.DeclareBuffer <CMX_NN> [1] <0> -> memref<16x1x1x4xsi32, [@CMX_NN, 1]>
-                %buf_cmx0_AW = VPURT.DeclareBuffer <CMX_NN> [0] <0> -> memref<1x1x1x16xui8, [@CMX_NN, 0]>
-                %buf_cmx1_AW = VPURT.DeclareBuffer <CMX_NN> [1] <0> -> memref<1x1x1x16xui8, [@CMX_NN, 1]>
 
                 %buf_cmx0_1 = VPURT.DeclareBuffer <CMX_NN> [0] <0> -> memref<1x16x24x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>
                 %buf_cmx1_1 = VPURT.DeclareBuffer <CMX_NN> [1] <0> -> memref<1x16x24x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 1]>
@@ -292,14 +289,6 @@ TEST_F(MLIR_InferenceExecutionAnalysis, CheckCycleUpdateOnMultiQueueIR) {
                     %0 = VPUIP.NNDMA {port = 1 : i64} inputs(%cst_WT : memref<16x1x1x4xsi32>) outputs(%buf_cmx1_WT : memref<16x1x1x4xsi32, [@CMX_NN, 1]>) -> memref<16x1x1x4xsi32, [@CMX_NN, 1]>
                 }
 
-                VPURT.Task {
-                    %0 = VPUIP.NNDMA {port = 0 : i64} inputs(%cst_AW : memref<1x1x1x16xui8>) outputs(%buf_cmx0_AW : memref<1x1x1x16xui8, [@CMX_NN, 0]>) -> memref<1x1x1x16xui8, [@CMX_NN, 0]>
-                }
-
-                VPURT.Task {
-                    %0 = VPUIP.NNDMA {port = 1 : i64} inputs(%cst_AW : memref<1x1x1x16xui8>) outputs(%buf_cmx1_AW : memref<1x1x1x16xui8, [@CMX_NN, 1]>) -> memref<1x1x1x16xui8, [@CMX_NN, 1]>
-                }
-
                 VPURT.Task updates(%bar0 : !VPURT.Barrier) {
                     %0 = VPUIP.NNDMA {port = 0 : i64} inputs(%buf_ddr_0 : memref<1x16x24x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, @DDR>) outputs(%buf_cmx0_0 : memref<1x16x24x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>) -> memref<1x16x24x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>
                 }
@@ -309,10 +298,9 @@ TEST_F(MLIR_InferenceExecutionAnalysis, CheckCycleUpdateOnMultiQueueIR) {
                 }
 
                 VPURT.Task waits(%bar0 : !VPURT.Barrier) updates(%bar2 : !VPURT.Barrier) {
-                    %0 = VPUIP.NCEClusterTask {activation_window_channel_length = 4 : i64, kernel_padding = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, kernel_size = [1, 1], kernel_strides = [1, 1], task_type = #VPUIP.nce_task_type<MAXPOOL>}
+                    %0 = VPUIP.NCEClusterTask {kernel_padding = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, kernel_size = [1, 1], kernel_strides = [1, 1], task_type = #VPUIP.nce_task_type<MAXPOOL>}
                     input(%buf_cmx0_0 : memref<1x16x24x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>)
                     weight_table(%buf_cmx0_WT : memref<16x1x1x4xsi32, [@CMX_NN, 0]>)
-                    activation_window(%buf_cmx0_AW : memref<1x1x1x16xui8, [@CMX_NN, 0]>)
                     parent_input(%buf_cmx0_0 : memref<1x16x24x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>)
                     parent_output(%buf_cmx0_1 : memref<1x16x24x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>)
                     outputs(%buf_cmx0_1 : memref<1x16x24x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]>) -> memref<1x16x24x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 0]> variants : {
@@ -322,10 +310,9 @@ TEST_F(MLIR_InferenceExecutionAnalysis, CheckCycleUpdateOnMultiQueueIR) {
                 }
 
                 VPURT.Task waits(%bar1 : !VPURT.Barrier) updates(%bar3 : !VPURT.Barrier) {
-                    %0 = VPUIP.NCEClusterTask {activation_window_channel_length = 4 : i64, kernel_padding = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, kernel_size = [1, 1], kernel_strides = [1, 1], task_type = #VPUIP.nce_task_type<MAXPOOL>}
+                    %0 = VPUIP.NCEClusterTask {kernel_padding = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, kernel_size = [1, 1], kernel_strides = [1, 1], task_type = #VPUIP.nce_task_type<MAXPOOL>}
                     input(%buf_cmx1_0 : memref<1x16x24x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 1]>)
                     weight_table(%buf_cmx1_WT : memref<16x1x1x4xsi32, [@CMX_NN, 1]>)
-                    activation_window(%buf_cmx1_AW : memref<1x1x1x16xui8, [@CMX_NN, 1]>)
                     parent_input(%buf_cmx1_0 : memref<1x16x24x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 1]>)
                     parent_output(%buf_cmx1_1 : memref<1x16x24x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 1]>)
                     outputs(%buf_cmx1_1 : memref<1x16x24x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 1]>) -> memref<1x16x24x24xf16, affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>, [@CMX_NN, 1]> variants : {
@@ -398,8 +385,8 @@ TEST_F(MLIR_InferenceExecutionAnalysis, CheckCycleUpdateOnMultiQueueIR) {
         }
     }
 
-    ASSERT_EQ(tasksCostDmaP0.size(), 4);
-    ASSERT_EQ(tasksCostDmaP1.size(), 4);
+    ASSERT_EQ(tasksCostDmaP0.size(), 3);
+    ASSERT_EQ(tasksCostDmaP1.size(), 3);
     ASSERT_EQ(tasksCostNce.size(), 2);
     ASSERT_EQ(tasksCostSwKernel.size(), 4);
 

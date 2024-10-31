@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
-// RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%"  --correct-NCE-workloads %s | FileCheck %s
+// RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --correct-NCE-workloads %s | FileCheck %s
 // REQUIRES: arch-NPU40XX
 
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
@@ -19,6 +19,7 @@ func.func @ConvLargeSparseOutput(%input_ddr: tensor<1x64x40x40xf16, {order = #NH
     %weights_table = VPU.Copy(%cst_weights_table) {out_mem_space = @CMX_NN} : tensor<384x1x1x4xsi32, {order = #NHWC}> -> tensor<384x1x1x4xsi32, {mem_space = @CMX_NN, order = #NHWC}>
 
     %conv_out = VPU.NCE.Convolution(%input, %weights, %weights_table) {
+            opaque_ppe = #VPU.PPEStub<>,
             pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
             rawFilterShape = [384, 64, 4, 4],
             strides = [1, 1]
@@ -42,6 +43,7 @@ func.func @ConvLargeSparseOutput(%input_ddr: tensor<1x64x40x40xf16, {order = #NH
     // CHECK-SAME:      -> tensor<384x1x1x4xsi32, {mem_space = @CMX_NN, order = #NHWC}>
 
     // CHECK:       [[CONV_OUT:%.+]] = VPU.NCE.Convolution([[INPUT]], [[WEIGHTS]], [[WEIGHTS_TABLE]]) {
+    // CHECK-SAME:      opaque_ppe = #VPU.PPEStub<>,
     // CHECK-SAME:      pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
     // CHECK-SAME:      strides = [1, 1]}
     // CHECK-SAME:      -> !VPU.SparseTensor<data=tensor<1x384x37x37xf16, {mem_space = @CMX_NN, order = #NHWC}>, sparsity_map=tensor<1x384x37x37xi1, {mem_space = @CMX_NN, order = #NHWC}>> {
@@ -61,13 +63,11 @@ func.func @ConvLargeSparseOutput(%input_ddr: tensor<1x64x40x40xf16, {order = #NH
 func.func @OptimizeWorkloadForDepthwiseConv(%arg0: tensor<1x128x56x56xf16, {order = #NHWC}>) -> tensor<1x128x54x54xf16, {order = #NHWC}> {
     %cst0 = const.Declare tensor<128x16x1x1xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<128x16x1x1xf16>, [#const.Reorder<#NHWC>]
     %wt = const.Declare tensor<128x1x1x4xsi32, {order = #NHWC}> = dense<10> : tensor<128x1x1x4xsi32>, [#const.Reorder<#NHWC>]
-    %aw = const.Declare tensor<1x1x1x16xui8, {order = #NHWC}> = dense<1> : tensor<1x1x1x16xui8>, [#const.Reorder<#NHWC>]
 
     %0 = VPU.Copy(%arg0) {out_mem_space = [@CMX_NN, 0]} : tensor<1x128x56x56xf16, {order = #NHWC}> -> tensor<1x128x56x56xf16, {mem_space = [@CMX_NN, 0], order = #NHWC}>
     %1 = VPU.Copy(%cst0) {out_mem_space = [@CMX_NN, 0]} : tensor<128x16x1x1xf16, {order = #NHWC}> -> tensor<128x16x1x1xf16, {mem_space = [@CMX_NN, 0], order = #NHWC}>
     %2 = VPU.Copy(%wt) {out_mem_space = [@CMX_NN, 0]} : tensor<128x1x1x4xsi32, {order = #NHWC}> -> tensor<128x1x1x4xsi32, {mem_space = [@CMX_NN, 0], order = #NHWC}>
-    %3 = VPU.Copy(%aw) {out_mem_space = [@CMX_NN, 0]} : tensor<1x1x1x16xui8, {order = #NHWC}> -> tensor<1x1x1x16xui8, {mem_space = [@CMX_NN, 0], order = #NHWC}>
-    %4 = VPU.NCE.DepthConvolution(%0, %1, %2, %3) {activation_window_channel_length = 18 : i64, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, rawFilterShape = [128, 1, 3, 3], strides = [1, 1]} -> tensor<1x128x54x54xf16, {mem_space = [@CMX_NN, 0], order = #NHWC}> {
+    %4 = VPU.NCE.DepthConvolution(%0, %1, %2) {opaque_ppe = #VPU.PPEStub<>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, rawFilterShape = [128, 1, 3, 3], strides = [1, 1]} -> tensor<1x128x54x54xf16, {mem_space = [@CMX_NN, 0], order = #NHWC}> {
       VPU.DPU.Workload outOffsets [0, 0, 0, 0] outSizes [1, 128, 28, 28] <left = 0 : i64, right = 1 : i64, top = 0 : i64, bottom = 1 : i64> <CUBOID_16x16>
     }
 
@@ -92,13 +92,11 @@ func.func @OptimizeWorkloadForDepthwiseConv(%arg0: tensor<1x128x56x56xf16, {orde
 func.func @OptimizeWorkloadForDepthwiseConvWithU8(%arg0: tensor<1x128x56x56x!qElemType, {order = #NHWC}>) -> tensor<1x128x54x54x!qElemType, {order = #NHWC}> {
     %cst0 = const.Declare tensor<128x16x1x1xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<128x16x1x1xf16>, [#const.Reorder<#NHWC>]
     %wt = const.Declare tensor<128x1x1x4xsi32, {order = #NHWC}> = dense<10> : tensor<128x1x1x4xsi32>, [#const.Reorder<#NHWC>]
-    %aw = const.Declare tensor<1x1x1x16xui8, {order = #NHWC}> = dense<1> : tensor<1x1x1x16xui8>, [#const.Reorder<#NHWC>]
 
     %0 = VPU.Copy(%arg0) {out_mem_space = [@CMX_NN, 0]} : tensor<1x128x56x56x!qElemType, {order = #NHWC}> -> tensor<1x128x56x56x!qElemType, {mem_space = [@CMX_NN, 0], order = #NHWC}>
     %1 = VPU.Copy(%cst0) {out_mem_space = [@CMX_NN, 0]} : tensor<128x16x1x1xf16, {order = #NHWC}> -> tensor<128x16x1x1xf16, {mem_space = [@CMX_NN, 0], order = #NHWC}>
     %2 = VPU.Copy(%wt) {out_mem_space = [@CMX_NN, 0]} : tensor<128x1x1x4xsi32, {order = #NHWC}> -> tensor<128x1x1x4xsi32, {mem_space = [@CMX_NN, 0], order = #NHWC}>
-    %3 = VPU.Copy(%aw) {out_mem_space = [@CMX_NN, 0]} : tensor<1x1x1x16xui8, {order = #NHWC}> -> tensor<1x1x1x16xui8, {mem_space = [@CMX_NN, 0], order = #NHWC}>
-    %4 = VPU.NCE.DepthConvolution(%0, %1, %2, %3) {activation_window_channel_length = 54 : i64, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, rawFilterShape = [128, 1, 3, 3], strides = [1, 1]} -> tensor<1x128x54x54x!qElemType, {mem_space = [@CMX_NN, 0], order = #NHWC}> {
+    %4 = VPU.NCE.DepthConvolution(%0, %1, %2) {opaque_ppe = #VPU.PPEStub<>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, rawFilterShape = [128, 1, 3, 3], strides = [1, 1]} -> tensor<1x128x54x54x!qElemType, {mem_space = [@CMX_NN, 0], order = #NHWC}> {
       VPU.DPU.Workload outOffsets [0, 0, 0, 0] outSizes [1, 128, 28, 28] <left = 0 : i64, right = 1 : i64, top = 0 : i64, bottom = 1 : i64> <CUBOID_16x16>
     }
 
@@ -162,8 +160,7 @@ func.func @NCEPermuteClustered(%arg0: !Input_DDR) -> !Output_CMX {
         %2 = VPU.NCE.Permute(%arg1) {
             dstElemType = !qElemType0, dstOrder = #NHWC,
             expandedChannels = 4 : i64, minimumHardwareExecutionCost = 4294967195 : i64,
-            Output_CMXppe = #VPU.PPETask<mode = <NOOP>, clamp_low = 0 : i64, clamp_high = 255 : i64,
-            lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>
+            opaque_ppe = #VPU.PPEStub<>
         } -> !OutputStub_CMX {
             VPU.DPU.Workload outOffsets [0, 0, 0, 0] outSizes [1, 4, 112, 224] <left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64> <CUBOID_16x16> attributes {cluster_id = 0 : i64}
             VPU.DPU.Workload outOffsets [0, 0, 112, 0] outSizes [1, 4, 112, 224] <left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64> <CUBOID_16x16> attributes {cluster_id = 1 : i64}

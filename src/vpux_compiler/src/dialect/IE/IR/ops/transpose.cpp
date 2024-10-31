@@ -338,10 +338,10 @@ void vpux::IE::TransposeOp::getCanonicalizationPatterns(mlir::RewritePatternSet&
 
 mlir::OpFoldResult vpux::IE::TransposeOp::fold(FoldAdaptor adaptor) {
     auto operands = adaptor.getOperands();
-    if (const auto cst = operands[0].dyn_cast_or_null<Const::ContentAttr>()) {
+    if (const auto cst = operands[0].dyn_cast_or_null<Const::EphemeralContentAttr>()) {
         if (getOrderValue().has_value()) {
             const auto orderAttr = DimsOrder::fromAffineMap(getOrderValue().value());
-            return cst.transpose(orderAttr);
+            return static_cast<Const::ContentAttr>(cst).transform().transpose(orderAttr).get();
         }
     }
 

@@ -7,6 +7,7 @@
 #include "vpux/compiler/dialect/IE/transforms/passes.hpp"
 #include "vpux/compiler/dialect/const/utils/utils.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
+#include "vpux/compiler/utils/rewriter.hpp"
 #include "vpux/utils/core/range.hpp"
 
 #include <mlir/Transforms/DialectConversion.h>
@@ -28,7 +29,10 @@ auto getConcatResult(mlir::PatternRewriter& rewriter, vpux::Dim axis, int64_t fa
         concatInputs.push_back(constZeros);
     }
 
-    return rewriter.create<IE::ConcatOp>(origOp.getLoc(), mlir::ValueRange(concatInputs), axis, 1, factor).getOutput();
+    return rewriter
+            .create<IE::ConcatOp>(takeOpLoc(origOp, StringLiteral("concat_cst_d{0}"), axis.ind()),
+                                  mlir::ValueRange(concatInputs), axis, 1, factor)
+            .getOutput();
 }
 
 //
@@ -118,7 +122,7 @@ mlir::LogicalResult ConvertUpsamplingToStridedConcatPass::UpsamplingOpConverter:
         }
         if (needSlicing && (sliceShape != inputShape)) {
             const Shape sliceOffsets{0, 0, 0, 0};
-            auto slice = rewriter.create<IE::SliceOp>(origOp->getLoc(), upsamplingResult,
+            auto slice = rewriter.create<IE::SliceOp>(takeOpLoc(origOp, "slice_in"), upsamplingResult,
                                                       getIntArrayAttr(rewriter, sliceOffsets.raw()),
                                                       getIntArrayAttr(rewriter, sliceShape.raw()));
             upsamplingResult = slice.getResult();
@@ -140,8 +144,9 @@ mlir::LogicalResult ConvertUpsamplingToStridedConcatPass::UpsamplingOpConverter:
         auto padBeginAttr = getIntArrayAttr(rewriter, padingLAtt);
         auto padEndAttr = getIntArrayAttr(rewriter, padingRAtt);
         auto zeroFpAttr = getFPAttr(rewriter, 0.0f);
-        auto padingOp = rewriter.create<IE::PadOp>(origOp->getLoc(), upsamplingResult, nullptr, nullptr, nullptr,
-                                                   padBeginAttr, padEndAttr, zeroFpAttr, IE::PadMode::CONSTANT);
+        auto padingOp =
+                rewriter.create<IE::PadOp>(takeOpLoc(origOp, "pad_out"), upsamplingResult, nullptr, nullptr, nullptr,
+                                           padBeginAttr, padEndAttr, zeroFpAttr, IE::PadMode::CONSTANT);
         upsamplingResult = padingOp.getOutput();
     }
 

@@ -442,6 +442,48 @@ mlir::LogicalResult vpux::VPU::verifyRegionYoloLayoutInfo(mlir::Operation* op) {
     return VPU::verifySameInOutSpecificDimsOrder(op, {DimsOrder::NCHW});
 }
 
+//
+// inferLSTMSequenceLayoutInfo
+//
+
+void vpux::VPU::inferLSTMSequenceLayoutInfo(mlir::Operation* op, IE::LayerLayoutInfo& info) {
+    auto lstmSequenceOp = mlir::dyn_cast<IE::LSTMSequenceOp>(op);
+    VPUX_THROW_UNLESS(lstmSequenceOp, "Expected an IE::LSTMSequenceOp, got {0}", op);
+
+    const size_t firstOptionalInputInd = 3;
+    const auto inputFilter = [=](size_t ind) {
+        return ind < firstOptionalInputInd;
+    };
+    const auto outputFilter = [](size_t) {
+        return true;
+    };
+    IE::fillDefaultLayoutInfo(info, inputFilter, outputFilter);
+
+    size_t ind = firstOptionalInputInd;
+    if (lstmSequenceOp.getWeights()) {
+        info.setInput(ind++, DimsOrder::NWHC);  // weights
+    }
+    info.setInput(ind++, DimsOrder::NWHC);  // recurrenceWeights
+    if (lstmSequenceOp.getBiases()) {
+        info.setInput(ind++, DimsOrder::NCWH);  // biases
+    }
+}
+
+mlir::LogicalResult vpux::VPU::verifyLSTMSequenceLayoutInfo(mlir::Operation* op) {
+    auto lstmSequenceOp = mlir::dyn_cast<VPU::LSTMSequenceOp>(op);
+    VPUX_THROW_UNLESS(lstmSequenceOp, "Expected a VPU::LSTMSequenceOp, got {0}", op);
+
+    if (DimsOrder::fromValue(lstmSequenceOp.getInputData()) != DimsOrder::NCHW ||
+        DimsOrder::fromValue(lstmSequenceOp.getInitialHiddenState()) != DimsOrder::NCHW ||
+        DimsOrder::fromValue(lstmSequenceOp.getInitialCellState()) != DimsOrder::NCHW ||
+        DimsOrder::fromValue(lstmSequenceOp.getReccurenceWeights()) != DimsOrder::NWHC ||
+        DimsOrder::fromValue(lstmSequenceOp.getSyncBuffer()) != DimsOrder::NCHW) {
+        return mlir::failure();
+    }
+
+    return mlir::success();
+}
+
 void vpux::VPU::inferDequantizeLayoutInfo(mlir::Operation* origOp, IE::LayerLayoutInfo& info) {
     const auto inType = origOp->getOperand(0).getType().cast<vpux::NDTypeInterface>().getElementType();
 
@@ -699,6 +741,24 @@ mlir::LogicalResult vpux::VPU::verifyScatterNDUpdateLayoutInfo(mlir::Operation* 
     return mlir::success();
 }
 
+mlir::LogicalResult vpux::VPU::verifySWGroupConvolutionLayoutInfo(mlir::Operation* op) {
+    auto layer = mlir::dyn_cast<VPU::LayerOpInterface>(op);
+    if (layer == nullptr) {
+        return errorAt(op, "Operation '{0}' doesn't implement Layer interface", op->getName());
+    }
+
+    const auto filter = layer.getInputs()[1];
+
+    const auto filterOrder = DimsOrder::fromValue(filter);
+
+    if (filterOrder != DimsOrder::OIYX) {
+        return errorAt(op->getLoc(), "Operation filter order is not as expected. filterL={0}, expectedFilterL=OIYX",
+                       filterOrder);
+    }
+
+    return VPU::verifySameInOutSpecificDimsOrder(op,
+                                                 {DimsOrder::NCHW, DimsOrder::NHWC, DimsOrder::CHW, DimsOrder::HWC});
+}
 mlir::LogicalResult vpux::VPU::verifyNCEPermuteLayoutInfo(mlir::Operation* op) {
     auto layer = mlir::dyn_cast<VPU::LayerOpInterface>(op);
     if (layer == nullptr) {

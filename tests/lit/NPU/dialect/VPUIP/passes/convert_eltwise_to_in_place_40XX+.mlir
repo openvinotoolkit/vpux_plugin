@@ -58,7 +58,7 @@ func.func @InplaceEltwiseUnequalTensorSize(%activation: memref<1x64x128x128x!qEl
               DPUTask {cluster_id = 0 : i64, inEnd = [127, 64, 63], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [127, 63, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 0 : i64>}
               DPUTask {cluster_id = 1 : i64, inEnd = [127, 64, 63], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [127, 63, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 0 : i64, bottom = 1 : i64>}
           } PPE : {
-            PPETask <LPRELU> {clamp_high = 255 : i64, clamp_low = 0 : i64, fp_prelu_alpha = 0.300048828125 : f64, lrelu_mult = 1229 : i64, lrelu_shift = 12 : i64}
+            PPETask {opaque_ppe = #VPU.PPEStub<>}
           }
     }
 
@@ -83,7 +83,6 @@ func.func @InplaceEltwiseUnequalTensorSize(%activation: memref<1x64x128x128x!qEl
                                              %2 as %arg3: memref<1x64x128x128x!qElemType3, #NHWC, @CMX_NN>)
                                       outputs(%eltwise_cmx_outbuf as %arg4: memref<1x64x128x128x!qElemType2, #NHWC, @CMX_NN>) -> !DistributedType2 {
       %235 = VPUIP.NCEClusterTask {
-              activation_window_channel_length = 0 : i64,
               is_inplace = true,
               minimumHardwareExecutionCost = 4294967300 : i64,
               task_type = #VPUIP.nce_task_type<ELTWISE>
@@ -96,7 +95,7 @@ func.func @InplaceEltwiseUnequalTensorSize(%activation: memref<1x64x128x128x!qEl
               DPUTask {cluster_id = 0 : i64, inEnd = [127, 63, 63], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [127, 63, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
               DPUTask {cluster_id = 1 : i64, inEnd = [127, 64, 63], inStart = [0, 1, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [127, 63, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
           } PPE : {
-            PPETask <NOOP> {clamp_high = 255 : i64, clamp_low = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64, in1_quant_mult = [29455], in2_quant_mult = [40224], lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_mult = [18659], quant_post_shift = 0 : i64, quant_shift = [30]}
+            PPETask {opaque_ppe = #VPU.PPEStub<>}
           }
     }
 
@@ -140,7 +139,7 @@ func.func @InplaceEltwiseUnequalTensorSize(%activation: memref<1x64x128x128x!qEl
     // CHECK:                 DPUTask {cluster_id = 0 : i64, inEnd = [127, 64, 63], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [127, 63, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 0 : i64>}
     // CHECK:                 DPUTask {cluster_id = 1 : i64, inEnd = [127, 64, 63], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [127, 63, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 0 : i64, bottom = 1 : i64>}
     // CHECK:               } PPE : {
-    // CHECK:                 PPETask <LPRELU> {clamp_high = 255 : i64, clamp_low = 0 : i64, fp_prelu_alpha = 0.300048828125 : f64, lrelu_mult = 1229 : i64, lrelu_shift = 12 : i64}
+    // CHECK:                 PPETask {opaque_ppe = #VPU.PPEStub<>}
     // CHECK:               }
     // CHECK:             }
 
@@ -207,7 +206,7 @@ func.func @InplaceEltwiseUnequalTensorSize(%activation: memref<1x64x128x128x!qEl
     // CHECK-SAME:                         strides = [1, 1],
     // CHECK-SAME:                         num_clusters = 2 : i64,
     // CHECK-SAME:                         uniform_distributed_segments}> {
-    // CHECK: [[INNER_OP:%.+]] = VPUIP.NCEClusterTask {activation_window_channel_length = 0 : i64, is_inplace = true, minimumHardwareExecutionCost = 4294967300 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
+    // CHECK: [[INNER_OP:%.+]] = VPUIP.NCEClusterTask {is_inplace = true, minimumHardwareExecutionCost = 4294967300 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>}
     // CHECK-SAME:                input([[ARG3]] : memref<1x64x128x128x!qElemType3, #NHWC, @CMX_NN>)
     // CHECK-SAME:                weights([[ARG4]] : memref<1x64x128x128x!qElemType3, #NHWC, @CMX_NN>)
     // CHECK-SAME:                parent_input([[ARG3]] : memref<1x64x128x128x!qElemType3, #NHWC, @CMX_NN>)
@@ -216,7 +215,7 @@ func.func @InplaceEltwiseUnequalTensorSize(%activation: memref<1x64x128x128x!qEl
     // CHECK:                 DPUTask {cluster_id = 0 : i64, inEnd = [127, 63, 63], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [127, 63, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     // CHECK:                 DPUTask {cluster_id = 1 : i64, inEnd = [127, 64, 63], inStart = [0, 1, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [127, 63, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     // CHECK:                 } PPE : {
-    // CHECK:                   PPETask <NOOP> {clamp_high = 255 : i64, clamp_low = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64, in1_quant_mult = [29455], in2_quant_mult = [40224], lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_mult = [18659], quant_post_shift = 0 : i64, quant_shift = [30]}
+    // CHECK:                   PPETask {opaque_ppe = #VPU.PPEStub<>}
     // CHECK:                 }
     // CHECK:             }
 

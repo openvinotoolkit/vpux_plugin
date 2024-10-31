@@ -18,7 +18,7 @@ using namespace elf;
 namespace {
 
 ELFHeader createTemplateFileHeader() {
-    ELFHeader fileHeader;
+    ELFHeader fileHeader{};
 
     fileHeader.e_ident[EI_MAG0] = ELFMAG0;
     fileHeader.e_ident[EI_MAG1] = ELFMAG1;
@@ -37,27 +37,15 @@ ELFHeader createTemplateFileHeader() {
     fileHeader.e_entry = 0;
     fileHeader.e_flags = 0;
     fileHeader.e_shoff = sizeof(ELFHeader);
-    fileHeader.e_phoff = 0;
     fileHeader.e_shstrndx = 0;
     fileHeader.e_shnum = 0;
-    fileHeader.e_phnum = 0;
 
     fileHeader.e_ehsize = sizeof(ELFHeader);
-    fileHeader.e_phentsize = sizeof(ProgramHeader);
     fileHeader.e_shentsize = sizeof(SectionHeader);
 
     return fileHeader;
 }
 
-ElfDDRAccessManager::Config createDefaultElfDDRAccessManagerConfig() {
-    ElfDDRAccessManager::Config config;
-
-    config.mBufferManager = nullptr;
-    config.mInPlaceConfig.mIsInPlaceEnabled = false;
-    config.mInPlaceConfig.mIsAlignmentCheckEnabled = false;
-
-    return config;
-}
 constexpr size_t headerTableSize = 3;
 constexpr size_t indexToCheck = 1;
 
@@ -66,7 +54,8 @@ constexpr size_t indexToCheck = 1;
 TEST(ELFReaderTests, ELFReaderThrowsOnIncorrectMagic) {
     auto fileHeader = createTemplateFileHeader();
     fileHeader.e_ident[EI_MAG3] = 'D';
-    auto accessor = ElfDDRAccessManager(reinterpret_cast<uint8_t*>(&fileHeader), sizeof(fileHeader));
+    auto accessor =
+            DDRAccessManager<elf::DDRAlwaysEmplace>(reinterpret_cast<uint8_t*>(&fileHeader), sizeof(fileHeader));
 
     ASSERT_ANY_THROW(auto reader = Reader<ELF_Bitness::Elf64>(&accessor));
 }
@@ -83,7 +72,7 @@ TEST(ELFReaderTests, ReadingTheCorrectELFHeaderDoesntThrow) {
                   reinterpret_cast<uint8_t*>(&fileHeader) + sizeof(fileHeader));
     buffer.insert(buffer.end(), reinterpret_cast<uint8_t*>(sectionHeaders.data()),
                   reinterpret_cast<uint8_t*>(sectionHeaders.data()) + sizeof(SectionHeader) * headerTableSize);
-    auto accessor = ElfDDRAccessManager(buffer.data(), buffer.size());
+    auto accessor = DDRAccessManager<elf::DDRAlwaysEmplace>(buffer.data(), buffer.size());
 
     OV_ASSERT_NO_THROW(auto reader = Reader<ELF_Bitness::Elf64>(&accessor));
 }
@@ -100,7 +89,7 @@ TEST(ELFReaderTests, ELFHeaderIsReadCorrectly) {
                   reinterpret_cast<uint8_t*>(&fileHeader) + sizeof(fileHeader));
     buffer.insert(buffer.end(), reinterpret_cast<uint8_t*>(sectionHeaders.data()),
                   reinterpret_cast<uint8_t*>(sectionHeaders.data()) + sizeof(SectionHeader) * headerTableSize);
-    auto accessor = ElfDDRAccessManager(buffer.data(), buffer.size());
+    auto accessor = DDRAccessManager<elf::DDRAlwaysEmplace>(buffer.data(), buffer.size());
 
     const auto reader = Reader<ELF_Bitness::Elf64>(&accessor);
     auto parsedFileHeader = *reader.getHeader();
@@ -112,8 +101,8 @@ TEST(ELFReaderTests, ELFHeaderIsReadCorrectly) {
 TEST(ELFReaderTests, ELFReaderThrowsOnInvalidSectionHeaderCount) {
     auto fileHeader = createTemplateFileHeader();
     fileHeader.e_shnum = 1;
-    auto accessor = ElfDDRAccessManager(reinterpret_cast<uint8_t*>(&fileHeader), sizeof(fileHeader),
-                                        createDefaultElfDDRAccessManagerConfig());
+    auto accessor =
+            DDRAccessManager<elf::DDRAlwaysEmplace>(reinterpret_cast<uint8_t*>(&fileHeader), sizeof(fileHeader));
 
     ASSERT_ANY_THROW(auto reader = Reader<ELF_Bitness::Elf64>(&accessor));
 }
@@ -130,7 +119,7 @@ TEST(ELFReaderTests, SectionHeadersAreReadCorrectly) {
     buffer.insert(buffer.end(), reinterpret_cast<uint8_t*>(sectionHeaders.data()),
                   reinterpret_cast<uint8_t*>(sectionHeaders.data()) + sizeof(SectionHeader) * headerTableSize);
 
-    auto accessor = ElfDDRAccessManager(buffer.data(), buffer.size(), createDefaultElfDDRAccessManagerConfig());
+    auto accessor = DDRAccessManager<elf::DDRAlwaysEmplace>(buffer.data(), buffer.size());
     auto reader = Reader<ELF_Bitness::Elf64>(&accessor);
 
     ASSERT_TRUE(sizeof(sectionHeaders[0]) == sizeof(*reader.getSection(0).getHeader()));
@@ -153,7 +142,7 @@ TEST(ELFReaderTests, PointerToSectionDataIsResolvedCorrectly) {
     buffer.insert(buffer.end(), reinterpret_cast<uint8_t*>(sectionHeaders.data()),
                   reinterpret_cast<uint8_t*>(sectionHeaders.data()) + sizeof(SectionHeader) * headerTableSize);
 
-    auto accessor = ElfDDRAccessManager(buffer.data(), buffer.size());
+    auto accessor = DDRAccessManager<elf::DDRAlwaysEmplace>(buffer.data(), buffer.size());
     auto reader = Reader<ELF_Bitness::Elf64>(&accessor);
     ASSERT_EQ(reader.getSection(indexToCheck).getData<uint8_t>(), buffer.data() + sizeof(fileHeader));
 }
@@ -171,7 +160,7 @@ TEST(ELFReaderTests, PtrToSectionDataIsResolvedCorrectlyWithGetSectionNoData) {
     buffer.insert(buffer.end(), reinterpret_cast<uint8_t*>(sectionHeaders.data()),
                   reinterpret_cast<uint8_t*>(sectionHeaders.data()) + sizeof(SectionHeader) * headerTableSize);
 
-    auto accessor = ElfDDRAccessManager(buffer.data(), buffer.size());
+    auto accessor = DDRAccessManager<elf::DDRAlwaysEmplace>(buffer.data(), buffer.size());
     auto reader = Reader<ELF_Bitness::Elf64>(&accessor);
     ASSERT_EQ(reader.getSection(indexToCheck).getData<uint8_t>(), buffer.data() + sizeof(fileHeader));
 }

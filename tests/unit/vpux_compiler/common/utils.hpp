@@ -12,6 +12,7 @@
 
 #include "vpux/compiler/NPU37XX/dialect/NPUReg37XX/ops.hpp"
 #include "vpux/compiler/NPU40XX/dialect/NPUReg40XX/ops.hpp"
+#include "vpux/compiler/dialect/VPU/IR/dialect.hpp"
 #include "vpux/compiler/dialect/VPURegMapped/utils.hpp"
 #include "vpux/compiler/init.hpp"
 #include "vpux/compiler/interfaces_registry.hpp"
@@ -19,8 +20,7 @@
 class MLIR_UnitBase : public testing::Test {
 public:
     MLIR_UnitBase() {
-        vpux::registerDialects(registry);
-        vpux::registerCommonInterfaces(registry);
+        registry = vpux::createDialectRegistry();
     }
 
 protected:
@@ -55,14 +55,11 @@ public:
 };
 }  // namespace vpux::VPU::arch40xx
 
-using MappedRegValues = std::map<std::string, std::map<std::string, uint64_t>>;
+using MappedRegValues = std::map<std::string, std::map<std::string, vpux::VPURegMapped::RegFieldValue>>;
 template <typename HW_REG_TYPE, typename REG_MAPPED_TYPE>
 class MLIR_RegMappedUnitBase : public testing::TestWithParam<std::pair<MappedRegValues, HW_REG_TYPE>> {
 public:
     MLIR_RegMappedUnitBase() {
-        vpux::registerDialects(registry);
-        vpux::registerCommonInterfaces(registry);
-
         ctx = std::make_unique<mlir::MLIRContext>();
     }
     void compare() {
@@ -82,7 +79,6 @@ public:
         EXPECT_TRUE(memcmp(&params.second, serializedRegMappedDMADesc.data(), sizeof(params.second)) == 0);
     }
 
-    mlir::DialectRegistry registry;
     std::unique_ptr<mlir::MLIRContext> ctx;
     std::unique_ptr<mlir::OpBuilder> builder;
 };

@@ -25,10 +25,6 @@ VPUIP::SwProfilingMetadataAttr getSwProfilingMetaAttr(mlir::MLIRContext* ctx, si
                                                       size_t clusterSize, size_t dataIndex,
                                                       std::optional<size_t> tileId, std::optional<size_t> clusterId);
 
-void attachSwProfilingMetadataToUpa(mlir::Operation* op, VPUIP::SwProfilingMetadataAttr attr);
-
-VPUIP::SwProfilingMetadataAttr getSwProfilingMetadataFromUpa(mlir::Operation* op);
-
 VPUIP::M2IProfilingMetadataAttr getM2IProfilingMetaAttr(mlir::MLIRContext* ctx, size_t bufferId, size_t bufferOffset);
 
 enum class DMAProfilingMode { DISABLED, SCRATCH, SW, STATIC_HWP, DYNAMIC_HWP };

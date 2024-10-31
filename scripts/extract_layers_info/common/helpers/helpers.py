@@ -6,6 +6,7 @@
 import re
 from pathlib import Path
 
+
 def sortLayers(val):
     secondQuality = ["FakeQuantize", "Const"]
     return "zzzzzzzz" + str(secondQuality.index(val)) + val if val in secondQuality else val

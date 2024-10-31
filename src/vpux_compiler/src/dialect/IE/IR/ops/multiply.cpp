@@ -28,7 +28,12 @@ mlir::LogicalResult vpux::IE::MultiplyOp::inferReturnTypeComponents(
             IE::broadcastEltwiseShape(in1Type.getShape(), in2Type.getShape(), multiply.getAutoBroadcast(), loc);
 
     if (mlir::succeeded(outShapeRes)) {
-        inferredReturnShapes.emplace_back(outShapeRes.value(), in1Type.getElementType());
+        auto outShapeResVec = outShapeRes.value();
+        if (multiply.getOutputChannels().has_value()) {
+            outShapeResVec[Dims4D::Act::C.ind()] = multiply.getOutputChannels().value();
+        }
+
+        inferredReturnShapes.emplace_back(outShapeResVec, in1Type.getElementType());
     }
 
     return mlir::success();
@@ -43,11 +48,11 @@ mlir::OpFoldResult vpux::IE::MultiplyOp::fold(FoldAdaptor adaptor) {
         return nullptr;
     }
 
-    const auto attr = mlir::dyn_cast_or_null<Const::ContentAttr>(operands[1]);
+    const auto attr = mlir::dyn_cast_or_null<Const::EphemeralContentAttr>(operands[1]);
     if (attr == nullptr || !attr.isSplat()) {
         return nullptr;
     }
 
-    const auto content = attr.fold();
+    const auto content = static_cast<Const::ContentAttr>(attr).fold();
     return isDoubleEqual(content.getSplatValue<double>(), 1.0f) ? getInput1() : nullptr;
 }

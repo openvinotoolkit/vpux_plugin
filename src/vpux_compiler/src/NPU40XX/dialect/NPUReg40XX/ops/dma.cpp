@@ -15,6 +15,7 @@
 
 using namespace vpux;
 using namespace npu40xx;
+using namespace NPUReg40XX;
 
 //
 // NNDMAOp
@@ -23,11 +24,11 @@ using namespace npu40xx;
 void NPUReg40XX::NNDMAOp::serialize(elf::writer::BinaryDataSection<uint8_t>& binDataSection) {
     auto dmaDescriptor = getDmaDescriptorAttr().getRegMapped();
 
-    VPUX_THROW_UNLESS(Byte(sizeof(nn_public::VpuDMATask)) == dmaDescriptor.getWidth(),
+    VPUX_THROW_UNLESS(sizeof(nn_public::VpuDMATask) == dmaDescriptor.size(),
                       "HW DmaDescriptor size {0} != regMapped representation size {1}.", sizeof(nn_public::VpuDMATask),
-                      dmaDescriptor.getWidth());
+                      dmaDescriptor.size());
+    auto serializedDmaDesc = dmaDescriptor.getStorage();
 
-    auto serializedDmaDesc = dmaDescriptor.serialize();
     binDataSection.appendData(serializedDmaDesc.data(), serializedDmaDesc.size());
 }
 
@@ -37,14 +38,6 @@ size_t NPUReg40XX::NNDMAOp::getBinarySize() {
 
 size_t NPUReg40XX::NNDMAOp::getAlignmentRequirements() {
     return alignof(nn_public::VpuDMATask);
-}
-
-vpux::ELF::SectionFlagsAttr vpux::NPUReg40XX::NNDMAOp::getAccessingProcs(mlir::SymbolUserMap&) {
-    return ELF::SectionFlagsAttr::VPU_SHF_PROC_DMA;
-}
-
-ELF::SectionFlagsAttr NPUReg40XX::NNDMAOp::getUserProcs() {
-    return ELF::SectionFlagsAttr::VPU_SHF_PROC_DMA;
 }
 
 std::optional<ELF::SectionSignature> NPUReg40XX::NNDMAOp::getSectionSignature() {
@@ -64,16 +57,9 @@ size_t getSymRefOffsetForReloc(NPUReg40XX::NNDMAOp op, mlir::SymbolRefAttr ref) 
     } else if (ref == op.getOutputBuffsAttr()[0].cast<mlir::SymbolRefAttr>()) {
         return offsetof(nn_public::VpuDMATask, transaction_) + offsetof(DmaDescriptor, dst_offsetof);
     } else if (op.getActCompressionSizeEntryAttr() == ref) {
-        const auto dma_cfg_fields_rws_en = op.getDmaDescriptor()
-                                                   .getRegMapped()
-                                                   .getRegister("dma_cfg_fields")
-                                                   .getField("dma_cfg_fields_rws_en")
-                                                   .getValue();
-        const auto dma_cfg_fields_rwf_en = op.getDmaDescriptor()
-                                                   .getRegMapped()
-                                                   .getRegister("dma_cfg_fields")
-                                                   .getField("dma_cfg_fields_rwf_en")
-                                                   .getValue();
+        const auto& descriptor = op.getDmaDescriptor().getRegMapped();
+        const auto dma_cfg_fields_rws_en = descriptor.read<Fields::dma_cfg_fields_rws_en>();
+        const auto dma_cfg_fields_rwf_en = descriptor.read<Fields::dma_cfg_fields_rwf_en>();
         if (dma_cfg_fields_rws_en == 1) {
             return offsetof(nn_public::VpuDMATask, transaction_) + offsetof(DmaDescriptor, remote_width_store);
         } else if (dma_cfg_fields_rwf_en == 1) {
@@ -102,7 +88,8 @@ std::vector<ELF::RelocationInfo> NPUReg40XX::NNDMAOp::getRelocationInfo(ELF::Sym
                                   : ELF::RelocationType::R_VPU_64;
 
     relocs.push_back(ELF::RelocationInfo(getInput(), targetSection, getSymRefOffsetForReloc(thisDma, getInput()),
-                                         inputRelocType, ELF::getOffsetOfSymRef(symRefMap, getInput())));
+                                         inputRelocType, ELF::getOffsetOfSymRef(symRefMap, getInput()),
+                                         "Input in NNDMA reloc"));
 
     // Output reloc
     auto firstOutputBuff = getOutputBuffs()[0].cast<mlir::SymbolRefAttr>();
@@ -110,9 +97,9 @@ std::vector<ELF::RelocationInfo> NPUReg40XX::NNDMAOp::getRelocationInfo(ELF::Sym
                                    ? ELF::RelocationType::R_VPU_64_BIT_OR_B21_B26_UNSET
                                    : ELF::RelocationType::R_VPU_64;
 
-    relocs.push_back(ELF::RelocationInfo(firstOutputBuff, targetSection,
-                                         getSymRefOffsetForReloc(thisDma, firstOutputBuff), outputRelocType,
-                                         ELF::getOffsetOfSymRef(symRefMap, firstOutputBuff)));
+    relocs.push_back(ELF::RelocationInfo(
+            firstOutputBuff, targetSection, getSymRefOffsetForReloc(thisDma, firstOutputBuff), outputRelocType,
+            ELF::getOffsetOfSymRef(symRefMap, firstOutputBuff), "Output (firstOutputBuff) in NNDMA reloc"));
 
     // Link Address reloc
     if (auto nextLink = getNextLink().value_or(nullptr)) {
@@ -121,22 +108,23 @@ std::vector<ELF::RelocationInfo> NPUReg40XX::NNDMAOp::getRelocationInfo(ELF::Sym
                                                                : ELF::RelocationType::R_VPU_32_BIT_OR_B21_B26_UNSET;
 
         relocs.push_back(ELF::RelocationInfo(nextLink, targetSection, getSymRefOffsetForReloc(thisDma, nextLink),
-                                             relocType, ELF::getOffsetOfSymRef(symRefMap, nextLink)));
+                                             relocType, ELF::getOffsetOfSymRef(symRefMap, nextLink),
+                                             "Link address (nextLink) in NNDMA reloc"));
     }
 
     // ActCompressionSizeEntry reloc
     if (auto actCompressionSizeEntry = getActCompressionSizeEntry().value_or(nullptr)) {
-        relocs.push_back(ELF::RelocationInfo(actCompressionSizeEntry, targetSection,
-                                             getSymRefOffsetForReloc(thisDma, actCompressionSizeEntry),
-                                             ELF::RelocationType::R_VPU_32_BIT_OR_B21_B26_UNSET,
-                                             ELF::getOffsetOfSymRef(symRefMap, actCompressionSizeEntry)));
+        relocs.push_back(ELF::RelocationInfo(
+                actCompressionSizeEntry, targetSection, getSymRefOffsetForReloc(thisDma, actCompressionSizeEntry),
+                ELF::RelocationType::R_VPU_32_BIT_OR_B21_B26_UNSET,
+                ELF::getOffsetOfSymRef(symRefMap, actCompressionSizeEntry), "actCompressionSizeEntry in NNDMA reloc"));
     }
 
     // Indices reloc
     if (auto indices = getIndices().value_or(nullptr)) {
         relocs.push_back(ELF::RelocationInfo(indices, targetSection, getSymRefOffsetForReloc(thisDma, indices),
-                                             ELF::RelocationType::R_VPU_32,
-                                             ELF::getOffsetOfSymRef(symRefMap, indices)));
+                                             ELF::RelocationType::R_VPU_32, ELF::getOffsetOfSymRef(symRefMap, indices),
+                                             "indices in NNDMA reloc"));
     }
 
     return relocs;

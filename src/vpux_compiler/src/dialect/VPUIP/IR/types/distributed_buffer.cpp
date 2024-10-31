@@ -4,6 +4,7 @@
 //
 
 #include "vpux/compiler/core/attributes/shape.hpp"
+#include "vpux/compiler/core/attributes/stride_reqs.hpp"
 #include "vpux/compiler/dialect/VPUIP/IR/types.hpp"
 
 #include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
@@ -26,7 +27,7 @@ vpux::MemRefAttr::HwFields getHwSpecificFields(mlir::MemRefLayoutAttrInterface l
     return {};
 }
 
-StridedShape alignStridedShape(const StridedShape& stridedTiledShape, VPU::DistributedTensorAttr distribution,
+StridedShape alignStridedShape(const StridedShape& stridedTiledShape, VPU::DistributionInfoAttr distribution,
                                const DimsOrder order) {
     if (distribution.getAlignment() == nullptr) {
         return stridedTiledShape;
@@ -181,7 +182,7 @@ mlir::Type VPUIP::DistributedBufferType::parse(mlir::AsmParser& parser) {
         return Type();
     }
 
-    // DistributedTensorAttr
+    // DistributionInfoAttr
 
     if (parser.parseLBrace()) {
         return Type();
@@ -300,9 +301,9 @@ mlir::Type VPUIP::DistributedBufferType::parse(mlir::AsmParser& parser) {
         return Type();
     }
     auto distributedAttr =
-            VPU::DistributedTensorAttr::get(parser.getContext(), distributionModeAttr, numTiles, kernel, pads, strides,
-                                            numClusters, alignment, uniformDistributedSegments, computeShapes,
-                                            computeOffsets, memoryShapes, memoryOffsets, equalComputeAndMemoryView);
+            VPU::DistributionInfoAttr::get(parser.getContext(), distributionModeAttr, numTiles, kernel, pads, strides,
+                                           numClusters, alignment, uniformDistributedSegments, computeShapes,
+                                           computeOffsets, memoryShapes, memoryOffsets, equalComputeAndMemoryView);
     return static_cast<mlir::Type>(get(parser.getContext(), ArrayRef(shape), elemType, layout, memSpace,
                                        distributedAttr, sparsityCompression));
 }
@@ -315,7 +316,7 @@ mlir::LogicalResult VPUIP::DistributedBufferType::verify(FuncRef<mlir::InFlightD
                                                          ::llvm::ArrayRef<int64_t> shape, mlir::Type elementType,
                                                          mlir::MemRefLayoutAttrInterface layout,
                                                          IndexedSymbolAttr /*memSpace*/,
-                                                         VPU::DistributedTensorAttr distribution,
+                                                         VPU::DistributionInfoAttr distribution,
                                                          VPUIP::SparsityCompressionAttr sparsityCompression) {
     if (mlir::failed(VPU::verify(emitError, distribution, shape))) {
         return mlir::failure();
@@ -569,7 +570,7 @@ StridedShape VPUIP::DistributedBufferType::getStridedShape(int64_t tileInd) cons
 // them. This method creates DistributedType with requested shape and DistributedAttr with
 // memory_shapes/memory_offsets/computes_shapes/compute_offets adjusted for the new shape.
 NDTypeInterface VPUIP::DistributedBufferType::changeShapeForExplicitDistribution(
-        ShapeRef shape, VPU::DistributedTensorAttr distributedAttr) const {
+        ShapeRef shape, VPU::DistributionInfoAttr distributedAttr) const {
     return changeShapeElemTypeForExplicitDistribution(shape, getElementType(), distributedAttr);
 }
 
@@ -577,7 +578,7 @@ NDTypeInterface VPUIP::DistributedBufferType::changeShapeForExplicitDistribution
 // them. This method creates DistributedType with requested shape and element type and DistributedAttr with
 // memory_shapes/memory_offsets/computes_shapes/compute_offets adjusted for the new shape.
 NDTypeInterface VPUIP::DistributedBufferType::changeShapeElemTypeForExplicitDistribution(
-        ShapeRef shape, mlir::Type elemType, VPU::DistributedTensorAttr distributedAttr) const {
+        ShapeRef shape, mlir::Type elemType, VPU::DistributionInfoAttr distributedAttr) const {
     const auto ctx = getContext();
     const auto origOrder = getDimsOrder();
     const auto newOrder = origOrder.isIdentity() ? DimsOrder::fromNumDims(shape.size()) : origOrder;
@@ -612,7 +613,7 @@ NDTypeInterface VPUIP::DistributedBufferType::changeShapeElemTypeForExplicitDist
 // components, it will also update the DistributedAttr with memory_shapes/memory_offsets/computes_shapes/compute_offets
 // adjusted for the new shape. Otherwise, it leaves the DistributedAttr untouched.
 NDTypeInterface VPUIP::DistributedBufferType::changeTypeComponentsForExplicitDistribution(
-        const TypeComponents& typeComponents, VPU::DistributedTensorAttr distributedAttr) const {
+        const TypeComponents& typeComponents, VPU::DistributionInfoAttr distributedAttr) const {
     if (distributedAttr == nullptr) {
         return changeTypeComponents(typeComponents);
     }
@@ -654,7 +655,7 @@ NDTypeInterface VPUIP::DistributedBufferType::changeTypeComponentsForExplicitDis
 // It will also update the DistributedAttr with memory_shapes/memory_offsets/computes_shapes/compute_offets
 // adjusted for the resulting dense tile.
 NDTypeInterface VPUIP::DistributedBufferType::extractDenseTileForExplicitDistribution(
-        vpux::ShapeRef tileOffsets, vpux::ShapeRef tileShape, VPU::DistributedTensorAttr distributedAttr) const {
+        vpux::ShapeRef tileOffsets, vpux::ShapeRef tileShape, VPU::DistributionInfoAttr distributedAttr) const {
     if (distributedAttr == nullptr) {
         return extractDenseTile(tileOffsets, tileShape);
     }
@@ -675,7 +676,7 @@ NDTypeInterface VPUIP::DistributedBufferType::extractDenseTileForExplicitDistrib
 
 NDTypeInterface VPUIP::DistributedBufferType::extractViewTileForExplicitDistribution(
         vpux::ShapeRef tileOffsets, vpux::ShapeRef tileShape, vpux::ShapeRef tileElemStrides,
-        VPU::DistributedTensorAttr distributedAttr) const {
+        VPU::DistributionInfoAttr distributedAttr) const {
     if (distributedAttr == nullptr) {
         return extractViewTile(tileOffsets, tileShape, tileElemStrides);
     }

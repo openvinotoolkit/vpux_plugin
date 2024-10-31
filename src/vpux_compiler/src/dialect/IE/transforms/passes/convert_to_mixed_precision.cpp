@@ -4,6 +4,7 @@
 //
 
 #include "vpux/compiler/dialect/IE/transforms/passes/convert_to_mixed_precision.hpp"
+#include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/IE/utils/quantization.hpp"
 #include "vpux/utils/core/numeric.hpp"
 
@@ -11,6 +12,14 @@
 
 using namespace vpux;
 using namespace IE;
+
+bool isAvgPoolOrAddPerChannel(mlir::Operation* op, bool isOutputPerAxisQuant) {
+    // IE.MaxPool does not support fp16 input and quantized output
+    if (mlir::isa<IE::MaxPoolOp>(op)) {
+        return false;
+    }
+    return (mlir::isa<IE::AddOp, IE::AvgPoolOp>(op) && isOutputPerAxisQuant);
+}
 
 mlir::LogicalResult FloatOutConvRewriter::matchAndRewrite(IE::ConvolutionOp convolutionOp,
                                                           mlir::PatternRewriter& rewriter) const {
@@ -32,7 +41,8 @@ mlir::LogicalResult FloatOutConvRewriter::matchAndRewrite(IE::ConvolutionOp conv
             convolutionOp->getLoc(), convolutionOp.getType(), dequantizeInput, filterDequantizeInput,
             convolutionOp.getBias(), convolutionOp.getStrides(), convolutionOp.getPadsBegin(),
             convolutionOp.getPadsEnd(), convolutionOp.getDilations(), convolutionOp.getPostOpAttr(),
-            convolutionOp.getClampAttr(), convolutionOp.getStaticScaleAttr());
+            convolutionOp.getClampAttr(), convolutionOp.getStaticScaleAttr(), convolutionOp.getOutputChannelsAttr(),
+            convolutionOp.getInputChannelsAttr());
     if (!IE::checkRescaledQuantApproximationForConvBasedOp(newConv)) {
         rewriter.eraseOp(newConv);
         return mlir::failure();
@@ -63,7 +73,8 @@ mlir::LogicalResult FloatOutGroupConvRewriter::matchAndRewrite(IE::GroupConvolut
             groupConvolutionOp->getLoc(), groupConvolutionOp.getType(), dequantizeType, filterDequantizeType,
             groupConvolutionOp.getBias(), groupConvolutionOp.getStrides(), groupConvolutionOp.getPadsBegin(),
             groupConvolutionOp.getPadsEnd(), groupConvolutionOp.getDilations(), groupConvolutionOp.getGroupsAttr(),
-            groupConvolutionOp.getPostOpAttr(), groupConvolutionOp.getClampAttr());
+            groupConvolutionOp.getPostOpAttr(), groupConvolutionOp.getClampAttr(),
+            groupConvolutionOp.getOutputChannelsAttr(), groupConvolutionOp.getInputChannelsAttr());
 
     if (!IE::checkRescaledQuantApproximationForConvBasedOp(newGroupConv)) {
         rewriter.eraseOp(newGroupConv);
@@ -71,6 +82,60 @@ mlir::LogicalResult FloatOutGroupConvRewriter::matchAndRewrite(IE::GroupConvolut
     }
 
     rewriter.replaceOp(groupConvolutionOp, newGroupConv.getOutput());
+
+    return mlir::success();
+}
+
+mlir::LogicalResult FloatOutTransposedConvRewriter::matchAndRewrite(IE::TransposedConvolutionOp origOp,
+                                                                    mlir::PatternRewriter& rewriter) const {
+    if (IE::areAnyUserQuantizeOps(origOp) || !_isMixPrecisionSupported(origOp, false, _log)) {
+        return mlir::failure();
+    }
+    if (mlir::failed(checkRescaledBiasRange(origOp))) {
+        return mlir::failure();
+    }
+
+    auto dequantizeInput = IE::findQuantizedInput(origOp.getInput(), false);
+    auto filterDequantizeInput = IE::findQuantizedInput(origOp.getFilter(), true);
+
+    if (dequantizeInput == nullptr || filterDequantizeInput == nullptr) {
+        return mlir::failure();
+    }
+
+    auto newTransposedConv = rewriter.create<IE::TransposedConvolutionOp>(
+            origOp->getLoc(), origOp.getType(), dequantizeInput, filterDequantizeInput, origOp.getOutputShape(),
+            origOp.getBias(), origOp.getStrides(), origOp.getPadsBegin(), origOp.getPadsEnd(), origOp.getDilations(),
+            origOp.getOutputPaddingAttr(), origOp.getPostOpAttr(), origOp.getClampAttr(),
+            origOp.getOutputChannelsAttr(), origOp.getInputChannelsAttr());
+
+    if (!IE::checkRescaledQuantApproximationForConvBasedOp(newTransposedConv)) {
+        rewriter.eraseOp(newTransposedConv);
+        return mlir::failure();
+    }
+
+    rewriter.replaceOp(origOp, newTransposedConv.getOutput());
+
+    return mlir::success();
+}
+
+mlir::LogicalResult FloatOutAvgPoolRewriter::matchAndRewrite(IE::AvgPoolOp avgPoolOp,
+                                                             mlir::PatternRewriter& rewriter) const {
+    if (IE::areAnyUserQuantizeOps(avgPoolOp) || !IE::arch37xx::isMixPrecisionSupported(avgPoolOp, false, _log)) {
+        return mlir::failure();
+    }
+    // Although the operation could support per channel quant params because is depthwise,
+    // it does not have access to weights table, which is where per channel quant params
+    // are placed. Only global, per tensor quantization is supported by AVG Pool.
+    auto dequantizeType = IE::findQuantizedInput(avgPoolOp.getInput(), false);
+    if (dequantizeType == nullptr) {
+        return mlir::failure();
+    }
+
+    rewriter.replaceOpWithNewOp<IE::AvgPoolOp>(
+            avgPoolOp, avgPoolOp.getType(), dequantizeType, avgPoolOp.getKernelSize(), avgPoolOp.getStrides(),
+            avgPoolOp.getPadsBegin(), avgPoolOp.getPadsEnd(), avgPoolOp.getRoundingTypeAttr(),
+            avgPoolOp.getExcludePadsAttr(), avgPoolOp.getPostOpAttr(), avgPoolOp.getClampAttr(),
+            avgPoolOp.getStaticScaleAttr(), avgPoolOp.getOutputChannelsAttr(), avgPoolOp.getInputChannelsAttr());
 
     return mlir::success();
 }
@@ -110,38 +175,51 @@ mlir::LogicalResult FloatOutAddRewriter::matchAndRewrite(IE::AddOp addOp, mlir::
     }
 
     rewriter.replaceOpWithNewOp<IE::AddOp>(addOp, addOp.getType(), lhsDequant, rhsDequant, addOp.getAutoBroadcast(),
-                                           addOp.getPostOpAttr(), addOp.getClampAttr());
+                                           addOp.getPostOpAttr(), addOp.getClampAttr(), addOp.getOutputChannelsAttr(),
+                                           addOp.getInputChannelsAttr());
 
     return mlir::success();
 }
 
-mlir::LogicalResult FloatOutTransposedConvRewriter::matchAndRewrite(IE::TransposedConvolutionOp origOp,
-                                                                    mlir::PatternRewriter& rewriter) const {
-    if (IE::areAnyUserQuantizeOps(origOp) || !_isMixPrecisionSupported(origOp, false, _log)) {
-        return mlir::failure();
+mlir::LogicalResult QuantizeWithNCERewriter::matchAndRewrite(IE::QuantizeOp origOp,
+                                                             mlir::PatternRewriter& rewriter) const {
+    const auto isOutputPerAxisQuant = isPerAxisQuant(origOp.getOutput());
+    const auto maybeNCETask = origOp.getInput().getDefiningOp();
+    if (maybeNCETask == nullptr) {
+        return matchFailed(rewriter, origOp, "Producer is a block argument");
     }
-    if (mlir::failed(checkRescaledBiasRange(origOp))) {
-        return mlir::failure();
-    }
-
-    auto dequantizeInput = IE::findQuantizedInput(origOp.getInput(), false);
-    auto filterDequantizeInput = IE::findQuantizedInput(origOp.getFilter(), true);
-
-    if (dequantizeInput == nullptr || filterDequantizeInput == nullptr) {
-        return mlir::failure();
+    if (!maybeNCETask->getResult(0).hasOneUse()) {
+        return matchFailed(rewriter, origOp, "NCE task has more than one consumer");
     }
 
-    auto newTransposedConv = rewriter.create<IE::TransposedConvolutionOp>(
-            origOp->getLoc(), origOp.getType(), dequantizeInput, filterDequantizeInput, origOp.getOutputShape(),
-            origOp.getBias(), origOp.getStrides(), origOp.getPadsBegin(), origOp.getPadsEnd(), origOp.getDilations(),
-            origOp.getOutputPaddingAttr(), origOp.getPostOpAttr(), origOp.getClampAttr());
-
-    if (!IE::checkRescaledQuantApproximationForConvBasedOp(newTransposedConv)) {
-        rewriter.eraseOp(newTransposedConv);
-        return mlir::failure();
+    if (!_isPerAxesSupported && isAvgPoolOrAddPerChannel(maybeNCETask, isOutputPerAxisQuant)) {
+        return matchFailed(rewriter, origOp, "IE.AvgPool and IE.Add do not support per-channel quantized output");
     }
 
-    rewriter.replaceOp(origOp, newTransposedConv.getOutput());
+    auto layerWithPostOp = mlir::dyn_cast_or_null<IE::LayerWithPostOpInterface>(maybeNCETask);
+    if (layerWithPostOp != nullptr && layerWithPostOp.getPostOp().has_value()) {
+        if (!_checkPostOp(layerWithPostOp, isOutputPerAxisQuant, true, maybeNCETask->getLoc())) {
+            return matchFailed(rewriter, origOp, "Layer with PostOp not supported");
+        }
+    }
+
+    // NCE tasks with float input and quant output support LeakyReLU only per-tensor quantize output.
+    // One would expect that with ops ran sequential: BIAS->SCALE->PRELU, we could easily support prelu and per axis
+    // quant params. But actually in HW, depending on the sign of the FP BIAS result, you either execute SCALE or PRELU.
+    // So for the negative values we'd have to combine the prelu alpha parameter and the requant scale into the per
+    // tensor param for prelu scale. This explains why we can't have prelu with per axis quant in fp mode
+    if (!_isMixPrecisionSupported(maybeNCETask, !isOutputPerAxisQuant, _log)) {
+        return matchFailed(rewriter, origOp, "Producer {0} is not supported", maybeNCETask->getName());
+    }
+
+    auto* newNCETask = rewriter.clone(*maybeNCETask);
+    newNCETask->getResult(0).setType(origOp.getOutput().getType());
+    if (!IE::checkRescaledQuantApproximationForConvBasedOp(newNCETask)) {
+        rewriter.eraseOp(newNCETask);
+        return mlir::failure();
+    }
+    rewriter.replaceOp(origOp, newNCETask->getResult(0));
+    rewriter.eraseOp(maybeNCETask);
 
     return mlir::success();
 }

@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include "vpux/compiler/core/barrier_info.hpp"
 #include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
 
 #include "vpux/utils/core/array_ref.hpp"
@@ -12,6 +13,8 @@
 #include "vpux/utils/core/logger.hpp"
 #include "vpux/utils/core/ring_buffer.hpp"
 #include "vpux/utils/core/small_vector.hpp"
+
+#include <llvm/ADT/SmallSet.h>
 
 #include <array>
 #include <cassert>
@@ -107,12 +110,35 @@ private:
 };
 
 //
+// BarrierWlmHandler
+// Class that check if WLM restrictions are satisfied for PID assignment
+//
+class BarrierWlmHandler {
+public:
+    BarrierWlmHandler() = delete;
+    BarrierWlmHandler(BarrierInfo& barrierInfo);
+    BarrierWlmHandler(BarrierInfoTest& barrierInfoTest);
+
+    bool canBarrierReusePidFromBarrier(size_t vid, size_t prevVid);
+
+private:
+    BarrierInfo _barrierInfo;
+
+    // Store information about task control map that will be initialized through
+    // barrierInfo for given control graph split block index
+    size_t _blockIdxOfTaskControlMap;
+    std::pair<SmallVector<llvm::BitVector>, size_t> _taskControlMapAndOffset;
+};
+
+//
 // BarrierSimulator
 //
 
 class BarrierSimulator final {
 public:
-    explicit BarrierSimulator(mlir::func::FuncOp funcOp, bool wlm = false);
+    explicit BarrierSimulator(mlir::func::FuncOp funcOp);
+    // wlmFlag is used to enabled PID assignment restrictions for WLM
+    explicit BarrierSimulator(mlir::func::FuncOp funcOp, bool wlmFlag, BarrierInfo& barrierInfo);
 
 public:
     bool isDynamicBarriers() const {
@@ -120,6 +146,8 @@ public:
     }
 
 public:
+    // Used to enabled PID assignment restrictions for WLM
+    void configureForWlm(BarrierInfo& barrierInfo);
     const BarrierConfig& getConfig(mlir::Value bar) const;
 
 public:
@@ -127,13 +155,14 @@ public:
     mlir::LogicalResult checkProducerAndConsumerCount(Logger log) const;
     mlir::LogicalResult simulateBarriers(Logger log, std::optional<int64_t> numBarriers = std::nullopt,
                                          std::optional<bool> barrierLegalization = std::nullopt);
+    SmallVector<size_t> generateBarrierOrderWithSimulation(Logger log, int64_t numBarriers,
+                                                           SmallVector<size_t>& virtualToPhysicalBarrierMapping);
     SmallVector<mlir::DenseSet<VPURT::DeclareVirtualBarrierOp>> getBarrierBatchesToLegalize();
     void linkNextIds(Logger log);
 
 private:
     void parseBarriers(mlir::Operation* parentOp);
     void parseTasks(mlir::Operation* parentOp);
-    void buildBarrierControlMap(mlir::func::FuncOp funcOp);
 
 private:
     enum class Status { Success, Skip, Fail };
@@ -154,13 +183,12 @@ private:
     DenseMap<mlir::Operation*, size_t> _barriersMap;
     SmallVector<BarrierConfig> _barriers;
     bool _isDynamicBarriers = false;
-    bool _samePidTopoDep = false;
+    bool _wlmPidProgramming = false;
 
     SmallVector<SmallVector<BarrierUserConfig>> _dmaTasks;
     std::unordered_map<SmallVector<DmaTaskIdx>, bool> _multiQueueDmaTaskStatus;
     SmallVector<BarrierUserConfig> _nceTasks;
     SmallVector<BarrierUserConfig> _actTasks;
-    SmallVector<BarrierUserConfig> _upaTasks;
     SmallVector<BarrierUserConfig> _m2iTasks;
 
     VirtualDependencyTracker _vdt;
@@ -169,7 +197,17 @@ private:
     SmallVector<std::set<int64_t>> _barrierBatchesToLegalize;
     DenseMap<size_t, mlir::Operation*> _barrierVID;
 
-    SmallVector<llvm::BitVector> _barrierControlMap;
+    // For each barrier PID (map key) store queue of VID instances
+    // This is created only when generateBarrierOrderWithSimulation() is called
+    DenseMap<size_t, std::queue<size_t>> _barrierPidToVidInstancesQueueMap;
+
+    // When for barrier simulation VID to PID mapping is provided return order
+    // of barrier reprogramming. This order is expected to later be represented in IR
+    // This is created only when generateBarrierOrderWithSimulation() is called
+    SmallVector<size_t> _barrierProgrammingOrder;
+
+    // Module for managing restrictions on barrier PID reuse in case of WLM
+    std::optional<BarrierWlmHandler> _barrierWlmHandlerOpt = std::nullopt;
 };
 
 }  // namespace VPURT

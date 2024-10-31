@@ -22,6 +22,7 @@ using namespace vpux;
 
 void vpux::arch37xx::buildLowerIE2VPUPipeline(mlir::OpPassManager& pm, Logger log) {
     const auto grc = getDefaultGreedyRewriteConfig();
+    pm.addPass(createConvertDynamicQuantToVPUNCEPass(log));
 
     pm.addPass(vpux::arch37xx::createConvertIEToVPUNCEPass(log));
     pm.addPass(createConvertLayers2VPUPass(log));
@@ -35,6 +36,7 @@ void vpux::arch37xx::buildLowerIE2VPUPipeline(mlir::OpPassManager& pm, Logger lo
 void vpux::arch37xx::buildLowerVPU2VPUIPPipeline(mlir::OpPassManager& pm, Logger log) {
     const auto grc = getDefaultGreedyRewriteConfig();
 
+    pm.addPass(createAdjustDynamicOpsBeforeBufferizationPass());
     pm.addPass(createInPlaceBufferizationAnalyzePass());
     pm.addPass(createOneShotBufferizeVPU2VPUIPPass());
     pm.addPass(VPUIP::createUngroupBoundedBuffersAsFuncArgsPass(log));

@@ -72,6 +72,15 @@ void buildRaceConditionTest(const nb::TestCaseJsonDescriptor& testDesc, mlir::Mo
     inputTypes.insert(inputTypes.end(), outputsCount, outputParamType);
     outputTypes.insert(outputTypes.end(), outputsCount, outputParamType);
 
+    //  Pass Manager
+    mlir::PassManager pmBuilderInit(module->getName(), mlir::OpPassManager::Nesting::Implicit);
+    auto initCompilerOptions = VPU::InitCompilerOptions(testDesc.getArchitecture(), VPU::CompilationMode::ReferenceHW);
+    initCompilerOptions.numberOfDPUGroups = static_cast<int>(raceConditionParams.requestedClusters);
+    initCompilerOptions.numberOfDMAPorts = static_cast<int>(raceConditionParams.requestedClusters);
+
+    VPU::buildInitCompilerPipeline(pmBuilderInit, initCompilerOptions, log);
+    VPUX_THROW_UNLESS(mlir::succeeded(pmBuilderInit.run(module)), "Init compilation failed");
+
     const auto funcType = builder.getFunctionType(ArrayRef(inputTypes), ArrayRef(outputTypes));
 
     auto func = builder.create<mlir::func::FuncOp>(
@@ -145,15 +154,6 @@ void buildRaceConditionTest(const nb::TestCaseJsonDescriptor& testDesc, mlir::Mo
 
     funcBuilder.create<mlir::func::ReturnOp>(builder.getUnknownLoc(),
                                              mlir::ValueRange(ArrayRef<mlir::BlockArgument>(returnOps)));
-
-    //  Pass Manager
-    mlir::PassManager pm(module->getName(), mlir::OpPassManager::Nesting::Implicit);
-    auto initCompilerOptions = VPU::InitCompilerOptions(testDesc.getArchitecture(), VPU::CompilationMode::ReferenceHW);
-    initCompilerOptions.numberOfDPUGroups = static_cast<int>(raceConditionParams.requestedClusters);
-    initCompilerOptions.numberOfDMAPorts = static_cast<int>(raceConditionParams.requestedClusters);
-
-    VPU::buildInitCompilerPipeline(pm, initCompilerOptions, log);
-    VPUX_THROW_UNLESS(mlir::succeeded(pm.run(module)), "Compilation failed");
 
     //  CNN Operation
     buildCNNOp(builder, func.getName(), {getTensorType(ShapeRef(inShape), inputType, DimsOrder::NHWC, nullptr)},

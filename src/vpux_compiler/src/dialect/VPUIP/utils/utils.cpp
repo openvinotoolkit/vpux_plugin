@@ -14,6 +14,7 @@
 #include "vpux/compiler/dialect/VPU/utils/barrier_variant_constraint_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/distributed_tensor_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/explicit_distribution_utils.hpp"
+#include "vpux/compiler/dialect/VPU/utils/max_kernel_size_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_invariant.hpp"
 #include "vpux/compiler/dialect/VPUIP/interfaces/nce_invariant.hpp"
 #include "vpux/compiler/dialect/VPUIP/utils/sw_utils.hpp"
@@ -42,6 +43,18 @@ uint16_t vpux::VPUIP::getProfWorkloadSize(mlir::ModuleOp module) {
     }
     VPUX_THROW_WHEN(profilingWorkloadSize % sizeof(uint64_t) != 0, "Not supported size of workload");
     return profilingWorkloadSize;
+}
+
+//
+// Compile time info
+//
+
+bool vpux::VPUIP::hasMaxKernelSize(mlir::Operation* op) {
+    return VPU::hasMaxKernelSize(op);
+}
+
+int64_t vpux::VPUIP::getMaxKernelSize(mlir::Operation* op) {
+    return VPU::getMaxKernelSize(op);
 }
 
 //
@@ -148,7 +161,7 @@ int64_t vpux::VPUIP::getNumberOfIndependentDmaQueues(mlir::Operation* parentOp) 
 
     const auto arch = VPU::getArch(module);
 
-    // On NPU40XX there is a dedicated Link Agent exposed depending on DMA
+    // On NPU40XX, there is a dedicated Link Agent exposed depending on DMA
     // channel (CMX and DDR) thus the number of independent DMA FIFOs that
     // compiler needs to track is twice the number of DMA ports
     if (arch == vpux::VPU::ArchKind::NPU40XX) {
@@ -166,12 +179,13 @@ namespace {
 
 mlir::Value getAlignedConstWeights(mlir::OpBuilder& builder, mlir::Location loc, Const::DeclareOp weightsConst,
                                    Shape flatWeightShape, int64_t padding) {
-    auto weightsContentAttr = weightsConst.getContentAttr();
-    auto nchwWeightsContentAttr = weightsContentAttr.reorder(DimsOrder::NCHW);
-
-    auto flatWeightsContentAttr = nchwWeightsContentAttr.reshape(flatWeightShape);
-    auto alignedWeightsContentAttr = flatWeightsContentAttr.padWithZero({0, 0, 0, 0}, {0, padding, 0, 0});
-    auto nhwcWeightsContentAttr = alignedWeightsContentAttr.reorder(DimsOrder::NHWC);
+    auto nhwcWeightsContentAttr = weightsConst.getContentAttr()
+                                          .transform()
+                                          .reorder(DimsOrder::NCHW)
+                                          .reshape(flatWeightShape)
+                                          .padWithZero({0, 0, 0, 0}, {0, padding, 0, 0})
+                                          .reorder(DimsOrder::NHWC)
+                                          .get();
 
     const auto OC = flatWeightShape[Dims4D::Filter::OC];
     const auto flatWeightChannelsCount = flatWeightShape[Dims4D::Filter::IC];
@@ -180,7 +194,7 @@ mlir::Value getAlignedConstWeights(mlir::OpBuilder& builder, mlir::Location loc,
     const auto outAllocType =
             mlir::MemRefType::get(alignedWeightShape, origFilterType.getElementType()).cast<vpux::NDTypeInterface>();
     const auto outAllocTypeNHWC = outAllocType.changeDimsOrder(DimsOrder::NHWC);
-    auto alignedWeightsOp = builder.create<Const::DeclareOp>(loc, outAllocTypeNHWC, nhwcWeightsContentAttr);
+    auto alignedWeightsOp = builder.create<Const::DeclareOp>(loc, outAllocTypeNHWC, std::move(nhwcWeightsContentAttr));
 
     return alignedWeightsOp.getOutput();
 }
@@ -216,12 +230,11 @@ mlir::Value getAlignedNonConstWeights(mlir::OpBuilder& builder, mlir::Location l
             mlir::RankedTensorType::get(padShape, origFilterType.getElementType()).cast<vpux::NDTypeInterface>();
     const auto padType = padShapedType.changeDimsOrder(DimsOrder::NCHW);
     const auto padAttr = mlir::DenseElementsAttr::get(padType.cast<mlir::RankedTensorType>(), ArrayRef(padValues));
-    const auto padContentAttr = Const::ContentAttr::get(padAttr);
 
     const auto padAllocType =
             mlir::MemRefType::get(padShape, origFilterType.getElementType()).cast<vpux::NDTypeInterface>();
     const auto padAllocTypeNHWC = padAllocType.changeDimsOrder(DimsOrder::NCHW);
-    auto paddedTensor = builder.create<Const::DeclareOp>(loc, padAllocTypeNHWC, padContentAttr);
+    auto paddedTensor = builder.create<Const::DeclareOp>(loc, padAllocTypeNHWC, Const::ContentAttr::get(padAttr));
 
     // Step 4: Concatenate flat NCHW input with padding.
     auto subViewAlloc = builder.create<mlir::memref::AllocOp>(loc, outAllocType.cast<mlir::MemRefType>());
@@ -1149,7 +1162,7 @@ int64_t vpux::VPUIP::getSpecificAxisFromAttr(mlir::ArrayAttr attr) {
 // Return {-1, -1} to indicate there's no numTiles and alignment attributes in distribution.
 mlir::FailureOr<std::pair<int64_t, int64_t>> vpux::VPUIP::getDistributedAxesMappingAfterShapeChanged(
         vpux::NDTypeInterface reshapeInType, vpux::NDTypeInterface reshapeOutType,
-        VPU::DistributedTensorAttr copyInDistribution, Logger log) {
+        VPU::DistributionInfoAttr copyInDistribution, Logger log) {
     if (reshapeOutType == nullptr) {
         return mlir::failure();
     }
@@ -1190,8 +1203,8 @@ mlir::FailureOr<std::pair<int64_t, int64_t>> vpux::VPUIP::getDistributedAxesMapp
     return std::make_pair(inAxis, outAxis);
 }
 
-VPU::DistributedTensorAttr vpux::VPUIP::changeDistributedAxisOnDistributedTensorAttr(
-        VPU::DistributedTensorAttr inDistribution, int64_t inDistributionAxis, int64_t outDistributionAxis,
+VPU::DistributionInfoAttr vpux::VPUIP::changeDistributedAxisOnDistributionInfoAttr(
+        VPU::DistributionInfoAttr inDistribution, int64_t inDistributionAxis, int64_t outDistributionAxis,
         ShapeRef newShape) {
     auto ctx = inDistribution.getContext();
 
@@ -1224,11 +1237,11 @@ VPU::DistributedTensorAttr vpux::VPUIP::changeDistributedAxisOnDistributedTensor
 
     // If the original distributed type has explicit shapes and offsets, need to get new explicit attrs
     if (!isDistributedAttrWithExplicitShapesAndOffsets(inDistribution)) {
-        return VPU::DistributedTensorAttr::get(ctx, inDistribution.getMode(), numTilesAttr, inDistribution.getKernel(),
-                                               inDistribution.getPads(), inDistribution.getStrides(),
-                                               inDistribution.getNumClusters(), alignmentAttr,
-                                               inDistribution.getUniformDistributedSegments(), nullptr, nullptr,
-                                               nullptr, nullptr, inDistribution.getEqualMemoryAndComputeView());
+        return VPU::DistributionInfoAttr::get(ctx, inDistribution.getMode(), numTilesAttr, inDistribution.getKernel(),
+                                              inDistribution.getPads(), inDistribution.getStrides(),
+                                              inDistribution.getNumClusters(), alignmentAttr,
+                                              inDistribution.getUniformDistributedSegments(), nullptr, nullptr, nullptr,
+                                              nullptr, inDistribution.getEqualMemoryAndComputeView());
     }
 
     auto computeShapesAttr = inDistribution.getComputeShapes();
@@ -1267,7 +1280,7 @@ VPU::DistributedTensorAttr vpux::VPUIP::changeDistributedAxisOnDistributedTensor
     }
     auto perClusterMemoryOffsets = getIntArrayOfArray(ctx, outMemoryOffsetsVec);
 
-    return VPU::DistributedTensorAttr::get(
+    return VPU::DistributionInfoAttr::get(
             ctx, inDistribution.getMode(), numTilesAttr, inDistribution.getKernel(), inDistribution.getPads(),
             inDistribution.getStrides(), inDistribution.getNumClusters(), alignmentAttr,
             inDistribution.getUniformDistributedSegments(), perClusterComputeShapes, perClusterComputeOffsets,
@@ -1349,14 +1362,14 @@ namespace {
 // %cst = const.Declare memref<128x16x1x1xf16, #NHWC> = dense<1.0> : tensor<1x1x128x9xf32>, [
 //      #const.Reshape<[128, 9]>,
 //      #const.Reshape<[128, 9, 1, 1]>,
-//      #const.ConvertElemType<f16>,
+//      #const.CastElemType<f16>,
 //      #const.Reorder<#NHWC>,
 //      #const.PadWithZero<[0, 0, 0, 0], [0, 7, 0, 0]>
 // ]
 // Base content type is tensor<1x1x128x9xf32>.
 // This is not helpful because the type before padding is tensor<128x9x1x1xf16>.
 // Compression must get [128, 9, 1, 1][IC] = 9, not [1, 1, 128, 9][IC] = 1
-bool hasShapeChangeAttr(Const::ContentAttr content) {
+bool hasShapeChangeAttr(const Const::ContentAttr& content) {
     const auto transformations = content.getTransformations();
     for (auto transform : transformations) {
         if (mlir::isa<vpux::Const::TransposeAttr, vpux::Const::ReshapeAttr>(transform)) {
@@ -1378,7 +1391,7 @@ bool inChannelGreaterThanAlignValue(Const::DeclareOp weightsInput) {
 
 // We apply the weights compression only when we know for certain we have
 // just padding over input channels.
-bool vpux::VPUIP::isOnlyPadOverIC(Const::ContentAttr content) {
+bool vpux::VPUIP::isOnlyPadOverIC(const Const::ContentAttr& content) {
     const auto transformations = content.getTransformations();
     bool transformsOnlyPadOverIC = false;
 
@@ -1784,17 +1797,14 @@ bool vpux::VPUIP::hasLegalStridingLevel(mlir::Operation* op) {
     if (inputStridingLevel > maxStridingLevel || outputStridingLevel > maxStridingLevel) {
         return false;
     }
-    auto clusterOp = mlir::dyn_cast<VPUIP::NCEClusterTilingOp>(op->getParentOp());
-    if (clusterOp == nullptr) {
+    if (!vpux::VPUIP::hasDistributedOperand(op)) {
         return !isSplitNeededForLargePlanesNum(op);
     }
 
-    auto outerInType = VPUIP::extractDataType(clusterOp->getOperand(0)).cast<vpux::NDTypeInterface>();
-    auto outerOutType = VPUIP::extractDataType(clusterOp->getResult(0)).cast<vpux::NDTypeInterface>();
+    auto outerInType = VPUIP::extractDataType(op->getOperand(0)).cast<vpux::NDTypeInterface>();
+    auto outerOutType = VPUIP::extractDataType(op->getResult(0)).cast<vpux::NDTypeInterface>();
     const auto inputDistType = outerInType.dyn_cast<VPUIP::DistributedBufferType>();
     const auto outputDistType = outerOutType.dyn_cast<VPUIP::DistributedBufferType>();
-    VPUX_THROW_UNLESS((inputDistType != nullptr) ^ (outputDistType != nullptr),
-                      "One of operands must have DistributedBuffer type");
     auto findLargestMemoryShape = [](ArrayRef<Shape> shapes) {
         auto iter = std::max_element(shapes.begin(), shapes.end(), [](ShapeRef a, ShapeRef b) {
             return a.totalSize() < b.totalSize();

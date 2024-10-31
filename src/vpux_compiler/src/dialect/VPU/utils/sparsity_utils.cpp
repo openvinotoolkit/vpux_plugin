@@ -86,7 +86,7 @@ bool VPU::shouldRemoveOutputSparsity(VPU::NCEOpInterface nceOp) {
     const auto numClusters = VPU::getOptimalNumClusters(clusteredOp, outputTensorType.getShape(), strategy);
     const auto distributedDataType = getDistributedOutputTypeFromOp(
             clusteredOp, sparseOutputType.getData(), numClusters,
-            /*inputType*/ nullptr, /*tileInfo*/ vpux::TileInfo(ShapeRef()), /*hasExplicitDistributedAttr*/ false);
+            /*inputTypes*/ {}, /*tileInfo*/ vpux::TileInfo(ShapeRef()), /*hasExplicitDistributedAttr*/ false);
 
     // Removes SOK layer's output sparsity if SOK layer has different split sizes on clusters excluding the last
     // one. For example, we need to split OC = 128 on 6 tiles, the tiled size will be {32, 32, 16, 16, 16, 16}.

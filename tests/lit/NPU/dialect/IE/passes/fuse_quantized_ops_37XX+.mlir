@@ -71,7 +71,7 @@ func.func @DoNotFuseQuantParamsIntoAvgPoolWithExcludePadsAttr(%arg0: tensor<1x3x
 func.func @NotFuseQuantParamsIntoConvForInvalidApproximation(%arg0: tensor<1x3x16x16xf16>) -> tensor<1x3x14x14xf16> {
   %1 = IE.Quantize(%arg0) {dstElemType = !qElemType1} : tensor<1x3x16x16xf16> -> tensor<1x3x16x16x!qElemType1>
   %2 = IE.Dequantize(%1) {dstElemType = f16} : tensor<1x3x16x16x!qElemType1> -> tensor<1x3x16x16xf16>
-  %weights = const.Declare tensor<3x3x3x3x!qElemType> = dense<1.0> : tensor<3x3x3x3xf16>, [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType>]
+  %weights = const.Declare tensor<3x3x3x3x!qElemType> = dense<1.0> : tensor<3x3x3x3xf16>, [#const.CastElemType<ui8>, #const.CastElemType<!qElemType>]
   %3 = IE.Dequantize(%weights) {dstElemType = f16} : tensor<3x3x3x3x!qElemType> -> tensor<3x3x3x3xf16>
   %4 = IE.Convolution(%2, %3) {dilations = [1, 1], pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]} : tensor<1x3x16x16xf16>, tensor<3x3x3x3xf16> -> tensor<1x3x14x14xf16>
   %5 = IE.Quantize(%4) {dstElemType = !qElemType2}: tensor<1x3x14x14xf16> -> tensor<1x3x14x14x!qElemType2>
@@ -81,7 +81,7 @@ func.func @NotFuseQuantParamsIntoConvForInvalidApproximation(%arg0: tensor<1x3x1
 
   //CHECK: [[VAL0:%.*]] = const.Declare tensor<3x3x3x3x!qElemType> =
   //CHECK-SAME:                 dense<1.000000e+00> : tensor<3x3x3x3xf16>,
-  //CHECK-SAME:                 [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType>]
+  //CHECK-SAME:                 [#const.CastElemType<ui8>, #const.CastElemType<!qElemType>]
 
   //CHECK: [[VAL1:%.*]] = IE.Quantize(%arg0) {dstElemType = !qElemType1} : tensor<1x3x16x16xf16> -> tensor<1x3x16x16x!qElemType1>
   //CHECK: [[VAL2:%.*]] = IE.Dequantize([[VAL1]]) {dstElemType = f16} : tensor<1x3x16x16x!qElemType1> -> tensor<1x3x16x16xf16>
@@ -100,7 +100,7 @@ func.func @NotFuseQuantParamsIntoConvForInvalidApproximation(%arg0: tensor<1x3x1
 
 // CHECK-LABEL: @NotFuseQuantParamsIntoGroupConvForInvalidApproximation
 func.func @NotFuseQuantParamsIntoGroupConvForInvalidApproximation(%arg0: tensor<1x3x10x10xf16>) -> tensor<1x3x10x10xf16> {
-    %cst = const.Declare tensor<3x1x3x3x!qElemType> = dense<2.000000e+00> : tensor<3x1x3x3xf16>, [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType>]
+    %cst = const.Declare tensor<3x1x3x3x!qElemType> = dense<2.000000e+00> : tensor<3x1x3x3xf16>, [#const.CastElemType<ui8>, #const.CastElemType<!qElemType>]
 
     %0 = IE.Quantize(%arg0) {dstElemType = !qElemType} : tensor<1x3x10x10xf16> -> tensor<1x3x10x10x!qElemType>
     %1 = IE.Dequantize(%0) {dstElemType = f16} : tensor<1x3x10x10x!qElemType> -> tensor<1x3x10x10xf16>
@@ -114,7 +114,7 @@ func.func @NotFuseQuantParamsIntoGroupConvForInvalidApproximation(%arg0: tensor<
     return %5 : tensor<1x3x10x10xf16>
 
     //CHECK: [[CST:%.*]] = const.Declare tensor<3x1x3x3x!qElemType> =
-    //CHECK-SAME:     dense<2.000000e+00> : tensor<3x1x3x3xf16>, [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType>]
+    //CHECK-SAME:     dense<2.000000e+00> : tensor<3x1x3x3xf16>, [#const.CastElemType<ui8>, #const.CastElemType<!qElemType>]
 
     //CHECK: [[VAL0:%.*]] = IE.Quantize(%arg0) {dstElemType = !qElemType} : tensor<1x3x10x10xf16> -> tensor<1x3x10x10x!qElemType>
     //CHECK: [[VAL1:%.*]] = IE.Dequantize([[VAL0]]) {dstElemType = f16} : tensor<1x3x10x10x!qElemType> -> tensor<1x3x10x10xf16>
@@ -124,4 +124,70 @@ func.func @NotFuseQuantParamsIntoGroupConvForInvalidApproximation(%arg0: tensor<
     //CHECK: [[VAL5:%.*]] = IE.Dequantize([[VAL4]]) {dstElemType = f16} : tensor<1x3x10x10x!qElemType1> -> tensor<1x3x10x10xf16>
 
     //CHECK: return [[VAL5]] : tensor<1x3x10x10xf16>
+}
+
+// -----
+
+!qElemType = !quant.uniform<u8:f16, 0.57450980392156858>
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
+// CHECK-LABEL: @FuseGroupConvolutionWithChannelsAndDilation
+// CHECK-SAME: [[ARG0:%.+]]: tensor<1x72x56x56xf16, {order = #NHWC}>
+func.func @FuseGroupConvolutionWithChannelsAndDilation(%arg0: tensor<1x72x56x56xf16, {order = #NHWC}>) -> tensor<1x72x28x28xf16, {order = #NHWC}> {
+    %filter = const.Declare tensor<72x1x3x3x!qElemType, {order = #NHWC}> = dense<1.0> : tensor<72x1x3x3xf16>, [#const.Reorder<#NHWC>, #const.CastElemType<ui8>, #const.CastElemType<!qElemType>]
+    %bias = const.Declare tensor<1x72x1x1xf16> = dense<1.0> : tensor<1x72x1x1xf16>
+
+    %1 = IE.Quantize(%arg0) {dstElemType = !qElemType} : tensor<1x72x56x56xf16, {order = #NHWC}> -> tensor<1x72x56x56x!qElemType, {order = #NHWC}>
+    %2 = IE.Dequantize(%1) {dstElemType = f16} : tensor<1x72x56x56x!qElemType, {order = #NHWC}> -> tensor<1x72x56x56xf16, {order = #NHWC}>
+
+    %3 = IE.Dequantize(%filter) {dstElemType = f16} : tensor<72x1x3x3x!qElemType, {order = #NHWC}> -> tensor<72x1x3x3xf16, {order = #NHWC}>
+
+    %4 = IE.GroupConvolution(%2, %3, %bias) {
+        dilations = [3, 3], groups = 72, pads_begin = [3, 3], pads_end = [3, 3], strides = [2, 2]
+    } : tensor<1x72x56x56xf16, {order = #NHWC}>, tensor<72x1x3x3xf16, {order = #NHWC}>, tensor<1x72x1x1xf16> -> tensor<1x72x28x28xf16, {order = #NHWC}>
+    %5 = IE.Quantize(%4) {dstElemType = !qElemType} : tensor<1x72x28x28xf16, {order = #NHWC}> -> tensor<1x72x28x28x!qElemType, {order = #NHWC}>
+    %6 = IE.Dequantize(%5) {dstElemType = f16} : tensor<1x72x28x28x!qElemType, {order = #NHWC}> -> tensor<1x72x28x28xf16, {order = #NHWC}>
+
+    return %6 : tensor<1x72x28x28xf16, {order = #NHWC}>
+    // CHECK:       [[FILTER:%.+]] = const.Declare tensor<72x1x3x3x!qElemType, {order = #NHWC}>
+    // CHECK:       [[BIAS:%.+]]  = const.Declare tensor<1x72x1x1xf16> = dense<1.000000e+00> : tensor<1x72x1x1xf16>
+    // CHECK:       [[QUANTINPUT:%.+]] = IE.Quantize([[ARG0]]) {dstElemType = !qElemType} : tensor<1x72x56x56xf16,
+    // CHECK-SAME:  {order = #NHWC}> -> tensor<1x72x56x56x!qElemType, {order = #NHWC}>
+    // CHECK:       [[GROUPCONV:%.+]] = IE.GroupConvolution([[QUANTINPUT]], [[FILTER]], [[BIAS]]) {dilations = [3, 3], groups = 72 : i64,
+    // CHECK-SAME:  pads_begin = [3, 3], pads_end = [3, 3], strides = [2, 2]} : tensor<1x72x56x56x!qElemType, {order = #NHWC}>,
+    // CHECK-SAME:  tensor<72x1x3x3x!qElemType, {order = #NHWC}>, tensor<1x72x1x1xf16> -> tensor<1x72x28x28x!qElemType, {order = #NHWC}>
+    // CHECK:       [[DEQUANT:%.+]] = IE.Dequantize([[GROUPCONV]]) {dstElemType = f16} : tensor<1x72x28x28x!qElemType, {order = #NHWC}>
+    // CHECK-SAME:  -> tensor<1x72x28x28xf16, {order = #NHWC}>
+
+    // CHECK        return [[DEQUANT]]
+}
+
+// -----
+
+!qElemType = !quant.uniform<u8:f16, 0.57450980392156858>
+!qElemType1 = !quant.uniform<u8:f16, 1.0534313725490195:128>
+!qElemType2 = !quant.uniform<u8:f16, 3.1368405211205576E-7>
+
+// CHECK-LABEL: @FuseQuantParamsIntoMatMul
+// CHECK-SAME: [[ARG0:%.+]]: tensor<1x8x16x16xf16>
+func.func @FuseQuantParamsIntoMatMul(%arg0: tensor<1x8x16x16xf16>) -> tensor<1x8x16x32xf16> {
+  %1 = IE.Quantize(%arg0) {dstElemType = !qElemType1} : tensor<1x8x16x16xf16> -> tensor<1x8x16x16x!qElemType1>
+  %2 = IE.Dequantize(%1) {dstElemType = f16} : tensor<1x8x16x16x!qElemType1> -> tensor<1x8x16x16xf16>
+  %weights = const.Declare tensor<1x8x16x32x!qElemType> = dense<1.0> : tensor<1x8x16x32xf16>, [#const.CastElemType<ui8>, #const.CastElemType<!qElemType>]
+  %3 = IE.Dequantize(%weights) {dstElemType = f16} : tensor<1x8x16x32x!qElemType> -> tensor<1x8x16x32xf16>
+  %4 = IE.MatMul(%2, %3) {dilations = [1, 1], pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]} : tensor<1x8x16x16xf16>, tensor<1x8x16x32xf16> -> tensor<1x8x16x32xf16>
+  %5 = IE.Quantize(%4) {dstElemType = !qElemType2}: tensor<1x8x16x32xf16> -> tensor<1x8x16x32x!qElemType2>
+  %6 = IE.Dequantize(%5) {dstElemType = f16} : tensor<1x8x16x32x!qElemType2> -> tensor<1x8x16x32xf16>
+
+  return %6 : tensor<1x8x16x32xf16>
+
+  // CHECK: [[CST:%.+]] = const.Declare tensor<1x8x16x32x!qElemType> = dense<1.000000e+00> :
+  // CHECK-SAME: tensor<1x8x16x32xf16>, [#const.CastElemType<ui8>, #const.CastElemType<!qElemType>]
+  // CHECK: [[VAL0:%.+]] = IE.Quantize([[ARG0]]) {dstElemType = !qElemType1}
+  // CHECK-SAME: : tensor<1x8x16x16xf16> -> tensor<1x8x16x16x!qElemType1>
+  // CHECK: [[VAL1:%.+]] = IE.MatMul([[VAL0]], [[CST]])
+  // CHECK-SAME: : tensor<1x8x16x16x!qElemType1>, tensor<1x8x16x32x!qElemType> -> tensor<1x8x16x32x!qElemType2>
+  // CHECK: [[VAL2:%.+]] = IE.Dequantize([[VAL1]]) {dstElemType = f16}
+  // CHECK-SAME: : tensor<1x8x16x32x!qElemType2> -> tensor<1x8x16x32xf16>
+  // CHECK: return [[VAL2]] : tensor<1x8x16x32xf16>
 }

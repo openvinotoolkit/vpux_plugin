@@ -6,8 +6,9 @@
 #include "vpux/compiler/NPU40XX/utils.hpp"
 #include "vpux/compiler/conversion.hpp"
 #include "vpux/compiler/conversion/passes/VPU2VPUIP/bufferizable_ops_interface.hpp"
-#include "vpux/compiler/conversion/rewriters/VPU2VPUIP/sw_rewriter.hpp"
+#include "vpux/compiler/dialect/VPU/IR/dialect.hpp"
 #include "vpux/compiler/dialect/VPU/utils/m2i_utils.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/dialect.hpp"
 #include "vpux/compiler/dialect/VPUIP/utils/convert_to_dma_utils.hpp"
 #include "vpux/compiler/dialect/VPUIP/utils/sw_utils.hpp"
 #include "vpux/compiler/utils/allocate_buffers.hpp"
@@ -35,7 +36,7 @@ mlir::OpResult createCopyResult(mlir::Type type, mlir::Value inputBuffer, mlir::
         dataType = sparseBuffer.getData();
     }
 
-    if (dataType.isa<mlir::MemRefType, VPUIP::BufferType>()) {
+    if (dataType.isa<mlir::MemRefType>()) {
         auto copyOp = rewriter.create<VPUIP::CopyOp>(location, inputBuffer, outputBuffer);
 
         return copyOp.getOperation()->getResult(0);
@@ -624,8 +625,8 @@ mlir::LogicalResult vpux::bufferizeOp(mlir::MLIRContext*, VPU::UpsamplingOp orig
 
     auto outputBuffers = allocateBuffers(log, origOp->getLoc(), rewriter, origOp->getOpResults(),
                                          /*individualBuffers =*/false);
-    auto newOp = rewriter.create<VPUIP::UpsamplingUPAOp>(origOp->getLoc(), newArgs.getInput(), outputBuffers[0],
-                                                         origOp.getUpsamplingFactorAttr(), origOp.getPadAttr());
+    auto newOp = rewriter.create<VPUIP::UpsamplingOp>(origOp->getLoc(), newArgs.getInput(), outputBuffers[0],
+                                                      origOp.getUpsamplingFactorAttr(), origOp.getPadAttr());
     mlir::bufferization::replaceOpWithBufferizedValues(rewriter, origOp, newOp->getResults());
     return mlir::success();
 }
@@ -646,7 +647,6 @@ void vpux::registerVPUBufferizableOpInterfaces(mlir::DialectRegistry& registry) 
         VPU::UnsqueezeOp::attachInterface<VpuGenericOneShotBufferizeModel<VPU::UnsqueezeOp>>(*ctx);
         VPU::SliceOp::attachInterface<VpuGenericOneShotBufferizeModel<VPU::SliceOp>>(*ctx);
         VPU::SplitOp::attachInterface<VpuGenericOneShotBufferizeModel<VPU::SplitOp>>(*ctx);
-        VPU::ConcatOp::attachInterface<VpuGenericOneShotBufferizeModel<VPU::ConcatOp>>(*ctx);
         VPU::PermuteCastOp::attachInterface<VpuGenericOneShotBufferizeModel<VPU::PermuteCastOp>>(*ctx);
         VPU::QuantizeCastOp::attachInterface<VpuGenericOneShotBufferizeModel<VPU::QuantizeCastOp>>(*ctx);
         VPU::DistributedCastOp::attachInterface<VpuGenericOneShotBufferizeModel<VPU::DistributedCastOp>>(*ctx);

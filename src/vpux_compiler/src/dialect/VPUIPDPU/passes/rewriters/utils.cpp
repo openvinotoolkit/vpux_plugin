@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -92,14 +92,13 @@ mlir::Type getBaseType(mlir::Type type) {
 }
 
 mlir::LogicalResult getQuantConfig(const Logger&, mlir::Type type, SmallVector<int64_t>& quantMult,
-                                   SmallVector<int64_t>& quantShift, SmallVector<uint8_t>& quantZero,
-                                   VPU::ArchKind arch) {
-    if (const auto qType = type.dyn_cast<mlir::quant::UniformQuantizedType>()) {
+                                   SmallVector<int64_t>& quantShift, SmallVector<uint8_t>& quantZero) {
+    if (const auto qType = mlir::dyn_cast<mlir::quant::UniformQuantizedType>(type)) {
         quantZero.push_back(checked_cast<uint8_t>(qType.getZeroPoint()));
-        const auto scaleApproximation = QuantizationApproximation(arch, qType.getScale());
+        const auto scaleApproximation = QuantizationApproximation(qType.getScale());
         quantMult.push_back(scaleApproximation.mult());
         quantShift.push_back(scaleApproximation.shift());
-    } else if (const auto qPerAxisType = type.dyn_cast<mlir::quant::UniformQuantizedPerAxisType>()) {
+    } else if (const auto qPerAxisType = mlir::dyn_cast<mlir::quant::UniformQuantizedPerAxisType>(type)) {
         auto qtypeQuantZp = qPerAxisType.getZeroPoints();
         auto qtypeQuantScale = qPerAxisType.getScales();
 
@@ -111,7 +110,7 @@ mlir::LogicalResult getQuantConfig(const Logger&, mlir::Type type, SmallVector<i
         quantMult.resize(qtypeQuantScale.size());
         quantShift.resize(qtypeQuantScale.size());
         for (std::size_t i = 0; i < qtypeQuantScale.size(); ++i) {
-            const auto scaleApproximation = QuantizationApproximation(arch, qtypeQuantScale[i]);
+            const auto scaleApproximation = QuantizationApproximation(qtypeQuantScale[i]);
             quantMult[i] = scaleApproximation.mult();
             quantShift[i] = scaleApproximation.shift();
         }
@@ -130,6 +129,19 @@ mlir::IntegerAttr getI64IntegerAttrOrNull(mlir::OpBuilder& builder, const std::o
     }
 
     return nullptr;
+}
+
+VPUIPDPU::ODUDataBitWidth getDataBitWidth(mlir::Type outActType) {
+    auto asIntegerType = outActType.dyn_cast<mlir::IntegerType>();
+    auto asFloatType = outActType.dyn_cast<mlir::FloatType>();
+    VPUX_THROW_UNLESS(asIntegerType || asFloatType, "Not a Float or Integer Type");
+
+    const auto width = asIntegerType ? asIntegerType.getWidth() : asFloatType.getWidth();
+    const auto oduBitWidth = VPUIPDPU::symbolizeODUDataBitWidth(log2(width));
+    VPUX_THROW_UNLESS(oduBitWidth.has_value(), "Unable to determine data bit width from out_activations {0}",
+                      outActType);
+
+    return oduBitWidth.value();
 }
 
 }  // namespace VPUIPDPU

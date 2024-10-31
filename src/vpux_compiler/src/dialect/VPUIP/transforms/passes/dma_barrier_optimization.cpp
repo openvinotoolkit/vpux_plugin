@@ -316,13 +316,20 @@ void DMABarrierOptimizationPass::safeRunOnFunc() {
     auto func = getOperation();
     auto& barrierInfo = getAnalysis<BarrierInfo>();
     VPURT::orderExecutionTasksAndBarriers(func, barrierInfo, true);
-    barrierInfo.buildTaskQueueTypeMap(_considerTaskFifoDependency);
+
+    barrierInfo.optimizeBarriers(/* checkValidSlotCount */ false, _considerTaskFifoDependency);
+    VPURT::orderExecutionTasksAndBarriers(func, barrierInfo);
+
+    if (_considerTaskFifoDependency) {
+        barrierInfo.buildTaskQueueTypeMap();
+    }
 
     // get original wait barrier map
     const auto origWaitBarriersMap = barrierInfo.getWaitBarriersMap();
 
     // DMA operation in the same FIFO do not require a barrier between them
     // optimize dependencies between DMA tasks in the same FIFO
+    // (Some of these dependencies may been removed during optimizeBarriers step, E137500)
     removeRedundantDependencies(barrierInfo, _considerTaskFifoDependency, _log);
     removeExplicitDependencies(barrierInfo);
     mergeBarriers(barrierInfo, origWaitBarriersMap);

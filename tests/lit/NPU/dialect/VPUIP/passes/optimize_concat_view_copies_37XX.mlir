@@ -72,13 +72,9 @@ func.func @FuseConcatViewOpsWithSuitableNumPlanePerCluster(
 
     %0 = memref.alloc() : memref<1x4x480x640xf16, #NHWC, @DDR>
     %1 = VPUIP.SubView %0 [0, 0, 0, 0] [1, 4, 480, 320] : memref<1x4x480x640xf16, #NHWC, @DDR> to memref<1x4x480x320xf16, {order = #NHWC, strides = [1228800, 1, 2560, 4]}, @DDR>
-    %2 = VPUIP.NCEClusterTiling inputs(%input0 as %arg1: memref<1x4x480x320xf16, #NHWC, @CMX_NN>) outputs(%1 as %arg2: memref<1x4x480x320xf16, {order = #NHWC, strides = [1228800, 1, 2560, 4]}>) -> memref<1x4x480x320xf16, {order = #NHWC, strides = [1228800, 1, 2560, 4]}, @DDR> {
-        VPUIP.Copy inputs(%arg1 : memref<1x4x480x320xf16, #NHWC, @CMX_NN>) outputs(%arg2 : memref<1x4x480x320xf16, {order = #NHWC, strides = [1228800, 1, 2560, 4]}>) -> memref<1x4x480x320xf16, {order = #NHWC, strides = [1228800, 1, 2560, 4]}>
-    }
+    %2 = VPUIP.Copy inputs(%input0 : !InputDistributed) outputs(%1 : memref<1x4x480x320xf16, {order = #NHWC, strides = [1228800, 1, 2560, 4]}, @DDR>) -> memref<1x4x480x320xf16, {order = #NHWC, strides = [1228800, 1, 2560, 4]}, @DDR>
     %3 = VPUIP.SubView %0 [0, 0, 0, 320] [1, 4, 480, 320] : memref<1x4x480x640xf16, #NHWC, @DDR> to memref<1x4x480x320xf16, {order = #NHWC, strides = [1228800, 1, 2560, 4]}, @DDR>
-    %4 = VPUIP.NCEClusterTiling inputs(%input1 as %arg1: memref<1x4x480x320xf16, #NHWC, @CMX_NN>) outputs(%3 as %arg2: memref<1x4x480x320xf16, {order = #NHWC, strides = [1228800, 1, 2560, 4]}>) -> memref<1x4x480x320xf16, {order = #NHWC, strides = [1228800, 1, 2560, 4]}, @DDR> {
-        VPUIP.Copy inputs(%arg1 : memref<1x4x480x320xf16, #NHWC, @CMX_NN>) outputs(%arg2 : memref<1x4x480x320xf16, {order = #NHWC, strides = [1228800, 1, 2560, 4]}>) -> memref<1x4x480x320xf16, {order = #NHWC, strides = [1228800, 1, 2560, 4]}>
-    }
+    %4 = VPUIP.Copy inputs(%input1 : !InputDistributed) outputs(%3 : memref<1x4x480x320xf16, {order = #NHWC, strides = [1228800, 1, 2560, 4]}, @DDR>) -> memref<1x4x480x320xf16, {order = #NHWC, strides = [1228800, 1, 2560, 4]}, @DDR>
     %5 = VPUIP.ConcatView inputs(%2, %4 : memref<1x4x480x320xf16, {order = #NHWC, strides = [1228800, 1, 2560, 4]}, @DDR>, memref<1x4x480x320xf16, {order = #NHWC, strides = [1228800, 1, 2560, 4]}, @DDR>) outputs(%0 : memref<1x4x480x640xf16, #NHWC, @DDR>) -> memref<1x4x480x640xf16, #NHWC, @DDR>
 
     %6 = memref.alloc() : memref<1x8x480x640xf16, #NHWC, @DDR>
@@ -95,19 +91,9 @@ func.func @FuseConcatViewOpsWithSuitableNumPlanePerCluster(
     // CHECK:       [[OUTPUT_BUFF:%.*]] = memref.alloc() : memref<1x8x480x640xf16, #NHWC, @DDR>
 
     // CHECK:       [[SUBVIEW_0:%.*]] = VPUIP.SubView [[OUTPUT_BUFF]] [0, 0, 0, 0] [1, 4, 480, 320] [1, 1, 1, 1] : memref<1x8x480x640xf16, #NHWC, @DDR> to memref<1x4x480x320xf16, {order = #NHWC, strides = [2457600, 1, 5120, 8]}, @DDR>
-    // CHECK:       [[COPY_0:%.*]] = VPUIP.NCEClusterTiling
-    // CHECK-SAME:            inputs([[INPUT_0]] as [[ARG1:%.+]]: memref<1x4x480x320xf16, #NHWC, @CMX_NN>)
-    // CHECK-SAME:            outputs([[SUBVIEW_0]] as [[ARG2:%.+]]: memref<1x4x480x320xf16, {order = #NHWC, strides = [2457600, 1, 5120, 8]}, @DDR>)
-    // CHECK-SAME:           -> memref<1x4x480x320xf16, {order = #NHWC, strides = [2457600, 1, 5120, 8]}, @DDR> {
-    // CHECK:                 VPUIP.Copy inputs([[ARG1]] : memref<1x4x480x320xf16, #NHWC, @CMX_NN>) outputs([[ARG2]] : memref<1x4x480x320xf16, {order = #NHWC, strides = [2457600, 1, 5120, 8]}, @DDR>) -> memref<1x4x480x320xf16, {order = #NHWC, strides = [2457600, 1, 5120, 8]}, @DDR>
-    // CHECK:       }
+    // CHECK:       [[COPY_0:%.*]] = VPUIP.Copy inputs([[INPUT_0]] : !VPUIP.DistributedBuffer<1x4x480x320xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}>) outputs([[SUBVIEW_0]] : memref<1x4x480x320xf16, {order = #NHWC, strides = [2457600, 1, 5120, 8]}, @DDR>) -> memref<1x4x480x320xf16, {order = #NHWC, strides = [2457600, 1, 5120, 8]}, @DDR>
     // CHECK:       [[SUBVIEW_1:%.*]] = VPUIP.SubView [[OUTPUT_BUFF]] [0, 0, 0, 320] [1, 4, 480, 320] [1, 1, 1, 1] : memref<1x8x480x640xf16, #NHWC, @DDR> to memref<1x4x480x320xf16, {order = #NHWC, strides = [2457600, 1, 5120, 8]}, @DDR>
-    // CHECK:       [[COPY_1:%.*]] = VPUIP.NCEClusterTiling
-    // CHECK-SAME:            inputs([[INPUT_1]] as [[ARG1:%.+]]: memref<1x4x480x320xf16, #NHWC, @CMX_NN>)
-    // CHECK-SAME:            outputs([[SUBVIEW_1]] as [[ARG2:%.+]]: memref<1x4x480x320xf16, {order = #NHWC, strides = [2457600, 1, 5120, 8]}, @DDR>)
-    // CHECK-SAME:           -> memref<1x4x480x320xf16, {order = #NHWC, strides = [2457600, 1, 5120, 8]}, @DDR> {
-    // CHECK:                 VPUIP.Copy inputs([[ARG1]] : memref<1x4x480x320xf16, #NHWC, @CMX_NN>) outputs([[ARG2]] : memref<1x4x480x320xf16, {order = #NHWC, strides = [2457600, 1, 5120, 8]}, @DDR>) -> memref<1x4x480x320xf16, {order = #NHWC, strides = [2457600, 1, 5120, 8]}, @DDR>
-    // CHECK:       }
+    // CHECK:       [[COPY_1:%.*]] = VPUIP.Copy inputs([[INPUT_1]] : !VPUIP.DistributedBuffer<1x4x480x320xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}>) outputs([[SUBVIEW_1]] : memref<1x4x480x320xf16, {order = #NHWC, strides = [2457600, 1, 5120, 8]}, @DDR>) -> memref<1x4x480x320xf16, {order = #NHWC, strides = [2457600, 1, 5120, 8]}, @DDR>
     // CHECK:       [[SUBVIEW_2:%.*]] = VPUIP.SubView [[OUTPUT_BUFF]] [0, 4, 0, 0] [1, 4, 480, 640] : memref<1x8x480x640xf16, #NHWC, @DDR> to memref<1x4x480x640xf16, {order = #NHWC, strides = [2457600, 1, 5120, 8]}, @DDR>
     // CHECK:       [[COPY_2:%.*]] = VPUIP.Copy
     // CHECK-SAME:      inputs([[INPUT]] : memref<1x4x480x640xf16, #NHWC, @DDR>)

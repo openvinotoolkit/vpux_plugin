@@ -52,6 +52,7 @@ module @mainModule {
 //CHECK-SAME:         is_critical, is_out_of_order, port = 0 : si64} inputs(%arg0 : memref<24576xui8>)
 //CHECK:           outputs([[CMX_BUF]] : memref<106xui8, [@CMX_NN, 0]>) nextDMAIdx([[NNDMA_1]] : !VPURegMapped.Index<0:0:1>) updates([[BAR0]] : !VPURegMapped.Index<0:0:0>) start_after(0) clean_after(0) acceleration_mode(<DISABLE>) -> !VPURegMapped.Index<0:0:0>
 
+
 //CHECK:    [[DMA0_TEXT:%.+]] = ELFNPU37XX.CreateSection secType(SHT_PROGBITS) secFlags(SHF_ALLOC) {secAddrAlign = 64 : i64, secInfo = 0 : i64, secName = ".text.dmaTasks0"} -> !ELFNPU37XX.Section {
 //CHECK-NEXT:      ELFNPU37XX.PutOpInSection [[NNDMA_0]] : !VPURegMapped.Index<0:0:0>
 //CHECK-NEXT:      ELFNPU37XX.PutOpInSection [[NNDMA_1]] : !VPURegMapped.Index<0:0:1>
@@ -61,21 +62,23 @@ module @mainModule {
 //CHECK:    [[MAPINFER_TEXT:%.+]] = ELFNPU37XX.CreateSection secType(SHT_PROGBITS) secFlags("SHF_NONE") {secAddrAlign = 64 : i64, secInfo = 0 : i64, secName = ".text.MappedInference"} -> !ELFNPU37XX.Section {
 //CHECK-NEXT:      ELFNPU37XX.PutOpInSection [[MAPINFER]] : !VPURegMapped.Index<0:0:0>
 
-//CHECK:    [[META_SEC:%.+]] = ELFNPU37XX.CreateMetadataSection secFlags("SHF_NONE") {secAddrAlign = 8 : i64, secInfo = 0 : i64, secName = ".metadata"} -> !ELFNPU37XX.Section {
-//CHECK:      [[NET_META:%.+]] = VPUMI37XX.NetworkMetadata -> !VPURegMapped.Index<0:0:0>
+//CHECK:    ELFNPU37XX.CreateMetadataSection secFlags("SHF_NONE") {secAddrAlign = 8 : i64, secInfo = 0 : i64, secName = ".metadata"} -> !ELFNPU37XX.Section {
+//CHECK-NEXT:      VPUMI37XX.NetworkMetadata -> !VPURegMapped.Index<0:0:0>
 
-//CHECK-DAG:    [[INPUT_0:%.+]] = ELFNPU37XX.Symbol %arg0 name("input_0") type(<STT_NOTYPE>) size(24576) {value = 0 : ui64} : memref<24576xui8>
-//CHECK-DAG:    [[SYM_INPUT:%.+]] = ELFNPU37XX.CreateSymbolTableSection secName(".symtab.input") secFlags(VPU_SHF_USERINPUT) -> !ELFNPU37XX.Section {
-//CHECK-DAG:      ELFNPU37XX.PutOpInSection [[INPUT_0]] : !ELFNPU37XX.Symbol
+//CHECK:    [[DMA1_TEXT:%.+]] = ELFNPU37XX.CreateSection secType(SHT_PROGBITS) secFlags(SHF_ALLOC) {secAddrAlign = 64 : i64, secInfo = 0 : i64, secName = ".text.dmaTasks1"} -> !ELFNPU37XX.Section {
+
+//CHECK:    [[INPUT_0:%.+]] = ELFNPU37XX.Symbol %arg0 name("input_0") type(<STT_NOTYPE>) size(24576) {value = 0 : ui64} : memref<24576xui8>
+//CHECK:    [[SYM_INPUT:%.+]] = ELFNPU37XX.CreateSymbolTableSection secName(".symtab.input") secFlags(VPU_SHF_USERINPUT) -> !ELFNPU37XX.Section {
+//CHECK-NEXT:      ELFNPU37XX.PutOpInSection [[INPUT_0]] : !ELFNPU37XX.Symbol
 
 //CHECK-DAG:    [[OUTPUT_0:%.+]] = ELFNPU37XX.Symbol %arg1 name("output_0") type(<STT_NOTYPE>) size(9858) {value = 0 : ui64} : memref<9858xui8>
 //CHECK-DAG:    [[SYM_OUTPUT:%.+]] = ELFNPU37XX.CreateSymbolTableSection secName(".symtab.output") secFlags(VPU_SHF_USEROUTPUT) -> !ELFNPU37XX.Section {
 //CHECK-DAG:      ELFNPU37XX.PutOpInSection [[OUTPUT_0]] : !ELFNPU37XX.Symbol
 
-//CHECK-DAG:    [[SYM_DMA_0:%.+]] = ELFNPU37XX.Symbol [[DMA0_TEXT]] name("sym_dmaSection0") type(<STT_NOTYPE>) size(0) {value = 0 : ui64} : !ELFNPU37XX.Section
+//CHECK-DAG:    [[SYM_DMA_0:%.+]] = ELFNPU37XX.Symbol %6 name("sym_dmaSection0") type(<STT_NOTYPE>) size(0) {value = 0 : ui64} : !ELFNPU37XX.Section
 //CHECK-DAG:    [[SYM_BAR_SEC:%.+]] = ELFNPU37XX.Symbol [[BAR_CFG]] name("sym_barrierSection") type(<STT_NOTYPE>) size(0) {value = 0 : ui64} : !ELFNPU37XX.Section
 //CHECK-DAG:    [[SYM_INFER_ENTRY:%.+]] = ELFNPU37XX.Symbol [[MAPINFER_TEXT]] name("MappedInference_entry") type(<VPU_STT_ENTRY>) size(0) {value = 0 : ui64} : !ELFNPU37XX.Section
-//CHECK-DAG:    %36 = ELFNPU37XX.CreateSymbolTableSection secName(".symtab.tasks") secFlags("SHF_NONE") -> !ELFNPU37XX.Section {
+//CHECK-DAG:    %37 = ELFNPU37XX.CreateSymbolTableSection secName(".symtab.tasks") secFlags("SHF_NONE") -> !ELFNPU37XX.Section {
 //CHECK-DAG:      ELFNPU37XX.PutOpInSection [[SYM_DMA_0]] : !ELFNPU37XX.Symbol
 //CHECK-DAG:      ELFNPU37XX.PutOpInSection [[SYM_BAR_SEC]] : !ELFNPU37XX.Symbol
 //CHECK-DAG:      ELFNPU37XX.PutOpInSection [[SYM_INFER_ENTRY]] : !ELFNPU37XX.Symbol
@@ -106,20 +109,38 @@ module @mainModule {
 //CHECK-NEXT:      ELFNPU37XX.PutOpInSection [[BAR_START]] : !ELFNPU37XX.Symbol
 //CHECK-NEXT:      ELFNPU37XX.PutOpInSection [[HW_REG]] : !ELFNPU37XX.Symbol
 
-//CHECK:    ELFNPU37XX.CreateRelocationSection secName(".rlt.DMA_NetInput0") sourceSymbolTableSection([[SYM_INPUT]]) targetSection([[DMA0_TEXT]]) secFlags("SHF_INFO_LINK|VPU_SHF_JIT|VPU_SHF_USERINPUT") -> !ELFNPU37XX.Section {
+//CHECK:    ELFNPU37XX.CreateRelocationSection secName(".rlt.DMA_NetInput0") sourceSymbolTableSection([[SYM_INPUT]]) targetSection(%6) secFlags("SHF_INFO_LINK|VPU_SHF_JIT|VPU_SHF_USERINPUT") -> !ELFNPU37XX.Section {
 //CHECK:      ELFNPU37XX.Reloc offset(16) <R_VPU_64> [[INPUT_0]] 0
 
-//CHECK:    ELFNPU37XX.CreateRelocationSection secName(".rlt.DMA_NetOutput0") sourceSymbolTableSection([[SYM_OUTPUT]]) targetSection([[DMA0_TEXT]]) secFlags("SHF_INFO_LINK|VPU_SHF_JIT|VPU_SHF_USEROUTPUT") -> !ELFNPU37XX.Section {
+//CHECK:    ELFNPU37XX.CreateRelocationSection secName(".rlt.DMA_NetOutput0") sourceSymbolTableSection([[SYM_OUTPUT]]) targetSection(%6) secFlags("SHF_INFO_LINK|VPU_SHF_JIT|VPU_SHF_USEROUTPUT") -> !ELFNPU37XX.Section {
 //CHECK:      ELFNPU37XX.Reloc offset(152) <R_VPU_64> [[OUTPUT_0]] 0
 
-//CHECK:    ELFNPU37XX.CreateRelocationSection secName(".rlt.text.dmaTasks0") sourceSymbolTableSection([[SYMSEC_RT]]) targetSection([[DMA0_TEXT]]) secFlags(SHF_INFO_LINK) -> !ELFNPU37XX.Section {
+//CHECK:    ELFNPU37XX.CreateRelocationSection secName(".rlt.text.dmaTasks0") sourceSymbolTableSection([[SYMSEC_RT]]) targetSection(%6) secFlags(SHF_INFO_LINK) -> !ELFNPU37XX.Section {
 //CHECK:      ELFNPU37XX.Reloc offset(24) <R_VPU_64> [[SYM_BASE_ADDR]] 0
 //CHECK:      ELFNPU37XX.Reloc offset(0) <R_VPU_32_RTM> [[SYM_RTM_DMA0]] 128
+//CHECK:      ELFNPU37XX.Reloc offset(64) <R_VPU_64_LSHIFT>
+//CHECK:      ELFNPU37XX.Reloc offset(72) <R_VPU_64_LSHIFT>
 //CHECK:      ELFNPU37XX.Reloc offset(144) <R_VPU_64> [[SYM_BASE_ADDR]] 0
+//CHECK:      ELFNPU37XX.Reloc offset(192) <R_VPU_64_LSHIFT>
+//CHECK:      ELFNPU37XX.Reloc offset(200) <R_VPU_64_LSHIFT>
 
-//CHECK:    ELFNPU37XX.CreateRelocationSection secName(".rlt.text.MappedInference") sourceSymbolTableSection(%36) targetSection([[MAPINFER_TEXT]]) secFlags(SHF_INFO_LINK) -> !ELFNPU37XX.Section {
-//CHECK:      ELFNPU37XX.Reloc offset(72) <R_VPU_64> [[SYM_DMA_0]] 0
+
+//CHECK:    ELFNPU37XX.CreateRelocationSection secName(".rlt.text.MappedInference") sourceSymbolTableSection(%37) targetSection(%8) secFlags(SHF_INFO_LINK) -> !ELFNPU37XX.Section {
+//CHECK:      ELFNPU37XX.Reloc offset(72) <R_VPU_64> %27 0
+//CHECK:      ELFNPU37XX.Reloc offset(112) <R_VPU_64> [[SYM_DMA_0]] 0
 //CHECK:      ELFNPU37XX.Reloc offset(312) <R_VPU_64> [[SYM_BAR_SEC]] 0
 
-//CHECK:    return %arg1 : memref<9858xui8>
+//CHECK: ELFNPU37XX.CreateRelocationSection secName(".rlt.text.BarrierConfigs") sourceSymbolTableSection(%46) targetSection(%1) secFlags(SHF_INFO_LINK) -> !ELFNPU37XX.Section {
+//CHECK: ELFNPU37XX.Reloc offset(8) <R_VPU_16_SUM>
+
+
+// single tile concurent execution
+//CHECK: ELFNPU37XX.CreateRelocationSection secName(".rlt.text.MappedInference") sourceSymbolTableSection(%46) targetSection(%8) secFlags(SHF_INFO_LINK) -> !ELFNPU37XX.Section
+//CHECK:      ELFNPU37XX.Reloc offset(72) <R_VPU_64_MULT_SUB>
+//CHECK:      ELFNPU37XX.Reloc offset(80) <R_VPU_64_MULT_SUB>
+//CHECK:      ELFNPU37XX.Reloc offset(112) <R_VPU_64_MULT>
+//CHECK:      ELFNPU37XX.Reloc offset(120) <R_VPU_64_MULT>
+
+
+//CHECK-DAG:    return %arg1 : memref<9858xui8>
 }

@@ -36,10 +36,24 @@ VPURT::TaskOp getFirstSuitableDMAOp(mlir::func::FuncOp funcOp) {
     return dmaOp;
 }
 
+// suitable start barrier cannot be consumed by any other task other than DMA
+bool checkSuitableStartBarrier(VPURT::DeclareVirtualBarrierOp barrierOp) {
+    for (auto user : barrierOp.getBarrier().getUsers()) {
+        auto taskOp = mlir::dyn_cast<VPURT::TaskOp>(user);
+        if (llvm::none_of(taskOp.getWaitBarriers(), [=](mlir::Value v) {
+                return v.getDefiningOp<VPURT::DeclareVirtualBarrierOp>() == barrierOp;
+            })) {
+            continue;
+        }
+        if (taskOp.getExecutorKind() != VPU::ExecutorKind::DMA_NN) {
+            return false;
+        }
+    }
+    return true;
+}
 /*
 Check DMA->Bar->DMA pattern with port 0 and DDR channel type
 */
-
 bool checkPattern(VPURT::TaskOp firstDMAOp) {
     if (firstDMAOp == nullptr) {
         return false;
@@ -47,15 +61,12 @@ bool checkPattern(VPURT::TaskOp firstDMAOp) {
     auto updateBarriers = firstDMAOp.getUpdateBarriers();
     for (const auto& barrier : updateBarriers) {
         auto barrierOp = barrier.getDefiningOp<VPURT::DeclareVirtualBarrierOp>();
-        for (auto user : barrierOp.getBarrier().getUsers()) {
-            auto taskOp = mlir::dyn_cast<VPURT::TaskOp>(user);
-            if (llvm::none_of(taskOp.getWaitBarriers(), [=](mlir::Value v) {
-                    return v.getDefiningOp<VPURT::DeclareVirtualBarrierOp>() == barrierOp;
-                })) {
-                continue;
-            }
-            if (isSuitableDmaTask(taskOp)) {
-                return true;
+        if (checkSuitableStartBarrier(barrierOp)) {
+            for (auto user : barrierOp.getBarrier().getUsers()) {
+                auto taskOp = mlir::dyn_cast<VPURT::TaskOp>(user);
+                if (isSuitableDmaTask(taskOp)) {
+                    return true;
+                }
             }
         }
     }
@@ -93,7 +104,6 @@ void AddStartBarrierPass::safeRunOnFunc() {
     if (checkPattern(firstDmaOp)) {
         return;
     }
-
     // Need create new barrer and sync dma task
     auto insertPoint = &func.getBody().front().front();
     mlir::OpBuilder builder(func);

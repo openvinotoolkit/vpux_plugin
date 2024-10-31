@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -10,7 +10,9 @@
 #include <mlir/Dialect/Quant/QuantTypes.h>
 
 #include <functional>
+#include "vpux/compiler/dialect/VPU/transforms/factories/nce_sparsity_converters.hpp"
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
+#include "vpux/compiler/dialect/VPU/utils/ppe_utils.hpp"
 #include "vpux/compiler/dialect/VPUIP/IR/attributes.hpp"
 #include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPUIP/transforms/passes.hpp"
@@ -32,6 +34,17 @@ namespace hwtest {
 
 void buildAvgpool(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp module, mlir::OpBuilder builder,
                   Logger& log, mlir::Type inputType, mlir::Type outputType) {
+    // set runtime resources
+    std::optional<vpux::Byte> availableCMXMemory = std::nullopt;
+
+    mlir::PassManager pmBuilderInit(module->getName(), mlir::OpPassManager::Nesting::Implicit);
+    auto initCompilerOptions = VPU::InitCompilerOptions(testDesc.getArchitecture(), VPU::CompilationMode::DefaultHW);
+    initCompilerOptions.numberOfDPUGroups = 1;
+    initCompilerOptions.setAvailableCMXMemory(availableCMXMemory);
+
+    VPU::buildInitCompilerPipeline(pmBuilderInit, initCompilerOptions, log);
+    VPUX_THROW_UNLESS(mlir::succeeded(pmBuilderInit.run(module)), "Init compilation failed");
+
     auto* ctx = builder.getContext();
     auto loc = builder.getUnknownLoc();
     const auto arch = testDesc.getArchitecture();
@@ -139,16 +152,23 @@ void buildAvgpool(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp mod
                                               builder.getIntegerType(32, true), DimsOrder::NHWC);
         const auto wtTblDataDdrValueType =
                 mlir::RankedTensorType::get(wtTblDataShape, builder.getIntegerType(32, /*isSigned=*/true));
+        mlir::FloatAttr constScale = nullptr;
+        if (!mlir::dyn_cast<mlir::quant::QuantizedType>(inputType)) {
+            constScale = builder.getF32FloatAttr(scaleValue);
+        }
 
+        const auto ppeConverter = VPU::NCESparsity::getPPEConverterCb(arch);
+        const auto biasConverter = VPU::NCESparsity::getBiasConverterCb(arch);
         const std::vector<int32_t> wtTblDataValuesVec = VPU::NCESparsity::getWeightsTable(
                 inputType, outputType, /*weightsPtrs*/ std::nullopt, static_cast<int32_t>(0),
-                /*sparsityPtr*/ std::nullopt, static_cast<int32_t>(0), arch, output.shape[1]);
+                /*sparsityPtr*/ std::nullopt, static_cast<int32_t>(0), ppeConverter, biasConverter, output.shape[1],
+                weightsType, {}, constScale);
 
         auto wtTblDataValues = ArrayRef<int32_t>(wtTblDataValuesVec);
         auto wtTblDataVals = mlir::DenseElementsAttr::get(wtTblDataDdrValueType, wtTblDataValues);
-        auto wtTblDataDdr =
-                funcBuilder.create<Const::DeclareOp>(builder.getUnknownLoc(), wtTblDataDdrType,
-                                                     Const::ContentAttr::get(wtTblDataVals).reorder(DimsOrder::NHWC));
+        auto wtTblDataDdr = funcBuilder.create<Const::DeclareOp>(
+                builder.getUnknownLoc(), wtTblDataDdrType,
+                Const::ContentAttr::transform(wtTblDataVals).reorder(DimsOrder::NHWC).get());
 
         // weights table cmx tensor
 
@@ -173,7 +193,7 @@ void buildAvgpool(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp mod
     auto nceTask = vpux::VPURT::wrapIntoTaskOp<VPUIP::NCEClusterTaskOp>(
             funcBuilder, mlir::ValueRange(barrier0.getBarrier()), mlir::ValueRange(barrier1.getBarrier()), loc,
             outputCmxType, inputCmx.getOperation()->getResult(0), mlir::Value(), wtTblValue,
-            /*instruction_table_list*/ nullptr, /*spr_lookup_table*/ nullptr, /*activation_window=*/nullptr,
+            /*instruction_table_list*/ nullptr, /*spr_lookup_table*/ nullptr,
             parentInputCmx.getOperation()->getResult(0), parentOutputCmx.getOperation()->getResult(0),
             outputCmx.getOperation()->getResult(0), VPUIP::NCETaskType::AVEPOOL, filterSizeAttr, strides, kernelPadding,
             /*actChannelLength*/ nullptr, /*is_continued*/ nullptr, /*sp_pattern*/ nullptr);
@@ -181,8 +201,7 @@ void buildAvgpool(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp mod
     // Since AvgPool operation doesn't have weights table it requires final quantization scaling
     // to be part of output tensor description. Scale vector will be placed in PPE block and
     // later used during NCE task serialization
-    auto avgPoolScale =
-            qPerChType ? 0 : VPU::calculateQuantScaleVectorForAvgPool(inputCmxType, outputCmxType, filterSize, arch);
+    auto avgPoolScale = qPerChType ? 0 : VPU::computeAvgPoolQuantScale(inputCmxType, outputCmxType, filterSize);
 
     int64_t clampLow = std::numeric_limits<int32_t>::min();
     int64_t clampHigh = std::numeric_limits<int32_t>::max();
@@ -198,12 +217,27 @@ void buildAvgpool(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp mod
         // Scale approximation is required for quantized inputs.
         // It is intentional to apply int32 limits for floating point clamping.
         // See E#50875 for details.
-        nceTask.addPPETask(funcBuilder, VPU::PPEMode::NOOP, clampLow, clampHigh, bypassMult, bypassShift, bypassMult,
-                           bypassShift, bypassShift, avgPoolScale);
+        auto ppeAttr = VPU::PPEIntAttr::get(ctx, VPU::PPEModeAttr::get(ctx, VPU::PPEMode::NOOP),
+                                            vpux::getIntAttr(ctx, clampLow), vpux::getIntAttr(ctx, clampHigh),
+                                            vpux::getIntAttr(ctx, bypassMult), vpux::getIntAttr(ctx, bypassShift),
+                                            vpux::getFPArrayAttr(ctx, ArrayRef<double>{avgPoolScale}),
+                                            vpux::getIntArrayAttr(ctx, ArrayRef<int64_t>{bypassMult}),
+                                            vpux::getIntArrayAttr(ctx, ArrayRef<int64_t>{bypassShift}),
+                                            vpux::getIntAttr(ctx, bypassShift), /* in1QuantMult = */ nullptr,
+                                            /* in2QuantMult = */ nullptr,
+                                            /* fpPreluAlpha = */ nullptr);
+        nceTask.addPPETask(funcBuilder, ppeAttr);
     } else {
-        const auto scaleApproximation = QuantizationApproximation(arch, avgPoolScale);
-        nceTask.addPPETask(funcBuilder, VPU::PPEMode::NOOP, clampLow, clampHigh, bypassMult, bypassShift,
-                           scaleApproximation.mult(), scaleApproximation.shift());
+        const auto scaleApproximation = QuantizationApproximation(avgPoolScale);
+        auto ppeAttr = VPU::PPEIntAttr::get(
+                ctx, VPU::PPEModeAttr::get(ctx, VPU::PPEMode::NOOP), vpux::getIntAttr(ctx, clampLow),
+                vpux::getIntAttr(ctx, clampHigh), vpux::getIntAttr(ctx, bypassMult), vpux::getIntAttr(ctx, bypassShift),
+                /* quantScale = */ nullptr, vpux::getIntArrayAttr(ctx, ArrayRef<int64_t>{scaleApproximation.mult()}),
+                vpux::getIntArrayAttr(ctx, ArrayRef<int64_t>{scaleApproximation.shift()}),
+                vpux::getIntAttr(ctx, scaleApproximation.postShift()), /* in1QuantMult = */ nullptr,
+                /* in2QuantMult = */ nullptr,
+                /* fpPreluAlpha = */ nullptr);
+        nceTask.addPPETask(funcBuilder, ppeAttr);
     }
 
     // Create DPU task for NCE task
@@ -218,17 +252,6 @@ void buildAvgpool(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp mod
                                                 outputCmx.getOperation()->getResult(0), funcOutput, 0);
 
     funcBuilder.create<mlir::func::ReturnOp>(loc, funcOutput);
-
-    // set runtime resources
-    std::optional<vpux::Byte> availableCMXMemory = std::nullopt;
-
-    mlir::PassManager pm(module->getName(), mlir::OpPassManager::Nesting::Implicit);
-    auto initCompilerOptions = VPU::InitCompilerOptions(arch, VPU::CompilationMode::DefaultHW);
-    initCompilerOptions.numberOfDPUGroups = 1;
-    initCompilerOptions.setAvailableCMXMemory(availableCMXMemory);
-    VPU::buildInitCompilerPipeline(pm, initCompilerOptions, log);
-
-    VPUX_THROW_UNLESS(mlir::succeeded(pm.run(module)), "Compilation failed");
 
     // IE.CNNNetwork
     buildCNNOp(builder, func.getName(), {getTensorType(ShapeRef(inShape), inputType, DimsOrder::NHWC, nullptr)},

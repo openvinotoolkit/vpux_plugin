@@ -39,20 +39,24 @@ module @Test_1 {
     VPUIPDPU.DPUVariant @DPUVariant_0 invariant(@DeclareTaskBuffer_DPUInvariant_0) {task_index = !VPURegMapped.Index<0:0:0>, taskLocation = @DeclareTaskBuffer_DPUVariant_0, nce_task_type = #VPUIP.nce_task_type<MAXPOOL>}
     DPUCfg: {
         VPUIPDPU.ODUOutSubtensor begin_coord_x(0) begin_coord_y(0) begin_coord_z(0) end_coord_x(63) end_coord_y(63) end_coord_z(15)
-        VPUIPDPU.ODUHaloRegion begin_coord_x(0) begin_coord_y(0) end_coord_x(3) end_coord_y(3)
-                                activations_offset(0) sparsity_offset(0) target_width(0)
-                                cast_to_tile("DPU_TILE_1|DPU_TILE_2")
-        VPUIPDPU.ODUHaloRegion begin_coord_x(60) begin_coord_y(60) end_coord_x(63) end_coord_y(63)
-                                activations_offset(0) sparsity_offset(0) target_width(0)
-                                cast_to_tile("DPU_TILE_1|DPU_TILE_2")
+        VPUIPDPU.ODUHaloCfg {
+            VPUIPDPU.ODUHaloRegion begin_coord_x(0) begin_coord_y(0) end_coord_x(3) end_coord_y(3)
+                                    activations_offset(0) sparsity_offset(0) target_width(0)
+                                    cast_to_tile("DPU_TILE_1|DPU_TILE_2")
+            VPUIPDPU.ODUHaloRegion begin_coord_x(60) begin_coord_y(60) end_coord_x(63) end_coord_y(63)
+                                    activations_offset(0) sparsity_offset(0) target_width(0)
+                                    cast_to_tile("DPU_TILE_1|DPU_TILE_2")
+        }
     }
 
     VPUIPDPU.DPUVariant @DPUVariant_1 invariant(@DeclareTaskBuffer_DPUInvariant_0) {task_index = !VPURegMapped.Index<0:0:0>, taskLocation = @DeclareTaskBuffer_DPUVariant_1, nce_task_type = #VPUIP.nce_task_type<MAXPOOL>}
     DPUCfg: {
         VPUIPDPU.ODUOutSubtensor begin_coord_x(0) begin_coord_y(0) begin_coord_z(0) end_coord_x(63) end_coord_y(63) end_coord_z(15)
-        VPUIPDPU.ODUHaloRegion begin_coord_x(0) begin_coord_y(0) end_coord_x (63) end_coord_y(63)
-                                activations_offset(0) sparsity_offset(0) target_width(0)
-                                cast_to_tile("DPU_TILE_2|DPU_TILE_3")
+        VPUIPDPU.ODUHaloCfg {
+            VPUIPDPU.ODUHaloRegion begin_coord_x(0) begin_coord_y(0) end_coord_x (63) end_coord_y(63)
+                                    activations_offset(0) sparsity_offset(0) target_width(0)
+                                    cast_to_tile("DPU_TILE_2|DPU_TILE_3")
+        }
     }
 }
 
@@ -70,12 +74,16 @@ module @Test_1 {
 //CHECK:    }
 //CHECK:    VPUIPDPU.DPUVariant @DPUVariant_0 invariant(@DeclareTaskBuffer_DPUInvariant_0) {nce_task_type = #VPUIP.nce_task_type<MAXPOOL>, taskLocation = @DeclareTaskBuffer_DPUVariant_0, task_index = !VPURegMapped.Index<0:0:0>} DPUCfg : {
 //CHECK:      VPUIPDPU.ODUOutSubtensor begin_coord_x(0) begin_coord_y(0) begin_coord_z(0) end_coord_x(63) end_coord_y(63) end_coord_z(15)
-//CHECK:      VPUIPDPU.ODUHaloRegion begin_coord_x(0) begin_coord_y(0) end_coord_x(3) end_coord_y(3) activations_offset(0) sparsity_offset(0) target_width(0) cast_to_tile(DPU_TILE_1|DPU_TILE_2)
-//CHECK:      VPUIPDPU.ODUHaloRegion begin_coord_x(60) begin_coord_y(60) end_coord_x(63) end_coord_y(63) activations_offset(0) sparsity_offset(0) target_width(0) cast_to_tile(DPU_TILE_1|DPU_TILE_2)
+//CHECK:      VPUIPDPU.ODUHaloCfg {
+//CHECK:        VPUIPDPU.ODUHaloRegion begin_coord_x(0) begin_coord_y(0) end_coord_x(3) end_coord_y(3) activations_offset(0) sparsity_offset(0) target_width(0) cast_to_tile(DPU_TILE_1|DPU_TILE_2)
+//CHECK:        VPUIPDPU.ODUHaloRegion begin_coord_x(60) begin_coord_y(60) end_coord_x(63) end_coord_y(63) activations_offset(0) sparsity_offset(0) target_width(0) cast_to_tile(DPU_TILE_1|DPU_TILE_2)
+//CHECK:      }
 //CHECK:    }
 //CHECK:    VPUIPDPU.DPUVariant @DPUVariant_1 invariant(@DeclareTaskBuffer_DPUInvariant_0) {nce_task_type = #VPUIP.nce_task_type<MAXPOOL>, taskLocation = @DeclareTaskBuffer_DPUVariant_1, task_index = !VPURegMapped.Index<0:0:0>} DPUCfg : {
 //CHECK:      VPUIPDPU.ODUOutSubtensor begin_coord_x(0) begin_coord_y(0) begin_coord_z(0) end_coord_x(63) end_coord_y(63) end_coord_z(15)
-//CHECK:      VPUIPDPU.ODUHaloRegion begin_coord_x(0) begin_coord_y(0) end_coord_x(63) end_coord_y(63) activations_offset(0) sparsity_offset(0) target_width(0) cast_to_tile(DPU_TILE_2|DPU_TILE_3)
+//CHECK:      VPUIPDPU.ODUHaloCfg {
+//CHECK:        VPUIPDPU.ODUHaloRegion begin_coord_x(0) begin_coord_y(0) end_coord_x(63) end_coord_y(63) activations_offset(0) sparsity_offset(0) target_width(0) cast_to_tile(DPU_TILE_2|DPU_TILE_3)
+//CHECK:      }
 //CHECK:    }
 
 // -----
@@ -161,21 +169,23 @@ module @Test_3 {
     VPUIPDPU.DPUVariant @DPUVariant_0 invariant(@DeclareTaskBuffer_DPUInvariant_0) {task_index = !VPURegMapped.Index<0:0:0>, taskLocation = @DeclareTaskBuffer_DPUVariant_0, nce_task_type = #VPUIP.nce_task_type<MAXPOOL>}
     DPUCfg: {
         VPUIPDPU.ODUOutSubtensor begin_coord_x(0) begin_coord_y(0) begin_coord_z(0) end_coord_x(63) end_coord_y(63) end_coord_z(15)
-        VPUIPDPU.ODUHaloRegion begin_coord_x(0) begin_coord_y(0) end_coord_x(4) end_coord_y(4)
-                                activations_offset(0) sparsity_offset(0) target_width(0)
-                                cast_to_tile("DPU_TILE_1|DPU_TILE_2")
-        VPUIPDPU.ODUHaloRegion begin_coord_x(59) begin_coord_y(59) end_coord_x(63) end_coord_y(63)
-                                activations_offset(0) sparsity_offset(0) target_width(0)
-                                cast_to_tile("DPU_TILE_1|DPU_TILE_2")
-        VPUIPDPU.ODUHaloRegion begin_coord_x(0) begin_coord_y(0) end_coord_x(63) end_coord_y(63)
-                                activations_offset(0) sparsity_offset(0) target_width(0)
-                                cast_to_tile("DPU_TILE_3|DPU_TILE_4")
-        VPUIPDPU.ODUHaloRegion begin_coord_x(0) begin_coord_y(0) end_coord_x(100) end_coord_y(100)
-                                activations_offset(131072) sparsity_offset(0) target_width(0)
-                                cast_to_tile("DPU_TILE_1|DPU_TILE_2|DPU_TILE_3")
-        VPUIPDPU.ODUHaloRegion begin_coord_x(29) begin_coord_y(29) end_coord_x(35) end_coord_y(35)
-                                activations_offset(262144) sparsity_offset(0) target_width(0)
-                                cast_to_tile("DPU_TILE_1|DPU_TILE_2|DPU_TILE_3|DPU_TILE_4")
+        VPUIPDPU.ODUHaloCfg {
+            VPUIPDPU.ODUHaloRegion begin_coord_x(0) begin_coord_y(0) end_coord_x(4) end_coord_y(4)
+                                    activations_offset(0) sparsity_offset(0) target_width(0)
+                                    cast_to_tile("DPU_TILE_1|DPU_TILE_2")
+            VPUIPDPU.ODUHaloRegion begin_coord_x(59) begin_coord_y(59) end_coord_x(63) end_coord_y(63)
+                                    activations_offset(0) sparsity_offset(0) target_width(0)
+                                    cast_to_tile("DPU_TILE_1|DPU_TILE_2")
+            VPUIPDPU.ODUHaloRegion begin_coord_x(0) begin_coord_y(0) end_coord_x(63) end_coord_y(63)
+                                    activations_offset(0) sparsity_offset(0) target_width(0)
+                                    cast_to_tile("DPU_TILE_3|DPU_TILE_4")
+            VPUIPDPU.ODUHaloRegion begin_coord_x(0) begin_coord_y(0) end_coord_x(100) end_coord_y(100)
+                                    activations_offset(131072) sparsity_offset(0) target_width(0)
+                                    cast_to_tile("DPU_TILE_1|DPU_TILE_2|DPU_TILE_3")
+            VPUIPDPU.ODUHaloRegion begin_coord_x(29) begin_coord_y(29) end_coord_x(35) end_coord_y(35)
+                                    activations_offset(262144) sparsity_offset(0) target_width(0)
+                                    cast_to_tile("DPU_TILE_1|DPU_TILE_2|DPU_TILE_3|DPU_TILE_4")
+        }
     }
 }
 
@@ -193,9 +203,11 @@ module @Test_3 {
 //CHECK:    }
 //CHECK:    VPUIPDPU.DPUVariant @DPUVariant_0 invariant(@DeclareTaskBuffer_DPUInvariant_0) {nce_task_type = #VPUIP.nce_task_type<MAXPOOL>, taskLocation = @DeclareTaskBuffer_DPUVariant_0, task_index = !VPURegMapped.Index<0:0:0>} DPUCfg : {
 //CHECK:      VPUIPDPU.ODUOutSubtensor begin_coord_x(0) begin_coord_y(0) begin_coord_z(0) end_coord_x(63) end_coord_y(63) end_coord_z(15)
-//CHECK:      VPUIPDPU.ODUHaloRegion begin_coord_x(0) begin_coord_y(0) end_coord_x(4) end_coord_y(4) activations_offset(0) sparsity_offset(0) target_width(0) cast_to_tile(DPU_TILE_1|DPU_TILE_2)
-//CHECK:      VPUIPDPU.ODUHaloRegion begin_coord_x(59) begin_coord_y(59) end_coord_x(63) end_coord_y(63) activations_offset(0) sparsity_offset(0) target_width(0) cast_to_tile(DPU_TILE_1|DPU_TILE_2)
-//CHECK:      VPUIPDPU.ODUHaloRegion begin_coord_x(0) begin_coord_y(0) end_coord_x(63) end_coord_y(63) activations_offset(0) sparsity_offset(0) target_width(0) cast_to_tile(DPU_TILE_3|DPU_TILE_4)
-//CHECK:      VPUIPDPU.ODUHaloRegion begin_coord_x(0) begin_coord_y(0) end_coord_x(100) end_coord_y(100) activations_offset(131072) sparsity_offset(0) target_width(0) cast_to_tile(DPU_TILE_1|DPU_TILE_2|DPU_TILE_3)
-//CHECK:      VPUIPDPU.ODUHaloRegion begin_coord_x(29) begin_coord_y(29) end_coord_x(35) end_coord_y(35) activations_offset(262144) sparsity_offset(0) target_width(0) cast_to_tile(DPU_TILE_1|DPU_TILE_2|DPU_TILE_3|DPU_TILE_4)
+//CHECK:      VPUIPDPU.ODUHaloCfg {
+//CHECK:        VPUIPDPU.ODUHaloRegion begin_coord_x(0) begin_coord_y(0) end_coord_x(4) end_coord_y(4) activations_offset(0) sparsity_offset(0) target_width(0) cast_to_tile(DPU_TILE_1|DPU_TILE_2)
+//CHECK:        VPUIPDPU.ODUHaloRegion begin_coord_x(59) begin_coord_y(59) end_coord_x(63) end_coord_y(63) activations_offset(0) sparsity_offset(0) target_width(0) cast_to_tile(DPU_TILE_1|DPU_TILE_2)
+//CHECK:        VPUIPDPU.ODUHaloRegion begin_coord_x(0) begin_coord_y(0) end_coord_x(63) end_coord_y(63) activations_offset(0) sparsity_offset(0) target_width(0) cast_to_tile(DPU_TILE_3|DPU_TILE_4)
+//CHECK:        VPUIPDPU.ODUHaloRegion begin_coord_x(0) begin_coord_y(0) end_coord_x(100) end_coord_y(100) activations_offset(131072) sparsity_offset(0) target_width(0) cast_to_tile(DPU_TILE_1|DPU_TILE_2|DPU_TILE_3)
+//CHECK:        VPUIPDPU.ODUHaloRegion begin_coord_x(29) begin_coord_y(29) end_coord_x(35) end_coord_y(35) activations_offset(262144) sparsity_offset(0) target_width(0) cast_to_tile(DPU_TILE_1|DPU_TILE_2|DPU_TILE_3|DPU_TILE_4)
+//CHECK:      }
 //CHECK:    }

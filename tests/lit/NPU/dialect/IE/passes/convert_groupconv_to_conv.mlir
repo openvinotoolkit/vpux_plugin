@@ -107,9 +107,9 @@ func.func @ConvertGroupConvToSingleConvWithAsymmetricalWeights(%arg0: tensor<1x1
     // CHECK-DAG:   [[ORG_WEIGHTS:%.+]] = const.Declare tensor<8x8x1x3xf16> = dense<1.000000e+00> : tensor<2x4x8x3xf16>, [#const.Reshape<[8, 8, 3]>, #const.Reshape<[8, 8, 1, 3]>]
 
     // CHECK-DAG:   [[WEIGHTS0:%.+]] = const.Declare tensor<4x16x1x3xf16> = dense<1.000000e+00> : tensor<2x4x8x3xf16>
-    // CHECK-SAME:                     [#const.Reshape<[8, 8, 3]>, #const.Reshape<[8, 8, 1, 3]>, #const.SubView<[0, 0, 0, 0], [4, 8, 1, 3]>, #const.PadWithZero<[0, 0, 0, 0], [0, 8, 0, 0]>]
+    // CHECK-SAME:                     [#const.Reshape<[8, 8, 3]>, #const.SubView<[0, 0, 0], [4, 8, 3]>, #const.Reshape<[4, 8, 1, 3]>, #const.PadWithZero<[0, 0, 0, 0], [0, 8, 0, 0]>]
     // CHECK-DAG:   [[WEIGHTS1:%.+]] = const.Declare tensor<4x16x1x3xf16> = dense<1.000000e+00> : tensor<2x4x8x3xf16>
-    // CHECK-SAME:                     [#const.Reshape<[8, 8, 3]>, #const.Reshape<[8, 8, 1, 3]>, #const.SubView<[4, 0, 0, 0], [4, 8, 1, 3]>, #const.PadWithZero<[0, 8, 0, 0], [0, 0, 0, 0]>]
+    // CHECK-SAME:                     [#const.Reshape<[8, 8, 3]>, #const.SubView<[4, 0, 0], [4, 8, 3]>, #const.Reshape<[4, 8, 1, 3]>, #const.PadWithZero<[0, 8, 0, 0], [0, 0, 0, 0]>]
 
     // CHECK:       [[CONCAT:%.+]] = IE.Concat([[WEIGHTS0]], [[WEIGHTS1]]) {per_axis = #IE.Concat<axis = 0 : i64>}
     // CHECK-SAME:                      tensor<4x16x1x3xf16>, tensor<4x16x1x3xf16> -> tensor<8x16x1x3xf16>

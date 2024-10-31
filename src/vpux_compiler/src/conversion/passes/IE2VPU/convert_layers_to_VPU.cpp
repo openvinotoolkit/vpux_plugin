@@ -1,49 +1,21 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2023-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 #include "vpux/compiler/conversion/passes/IE2VPU/convert_layers_to_VPU.hpp"
 #include "vpux/compiler/conversion.hpp"
 #include "vpux/compiler/conversion/factories/convert_layers_to_vpu_strategy_getter.hpp"
+#include "vpux/compiler/core/attributes/tensor_attr.hpp"
+#include "vpux/compiler/dialect/IE/IR/dialect.hpp"
+#include "vpux/compiler/dialect/IE/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPU/IR/dialect.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
 
 // Generated
 #include <vpux/compiler/conversion/convert_layers_to_VPU.hpp.inc>
 
 using namespace vpux;
-
-//
-// computeWeightForEmbeddingOp
-//
-
-void vpux::computeWeightForEmbeddingOp(mlir::MLIRContext* ctx, mlir::RankedTensorType& weightsTensorType,
-                                       mlir::DenseElementsAttr& baseAttr, llvm::ArrayRef<int64_t> weightsShape,
-                                       vpux::NDTypeInterface inType) {
-    // Serialization of optional arguments for sw operators not supported
-    // weight tensor is constructed when it is not provided
-    const auto iType = inType.getElementType();
-
-    if (iType.isUnsignedInteger(8)) {
-        // netPrecision:U8
-        weightsTensorType = mlir::RankedTensorType::get(
-                weightsShape, mlir::IntegerType::get(ctx, 8, mlir::IntegerType::SignednessSemantics::Unsigned));
-        baseAttr = mlir::DenseElementsAttr::get(weightsTensorType, (uint8_t)1);
-
-    } else if (iType.isInteger(32)) {
-        // netPrecision:int32
-        weightsTensorType = mlir::RankedTensorType::get(
-                weightsShape, mlir::IntegerType::get(ctx, 32, mlir::IntegerType::SignednessSemantics::Signed));
-        baseAttr = mlir::DenseElementsAttr::get(weightsTensorType, 1);
-
-    } else if (iType.isF16()) {
-        // netPrecision:float16
-        weightsTensorType = mlir::RankedTensorType::get(weightsShape, mlir::Float16Type::get(ctx));
-        baseAttr = mlir::DenseElementsAttr::get(weightsTensorType, vpux::type::float16(1));
-    } else {
-        VPUX_THROW("Unsupported element type: {0}", iType);
-    }
-}
 
 //
 // IfRewrite
@@ -253,35 +225,6 @@ mlir::LogicalResult GRUCellRewrite::matchAndRewrite(IE::GRUCellOp origOp, mlir::
 }
 
 //
-// EmbeddingBagPackedSumRewrite
-//
-
-mlir::LogicalResult EmbeddingBagPackedSumRewrite::matchAndRewrite(IE::EmbeddingBagPackedSumOp origOp,
-                                                                  mlir::PatternRewriter& rewriter) const {
-    _log.trace("Found EmbeddingBagPackedSum Operation '{0}'", origOp->getLoc());
-
-    auto* ctx = origOp->getContext();
-    const auto weights = origOp.getPerSampleWeights();
-    if (weights != nullptr) {
-        rewriter.replaceOpWithNewOp<VPU::EmbeddingBagPackedSumOp>(origOp, origOp.getEmbTable(), origOp.getIndices(),
-                                                                  origOp.getPerSampleWeights());
-        return mlir::success();
-    }
-
-    mlir::RankedTensorType weightsTensorType;
-    mlir::DenseElementsAttr baseAttr;
-    const auto weightsShape = getShape(origOp.getIndices()).raw();
-    const auto inType = origOp.getEmbTable().getType().cast<NDTypeInterface>();
-
-    computeWeightForEmbeddingOp(ctx, weightsTensorType, baseAttr, weightsShape, inType);
-
-    auto cst = rewriter.create<Const::DeclareOp>(origOp.getLoc(), weightsTensorType, Const::ContentAttr::get(baseAttr));
-    rewriter.replaceOpWithNewOp<VPU::EmbeddingBagPackedSumOp>(origOp, origOp.getEmbTable(), origOp.getIndices(),
-                                                              cst.getOutput());
-    return mlir::success();
-}
-
-//
 // InterpolateRewrite
 //
 
@@ -289,9 +232,8 @@ mlir::LogicalResult InterpolateRewrite::matchAndRewrite(IE::InterpolateOp origOp
                                                         mlir::PatternRewriter& rewriter) const {
     rewriter.replaceOpWithNewOp<VPU::InterpolateOp>(
             origOp, origOp.getType(), origOp.getInput(), origOp.getSizes(), origOp.getScales(), origOp.getAxes(),
-            /*coordinates*/ nullptr, /* lambdas */ nullptr, origOp.getSizesAttrAttr(), origOp.getScalesAttrAttr(),
-            origOp.getAxesAttrAttr(), origOp.getTileOffsetAttrAttr(), origOp.getInitialInputDimsAttrAttr(),
-            origOp.getInitialOutputDimsAttrAttr(),
+            origOp.getSizesAttrAttr(), origOp.getScalesAttrAttr(), origOp.getAxesAttrAttr(),
+            origOp.getTileOffsetAttrAttr(), origOp.getInitialInputDimsAttrAttr(), origOp.getInitialOutputDimsAttrAttr(),
             /*initial_input_offset_attr=*/nullptr, /*initial_output_offset_attr=*/nullptr,
             /*multiClusterStrategy=*/nullptr, origOp.getAttrAttr());
     return mlir::success();
@@ -345,6 +287,44 @@ mlir::LogicalResult NormalizeL2Rewrite::matchAndRewrite(IE::NormalizeL2Op origOp
 }
 
 //
+// LSTMCellRewrite
+//
+
+mlir::LogicalResult LSTMCellRewrite::matchAndRewrite(IE::LSTMCellOp origOp, mlir::PatternRewriter& rewriter) const {
+    const auto weights = origOp.getWeights();
+    const auto biases = origOp.getBiases();
+    if (!weights || !biases) {
+        return matchFailed(rewriter, origOp,
+                           "VPU::LSTMCell does not support missing weights or biases; it should have been decomposed "
+                           "by the DecomposeLSTMCellPass.");
+    }
+
+    rewriter.replaceOpWithNewOp<VPU::LSTMCellOp>(origOp, origOp.getInputData(), origOp.getInitialHiddenState(),
+                                                 origOp.getInitialCellState(), weights, origOp.getRecurrenceWeights(),
+                                                 biases, origOp.getHiddenSizeAttr());
+    return mlir::success();
+}
+
+//
+// LSTMSequenceRewrite
+//
+
+mlir::LogicalResult LSTMSequenceRewrite::matchAndRewrite(IE::LSTMSequenceOp origOp,
+                                                         mlir::PatternRewriter& rewriter) const {
+    const auto weights = origOp.getWeights();
+    const auto biases = origOp.getBiases();
+    if (weights || biases) {
+        return matchFailed(rewriter, origOp,
+                           "VPU::LSTMSequence does not support weights and biases; it should have been decomposed by "
+                           "the DecomposeLSTMSequencePass.");
+    }
+    rewriter.replaceOpWithNewOp<VPU::LSTMSequenceOp>(
+            origOp, origOp.getInputData(), origOp.getInitialHiddenState(), origOp.getInitialCellState(),
+            origOp.getReccurenceWeights(), origOp.getSequenceLengthAttr(), origOp.getDirectionAttr(), nullptr);
+    return mlir::success();
+}
+
+//
 // LSTMGatesRewrite
 //
 
@@ -353,6 +333,53 @@ mlir::LogicalResult LSTMGatesRewrite::matchAndRewrite(IE::LSTMGatesOp origOp, ml
 
     rewriter.replaceOpWithNewOp<VPU::LSTMGatesOp>(origOp, origOp.getGatesInput(), origOp.getInitialCellState(),
                                                   /*multiClusterStrategy=*/nullptr);
+
+    return mlir::success();
+}
+
+//
+// GroupConvolutionRewrite
+//
+
+mlir::LogicalResult GroupConvolutionRewrite::matchAndRewrite(IE::GroupConvolutionOp origOp,
+                                                             mlir::PatternRewriter& rewriter) const {
+    _log.trace("Found GroupConvolutionRewrite Operation '{0}'", origOp->getLoc());
+
+    rewriter.replaceOpWithNewOp<VPU::GroupConvolutionOp>(
+            origOp, origOp.getOutput().getType(), origOp.getInput(), origOp.getFilter(), origOp.getBias(),
+            origOp.getStrides(), origOp.getPadsBegin(), origOp.getPadsEnd(), origOp.getDilations(),
+            origOp.getGroupsAttr(), origOp.getPostOpAttr());
+
+    return mlir::success();
+}
+
+//
+// DynamicReshapeRewrite
+//
+
+mlir::LogicalResult DynamicReshapeRewrite::matchAndRewrite(IE::DynamicReshapeOp origOp,
+                                                           mlir::PatternRewriter& rewriter) const {
+    _log.trace("Found DynamicReshape Operation '{0}'", origOp->getLoc());
+
+    const auto outputType = origOp.getOutput().getType();
+    rewriter.replaceOpWithNewOp<VPU::DynamicReshapeOp>(origOp, outputType, origOp.getInput(), origOp.getShape(),
+                                                       origOp.getOutputShapeAttr(), origOp.getOutputBoundsAttr());
+
+    return mlir::success();
+}
+
+//
+// DynamicTileRewrite
+//
+
+mlir::LogicalResult DynamicTileRewrite::matchAndRewrite(IE::DynamicTileOp origOp,
+                                                        mlir::PatternRewriter& rewriter) const {
+    _log.trace("Found DynamicTileOp Operation '{0}'", origOp->getLoc());
+
+    const auto outputType = origOp.getOutput().getType();
+    rewriter.replaceOpWithNewOp<VPU::DynamicTileOp>(origOp, outputType, origOp.getInput(), origOp.getTargetShape(),
+                                                    origOp.getRepeats(), origOp.getRepeatsValuesAttr(),
+                                                    origOp.getOutputShapeAttr(), origOp.getOutputBoundsAttr());
 
     return mlir::success();
 }
@@ -378,7 +405,7 @@ void ConvertLayers2VPUPass::safeRunOnFunc() {
     auto func = getOperation();
     auto arch = VPU::getArch(func);
 
-    auto archSpecificStrategy = CreateConvertLayers2VPUStrategy(arch);
+    auto archSpecificStrategy = createConvertLayers2VPUStrategy(arch);
 
     mlir::ConversionTarget target(ctx);
     target.addIllegalDialect<IE::IEDialect>();
@@ -398,11 +425,15 @@ void ConvertLayers2VPUPass::safeRunOnFunc() {
     patterns.add<InterpolateRewrite>(&ctx, _log);
 
     patterns.add<GRUCellRewrite>(&ctx, _log);
-    patterns.add<EmbeddingBagPackedSumRewrite>(&ctx, _log);
     patterns.add<TopKRewrite>(&ctx, _log);
     patterns.add<TransposedConvRewrite>(&ctx, _log);
     patterns.add<NormalizeL2Rewrite>(&ctx, _log);
+    patterns.add<LSTMCellRewrite>(&ctx, _log);
+    patterns.add<LSTMSequenceRewrite>(&ctx, _log);
     patterns.add<LSTMGatesRewrite>(&ctx, _log);
+    patterns.add<GroupConvolutionRewrite>(&ctx, _log);
+    patterns.add<DynamicReshapeRewrite>(&ctx, _log);
+    patterns.add<DynamicTileRewrite>(&ctx, _log);
     populateWithGenerated(patterns);
 
     if (mlir::failed(mlir::applyFullConversion(func, target, std::move(patterns)))) {

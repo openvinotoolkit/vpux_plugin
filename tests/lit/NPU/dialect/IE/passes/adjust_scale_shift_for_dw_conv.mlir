@@ -14,7 +14,7 @@ func.func @AdjustScaleShiftForDWConvWithInputIsConst(%arg0: tensor<1x77x1x1xf16>
 
     // CHECK-DAG:   [[INPUT_CONST:%.*]] = const.Declare tensor<1x5929x3x3xf16> = dense<1.000000e+00> :
     // CHECK-SAME:            tensor<77x77x3x3xf16>, [#const.Reshape<[1, 5929, 3, 3]>]
-    // CHECK-DAG:   [[BROADCAST_SHAPE:%.*]] = const.Declare tensor<4xsi32> = dense<[77, 77, 1, 1]> : tensor<4xsi64>, [#const.ConvertElemType<si32>]
+    // CHECK-DAG:   [[BROADCAST_SHAPE:%.*]] = const.Declare tensor<4xsi32> = dense<[77, 77, 1, 1]> : tensor<4xsi64>, [#const.CastElemType<si32>]
     // CHECK:       [[BROADCAST:%.*]] = IE.Broadcast(%arg0, [[BROADCAST_SHAPE]]) {mode = #IE.broadcast_type<NUMPY>} :
     // CHECK-SAME:            tensor<1x77x1x1xf16>, tensor<4xsi32> -> tensor<77x77x1x1xf16>
     // CHECK:       [[INPUT_RESHAPE:%.*]] = IE.Reshape([[BROADCAST]]) {shape_value = [1, 5929, 1, 1]} :
@@ -29,13 +29,13 @@ func.func @AdjustScaleShiftForDWConvWithInputIsConst(%arg0: tensor<1x77x1x1xf16>
 
 // CHECK-LABEL: @AdjustScaleShiftForDWConvWithLargeN
 func.func @AdjustScaleShiftForDWConvWithLargeN(%arg0: tensor<1x77x77x9xf16>) -> tensor<77x77x3x3xf16> {
-    %cst = const.Declare tensor<1x77x1x1xf16> = dense<-1.39928699> : tensor<1x1x1x1xf32>, [#const.ConvertElemType<f16>, #const.Broadcast<1 : i64, 77 : i64>]
+    %cst = const.Declare tensor<1x77x1x1xf16> = dense<-1.39928699> : tensor<1x1x1x1xf32>, [#const.CastElemType<f16>, #const.Broadcast<1 : i64, 77 : i64>]
     %reshape = IE.AffineReshape(%arg0) {dim_mapping = [[0], [0], [1], [2, 3]], shape_value = [77, 77, 3, 3]} : tensor<1x77x77x9xf16> -> tensor<77x77x3x3xf16>
     %result = IE.ScaleShift(%reshape, %cst) {operandSegmentSizes = array<i32: 1, 1, 0>} : tensor<77x77x3x3xf16>, tensor<1x77x1x1xf16> -> tensor<77x77x3x3xf16>
 
     return %result : tensor<77x77x3x3xf16>
 
-    // CHECK-DAG:   [[CST1:%.*]] = const.Declare tensor<1x5929x1x1xf16> = dense<-1.39928699> : tensor<1x1x1x1xf32>, [#const.ConvertElemType<f16>, #const.Broadcast<1 : i64, 77 : i64>, #const.Broadcast<0 : i64, 77 : i64>, #const.Reshape<[1, 5929, 1, 1]>]
+    // CHECK-DAG:   [[CST1:%.*]] = const.Declare tensor<1x5929x1x1xf16> = dense<-1.39928699> : tensor<1x1x1x1xf32>, [#const.CastElemType<f16>, #const.Broadcast<1 : i64, 77 : i64>, #const.Broadcast<0 : i64, 77 : i64>, #const.Reshape<[1, 5929, 1, 1]>]
     // CHECK:       [[AFFINERESHAPE:%.*]] = IE.AffineReshape(%arg0)
     // CHECK-SAME{LITERAL}: {dim_mapping = [[0], [0], [1], [2, 3]], shape_value = [77, 77, 3, 3]} : tensor<1x77x77x9xf16> -> tensor<77x77x3x3xf16>
     // CHECK:       [[RESHAPE:%.*]] = IE.Reshape([[AFFINERESHAPE]]) {shape_value = [1, 5929, 3, 3]} : tensor<77x77x3x3xf16> -> tensor<1x5929x3x3xf16>

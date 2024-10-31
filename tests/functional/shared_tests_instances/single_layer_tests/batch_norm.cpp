@@ -12,15 +12,12 @@ namespace test {
 
 class BatchNormLayerTestCommon : public BatchNormLayerTest, virtual public VpuOv2LayerTest {};
 
-class BatchNormLayerTest_NPU3720 : public BatchNormLayerTestCommon {};
-class BatchNormLayerTest_NPU4000 : public BatchNormLayerTestCommon {};
-
-TEST_P(BatchNormLayerTest_NPU3720, SW) {
+TEST_P(BatchNormLayerTestCommon, NPU3720_SW) {
     setReferenceSoftwareMode();
     run(Platform::NPU3720);
 }
 
-TEST_P(BatchNormLayerTest_NPU4000, SW) {
+TEST_P(BatchNormLayerTestCommon, NPU4000_SW) {
     setReferenceSoftwareMode();
     run(Platform::NPU4000);
 }
@@ -54,20 +51,10 @@ const auto paramsPrecommit =
                          testing::ValuesIn(static_shapes_to_test_representation(inShapes_precommit)),  // Input shape
                          testing::Values(DEVICE_NPU));  // Target device name
 
-// ------ NPU3720 ------
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_BatchNorm, BatchNormLayerTestCommon, paramsPrecommit,
+                         BatchNormLayerTestCommon::getTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_BatchNorm, BatchNormLayerTest_NPU3720, paramsPrecommit,
-                         BatchNormLayerTest_NPU3720::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_BatchNorm, BatchNormLayerTest_NPU3720, paramsConfig,
-                         BatchNormLayerTest_NPU3720::getTestCaseName);
-
-// ------ NPU4000 ------
-
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_BatchNorm, BatchNormLayerTest_NPU4000, paramsPrecommit,
-                         BatchNormLayerTest_NPU4000 ::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_BatchNorm, BatchNormLayerTest_NPU4000, paramsConfig,
-                         BatchNormLayerTest_NPU4000::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_BatchNorm, BatchNormLayerTestCommon, paramsConfig,
+                         BatchNormLayerTestCommon::getTestCaseName);
 
 }  // namespace

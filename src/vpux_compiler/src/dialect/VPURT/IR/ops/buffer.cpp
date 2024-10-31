@@ -96,13 +96,9 @@ mlir::LogicalResult vpux::VPURT::DeclareBufferOp::verify() {
             }
 
             if (sectionIdx.size() > 1) {
-                const auto distributedType = type.dyn_cast<VPUIP::DistributedBufferType>();
-                const auto vpuipBufferType = type.dyn_cast<VPUIP::BufferType>();
-                if (distributedType == nullptr && vpuipBufferType == nullptr) {
+                if (!type.isa<VPUIP::DistributedBufferType>()) {
                     return errorAt(
-                            op,
-                            "Array of section indexes is supported only for vpuip/distributed buffer type, op = {0}",
-                            op);
+                            op, "Array of section indexes is supported only for distributed buffer type, op = {0}", op);
                 }
             }
 

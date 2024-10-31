@@ -5,7 +5,6 @@
 
 #pragma once
 
-#include <mlir/Dialect/Quant/QuantOps.h>
 #include <mlir/IR/Dialect.h>
 
 //

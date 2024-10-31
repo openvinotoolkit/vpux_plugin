@@ -18,8 +18,6 @@ mlir::IntegerAttr getOptionalInt(mlir::MLIRContext* ctx, std::optional<T> value)
     return value.has_value() ? getIntAttr(ctx, value.value()) : nullptr;
 }
 
-const mlir::StringRef SW_PROF_META_ATTR_NAME = "profilingMetadata";
-
 };  // namespace
 
 VPUIP::DpuProfilingMetadataAttr vpux::getDpuProfilingMetaAttr(mlir::MLIRContext* ctx, unsigned bufferId,
@@ -46,21 +44,6 @@ VPUIP::SwProfilingMetadataAttr vpux::getSwProfilingMetaAttr(mlir::MLIRContext* c
     return VPUIP::SwProfilingMetadataAttr::get(ctx, getIntAttr(ctx, bufferId), getIntAttr(ctx, bufferOffset),
                                                getIntAttr(ctx, clusterSize), getIntAttr(ctx, dataIndex),
                                                getOptionalInt(ctx, tileId), getOptionalInt(ctx, clusterId));
-}
-
-void vpux::attachSwProfilingMetadataToUpa(mlir::Operation* op, VPUIP::SwProfilingMetadataAttr attr) {
-    VPUX_THROW_WHEN(op == nullptr, "Null operation in attachSwProfilingMetadataToUpa");
-    op->setAttr(SW_PROF_META_ATTR_NAME, attr);
-}
-
-VPUIP::SwProfilingMetadataAttr vpux::getSwProfilingMetadataFromUpa(mlir::Operation* op) {
-    VPUX_THROW_WHEN(op == nullptr, "Null operation in attachSwProfilingMetadataToUpa");
-    auto attr = op->getAttr(SW_PROF_META_ATTR_NAME);
-    if (attr == nullptr) {
-        return nullptr;
-    }
-    VPUX_THROW_UNLESS(attr.isa<VPUIP::SwProfilingMetadataAttr>(), "'{0}' must be SwProfilingMetadataAttr");
-    return attr.cast<VPUIP::SwProfilingMetadataAttr>();
 }
 
 VPUIP::M2IProfilingMetadataAttr vpux::getM2IProfilingMetaAttr(mlir::MLIRContext* ctx, size_t bufferId,
@@ -118,6 +101,10 @@ mlir::BlockArgument vpux::addNewProfilingOutput(mlir::MLIRContext* ctx, mlir::fu
     auto userInfoBuilder = mlir::OpBuilder::atBlockEnd(&netOp.getProfilingOutputsInfo().front().front());
     userInfoBuilder.create<IE::DataInfoOp>(mlir::NameLoc::get(mlir::StringAttr::get(ctx, "profilingDataOutputInfo")),
                                            mlir::StringAttr::get(ctx, name), mlir::TypeAttr::get(outputUserResult),
+                                           /*OptionalAttr originalShape*/ nullptr,
+                                           /*OptionalAttr friendlyName*/ nullptr,
+                                           /*OptionalAttr inputName*/ nullptr,
+                                           /*OptionalAttr tensorNames*/ nullptr,
                                            /*profilingSectionsCount=*/0);
 
     const mlir::Location suffixLoc = mlir::NameLoc::get(mlir::StringAttr::get(ctx, "profiling_" + name));

@@ -11,8 +11,8 @@
 // CHECK-LABEL: @FloatInConv2d
 func.func @FloatInConv2d(%arg0: tensor<1x16x3x3xf16>) -> tensor<1x16x3x3x!qElemType> {
     %cst = const.Declare tensor<16x16x1x1x!qElemType1> = dense<2.000000e+00> : tensor<16x16x1x1xf16>, [
-        #const.ConvertElemType<ui8>,
-        #const.QuantCast<!qElemType1>
+        #const.CastElemType<ui8>,
+        #const.CastElemType<!qElemType1>
     ]
 
     %0 = IE.Quantize(%arg0) {
@@ -29,7 +29,7 @@ func.func @FloatInConv2d(%arg0: tensor<1x16x3x3xf16>) -> tensor<1x16x3x3x!qElemT
     return %1 : tensor<1x16x3x3x!qElemType>
 
     // CHECK-DAG:   [[CST:%.*]] = const.Declare tensor<16x16x1x1x!qElemType1> = dense<2.000000e+00> :
-    // CHECK-SAME:  tensor<16x16x1x1xf16>, [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType1>]
+    // CHECK-SAME:  tensor<16x16x1x1xf16>, [#const.CastElemType<ui8>, #const.CastElemType<!qElemType1>]
 
     // CHECK:   [[DEQUANT:%.*]] = IE.Dequantize([[CST]]) {
     // CHECK-SAME:      dstElemType = f16
@@ -52,8 +52,8 @@ func.func @FloatInConv2d(%arg0: tensor<1x16x3x3xf16>) -> tensor<1x16x3x3x!qElemT
 // CHECK-LABEL: @FloatInGroupConv
 func.func @FloatInGroupConv(%arg0: tensor<1x16x3x3xf16>) -> tensor<1x16x3x3x!qElemType> {
     %cst = const.Declare tensor<16x1x1x1x!qElemType1> = dense<2.000000e+00> : tensor<16x1x1x1xf16>, [
-        #const.ConvertElemType<ui8>,
-        #const.QuantCast<!qElemType1>
+        #const.CastElemType<ui8>,
+        #const.CastElemType<!qElemType1>
     ]
 
     %0 = IE.Quantize(%arg0) {
@@ -71,7 +71,7 @@ func.func @FloatInGroupConv(%arg0: tensor<1x16x3x3xf16>) -> tensor<1x16x3x3x!qEl
     return %1 : tensor<1x16x3x3x!qElemType>
 
     // CHECK-DAG:   [[CST:%.*]] = const.Declare tensor<16x1x1x1x!qElemType1> = dense<2.000000e+00> :
-    // CHECK-SAME:  tensor<16x1x1x1xf16>, [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType1>]
+    // CHECK-SAME:  tensor<16x1x1x1xf16>, [#const.CastElemType<ui8>, #const.CastElemType<!qElemType1>]
 
     // CHECK:   [[DEQUANT:%.*]] = IE.Dequantize([[CST]]) {
     // CHECK-SAME:      dstElemType = f16

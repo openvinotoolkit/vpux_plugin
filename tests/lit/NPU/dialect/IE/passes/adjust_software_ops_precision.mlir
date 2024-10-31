@@ -30,3 +30,23 @@ func.func @TopK_SI64toFP16(%arg0: tensor<1x77xsi64>) -> (tensor<1x1xsi64>, tenso
     // CHECK: [[OUT_CVT:%.*]] = IE.Convert([[VALUES]]) {dstElemType = si64} : tensor<1x1xf16> -> tensor<1x1xsi64>
     // CHECK: return [[OUT_CVT]], [[SHAPE]] : tensor<1x1xsi64>, tensor<1x1xsi32>
 }
+
+
+// -----
+
+!qElemType = !quant.uniform<i4:f16, 1.000000e+00>
+
+// CHECK-LABEL: @DequantizeScaletoFP16
+// CHECK-SAME:   [[INPUT0:%.+]]: tensor<28x512x128xi4>
+// CHECK-SAME:   [[INPUT1:%.+]]: tensor<28x1x128xf32>
+func.func @DequantizeScaletoFP16(%arg0: tensor<28x512x128xi4>, %arg1: tensor<28x1x128xf32>) -> tensor<28x512x128xf32> {
+    %0 = IE.QuantizeCast(%arg0) {dstElemType = !qElemType} : tensor<28x512x128xi4> -> tensor<28x512x128x!qElemType>
+    %1 = IE.DynamicDequantize(%0, %arg1) {dstElemType = f32} : tensor<28x512x128x!qElemType>, tensor<28x1x128xf32> -> tensor<28x512x128xf32>
+    return %1 : tensor<28x512x128xf32>
+
+    // CHECK: [[QUANTIZE_CAST:%.+]] = IE.QuantizeCast([[INPUT0]]) {dstElemType = !qElemType} : tensor<28x512x128xi4> -> tensor<28x512x128x!qElemType>
+    // CHECK: [[CONVERT_IN:%.+]] = IE.Convert([[INPUT1]]) {dstElemType = f16} : tensor<28x1x128xf32> -> tensor<28x1x128xf16>
+    // CHECK: [[DYN_DEQUANT:%.+]] = IE.DynamicDequantize([[QUANTIZE_CAST]], [[CONVERT_IN]]) {dstElemType = f16} : tensor<28x512x128x!qElemType>, tensor<28x1x128xf16> -> tensor<28x512x128xf16>
+    // CHECK: [[CONVERT_OUT:%.+]] = IE.Convert([[DYN_DEQUANT]]) {dstElemType = f32} : tensor<28x512x128xf16> -> tensor<28x512x128xf32>
+    // CHECK:       return [[CONVERT_OUT]] : tensor<28x512x128xf32>
+}

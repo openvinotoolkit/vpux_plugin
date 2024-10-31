@@ -33,12 +33,8 @@ size_t VPUASM::M2IOp::getAlignmentRequirements() {
     return alignof(nn_public::VpuMediaTask);
 }
 
-ELF::SectionFlagsAttr VPUASM::M2IOp::getAccessingProcs(mlir::SymbolUserMap&) {
+ELF::SectionFlagsAttr VPUASM::M2IOp::getPredefinedMemoryAccessors() {
     return ELF::SectionFlagsAttr::SHF_EXECINSTR | ELF::SectionFlagsAttr::VPU_SHF_PROC_DMA;
-}
-
-ELF::SectionFlagsAttr VPUASM::M2IOp::getUserProcs() {
-    return ELF::SectionFlagsAttr::SHF_NONE;
 }
 
 std::optional<ELF::SectionSignature> VPUASM::M2IOp::getSectionSignature() {

@@ -30,6 +30,7 @@ module @DumpOpsStatisticsTestTwoCompressionModes {
 }
 
 // CHECK:   Input size - 4.50 KB Output size - 4.50 KB
+// CHECK:   DDR heap size - 0 bytes
 // CHECK:   VPUIP tasks statistics:
 // CHECK:   VPUIP Tasks - 2 ops
 // CHECK:     VPUIP.DecompressDMAOp - 2 ops
@@ -65,6 +66,7 @@ module @DumpOpsStatisticsTestF16compressionModeOnly {
 }
 
 // CHECK:   Input size - 4.50 KB Output size - 4.50 KB
+// CHECK:   DDR heap size - 0 bytes
 // CHECK:   VPUIP tasks statistics:
 // CHECK:   VPUIP Tasks - 1 ops
 // CHECK:     VPUIP.DecompressDMAOp - 1 ops
@@ -98,6 +100,7 @@ module @DumpOpsStatisticsTestTwoM2ITasks {
 }
 
 // CHECK:   Input size - 4.50 KB Output size - 4.50 KB
+// CHECK:   DDR heap size - 0 bytes
 // CHECK:   VPUIP tasks statistics:
 // CHECK:   VPUIP Tasks - 2 ops
 // CHECK:     VPUIP.M2ITask - 2 ops

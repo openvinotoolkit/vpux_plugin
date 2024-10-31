@@ -72,10 +72,22 @@ void MapBilinearInterpolateOnDPUPass::safeRunOnFunc() {
     target.addDynamicallyLegalOp<IE::InterpolateOp>([&](IE::InterpolateOp op) {
         const auto inputShape = getShape(op.getInput());
         const auto outputShape = getShape(op.getOutput());
+
+        const auto attr = op.getAttr();
+        const auto coordModeAttr = attr.getCoordMode();
+        bool isAlignCorners = coordModeAttr.getValue() == IE::InterpolateCoordMode::ALIGN_CORNERS ? true : false;
+
         const auto axesValue = parseIntArrayAttr<int64_t>(op.getAxesAttrAttr());
         const bool isIntegerRatioOnly = std::all_of(axesValue.begin(), axesValue.end(), [&](const auto& axis) {
-            return (inputShape[Dim(axis)] % outputShape[Dim(axis)] == 0) ||
-                   (outputShape[Dim(axis)] % inputShape[Dim(axis)] == 0);
+            auto outputDim = outputShape[Dim(axis)];
+            auto inputDim = inputShape[Dim(axis)];
+
+            if (isAlignCorners && !isDoubleEqual(axis, 1.0f)) {
+                outputDim = outputDim == 1 ? 1 : (outputDim - 1);
+                inputDim = inputDim == 1 ? 1 : (inputDim - 1);
+            }
+
+            return (outputDim % inputDim == 0) || (inputDim % outputDim == 0);
         });
         // SW kernel performance is bigger that DPU decomposition performance for floating scale factors.
         if (!isIntegerRatioOnly) {

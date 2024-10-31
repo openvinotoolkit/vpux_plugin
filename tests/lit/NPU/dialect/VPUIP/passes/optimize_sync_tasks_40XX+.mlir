@@ -475,7 +475,7 @@ func.func @DoNotRemoveSyncTaskBarVariantLimit() -> memref<1x64x32x32xf16, #NHWC,
     %buf3 = VPURT.DeclareBuffer <DDR> <0> -> memref<0x0x0x0xi32, @DDR>
 
     VPURT.Task updates(%bar0 : !VPURT.Barrier) {
-      VPUIP.NCEClusterTask {activation_window_channel_length = 0 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>} input(%buf0: !CmxType) weights(%buf0: !CmxType) parent_input(%buf0: !CmxType) parent_output(%buf1: !CmxType) outputs(%buf1: !CmxType) -> !CmxType variants : {
+      VPUIP.NCEClusterTask {task_type = #VPUIP.nce_task_type<ELTWISE>} input(%buf0: !CmxType) weights(%buf0: !CmxType) parent_input(%buf0: !CmxType) parent_output(%buf1: !CmxType) outputs(%buf1: !CmxType) -> !CmxType variants : {
         DPUTask {cluster_id = 0 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [31, 31, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0, right = 0, top = 0, bottom = 0>}
         DPUTask {cluster_id = 0 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [31, 31, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0, right = 0, top = 0, bottom = 0>}
         DPUTask {cluster_id = 0 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [31, 31, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0, right = 0, top = 0, bottom = 0>}
@@ -510,7 +510,7 @@ func.func @DoNotRemoveSyncTaskBarVariantLimit() -> memref<1x64x32x32xf16, #NHWC,
         DPUTask {cluster_id = 0 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [31, 31, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0, right = 0, top = 0, bottom = 0>}
         DPUTask {cluster_id = 0 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [31, 31, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0, right = 0, top = 0, bottom = 0>}
       } PPE : {
-        PPETask <NOOP> {clamp_high = 2147483647 : i64, clamp_low = -2147483648 : i64, fp_prelu_alpha = 1.000000e+00 : f64, in1_quant_mult = [24330], in2_quant_mult = [24330], lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_mult = [16384], quant_post_shift = 0 : i64, quant_shift = [28]}
+        PPETask {opaque_ppe = #VPU.PPEStub<>}
       }
     }
 
@@ -519,7 +519,7 @@ func.func @DoNotRemoveSyncTaskBarVariantLimit() -> memref<1x64x32x32xf16, #NHWC,
     }
 
     VPURT.Task waits(%bar1 : !VPURT.Barrier) {
-      VPUIP.NCEClusterTask {activation_window_channel_length = 0 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>} input(%buf0: !CmxType) weights(%buf0: !CmxType) parent_input(%buf0: !CmxType) parent_output(%buf1: !CmxType) outputs(%buf1: !CmxType) -> !CmxType variants : {
+      VPUIP.NCEClusterTask {task_type = #VPUIP.nce_task_type<ELTWISE>} input(%buf0: !CmxType) weights(%buf0: !CmxType) parent_input(%buf0: !CmxType) parent_output(%buf1: !CmxType) outputs(%buf1: !CmxType) -> !CmxType variants : {
         DPUTask {cluster_id = 0 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [31, 31, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0, right = 0, top = 0, bottom = 0>}
         DPUTask {cluster_id = 0 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [31, 31, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0, right = 0, top = 0, bottom = 0>}
         DPUTask {cluster_id = 0 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [31, 31, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0, right = 0, top = 0, bottom = 0>}
@@ -554,7 +554,7 @@ func.func @DoNotRemoveSyncTaskBarVariantLimit() -> memref<1x64x32x32xf16, #NHWC,
         DPUTask {cluster_id = 0 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [31, 31, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0, right = 0, top = 0, bottom = 0>}
         DPUTask {cluster_id = 0 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [31, 31, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0, right = 0, top = 0, bottom = 0>}
       } PPE : {
-        PPETask <NOOP> {clamp_high = 2147483647 : i64, clamp_low = -2147483648 : i64, fp_prelu_alpha = 1.000000e+00 : f64, in1_quant_mult = [24330], in2_quant_mult = [24330], lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_mult = [16384], quant_post_shift = 0 : i64, quant_shift = [28]}
+        PPETask {opaque_ppe = #VPU.PPEStub<>}
       }
     }
 

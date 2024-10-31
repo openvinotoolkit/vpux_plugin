@@ -70,5 +70,8 @@ module @actShaveProfiling {
     // CHECK:       [[RELOC_KERNEL_INVO:%.*]] = ELFNPU37XX.CreateRelocationSection secName(".rlt.text.ActKernelInvocations") sourceSymbolTableSection([[VPU_RT_SYMTAB]])
     // CHECK-NEXT:       ELFNPU37XX.Reloc baseOp([[KERNEL_INVO]] : !VPURegMapped.Index<0:0:0>) offset({{.*}}) <R_VPU_32_RTM> [[VPU_NNRD_SYM_RTM_ACT]] 24
     // CHECK-NEXT:       ELFNPU37XX.Reloc baseOp([[KERNEL_INVO]] : !VPURegMapped.Index<0:0:0>) offset(12) <R_VPU_32_SUM> [[VPU_NNRD_SYM_NNCXM_SLICE_BASE_ADDR]] 4000
+    // CHECK-NEXT:       ELFNPU37XX.Reloc baseOp([[KERNEL_INVO]] : !VPURegMapped.Index<0:0:0>) offset(16) <R_VPU_64_LSHIFT>
+    // CHECK-NEXT:       ELFNPU37XX.Reloc baseOp([[KERNEL_INVO]] : !VPURegMapped.Index<0:0:0>) offset(24) <R_VPU_64_LSHIFT>
+    // CHECK-NEXT:       ELFNPU37XX.Reloc baseOp([[KERNEL_INVO]] : !VPURegMapped.Index<0:0:0>) offset(52) <R_VPU_32>
   }
 }

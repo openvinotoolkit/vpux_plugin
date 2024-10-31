@@ -21,8 +21,18 @@ include "vpux/compiler/NPU40XX/dialect/NPUReg40XX/dialect.td"
 // RegField Specialization
 //
 
-class NPUReg40XX_RegFieldWrapper<string name = "", int width = 0, int pos = 0, string dataType = "UINT"> :
-    VPURegMapped_RegFieldWrapper<NPUReg40XX_Dialect, name, width, pos, dataType> {
+class NPUReg40XX_Version<int vMajor, int vMinor, int vPatch> : VPURegMapped_Version {
+    let major = vMajor;
+    let minor = vMinor;
+    let patch = vPatch;
+}
+
+// MI Version that acts as baseline for NPU40XX NNRT API
+// All registers default to this baseline unless specified otherwise
+def NPUReg40XX_BaselineVersion : NPUReg40XX_Version<11, 4, 0>;
+
+class NPUReg40XX_RegFieldWrapper<string name = "", int width = 0, int pos = 0, string dataType = "UINT", VPURegMapped_Version version = NPUReg40XX_BaselineVersion> :
+    VPURegMapped_RegFieldWrapper<NPUReg40XX_Dialect, name, width, pos, dataType, version> {
 
     }
 
@@ -446,11 +456,8 @@ def bf_StartAfter : NPUReg40XX_RegFieldWrapper<"start_after_", 32, 0>;
 def bf_CleanAfter : NPUReg40XX_RegFieldWrapper<"clean_after_", 32, 32>;
 def reg_BarriersSchedulingCfg : NPUReg40XX_RegisterWrapper<"barriers_sched_", 64, 0x148, ["start_after_", "clean_after_"]>;
 
-def bf_OutputSparsityOffsetInvariant : NPUReg40XX_RegFieldWrapper<"output_sparsity_offset_invariant_", 32, 0>;
-def reg_OutputSparsityOffsetInvariant : NPUReg40XX_RegisterWrapper<"output_sparsity_offset_invariant_", 32, 0x150, ["output_sparsity_offset_invariant_"]>;
-
-def bf_HwpCmxBaseOffset : NPUReg40XX_RegFieldWrapper<"hwp_cmx_base_offset_", 32, 0>;
-def reg_HwpCmxBaseOffset : NPUReg40XX_RegisterWrapper<"hwp_cmx_base_offset_", 32, 0x154, ["hwp_cmx_base_offset_"]>;
+def bf_ReservedInvariant : NPUReg40XX_RegFieldWrapper<"reserved_inv", 64, 0, "UINT", NPUReg40XX_Version<11, 4, 10>>;
+def reg_ReservedInvariant : NPUReg40XX_RegisterWrapper<"reserved_inv", 64, 0x150, ["reserved_inv"]>;
 
 def bf_VariantCnt : NPUReg40XX_RegFieldWrapper<"variant_count_", 16, 0>;
 def reg_VariantCnt : NPUReg40XX_RegisterWrapper<"variant_count_", 16, 0x158, ["variant_count_"]>;
@@ -458,14 +465,8 @@ def reg_VariantCnt : NPUReg40XX_RegisterWrapper<"variant_count_", 16, 0x158, ["v
 def bf_ClusterInvariant : NPUReg40XX_RegFieldWrapper<"cluster_invariant_", 8, 0>;
 def reg_ClusterInvariant : NPUReg40XX_RegisterWrapper<"cluster_invariant_", 8, 0x15A, ["cluster_invariant_"]>;
 
-def bf_IsContConv : NPUReg40XX_RegFieldWrapper<"is_cont_conv_", 8, 0>;
-def reg_IsContConv : NPUReg40XX_RegisterWrapper<"is_cont_conv_", 8, 0x15B, ["is_cont_conv_"]>;
-
-def bf_dpuProfMode : NPUReg40XX_RegFieldWrapper<"dpu_prof_mode", 8, 0>;
-def reg_dpuProfMode : NPUReg40XX_RegisterWrapper<"dpu_prof_mode", 8, 0x15C, ["dpu_prof_mode"]>;
-
-def bf_Pad3 : NPUReg40XX_RegFieldWrapper<"pad_3", 24, 0>;
-def reg_Pad3 : NPUReg40XX_RegisterWrapper<"pad_3", 24, 0x15D, ["pad_3"]>;
+def bf_Pad3 : NPUReg40XX_RegFieldWrapper<"pad_3", 40, 0, "UINT", NPUReg40XX_Version<11, 4, 10>>;
+def reg_Pad3 : NPUReg40XX_RegisterWrapper<"pad_3", 40, 0x15B, ["pad_3"]>;
 
 //
 // DPUVariantRegisters
@@ -659,20 +660,15 @@ def reg_Invariant : NPUReg40XX_RegisterWrapper<"invariant_", 64, 0xC0, ["invaria
 def bf_InvariantIndex : NPUReg40XX_RegFieldWrapper<"invariant_index_", 32, 0>;
 def reg_InvariantIndex : NPUReg40XX_RegisterWrapper<"invariant_index_", 32, 0xC8, ["invariant_index_"]>;
 
-def bf_OutputSparsityOffset : NPUReg40XX_RegFieldWrapper<"output_sparsity_offset_variant_", 32, 0>;
-def reg_OutputSparsityOffset : NPUReg40XX_RegisterWrapper<"output_sparsity_offset_variant_", 32, 0xCC, ["output_sparsity_offset_variant_"]>;
+// uint8_t pad_[20]
+def bf_Pad_7_1 : NPUReg40XX_RegFieldWrapper<"pad_7_1", 64, 0, "UINT", NPUReg40XX_Version<11, 4, 10>>;
+def reg_Pad_7_1 : NPUReg40XX_RegisterWrapper<"pad_7_1", 64, 0xCC, ["pad_7_1"]>;
 
-def bf_WeightTableOffset : NPUReg40XX_RegFieldWrapper<"weight_table_offset_", 32, 0>;
-def reg_WeightTableOffset : NPUReg40XX_RegisterWrapper<"weight_table_offset_", 32, 0xD0, ["weight_table_offset_"]>;
+def bf_Pad_2_2 : NPUReg40XX_RegFieldWrapper<"pad_7_2", 64, 0, "UINT", NPUReg40XX_Version<11, 4, 10>>;
+def reg_Pad_7_2 : NPUReg40XX_RegisterWrapper<"pad_7_2", 64, 0xD4, ["pad_7_2"]>;
 
-def bf_WloadId : NPUReg40XX_RegFieldWrapper<"wload_id_", 32, 0>;
-def reg_WloadId : NPUReg40XX_RegisterWrapper<"wload_id_", 32, 0xD4, ["wload_id_"]>;
-
-def bf_Cluster : NPUReg40XX_RegFieldWrapper<"cluster_variant_", 8, 0>;
-def reg_Cluster : NPUReg40XX_RegisterWrapper<"cluster_variant_", 8, 0xD8, ["cluster_variant_"]>;
-
-def bf_Pad : NPUReg40XX_RegFieldWrapper<"pad_7", 56, 0>;
-def reg_Pad : NPUReg40XX_RegisterWrapper<"pad_7", 56, 0xD9, ["pad_7"]>;
+def bf_Pad_2_3 : NPUReg40XX_RegFieldWrapper<"pad_7_3", 32, 0, "UINT", NPUReg40XX_Version<11, 4, 10>>;
+def reg_Pad_7_3 : NPUReg40XX_RegisterWrapper<"pad_7_3", 32, 0xDC, ["pad_7_3"]>;
 
 //
 // RegMapped Specialization
@@ -696,8 +692,7 @@ def reg_mapped_DpuInvariantRegister : NPUReg40XX_RegMappedWrapper<"DpuInvariantR
     "pallet0", "pallet1", "pallet2", "pallet3", "pallet4", "pallet5", "pallet6", "pallet7",
     "se_addr1", "sparsity_addr1", "se_addr2", "sparsity_addr2", "se_addr3", "sparsity_addr3", "se_sp_size1", "se_sp_size2",
     "barriers_wait_mask_hi_", "barriers_wait_mask_lo_", "barriers_post_mask_hi_", "barriers_post_mask_lo_", "barriers_group_mask_",
-    "barriers_sched_", "output_sparsity_offset_invariant_", "hwp_cmx_base_offset_", "variant_count_", "cluster_invariant_", "is_cont_conv_",
-    "dpu_prof_mode", "pad_3"
+    "barriers_sched_", "reserved_inv", "variant_count_", "cluster_invariant_", "pad_3"
     ]>;
 
 // DPUVariantRegister
@@ -712,7 +707,7 @@ def reg_mapped_DpuVariantRegister : NPUReg40XX_RegMappedWrapper<"DpuVariantRegis
     "halo_region5A", "halo_region5B", "halo_region5C", "halo_region5D",
     "dpu_cfg", "te_beg0", "te_beg1", "te_end0", "te_end1",
     "weight_size", "weight_num", "weight_start",
-    "invariant_", "invariant_index_", "output_sparsity_offset_variant_", "weight_table_offset_", "wload_id_", "cluster_variant_", "pad_7"
+    "invariant_", "invariant_index_", "pad_7_1", "pad_7_2", "pad_7_3"
     ]>;
 
 // DMADescriptor
@@ -1161,8 +1156,8 @@ def reg_TextWindowBase : NPUReg40XX_RegisterWrapper<"text_window_base", 64, 0x10
 def bf_CodeSize : NPUReg40XX_RegFieldWrapper<"code_size", 32, 0>;
 def reg_CodeSize : NPUReg40XX_RegisterWrapper<"code_size", 32, 0x18, ["code_size"]>;
 
-def bf_DataSecSize : NPUReg40XX_RegFieldWrapper<"data_sec_size", 32, 0>;
-def reg_DataSecSize : NPUReg40XX_RegisterWrapper<"data_sec_size", 32, 0x1C, ["data_sec_size"]>;
+def bf_ReservedAkr : NPUReg40XX_RegFieldWrapper<"reserved_akr", 32, 0, "UINT", NPUReg40XX_Version<11, 4, 10>>;
+def reg_ReservedAkr : NPUReg40XX_RegisterWrapper<"reserved_akr", 32, 0x1C, ["reserved_akr"]>;
 
 def bf_KernelInvoCount : NPUReg40XX_RegFieldWrapper<"kernel_invo_count", 32, 0>;
 def reg_KernelInvoCount : NPUReg40XX_RegisterWrapper<"kernel_invo_count", 32, 0x20, ["kernel_invo_count"]>;
@@ -1172,7 +1167,7 @@ def reg_Pad1_4 : NPUReg40XX_RegisterWrapper<"pad1_4", 32, 0x24, ["pad1_4"]>;
 
 // ActKernelRange descriptor
 def reg_mapped_ActKernelRangeDescriptor : NPUReg40XX_RegMappedWrapper<"VpuActKernelRange",
-    ["type", "kernel_entry", "text_window_base", "code_size", "data_sec_size", "kernel_invo_count", "pad1_4"]>;
+    ["type", "kernel_entry", "text_window_base", "code_size", "reserved_akr", "kernel_invo_count", "pad1_4"]>;
 
 //
 // ActKernelInvocation registers
@@ -1208,8 +1203,8 @@ def reg_BarrierGroupMaskAct : NPUReg40XX_RegisterWrapper<"barriers_group_mask_ac
 
 def reg_SchedulingBarrierConfig : NPUReg40XX_RegisterWrapper<"act_invo_barriers_sched", 64, 0x48, ["start_after_", "clean_after_"]>;
 
-def bf_InvoIndex : NPUReg40XX_RegFieldWrapper<"invo_index", 32, 0>;
-def reg_InvoIndex : NPUReg40XX_RegisterWrapper<"invo_index", 32, 0x50, ["invo_index"]>;
+def bf_ReservedAki : NPUReg40XX_RegFieldWrapper<"reserved_aki", 32, 0, "UINT", NPUReg40XX_Version<11, 4, 10>>;
+def reg_ReservedAki : NPUReg40XX_RegisterWrapper<"reserved_aki", 32, 0x50, ["reserved_aki"]>;
 
 def bf_InvoTile : NPUReg40XX_RegFieldWrapper<"invo_tile", 32, 0>;
 def reg_InvoTile : NPUReg40XX_RegisterWrapper<"invo_tile", 32, 0x54, ["invo_tile"]>;
@@ -1217,14 +1212,14 @@ def reg_InvoTile : NPUReg40XX_RegisterWrapper<"invo_tile", 32, 0x54, ["invo_tile
 def bf_KernelRangeIndex : NPUReg40XX_RegFieldWrapper<"kernel_range_index", 32, 0>;
 def reg_KernelRangeIndex : NPUReg40XX_RegisterWrapper<"kernel_range_index", 32, 0x58, ["kernel_range_index"]>;
 
-def bf_Pad_4Act : NPUReg40XX_RegFieldWrapper<"pad_4_act", 32, 0>;
-def reg_Pad_4Act : NPUReg40XX_RegisterWrapper<"pad_4_act", 32, 0x5C, ["pad_4_act"]>;
+def bf_NexrAkiWlAddr : NPUReg40XX_RegFieldWrapper<"next_aki_wl_addr", 32, 0, "UINT", NPUReg40XX_Version<11, 4, 10>>;
+def reg_NexrAkiWlAddr : NPUReg40XX_RegisterWrapper<"next_aki_wl_addr", 32, 0x5C, ["next_aki_wl_addr"]>;
 
 // ActKernelInvocation descriptor
 def reg_mapped_ActKernelInvocationDescriptor : NPUReg40XX_RegMappedWrapper<"VpuActKernelInvocation",
     ["range", "kernel_args", "data_window_base", "perf_packet_out",
     "barriers_wait_mask_hi_act", "barriers_wait_mask_lo_act", "barriers_post_mask_hi_act", "barriers_post_mask_lo_act", "barriers_group_mask_act",
-    "act_invo_barriers_sched", "invo_index", "invo_tile", "kernel_range_index", "pad_4_act"]>;
+    "act_invo_barriers_sched", "reserved_aki", "invo_tile", "kernel_range_index", "next_aki_wl_addr"]>;
 
 //
 // M2I registers
@@ -1392,7 +1387,7 @@ def reg_WI_unit : NPUReg40XX_RegisterWrapper<"wi_unit", 8, 0x9, ["wi_unit"]>;
 def bf_WI_sub_unit : NPUReg40XX_RegFieldWrapper<"wi_sub_unit", 8, 0>;
 def reg_WI_sub_unit : NPUReg40XX_RegisterWrapper<"wi_sub_unit", 8, 0xA, ["wi_sub_unit"]>;
 
-// in API we have pas with 53 bytes, but in compiler w ehave sanity check for 8 byte per elem -> need 7 pads
+// in API we have pas with 53 bytes, but in compiler we have sanity check for 8 byte per elem -> need 7 pads
 def bf_Pad_8_0 : NPUReg40XX_RegFieldWrapper<"pad_8_0", 64, 0>;
 def reg_Pad_8_0 : NPUReg40XX_RegisterWrapper<"pad_8_0", 64, 0xB, ["pad_8_0"]>;
 
@@ -1417,6 +1412,40 @@ def reg_Pad_8_6 : NPUReg40XX_RegisterWrapper<"pad_5_6", 40, 0x3B, ["pad_5_6"]>;
 
 def reg_mapped_WorkItemDescriptor : NPUReg40XX_RegMappedWrapper<"WorkItem",
     ["desc_ptr", "wi_type", "wi_unit", "wi_sub_unit", "pad_8_0", "pad_8_1", "pad_8_2", "pad_8_3", "pad_8_4", "pad_8_5", "pad_5_6"]>;
+
+// TaskInfo registers
+def bf_TIDescPtr : NPUReg40XX_RegFieldWrapper<"ti_desc_ptr", 64, 0, "UINT", NPUReg40XX_Version<11, 4, 10>>;
+def reg_TIDescPtr : NPUReg40XX_RegisterWrapper<"ti_desc_ptr", 64, 0x0, ["ti_desc_ptr"]>;
+
+def bf_TIType : NPUReg40XX_RegFieldWrapper<"ti_type", 8, 0, "UINT", NPUReg40XX_Version<11, 4, 10>>;
+def reg_TIType : NPUReg40XX_RegisterWrapper<"ti_type", 8, 0x8, ["ti_type"]>;
+
+def bf_TIUnit : NPUReg40XX_RegFieldWrapper<"ti_unit", 8, 0, "UINT", NPUReg40XX_Version<11, 4, 10>>;
+def reg_TIUnit : NPUReg40XX_RegisterWrapper<"ti_unit", 8, 0x9, ["ti_unit"]>;
+
+def bf_TISubUnit : NPUReg40XX_RegFieldWrapper<"ti_sub_unit", 8, 0, "UINT", NPUReg40XX_Version<11, 4, 10>>;
+def reg_TISubUnit : NPUReg40XX_RegisterWrapper<"ti_sub_unit", 8, 0xA, ["ti_sub_unit"]>;
+
+def bf_TaskInfoPad1 : NPUReg40XX_RegFieldWrapper<"ti_pad1", 8, 0, "UINT", NPUReg40XX_Version<11, 4, 10>>;
+def reg_TaskInfoPad1 : NPUReg40XX_RegisterWrapper<"ti_pad1", 8, 0xB, ["ti_pad1"]>;
+
+def bf_TILinkedList : NPUReg40XX_RegFieldWrapper<"ti_linked_list_nodes", 32, 0, "UINT", NPUReg40XX_Version<11, 4, 10>>;
+def reg_TILinkedList : NPUReg40XX_RegisterWrapper<"ti_linked_list_nodes", 32, 0xC, ["ti_linked_list_nodes"]>;
+
+def bf_TIDescrRefOffset : NPUReg40XX_RegFieldWrapper<"ti_descr_ref_offset", 32, 0, "UINT", NPUReg40XX_Version<11, 4, 10>>;
+def reg_TIDescrRefOffset : NPUReg40XX_RegisterWrapper<"ti_descr_ref_offset", 32, 0x10, ["ti_descr_ref_offset"]>;
+
+def bf_TIParentDescrRefOffset : NPUReg40XX_RegFieldWrapper<"ti_parent_descr_ref_offset", 32, 0, "UINT", NPUReg40XX_Version<11, 4, 10>>;
+def reg_TIParentDescrRefOffset : NPUReg40XX_RegisterWrapper<"ti_parent_descr_ref_offset", 32, 0x14, ["ti_parent_descr_ref_offset"]>;
+
+def bf_TIEnqueueingTaskConfig : NPUReg40XX_RegFieldWrapper<"ti_enqueueing_task_config", 32, 0, "UINT", NPUReg40XX_Version<11, 4, 10>>;
+def reg_TIEnqueueingTaskConfig : NPUReg40XX_RegisterWrapper<"ti_enqueueing_task_config", 32, 0x18, ["ti_enqueueing_task_config"]>;
+
+def bf_TIWorkItemRef : NPUReg40XX_RegFieldWrapper<"ti_work_item_ref", 32, 0, "UINT", NPUReg40XX_Version<11, 4, 10>>;
+def reg_TIWorkItemRef : NPUReg40XX_RegisterWrapper<"ti_work_item_ref", 32, 0x1C, ["ti_work_item_ref"]>;
+
+def reg_mapped_TaskInfoDescriptor : NPUReg40XX_RegMappedWrapper<"VpuTaskInfo",
+    ["ti_desc_ptr", "ti_type", "ti_unit", "ti_sub_unit", "ti_pad1", "ti_linked_list_nodes", "ti_descr_ref_offset", "ti_parent_descr_ref_offset", "ti_enqueueing_task_config", "ti_work_item_ref"]>;
 
 
 // TaskBarrierMap registers
@@ -1448,5 +1477,29 @@ def ref_TaskBArrierReservedNextEnqueueId : NPUReg40XX_RegisterWrapper<"tb_reserv
 // TaskBarrierMap descriptor
 def reg_mapped_TaskBarrierMapDescriptor : NPUReg40XX_RegMappedWrapper<"vpuTaskBarrierMap",
     ["tb_next_same_id", "tb_producer_count", "tb_consumer_count", "tb_real_id", "tb_pad3", "tb_work_item_idx", "tb_enqueue_count", "tb_reserved_next_enqueue_id"]>;
+
+
+// BarrierReferenceMap registers
+
+def bf_BRPhysicalBarrier : NPUReg40XX_RegFieldWrapper<"br_physical_barrier", 16, 0, "UINT", NPUReg40XX_Version<11, 4, 10>>;
+def reg_BRPhysicalBarrier : NPUReg40XX_RegisterWrapper<"br_physical_barrier", 16, 0x0, ["br_physical_barrier"]>;
+
+def bf_BRProducerCount : NPUReg40XX_RegFieldWrapper<"br_producer_count", 16, 0, "UINT", NPUReg40XX_Version<11, 4, 10>>;
+def reg_BRProducerCount : NPUReg40XX_RegisterWrapper<"br_producer_count", 16, 0x2, ["br_producer_count"]>;
+
+def bf_BRConsumerCount : NPUReg40XX_RegFieldWrapper<"br_consumer_count", 16, 0, "UINT", NPUReg40XX_Version<11, 4, 10>>;
+def reg_BRConsumerCount : NPUReg40XX_RegisterWrapper<"br_consumer_count", 16, 0x4, ["br_consumer_count"]>;
+
+def bf_BRPad2 : NPUReg40XX_RegFieldWrapper<"br_pad2", 16, 0, "UINT", NPUReg40XX_Version<11, 4, 10>>;
+def reg_BRPad2 : NPUReg40XX_RegisterWrapper<"br_pad2", 16, 0x6, ["br_pad2"]>;
+
+def bf_BRProducersRefOffset : NPUReg40XX_RegFieldWrapper<"br_producers_ref_offset", 32, 0, "UINT", NPUReg40XX_Version<11, 4, 10>>;
+def reg_BRProducersRefOffset : NPUReg40XX_RegisterWrapper<"br_producers_ref_offset", 32, 0x8, ["br_producers_ref_offset"]>;
+
+def bf_BRConsumersRefOffset : NPUReg40XX_RegFieldWrapper<"br_consumers_ref_offset", 32, 0, "UINT", NPUReg40XX_Version<11, 4, 10>>;
+def reg_BRConsumersRefOffset : NPUReg40XX_RegisterWrapper<"br_consumers_ref_offset", 32, 0xC, ["br_consumers_ref_offset"]>;
+
+def reg_mapped_BarrierReferenceMapDescriptor : NPUReg40XX_RegMappedWrapper<"BarrierReferenceMap",
+    ["br_physical_barrier", "br_producer_count", "br_consumer_count", "br_pad2", "br_producers_ref_offset", "br_consumers_ref_offset"]>;
 
 #endif

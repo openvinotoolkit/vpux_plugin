@@ -14,9 +14,6 @@ using namespace vpux;
 
 namespace {
 
-// TODO: needs find suitable implict reshape value. Ticket: E#78751
-constexpr int64_t CONVOLUTION_INPUT_SHAPE_ALIGNMENT = 4;
-
 //
 // ReshapeMaxPoolOutput1x1
 //
@@ -124,7 +121,7 @@ mlir::LogicalResult ReshapeMaxPoolOutput1x1::matchAndRewrite(IE::MaxPoolOp origO
         inDimMapping.push_back({Dims4D::Act::W.ind()});
     }
 
-    auto newInput = rewriter.create<IE::AffineReshapeOp>(origOp->getLoc(), origOp.getInput(),
+    auto newInput = rewriter.create<IE::AffineReshapeOp>(takeOpLoc(origOp, "reshape_in"), origOp.getInput(),
                                                          getIntArrayOfArray(ctx, inDimMapping), inputShapeAttr);
 
     std::array<int64_t, 2> newMaxPoolKernel = {dimSize.back().first, dimSize.back().second};
@@ -133,7 +130,7 @@ mlir::LogicalResult ReshapeMaxPoolOutput1x1::matchAndRewrite(IE::MaxPoolOp origO
     auto newMaxPoolOp = rewriter.replaceOpWithNewOp<IE::MaxPoolOp>(
             origOp, origOp.getOutput().getType(), newInput.getOutput(), newMaxPoolKernelAttr, origOp.getStridesAttr(),
             origOp.getPadsBeginAttr(), origOp.getPadsEndAttr(), origOp.getRoundingType(), origOp.getPostOpAttr(),
-            origOp.getClampAttr());
+            origOp.getClampAttr(), origOp.getOutputChannelsAttr(), origOp.getInputChannelsAttr());
 
     _log.trace("Replace with new maxpool '{0}' ", newMaxPoolOp);
 
@@ -210,14 +207,14 @@ bool ReshapeMaxPoolInputWithStride::isLegalOpToConvert(IE::MaxPoolOp& origOp) co
         return false;
     }
 
-    if (strides[0] > 1 && (inputShape[Dims4D::Act::H] % CONVOLUTION_INPUT_SHAPE_ALIGNMENT != 0 ||
-                           (inputShape[Dims4D::Act::H] / CONVOLUTION_INPUT_SHAPE_ALIGNMENT) % strides[0] != 0)) {
+    if (strides[0] > 1 && (inputShape[Dims4D::Act::H] % VPU::NCEInvariant::VPU_SPATIAL_ALIGNMENT != 0 ||
+                           (inputShape[Dims4D::Act::H] / VPU::NCEInvariant::VPU_SPATIAL_ALIGNMENT) % strides[0] != 0)) {
         _log.trace("Can't handle shape [{0}] and  strides [{1}]", inputShape, strides);
         return false;
     }
 
-    if (strides[1] > 1 && (inputShape[Dims4D::Act::W] % CONVOLUTION_INPUT_SHAPE_ALIGNMENT != 0 ||
-                           (inputShape[Dims4D::Act::W] / CONVOLUTION_INPUT_SHAPE_ALIGNMENT) % strides[1] != 0)) {
+    if (strides[1] > 1 && (inputShape[Dims4D::Act::W] % VPU::NCEInvariant::VPU_SPATIAL_ALIGNMENT != 0 ||
+                           (inputShape[Dims4D::Act::W] / VPU::NCEInvariant::VPU_SPATIAL_ALIGNMENT) % strides[1] != 0)) {
         _log.trace("Can't handle shape [{0}] and  strides [{1}]", inputShape, strides);
         return false;
     }
@@ -253,10 +250,10 @@ mlir::LogicalResult ReshapeMaxPoolInputWithStride::matchAndRewrite(IE::MaxPoolOp
 
     const SmallVector<int64_t> newInShape = {
             inputShape[Dims4D::Act::N], inputShape[Dims4D::Act::C],
-            inputShape[Dims4D::Act::H] == 1 ? CONVOLUTION_INPUT_SHAPE_ALIGNMENT
-                                            : inputShape[Dims4D::Act::H] / CONVOLUTION_INPUT_SHAPE_ALIGNMENT,
-            inputShape[Dims4D::Act::H] == 1 ? inputShape[Dims4D::Act::W] / CONVOLUTION_INPUT_SHAPE_ALIGNMENT
-                                            : CONVOLUTION_INPUT_SHAPE_ALIGNMENT};
+            inputShape[Dims4D::Act::H] == 1 ? VPU::NCEInvariant::VPU_SPATIAL_ALIGNMENT
+                                            : inputShape[Dims4D::Act::H] / VPU::NCEInvariant::VPU_SPATIAL_ALIGNMENT,
+            inputShape[Dims4D::Act::H] == 1 ? inputShape[Dims4D::Act::W] / VPU::NCEInvariant::VPU_SPATIAL_ALIGNMENT
+                                            : VPU::NCEInvariant::VPU_SPATIAL_ALIGNMENT};
 
     const auto inputShapeAttr = getIntArrayAttr(origOp->getContext(), newInShape);
 
@@ -270,7 +267,7 @@ mlir::LogicalResult ReshapeMaxPoolInputWithStride::matchAndRewrite(IE::MaxPoolOp
         inDimMapping.push_back({Dims4D::Act::W.ind()});
     }
 
-    auto newInput = rewriter.create<IE::AffineReshapeOp>(origOp->getLoc(), origOp.getInput(),
+    auto newInput = rewriter.create<IE::AffineReshapeOp>(takeOpLoc(origOp, "reshape_in"), origOp.getInput(),
                                                          getIntArrayOfArray(ctx, inDimMapping), inputShapeAttr);
     mlir::IRMapping mapper;
     mapper.map(origOp.getInput(), newInput.getOutput());
@@ -279,10 +276,10 @@ mlir::LogicalResult ReshapeMaxPoolInputWithStride::matchAndRewrite(IE::MaxPoolOp
     auto outputShape = getShape(origOp.getOutput());
     auto newOutputShape = Shape(SmallVector<int64_t>{
             outputShape[Dims4D::Act::N], outputShape[Dims4D::Act::C],
-            inputShape[Dims4D::Act::H] == 1 ? CONVOLUTION_INPUT_SHAPE_ALIGNMENT
-                                            : outputShape[Dims4D::Act::H] / CONVOLUTION_INPUT_SHAPE_ALIGNMENT,
-            inputShape[Dims4D::Act::H] == 1 ? outputShape[Dims4D::Act::W] / CONVOLUTION_INPUT_SHAPE_ALIGNMENT
-                                            : CONVOLUTION_INPUT_SHAPE_ALIGNMENT});
+            inputShape[Dims4D::Act::H] == 1 ? VPU::NCEInvariant::VPU_SPATIAL_ALIGNMENT
+                                            : outputShape[Dims4D::Act::H] / VPU::NCEInvariant::VPU_SPATIAL_ALIGNMENT,
+            inputShape[Dims4D::Act::H] == 1 ? outputShape[Dims4D::Act::W] / VPU::NCEInvariant::VPU_SPATIAL_ALIGNMENT
+                                            : VPU::NCEInvariant::VPU_SPATIAL_ALIGNMENT});
 
     auto newOutputType = newMaxPoolOp.getOutput().getType().template cast<vpux::NDTypeInterface>();
     newOutputType = newOutputType.changeShape(newOutputShape);
@@ -337,7 +334,7 @@ void AdjustMaxPoolInputShapePass::safeRunOnFunc() {
 }  // namespace
 
 //
-// createConvertFCToConvPass
+// createAdjustMaxPoolInputShapePass
 //
 
 std::unique_ptr<mlir::Pass> vpux::IE::createAdjustMaxPoolInputShapePass(Logger log) {

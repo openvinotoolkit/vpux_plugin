@@ -68,7 +68,7 @@ InputTiling DetectionOutputSortOpInputTilingOnShave(VPUIP::SwKernelOp swKernelOp
                                                     int tileId, int tileCount, Logger /*log*/) {
     auto module = swKernelOp.getOperation()->getParentOfType<mlir::ModuleOp>();
     auto numClusters = IE::getTileExecutor(module).getCount();
-    auto numTotalShaves = IE::getTotalNumOfActShaveEngines(module);
+    auto numTotalShaves = IE::getTotalNumOfEngines(module, VPU::ExecutorKind::SHAVE_ACT);
     auto numShavesOnCluster = numTotalShaves / numClusters;
 
     auto inputsTiling = DetectionOutputSortOpInputTiling(firstOutputTile, numTotalShaves);
@@ -103,6 +103,23 @@ OutputTiling GRUSequenceOutputTiling(const vpux::TileInfo& firstOutputTile) {
     auto stateOutputTile = vpux::TileInfo(outStateShape, outStateOffsets, outStateAxis);
 
     return {firstOutputTile, std::move(stateOutputTile)};
+}
+
+OutputTiling lstmSequenceOutputTiling(const vpux::TileInfo& firstOutputTile) {
+    const auto firstOutputTileShape = firstOutputTile.shape;
+    const auto batchSize = firstOutputTileShape[Dims4D::Act::N];
+    const auto numDirections = firstOutputTileShape[Dims4D::Act::C];
+    const auto hiddenSize = firstOutputTileShape[Dims4D::Act::W];
+    const auto secondShape = Shape{batchSize, numDirections, 1, hiddenSize};
+
+    // For the LSTMSequence kernel, each output tile should have the same shape and zero offsets. The tiling
+    // infrastructure, specifically the 'divideTiles' function, will accumulate the offsets after each tile, which
+    // we will reset here.
+    TileInfo newFirstOutputTile(firstOutputTile.shape);
+
+    TileInfo secondTile(secondShape);
+    TileInfo thirdTile(secondShape);
+    return {std::move(newFirstOutputTile), std::move(secondTile), std::move(thirdTile)};
 }
 
 }  // namespace vpux::VPU

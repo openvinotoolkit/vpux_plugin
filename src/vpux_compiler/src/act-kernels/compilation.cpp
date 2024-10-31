@@ -34,6 +34,7 @@ flatbuffers::Offset<MVCNN::KernelData> buildKernelData(flatbuffers::FlatBufferBu
 
 ActKernelDesc compileKernelForACTShave(const CompilationUnitDesc& unitDesc, VPU::ArchKind archKind,
                                        std::optional<VPU::RevisionID> revisionID, bool hasInputsInDDR) {
+    VPUX_UNUSED(revisionID);
     auto& kernelInfo = ShaveBinaryResources::getInstance();
 
     std::string cpu;
@@ -55,11 +56,6 @@ ActKernelDesc compileKernelForACTShave(const CompilationUnitDesc& unitDesc, VPU:
         llvm::StringRef lsu0_wo = "lsu0_wo";
         textBinary = kernelInfo.getText(unitDesc.entry, cpu, lsu0_wo);
         dataBinary = kernelInfo.getData(unitDesc.entry, cpu, lsu0_wo);
-    } else if (archKind == VPU::ArchKind::NPU40XX && revisionID.has_value() &&
-               revisionID.value() >= VPU::RevisionID::REVISION_B) {
-        llvm::StringRef suffix = "B0";
-        textBinary = kernelInfo.getText(unitDesc.entry, cpu, suffix);
-        dataBinary = kernelInfo.getData(unitDesc.entry, cpu, suffix);
     } else {
         textBinary = kernelInfo.getText(unitDesc.entry, cpu);
         dataBinary = kernelInfo.getData(unitDesc.entry, cpu);

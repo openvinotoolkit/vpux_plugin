@@ -624,27 +624,6 @@ std::vector<std::pair<MappedRegValues, nn_public::VpuDPUVariant>> dpuVariantFiel
         {{
                  {"invariant_index_", {{"invariant_index_", 0xFFFFFFFF}}},
          },
-         CREATE_HW_DMA_DESC(invariant_index_, 0xFFFFFFFF)},
-        // output_sparsity_offset_ ---------------------------------------------------------------------
-        {{
-                 {"output_sparsity_offset_variant_", {{"output_sparsity_offset_variant_", 0xFFFFFFFF}}},
-         },
-         CREATE_HW_DMA_DESC(output_sparsity_offset_, 0xFFFFFFFF)},
-        // weight_table_offset_ ---------------------------------------------------------------------
-        {{
-                 {"weight_table_offset_", {{"weight_table_offset_", 0xFFFFFFFF}}},
-         },
-         CREATE_HW_DMA_DESC(weight_table_offset_, 0xFFFFFFFF)},
-        // wload_id_ ---------------------------------------------------------------------
-        {{
-                 {"wload_id_", {{"wload_id_", 0xFFFFFFFF}}},
-         },
-         CREATE_HW_DMA_DESC(wload_id_, 0xFFFFFFFF)},
-        // cluster_ ---------------------------------------------------------------------
-        {{
-                 {"cluster_variant_", {{"cluster_variant_", 0xFF}}},
-         },
-         CREATE_HW_DMA_DESC(cluster_, 0xFF)},
-};
+         CREATE_HW_DMA_DESC(invariant_index_, 0xFFFFFFFF)}};
 
-INSTANTIATE_TEST_CASE_P(NPUReg40XX_MappedRegs, NPUReg40XX_NpuDPUVariantTest, testing::ValuesIn(dpuVariantFieldSet));
+INSTANTIATE_TEST_SUITE_P(NPUReg40XX_MappedRegs, NPUReg40XX_NpuDPUVariantTest, testing::ValuesIn(dpuVariantFieldSet));

@@ -5,10 +5,9 @@
 
 #pragma once
 
-#include "vpux/compiler/utils/passes.hpp"
-
 #include "vpux/compiler/core/developer_build_utils.hpp"
-#include "vpux/utils/core/logger.hpp"
+#include "vpux/compiler/utils/options.hpp"
+#include "vpux/compiler/utils/passes.hpp"
 
 #include <mlir/Pass/PassManager.h>
 #include <mlir/Transforms/Passes.h>
@@ -23,6 +22,13 @@ namespace vpux {
 
 template <typename T>
 struct ReferenceSWOptions : mlir::PassPipelineOptions<T> {
+    BoolOption enableVerifiers{*this, "enable-verifiers", llvm::cl::desc("Enable verifiers execution after each pass"),
+                               llvm::cl::init(isDeveloperBuild())};
+
+    BoolOption enableMemoryUsageCollector{*this, "enable-memory-usage-collector",
+                                          llvm::cl::desc("Enable peak memory usage instrumentation after each pass"),
+                                          llvm::cl::init(isDeveloperBuild())};
+
     // InitCompiler
     IntOption revisionID{*this, "revision-id", ::llvm::cl::desc("[Optional] Revision ID of the platform")};
     IntOption numberOfDPUGroups{*this, "num-of-dpu-groups",
@@ -88,6 +94,14 @@ struct ReferenceSWOptions : mlir::PassPipelineOptions<T> {
     BoolOption enableOptimizeReorders{*this, "optimize-reorders", llvm::cl::desc("Enable optimize-reorders pass"),
                                       llvm::cl::init(false)};
 
+    // SetupChannelsAutoPadding pass options
+    BoolOption enableAutoPaddingODU{*this, "enable-auto-padding-odu",
+                                    llvm::cl::desc("Enable auto padding for output channels"), llvm::cl::init(false)};
+
+    // SetupChannelsAutoPadding pass options
+    BoolOption enableAutoPaddingIDU{*this, "enable-auto-padding-idu",
+                                    llvm::cl::desc("Enable auto padding for output channels"), llvm::cl::init(false)};
+
     // TODO: find a better way to expose enableSEPtrsOperations to the common AdjustLayouts pipeline
     BoolOption enableSEPtrsOperations{*this, "enable-se-ptrs-operations",
                                       llvm::cl::desc("Enable storage element pointer operations"),
@@ -112,7 +126,7 @@ struct ReferenceSWOptions : mlir::PassPipelineOptions<T> {
             llvm::cl::desc("Maximal number of tasks in each block that control graph will be split into. Used to "
                            "reduce memory consumption of barrier legalization pipeline for big models. Memory usage is "
                            "roughly (control-graph-split-block-size)^2/8"),
-            llvm::cl::init(100000)};
+            llvm::cl::init(CONTROL_GRAPH_SPLIT_BLOCK_SIZE)};
 
     StrOption computeLayersWithHigherPrecision{
             *this, "compute-layers-with-higher-precision",
@@ -120,7 +134,7 @@ struct ReferenceSWOptions : mlir::PassPipelineOptions<T> {
             llvm::cl::init("")};
 
     BoolOption enableSimpleSchedule{*this, "simple-schedule", llvm::cl::desc("Enable schedule simplification"),
-                                    llvm::cl::init(false)};
+                                    llvm::cl::init(true)};
 
     BoolOption shareWaitAndUpdateBarriers{*this, "share-wait-and-update-barriers",
                                           llvm::cl::desc("Share wait and update barriers"), llvm::cl::init(true)};
@@ -128,6 +142,9 @@ struct ReferenceSWOptions : mlir::PassPipelineOptions<T> {
     BoolOption reduceParallelControlFlows{*this, "reduce-parallel-control-flows",
                                           llvm::cl::desc("Reduce parallel overlapping control flows where possible"),
                                           llvm::cl::init(true)};
+    BoolOption enableColorBinPhysicalBarrierAssignment{
+            *this, "enable-color-bin-physical-barrier-assignment",
+            llvm::cl::desc("Enable physical barrier assignment optimization"), llvm::cl::init(false)};
 
     BoolOption enableSWKernelPrefetchingReserveMem{
             *this, "enable-sw-kernel-prefetching-reserve-mem",
@@ -139,17 +156,45 @@ struct ReferenceSWOptions : mlir::PassPipelineOptions<T> {
             llvm::cl::desc("Enable WeightsDequantizeToFakeQuantizePass on structures with BlockArgument input"),
             llvm::cl::init(false)};
 
+    BoolOption enableHandleU16FakeQuantize{*this, "enable-handle-u16-fake-quantize",
+                                           llvm::cl::desc("Enable handle u16 fake quantize pass"),
+                                           llvm::cl::init(false)};
+
     BoolOption enableGroupedMatMul{*this, "enable-grouped-matmul",
                                    llvm::cl::desc("Enable execution of grouped MatMul as a single operation."),
                                    llvm::cl::init(false)};
 
+    BoolOption accumulateMatmulWithDPU{*this, "accumulate-matmul-with-dpu",
+                                       llvm::cl::desc("Accumulate unrolled Matmul results with DPU"),
+                                       llvm::cl::init(false)};
+
+    BoolOption fuseScalesToAccumulate{
+            *this, "fuse-scales-to-accumulate",
+            llvm::cl::desc("Enable scales fusing to following Accumulate op from GPTQ Matmul unrolling"),
+            llvm::cl::init(false)};
+
+    BoolOption enableFP16CompressedConvolution{*this, "enable-fp16-compressed-convolution",
+                                               llvm::cl::desc("Enable FP16 Compressed convolution op"),
+                                               llvm::cl::init(false)};
+    BoolOption moveMultiplyPostFCForDynamicQuant{*this, "move-multiply-post-fc-for-dynamic-quant",
+                                                 llvm::cl::desc("Move multiply post fc for dynamic quant"),
+                                                 llvm::cl::init(false)};
+
+    BoolOption enableWeightsDynamicDequantization{*this, "enable-weights-dynamic-dequantization",
+                                                  llvm::cl::desc("Enable weights dequantization for weights as input"),
+                                                  llvm::cl::init(false)};
+
+    StrOption modelHash{*this, "model-hash", llvm::cl::desc("Hash of model XML architecture"), llvm::cl::init("")};
+
     bool enableForceZMajorConcat = false;
     bool enableSwapTransposeWithFQ = false;
     bool enableAlignScales = false;
-    // TODO: remove option after E-83187
+    bool fuseMvn6ScaleBias = false;
+    // TODO: remove option after E#83187
     bool enableFuseClamp = false;
     bool enableConvertFCToConv = false;
     bool enableAdjustNonZeroFakeQuant = false;
+    bool enableAdaptiveStripping = false;
 };
 
 //
@@ -160,6 +205,13 @@ struct ReferenceHWOptions40XX;
 
 template <typename T>
 struct ReferenceHWOptions : mlir::PassPipelineOptions<T> {
+    BoolOption enableVerifiers{*this, "enable-verifiers", llvm::cl::desc("Enable verifiers execution after each pass"),
+                               llvm::cl::init(isDeveloperBuild())};
+
+    BoolOption enableMemoryUsageCollector{*this, "enable-memory-usage-collector",
+                                          llvm::cl::desc("Enable peak memory usage instrumentation after each pass"),
+                                          llvm::cl::init(isDeveloperBuild())};
+
     // InitCompiler
     IntOption revisionID{*this, "revision-id", ::llvm::cl::desc("[Optional] Revision ID of the platform")};
     IntOption numberOfDPUGroups{*this, "num-of-dpu-groups",
@@ -189,6 +241,10 @@ struct ReferenceHWOptions : mlir::PassPipelineOptions<T> {
     BoolOption enableSplitConvWithMultipleFQ{*this, "split-conv-with-multiple-fq",
                                              llvm::cl::desc("Enable split-conv-with-multiple-fq pass"),
                                              llvm::cl::init(true)};
+
+    BoolOption enableHandleU16FakeQuantize{*this, "enable-handle-u16-fake-quantize",
+                                           llvm::cl::desc("Enable handle u16 fake quantize pass"),
+                                           llvm::cl::init(false)};
 
     BoolOption enableHandleLargeStrides{*this, "handle-large-strides",
                                         llvm::cl::desc("Enable handle-large-strides pass"), llvm::cl::init(true)};
@@ -263,6 +319,8 @@ struct ReferenceHWOptions : mlir::PassPipelineOptions<T> {
 
     BoolOption enableSWProfiling{*this, "sw-profiling", llvm::cl::desc("Enable SW task profiling"),
                                  llvm::cl::init(true)};
+    BoolOption enableM2IProfiling{*this, "m2i-profiling", llvm::cl::desc("Enable M2I task profiling"),
+                                  llvm::cl::init(true)};
 
     BoolOption enableGroupAsyncExecuteOps{*this, "group-async-execute-ops",
                                           llvm::cl::desc("Enable group-async-execute-ops pass"), llvm::cl::init(false)};
@@ -339,6 +397,10 @@ struct ReferenceHWOptions : mlir::PassPipelineOptions<T> {
                                             llvm::cl::desc("Fuse outstanding dequantize after NCE task"),
                                             llvm::cl::init(false)};
 
+    BoolOption enableFuseOutstandingQuant{*this, "fuse-outstanding-quant",
+                                          llvm::cl::desc("Fuse outstanding quantize before two-input Eltwise task"),
+                                          llvm::cl::init(false)};
+
     BoolOption enableForceZMajorConcat{*this, "force-z-major-concat",
                                        llvm::cl::desc("Enable transpose-reorder-concat pass"), llvm::cl::init(true)};
 
@@ -348,6 +410,9 @@ struct ReferenceHWOptions : mlir::PassPipelineOptions<T> {
 
     BoolOption enableAlignScales{*this, "enable-align-scales", llvm::cl::desc("Enable align scales"),
                                  llvm::cl::init(true)};
+
+    BoolOption enableAdaptiveStripping{*this, "enable-adaptive-stripping", llvm::cl::desc("Enable adaptive stripping"),
+                                       llvm::cl::init(false)};
 
     BoolOption enableFP16ToU8MixedMode{
             *this, "enable-fp16-to-u8-mixed-mode",
@@ -374,6 +439,8 @@ struct ReferenceHWOptions : mlir::PassPipelineOptions<T> {
             *this, "enable-shave-ddr-access-optimization",
             llvm::cl::desc("SHAVE DDR access optimization option (true, false or auto)"), llvm::cl::init("true")};
 
+    StrOption modelHash{*this, "model-hash", llvm::cl::desc("Hash of model XML architecture"), llvm::cl::init("")};
+
     BoolOption enableOpsAsDMA{*this, "enable-ops-as-dma",
                               llvm::cl::desc("Force using DMA transformations instead of SW ops"),
                               llvm::cl::init(false)};
@@ -386,10 +453,10 @@ struct ReferenceHWOptions : mlir::PassPipelineOptions<T> {
             llvm::cl::desc("Maximal number of tasks in each block that control graph will be split into. Used to "
                            "reduce memory consumption of barrier legalization pipeline for big models. Memory usage is "
                            "roughly (control-graph-split-block-size)^2/8"),
-            llvm::cl::init(100000)};
+            llvm::cl::init(CONTROL_GRAPH_SPLIT_BLOCK_SIZE)};
 
     BoolOption enableSimpleSchedule{*this, "simple-schedule", llvm::cl::desc("Enable schedule simplification"),
-                                    llvm::cl::init(false)};
+                                    llvm::cl::init(true)};
 
     BoolOption shareWaitAndUpdateBarriers{*this, "share-wait-and-update-barriers",
                                           llvm::cl::desc("Share wait and update barriers"), llvm::cl::init(true)};
@@ -401,6 +468,11 @@ struct ReferenceHWOptions : mlir::PassPipelineOptions<T> {
     BoolOption enableScheduleTrace{*this, "enable-schedule-trace",
                                    llvm::cl::desc("Enable compile time schedule analysis and trace"),
                                    llvm::cl::init(false)};
+
+    BoolOption enableIntermediateBufferOutput{
+            *this, "enable-intermediate-buffer-output",
+            llvm::cl::desc("Enable intermediate output of defined operation buffer at specified insertion place"),
+            llvm::cl::init(false)};
 
     BoolOption enableActivityFactor{*this, "enable-activity-factor",
                                     llvm::cl::desc("Enable activity factor and inference time estimation"),
@@ -452,9 +524,55 @@ struct ReferenceHWOptions : mlir::PassPipelineOptions<T> {
 
     BoolOption enableDmaOutOfOrder{*this, "dma-ooo", llvm::cl::desc("Enable out-of-order DMA"), llvm::cl::init(true)};
 
+    // SetupChannelsAutoPadding pass options
+    BoolOption enableAutoPaddingODU{*this, "enable-auto-padding-odu",
+                                    llvm::cl::desc("Enable auto padding for output channels"), llvm::cl::init(false)};
+
+    // SetupChannelsAutoPadding pass options
+    BoolOption enableAutoPaddingIDU{*this, "enable-auto-padding-idu",
+                                    llvm::cl::desc("Enable auto padding for output channels"), llvm::cl::init(false)};
+
     BoolOption enableConvolutionMixedPrecisionDecomposition{
             *this, "enable-convolution-mixed-precision-decomposition",
             llvm::cl::desc("Enable mixed precision decomposition for convolution"), llvm::cl::init(false)};
+
+    BoolOption accumulateMatmulWithDPU{*this, "accumulate-matmul-with-dpu",
+                                       llvm::cl::desc("Accumulate unrolled Matmul results with DPU"),
+                                       llvm::cl::init(false)};
+
+    BoolOption fuseScalesToAccumulate{
+            *this, "fuse-scales-to-accumulate",
+            llvm::cl::desc("Enable scales fusing to following Accumulate op from GPTQ Matmul unrolling"),
+            llvm::cl::init(false)};
+
+    BoolOption enableDynamicQuant{*this, "enable-dynamic-quant",
+                                  llvm::cl::desc("Enable dynamic quant weights signal pass."), llvm::cl::init(false)};
+
+    BoolOption enableColorBinPhysicalBarrierAssignment{
+            *this, "enable-color-bin-physical-barrier-assignment",
+            llvm::cl::desc("Enable physical barrier assignment optimization"), llvm::cl::init(false)};
+
+    BoolOption enablePopulateWeightTableWithShave{*this, "enable-populate-weight-table-with-shave",
+                                                  llvm::cl::desc("Enable populating weights table with Shave"),
+                                                  llvm::cl::init(false)};
+
+    BoolOption enableFP16CompressedConvolution{*this, "enable-fp16-compressed-convolution",
+                                               llvm::cl::desc("Enable FP16 Compressed convolution op"),
+                                               llvm::cl::init(false)};
+
+    BoolOption enableMCSideLoadDump{*this, "enable-mc-side-loading-dump",
+                                    llvm::cl::desc("Dump multi-cluster strategies in side-loading format"),
+                                    llvm::cl::init(false)};
+
+    BoolOption fuseMvn6ScaleBias{*this, "fuse-mvn6-scale-bias", llvm::cl::desc("Enable fuse-mvn6-scale-bias pass"),
+                                 llvm::cl::init(false)};
+    BoolOption moveMultiplyPostFCForDynamicQuant{*this, "move-multiply-post-fc-for-dynamic-quant",
+                                                 llvm::cl::desc("Move multiply post fc for dynamic quant"),
+                                                 llvm::cl::init(false)};
+
+    BoolOption enableWeightsDynamicDequantization{*this, "enable-weights-dynamic-dequantization",
+                                                  llvm::cl::desc("Enable weights dequantization for weights as input"),
+                                                  llvm::cl::init(false)};
 };
 
 //
@@ -464,13 +582,21 @@ struct ReferenceHWOptions : mlir::PassPipelineOptions<T> {
 //
 
 struct DefaultHWOptionsBase : mlir::PassPipelineOptions<DefaultHWOptionsBase> {
-    BoolOption enableFunctionOutlining{*this, "function-outlining",
-                                       llvm::cl::desc("Divide the IR into multiple parts to compile them in parallel"),
+    BoolOption enableAdaptiveStripping{*this, "enable-adaptive-stripping", llvm::cl::desc("Enable adaptive stripping"),
                                        llvm::cl::init(false)};
 
-    StrOption functionOutliningMode{*this, "function-outlining-mode",
-                                    llvm::cl::desc("Selects the outlining mode: `naive` or `repeating-blocks`"),
-                                    llvm::cl::init("naive")};
+    BoolOption enableVerifiers{*this, "enable-verifiers", llvm::cl::desc("Enable verifiers execution after each pass"),
+                               llvm::cl::init(isDeveloperBuild())};
+
+    BoolOption enableMemoryUsageCollector{*this, "enable-memory-usage-collector",
+                                          llvm::cl::desc("Enable peak memory usage instrumentation after each pass"),
+                                          llvm::cl::init(isDeveloperBuild())};
+
+    StrOption functionOutlining{*this, "function-outlining",
+                                llvm::cl::desc("Define a list of outlining modes and their parameters where the next "
+                                               "outlining mode is the fallback mode of the previous one."
+                                               "Example: function-outlining=' repeating-blocks=max-num-iterations=30 "
+                                               "min-ops-in-block=16, naive=num-parts=2'")};
 
     BoolOption enableDebatcher{*this, "debatching",
                                llvm::cl::desc("Apply debatching operation for batched tensors, which are arguments of "
@@ -530,6 +656,11 @@ struct DefaultHWOptionsBase : mlir::PassPipelineOptions<DefaultHWOptionsBase> {
                                    llvm::cl::desc("Enable compile time schedule analysis and trace"),
                                    llvm::cl::init(false)};
 
+    BoolOption enableIntermediateBufferOutput{
+            *this, "enable-intermediate-buffer-output",
+            llvm::cl::desc("Enable intermediate output of defined operation buffer at specified insertion place"),
+            llvm::cl::init(false)};
+
     BoolOption enableActivityFactor{*this, "enable-activity-factor",
                                     llvm::cl::desc("Enable activity factor and inference time estimation"),
                                     llvm::cl::init(true)};
@@ -546,10 +677,27 @@ struct DefaultHWOptionsBase : mlir::PassPipelineOptions<DefaultHWOptionsBase> {
                                 llvm::cl::desc("Enable vertical fusion pipelining pass and schedule pipelining"),
                                 llvm::cl::init(true)};
 
+    // SetupChannelsAutoPadding pass options
+    BoolOption enableAutoPaddingODU{*this, "enable-auto-padding-odu",
+                                    llvm::cl::desc("Enable auto padding for output channels"), llvm::cl::init(false)};
+
+    // SetupChannelsAutoPadding pass options
+    BoolOption enableAutoPaddingIDU{*this, "enable-auto-padding-idu",
+                                    llvm::cl::desc("Enable auto padding for output channels"), llvm::cl::init(false)};
+
     StrOption computeLayersWithHigherPrecision{
             *this, "compute-layers-with-higher-precision",
             llvm::cl::desc("Enable compute layers with higher precision for the specified layer types"),
             llvm::cl::init("")};
+
+    BoolOption accumulateMatmulWithDPU{*this, "accumulate-matmul-with-dpu",
+                                       llvm::cl::desc("Accumulate unrolled Matmul results with DPU"),
+                                       llvm::cl::init(false)};
+
+    BoolOption fuseScalesToAccumulate{
+            *this, "fuse-scales-to-accumulate",
+            llvm::cl::desc("Enable scales fusing to following Accumulate op from GPTQ Matmul unrolling"),
+            llvm::cl::init(false)};
 
     // InitCompiler
     IntOption revisionID{*this, "revision-id", ::llvm::cl::desc("[Optional] Revision ID of the platform")};
@@ -569,7 +717,7 @@ struct DefaultHWOptionsBase : mlir::PassPipelineOptions<DefaultHWOptionsBase> {
             llvm::cl::desc("Maximal number of tasks in each block that control graph will be split into. Used to "
                            "reduce memory consumption of barrier legalization pipeline for big models. Memory usage is "
                            "roughly (control-graph-split-block-size)^2/8"),
-            llvm::cl::init(100000)};
+            llvm::cl::init(CONTROL_GRAPH_SPLIT_BLOCK_SIZE)};
 
     BoolOption enableSimpleSchedule{*this, "simple-schedule", llvm::cl::desc("Enable schedule simplification"),
                                     llvm::cl::init(true)};
@@ -595,6 +743,31 @@ struct DefaultHWOptionsBase : mlir::PassPipelineOptions<DefaultHWOptionsBase> {
             llvm::cl::init(vpux::isDeveloperBuild() ? "fast" : "off")};
 
     BoolOption enableDmaOutOfOrder{*this, "dma-ooo", llvm::cl::desc("Enable out-of-order DMA"), llvm::cl::init(true)};
+
+    BoolOption enableColorBinPhysicalBarrierAssignment{
+            *this, "enable-color-bin-physical-barrier-assignment",
+            llvm::cl::desc("Enable physical barrier assignment optimization"), llvm::cl::init(false)};
+
+    BoolOption enablePopulateWeightTableWithShave{*this, "enable-populate-weight-table-with-shave",
+                                                  llvm::cl::desc("Enable populating weights table with Shave"),
+                                                  llvm::cl::init(false)};
+
+    BoolOption enableFP16CompressedConvolution{*this, "enable-fp16-compressed-convolution",
+                                               llvm::cl::desc("Enable FP16 Compressed convolution op"),
+                                               llvm::cl::init(false)};
+
+    StrOption modelHash{*this, "model-hash", llvm::cl::desc("Hash of model XML architecture"), llvm::cl::init("")};
+
+    BoolOption enableMCSideLoadDump{*this, "enable-mc-side-loading-dump",
+                                    llvm::cl::desc("Dump multi-cluster strategies in side-loading format"),
+                                    llvm::cl::init(false)};
+    BoolOption moveMultiplyPostFCForDynamicQuant{*this, "move-multiply-post-fc-for-dynamic-quant",
+                                                 llvm::cl::desc("Move multiply post fc for dynamic quant"),
+                                                 llvm::cl::init(false)};
+
+    BoolOption enableWeightsDynamicDequantization{*this, "enable-weights-dynamic-dequantization",
+                                                  llvm::cl::desc("Enable weights dequantization for weights as input"),
+                                                  llvm::cl::init(false)};
 };
 
 //
@@ -630,10 +803,16 @@ struct MCAndTilingOptionsBase : mlir::PassPipelineOptions<MCAndTilingOptionsBase
             *this, "enable-shave-ddr-access-optimization",
             llvm::cl::desc("SHAVE DDR access optimization option. (true, false or auto)"), llvm::cl::init("true")};
 
-    BoolOption enableExplicitDistributedTensorAttr{
+    BoolOption enableExplicitDistributionInfoAttr{
             *this, "enable-explicit-distributed-attr",
-            llvm::cl::desc("Enable DistributedTensorAttr with explicit per cluster memory/compute shapes & offsets"),
+            llvm::cl::desc("Enable DistributionInfoAttr with explicit per cluster memory/compute shapes & offsets"),
             llvm::cl::init(false)};
+
+    BoolOption enableMCSideLoadDump{*this, "enable-mc-side-loading-dump",
+                                    llvm::cl::desc("Dump multi-cluster strategies in side-loading format"),
+                                    llvm::cl::init(false)};
+
+    StrOption modelHash{*this, "model-hash", llvm::cl::desc("Hash of model architecture XML"), llvm::cl::init("")};
 
     MCAndTilingOptionsBase() = default;
 
@@ -647,8 +826,30 @@ struct MCAndTilingOptionsBase : mlir::PassPipelineOptions<MCAndTilingOptionsBase
         enableShaveDDRAccessOptimization = options.enableShaveDDRAccessOptimization;
         readStrategyFromJson = options.readStrategyFromJson;
         writeStrategyToJson = options.writeStrategyToJson;
-        enableExplicitDistributedTensorAttr = options.enableExplicitDistributedTensorAttr;
+        enableExplicitDistributionInfoAttr = options.enableExplicitDistributionInfoAttr;
+        modelHash = options.modelHash;
+        enableMCSideLoadDump = options.enableMCSideLoadDump;
     }
+};
+
+template <typename T>
+struct BackendCompilationOptionsBase : mlir::PassPipelineOptions<T> {
+    BoolOption enableMemorySideCache{*this, "enable-memory-side-cache", llvm::cl::desc("Enable memory side cache"),
+                                     llvm::cl::init(false)};
+    BoolOption enablePartialWorkloadManagement{*this, "enable-partial-workload-management",
+                                               llvm::cl::desc("Enable partial workload management"),
+                                               llvm::cl::init(true)};
+    StrOption enableDMAProfiling{*this, "dma-profiling",
+                                 llvm::cl::desc("Enable DMA task profiling (true|static|false)"),
+                                 llvm::cl::init("false")};
+
+    IntOption wlmOptimizationThreshold{*this, "wlm-barriers-threshold",
+                                       llvm::cl::desc("Threshold for WLM optimization"),
+                                       llvm::cl::init(VIRTUAL_BARRIER_THRESHOLD_WLM)};
+
+    StrOption enableShaveDDRAccessOptimization{
+            *this, "enable-shave-ddr-access-optimization",
+            llvm::cl::desc("SHAVE DDR access optimization option (true, false or auto)"), llvm::cl::init("true")};
 };
 
 }  // namespace vpux

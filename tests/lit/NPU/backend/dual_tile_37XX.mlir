@@ -11,10 +11,6 @@
 // demonstrate that the runtime can handle this.  It's also a lit test to help
 // check for regressions in the VPUIP dialect.
 //
-// To generate a blob, use:
-//
-//    vpux-translate --export-VPUIP < dual_tile.mlir > dual_tile.blob
-//
 
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 
@@ -33,7 +29,6 @@ module @dual_tile attributes {VPU.arch = #VPU.arch_kind<NPU37XX>, VPU.compilatio
   IE.ExecutorResource 2 of @DMA_NN
   IE.TileResource 1 of @NCE {
       IE.MemoryResource 2097152 bytes of @CMX_NN {VPU.bandwidth = 32 : i64, VPU.derateFactor = 1.000000e+00 : f64}
-      IE.ExecutorResource 1 of @SHAVE_UPA
       IE.ExecutorResource 1 of @SHAVE_ACT
       IE.ExecutorResource 1 of @DPU
   }
@@ -43,7 +38,7 @@ module @dual_tile attributes {VPU.arch = #VPU.arch_kind<NPU37XX>, VPU.compilatio
         %output_arg: memref<2x16x16x16xf16, #NHWC, @DDR>
       ) -> memref<2x16x16x16xf16, #NHWC, @DDR> {
     %weights_constant = const.Declare memref<16x1x1x16x!qtype, #NHWC, @DDR> =
-      dense<1> : tensor<16x1x1x16xui8>, [#const.QuantCast<!qtype>, #const.Reorder<#NHWC>]
+      dense<1> : tensor<16x1x1x16xui8>, [#const.CastElemType<!qtype>, #const.Reorder<#NHWC>]
     %weights0 = VPURT.DeclareBuffer <CMX_NN> [0] <12544>
       -> memref<16x1x1x16x!qtype, #NHWC, [@CMX_NN, 0]>
     %weights1 = VPURT.DeclareBuffer <CMX_NN> [1] <12544>

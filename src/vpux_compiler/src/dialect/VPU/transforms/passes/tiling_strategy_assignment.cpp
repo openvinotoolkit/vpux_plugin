@@ -4,12 +4,11 @@
 //
 
 #include "vpux/compiler/core/tiling.hpp"
-#include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
-#include "vpux/compiler/dialect/VPU/IR/ops.hpp"
+#include "vpux/compiler/core/type_interfaces.hpp"
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
 #include "vpux/compiler/dialect/VPU/utils/generate_tiling.hpp"
 #include "vpux/compiler/dialect/VPU/utils/manual_strategy_utils.hpp"
-#include "vpux/compiler/utils/rewriter.hpp"
+#include "vpux/compiler/dialect/VPU/utils/sibling_ops_analysis.hpp"
 
 using namespace vpux;
 
@@ -86,7 +85,9 @@ void TilingStrategyAssignmentPass::assignStrategy(VPU::TilingBuilderOpInterface 
     auto defaultTilingMode = getTilingSupportedMode(origOp, _enablePrefetchTiling, _log);
 
     mlir::FailureOr<OutputTiling> tiles = mlir::failure();
-    if (_costModel == nullptr || !mlir::isa<VPU::NCEOpInterface>(op)) {
+    // Temporarily not assign tiling strategy to NCE ops with INT4 weights based on VPUNN cost.
+    // This can be removed when VPUNN is upgraded to support INT4 data type, tracked in E#113316.
+    if (_costModel == nullptr || !mlir::isa<VPU::NCEOpInterface>(op) || VPU::isNCEWithInt4Weights(op)) {
         tiles = getLayerTilingStrategy(origOp, _enablePrefetchTiling, _log);
     } else {
         auto tileDimOrder = getTileDimOrder(op, defaultTilingMode, _log);
@@ -99,10 +100,11 @@ void TilingStrategyAssignmentPass::assignStrategy(VPU::TilingBuilderOpInterface 
 
 void TilingStrategyAssignmentPass::safeRunOnFunc() {
     auto func = getOperation();
+    auto siblingsOpsAnalysis = getAnalysis<VPU::SiblingOpsAnalysis>();
     if (_vpunnCost) {
         _log.trace("Using VPUNN Cost to get best tiling strategy");
         _costModel = std::make_shared<vpux::VPU::LayerCostModel>(
-                vpux::VPU::LayerCostModel(func, _enablePrefetchTiling, _log));
+                vpux::VPU::LayerCostModel(func, _enablePrefetchTiling, _log, siblingsOpsAnalysis));
     }
 
     const auto assignWithOnlyCMXAccessStrategy = [&](mlir::Operation* op) {

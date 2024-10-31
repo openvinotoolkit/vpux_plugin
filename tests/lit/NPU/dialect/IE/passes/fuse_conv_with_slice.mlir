@@ -31,13 +31,13 @@ func.func @FuseConvWithSliceSingleUser(%arg0: tensor<1x16x80x80xf16>) -> tensor<
 !qElemType1 = !quant.uniform<u8:f32, 2.000000e+00>
 // CHECK-LABEL: @FuseConvWithSliceSingleUserQuantizeType
 func.func @FuseConvWithSliceSingleUserQuantizeType(%arg0: tensor<1x16x80x80x!qElemType>) -> tensor<1x32x80x80x!qElemType1> {
-    %weights = const.Declare tensor<64x16x3x3x!qElemType2> = dense<1.000000e+00> : tensor<64x16x3x3xf16>, [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType2>]
+    %weights = const.Declare tensor<64x16x3x3x!qElemType2> = dense<1.000000e+00> : tensor<64x16x3x3xf16>, [#const.CastElemType<ui8>, #const.CastElemType<!qElemType2>]
     %bias = const.Declare tensor<1x64x1x1xf16> = dense<1.0> : tensor<1x64x1x1xf16>
     %0 = IE.Convolution(%arg0, %weights, %bias) {dilations = [1, 1], pads_begin = [1, 1], pads_end = [1, 1], strides = [1, 1], post_op = #IE.PostOp<name = "IE.ReLU", attrs = {}>} : tensor<1x16x80x80x!qElemType>, tensor<64x16x3x3x!qElemType2>, tensor<1x64x1x1xf16> -> tensor<1x64x80x80x!qElemType1>
     %1 = IE.Slice %0 [0, 0, 0, 0] [1, 32, 80, 80] : tensor<1x64x80x80x!qElemType1> to tensor<1x32x80x80x!qElemType1>
     return %1 : tensor<1x32x80x80x!qElemType1>
 
-    // CHECK-DAG:       [[WEIGHTS:%.*]] = const.Declare tensor<32x16x3x3x!qElemType2> = dense<1.000000e+00> : tensor<64x16x3x3xf16>, [#const.ConvertElemType<ui8>, #const.QuantCast<!qElemType2>, #const.SubView<[0, 0, 0, 0], [32, 16, 3, 3]>]
+    // CHECK-DAG:       [[WEIGHTS:%.*]] = const.Declare tensor<32x16x3x3x!qElemType2> = dense<1.000000e+00> : tensor<64x16x3x3xf16>, [#const.SubView<[0, 0, 0, 0], [32, 16, 3, 3]>, #const.CastElemType<ui8>, #const.CastElemType<!qElemType2>]
     // CHECK-DAG:       [[BIAS:%.*]] = const.Declare tensor<1x32x1x1xf16> = dense<1.000000e+00> : tensor<1x64x1x1xf16>, [#const.SubView<[0, 0, 0, 0], [1, 32, 1, 1]>]
     // CHECK:           [[CONV0:%.*]] = IE.Convolution(%arg0, [[WEIGHTS]], [[BIAS]]) {dilations = [1, 1], pads_begin = [1, 1], pads_end = [1, 1], post_op = #IE.PostOp<name = "IE.ReLU", attrs = {}>, strides = [1, 1]}
     // CHECK-SAME:              : tensor<1x16x80x80x!qElemType>, tensor<32x16x3x3x!qElemType2>, tensor<1x32x1x1xf16> -> tensor<1x32x80x80x!qElemType1>

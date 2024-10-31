@@ -31,14 +31,14 @@ module @OneDMAWithoutAttributes {
       VPUASM.NNDMA @NNDMA_0_0_0 idx(!VPURegMapped.Index<0:0:0>) taskLocation(@builtin.tasks.DMA0::@DeclareTaskBuffer_DMA_0) input(@DeclareBuffer0) outputs([@DeclareBuffer1]) waits([]) updates([]) start_after(1) clean_after(2) descriptor(#VPUIP.DMADescriptorAttr<numPlanes = 0 : i32, len = 1024 : i32, srcWidth = 1024 : i32, srcStride = 1024 : i32, srcPlaneStride = 0 : i32, dstWidth = 1024 : i32, dstStride = 1024 : i32, dstPlaneStride = 0 : i32>) acceleration_mode(<DISABLE>) indices( @builtin.tasks.DMA0::@DeclareBuffer10)
       // CHECK-NOT:   VPUASM.NNDMA
       // CHECK:  NPUReg40XX.NNDMA
-      // CHECK:  UINT dma_cfg_fields_src_list_cfg at 35 size 2 = 2,
-      // CHECK:  UINT dma_width_src at 0 size 32 = 0xC00,
+      // CHECK:  UINT dma_cfg_fields_src_list_cfg at 35 size 2 = 2
+      // CHECK:  UINT dma_width_src at 0 size 32 = 0xC00
       // CHECK:  UINT dma_width_dst at 32 size 32 = 0x400
-      // CHECK:  UINT dma_src at 0 size 48 = 0,
-      // CHECK:  UINT dma_dst at 0 size 48 = 0,
-      // CHECK:  UINT dma_list_size_src at 0 size 32 = 0x400,
-      // CHECK:  dma_stride_dst_1 offset 108 size 32 = UINT 0xC00,
-      // CHECK:  UINT start_after_ at 0 size 32 = 1,
+      // CHECK:  UINT dma_src at 0 size 48 = 0
+      // CHECK:  UINT dma_dst at 0 size 48 = 0
+      // CHECK:  UINT dma_list_size_src at 0 size 32 = 0x400
+      // CHECK:  dma_stride_dst_1 offset 108 size 32 = UINT 0xC00
+      // CHECK:  UINT start_after_ at 0 size 32 = 1
       // CHECK:  UINT clean_after_ at 32 size 32 = 2
 
       }

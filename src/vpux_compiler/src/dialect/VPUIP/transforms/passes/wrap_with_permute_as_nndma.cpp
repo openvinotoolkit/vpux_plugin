@@ -11,6 +11,7 @@
 #include "vpux/compiler/dialect/VPUIP/transforms/passes.hpp"
 #include "vpux/compiler/dialect/VPUIP/utils/convert_to_dma_utils.hpp"
 #include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
+#include "vpux/compiler/utils/analysis.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/compiler/utils/permute_utils.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
@@ -70,9 +71,9 @@ VPUIP::DistributedBufferType createDMADistributedTensorType(mlir::MLIRContext* c
     const auto alignment =
             heightAlignment == 1 ? nullptr : getIntArrayAttr(ctx, SmallVector<int64_t>{1, 1, heightAlignment, 1});
     const auto uniformDistributedSegmentsAttr = uniformDistributedSegments ? mlir::UnitAttr::get(ctx) : nullptr;
-    const auto distributionAttr = VPU::DistributedTensorAttr::get(ctx, distMode, numTiles, nullptr, nullptr, nullptr,
-                                                                  tileCount, alignment, uniformDistributedSegmentsAttr,
-                                                                  nullptr, nullptr, nullptr, nullptr, nullptr);
+    const auto distributionAttr =
+            VPU::DistributionInfoAttr::get(ctx, distMode, numTiles, nullptr, nullptr, nullptr, tileCount, alignment,
+                                           uniformDistributedSegmentsAttr, nullptr, nullptr, nullptr, nullptr, nullptr);
 
     const auto memSpace = vpux::IndexedSymbolAttr::get(ctx, stringifyEnum(VPU::MemoryKind::CMX_NN));
     const auto order = mlir::AffineMapAttr::get(operandType.getDimsOrder().toAffineMap(ctx));
@@ -1082,7 +1083,7 @@ mlir::LogicalResult FuseExpandWithUpsampling::matchAndRewrite(VPUIP::ExpandOp or
                                                               mlir::PatternRewriter& rewriter) const {
     _log.trace("Found ExpandOp Operation '{0}' at '{1}'", origOp->getName(), origOp->getLoc());
 
-    auto upsamplingOp = origOp.getInput().getDefiningOp<VPUIP::UpsamplingUPAOp>();
+    auto upsamplingOp = origOp.getInput().getDefiningOp<VPUIP::UpsamplingOp>();
 
     if (!upsamplingOp) {
         return mlir::failure();
@@ -1110,7 +1111,7 @@ mlir::LogicalResult FuseExpandWithUpsampling::matchAndRewrite(VPUIP::ExpandOp or
     auto copyZeroOp = rewriter.create<VPUIP::CopyOp>(origOp->getLoc(), constZeros, origOp.getOutputBuff());
     auto upsampleFactorAttr = getIntArrayAttr(origOp.getContext(), upsamplingFactorVector);
 
-    auto upsampeDMA = rewriter.replaceOpWithNewOp<VPUIP::UpsamplingDMAOp>(
+    auto upsampleDMA = rewriter.replaceOpWithNewOp<VPUIP::UpsamplingDMAOp>(
             origOp, upsamplingOp.getInput(), copyZeroOp.getOutput(), upsampleFactorAttr, /*dma_descriptor,*/ nullptr,
             padChannelAttr, getIntAttr(origOp->getContext(), 0), /*is_out_of_order*/ nullptr,
             /*is_critical*/ nullptr, /*dmaHwpId=*/nullptr,
@@ -1118,7 +1119,7 @@ mlir::LogicalResult FuseExpandWithUpsampling::matchAndRewrite(VPUIP::ExpandOp or
 
     rewriter.eraseOp(upsamplingOp);
 
-    _log.trace("Create new upsampling operation '{0}'", upsampeDMA);
+    _log.trace("Create new upsampling operation '{0}'", upsampleDMA);
     return mlir::success();
 }
 
@@ -1885,18 +1886,18 @@ public:
     mlir::LogicalResult matchAndRewrite(VPUIP::PermuteDMAOp permuteOp, mlir::PatternRewriter& rewriter) const final;
 
 private:
-    VPU::DistributedTensorAttr getDuplicatedDistribution(ShapeRef shape, VPU::DistributedTensorAttr origDistribution,
-                                                         mlir::MLIRContext* ctx) const;
+    VPU::DistributionInfoAttr getDuplicatedDistribution(ShapeRef shape, VPU::DistributionInfoAttr origDistribution,
+                                                        mlir::MLIRContext* ctx) const;
 
 private:
     Logger _log;
 };
 
-VPU::DistributedTensorAttr FuseClusterMemPermuteWithViewLikeOps::getDuplicatedDistribution(
-        ShapeRef shape, VPU::DistributedTensorAttr origDistribution, mlir::MLIRContext* ctx) const {
+VPU::DistributionInfoAttr FuseClusterMemPermuteWithViewLikeOps::getDuplicatedDistribution(
+        ShapeRef shape, VPU::DistributionInfoAttr origDistribution, mlir::MLIRContext* ctx) const {
     const auto distrModeAttr = VPU::DistributionModeAttr::get(ctx, VPU::DistributionMode::DUPLICATED);
     if (!isDistributedAttrWithExplicitShapesAndOffsets(origDistribution)) {
-        return VPU::DistributedTensorAttr::get(
+        return VPU::DistributionInfoAttr::get(
                 ctx, distrModeAttr, nullptr, nullptr, nullptr, nullptr, origDistribution.getNumClusters(), nullptr,
                 origDistribution.getUniformDistributedSegments(), nullptr, nullptr, nullptr, nullptr, nullptr);
     }

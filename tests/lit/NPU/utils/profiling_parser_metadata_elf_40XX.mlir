@@ -10,7 +10,7 @@
 //CHECK: {
 //CHECK: majorVersion: 2,
 //CHECK: platform: {
-//CHECK: device: 4
+//CHECK: device: 3
 //CHECK: },
 //CHECK: profilingBuffer: {
 //CHECK: sections: [ {

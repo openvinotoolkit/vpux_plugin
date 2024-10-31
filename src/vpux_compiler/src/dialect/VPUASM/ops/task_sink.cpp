@@ -25,11 +25,7 @@ size_t VPUASM::TaskSinkOp::getAlignmentRequirements() {
     return sizeof(uint32_t);
 }
 
-ELF::SectionFlagsAttr VPUASM::TaskSinkOp::getAccessingProcs(mlir::SymbolUserMap&) {
-    return ELF::SectionFlagsAttr::VPU_SHF_PROC_DMA;
-}
-
-ELF::SectionFlagsAttr VPUASM::TaskSinkOp::getUserProcs() {
+ELF::SectionFlagsAttr VPUASM::TaskSinkOp::getPredefinedMemoryAccessors() {
     return ELF::SectionFlagsAttr::VPU_SHF_PROC_DMA;
 }
 

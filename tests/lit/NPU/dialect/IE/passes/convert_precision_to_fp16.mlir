@@ -60,7 +60,7 @@ func.func @main() -> tensor<1x2x2x2xf32> {
     return %0 : tensor<1x2x2x2xf32>
 
     // CHECK-DAG:       %[[OUT:.*]] = const.Declare tensor<1x2x2x2xf16> =
-    // CHECK-SAME:      dense<1.000000e+00> : tensor<1x2x2x2xf32>, [#const.ConvertElemType<f16>]
+    // CHECK-SAME:      dense<1.000000e+00> : tensor<1x2x2x2xf32>, [#const.CastElemType<f16>]
     // CHECK:       return %[[OUT]] : tensor<1x2x2x2xf16>
 }
 
@@ -256,4 +256,35 @@ func.func @main(%arg0: tensor<1x1024xf16>) -> tensor<1x1024xf16> {
 
 }
 
+}
+
+// -----
+
+// CHECK-LABEL: @FP32Less
+module @FP32Less {
+    IE.CNNNetwork
+        entryPoint : @main
+        inputsInfo : {
+            // CHECK: DataInfo "Input" : tensor<1x2xf16>
+            // CHECK: DataInfo "Const" : tensor<1x1xf16>
+            DataInfo "Input" : tensor<1x2xf16>
+            DataInfo "Const" : tensor<1x1xf16>
+        }
+        outputsInfo : {
+            // CHECK: DataInfo "Out" : tensor<1x2xf16>
+            DataInfo "Out" : tensor<1x2xf16>
+        }
+
+    // CHECK: func.func @main([[INPUT:%.+]]: tensor<1x2xf16>, [[CST:%.+]]: tensor<1x1xf16>) -> tensor<1x2xf16>
+    func.func @main(%input: tensor<1x2xf16>, %cst: tensor<1x1xf16>) -> tensor<1x2xf16> {
+        %conver_input = IE.Convert(%input) {dstElemType = f32} : tensor<1x2xf16> -> tensor<1x2xf32>
+        %conver_cst = IE.Convert(%cst) {dstElemType = f32} : tensor<1x1xf16> -> tensor<1x1xf32>
+        %0 = IE.Less(%conver_input, %conver_cst) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x2xf32>, tensor<1x1xf32> -> tensor<1x2xi8>
+        %out = IE.Convert(%0) {dstElemType = f16} : tensor<1x2xi8> -> tensor<1x2xf16>
+        return %out : tensor<1x2xf16>
+
+        // CHECK: [[OUT:%.+]] = IE.Less([[INPUT]], [[CST]])
+        // CHECK-SAME: tensor<1x2xf16>, tensor<1x1xf16> -> tensor<1x2xi8>
+
+    }
 }

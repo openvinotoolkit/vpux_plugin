@@ -87,11 +87,11 @@ const auto paramsNPU3720 =
                          testing::ValuesIn(ov::test::static_shapes_to_test_representation(inputShapesMemPerm)),
                          testing::Values(ov::test::utils::DEVICE_NPU));
 
-INSTANTIATE_TEST_CASE_P(smoke_precommit_Transpose, TransposeLayerTest_NPU3720, paramsNPU3720,
-                        TransposeLayerTest_NPU3720::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_Transpose, TransposeLayerTest_NPU3720, paramsNPU3720,
+                         TransposeLayerTest_NPU3720::getTestCaseName);
 
-INSTANTIATE_TEST_CASE_P(smoke_TransposeMemPermNWCHtoNHWC, TransposeLayerTest_NPU3720, paramsMemPermNWCHtoNHWC,
-                        TransposeLayerTest_NPU3720::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_TransposeMemPermNWCHtoNHWC, TransposeLayerTest_NPU3720, paramsMemPermNWCHtoNHWC,
+                         TransposeLayerTest_NPU3720::getTestCaseName);
 
 /* ============= NPU3720 ND  ============= */
 
@@ -104,8 +104,8 @@ const auto params_5D = testing::Combine(testing::ValuesIn(reorder_5D), testing::
                                         testing::ValuesIn(ov::test::static_shapes_to_test_representation(shape_5D)),
                                         testing::Values(ov::test::utils::DEVICE_NPU));
 
-INSTANTIATE_TEST_CASE_P(smoke_Transpose_5D, TransposeLayerTest_NPU3720, params_5D,
-                        TransposeLayerTest_NPU3720::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_Transpose_5D, TransposeLayerTest_NPU3720, params_5D,
+                         TransposeLayerTest_NPU3720::getTestCaseName);
 
 /* ============= NPU3720 Test complex tensor optimization  ============= */
 
@@ -122,8 +122,8 @@ const auto paramsCNo4d =
                          testing::ValuesIn(ov::test::static_shapes_to_test_representation(inputShapesCNo4d)),
                          testing::Values(ov::test::utils::DEVICE_NPU));
 
-INSTANTIATE_TEST_CASE_P(smoke_precommit_TransposeCNo4d, TransposeLayerTest_NPU3720, paramsCNo4d,
-                        TransposeLayerTest_NPU3720::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_TransposeCNo4d, TransposeLayerTest_NPU3720, paramsCNo4d,
+                         TransposeLayerTest_NPU3720::getTestCaseName);
 
 /* ============= NPU3720 Test optimization with merged input shape 4D ============= */
 
@@ -138,8 +138,8 @@ const auto paramsMerged4d =
                          testing::ValuesIn(ov::test::static_shapes_to_test_representation(inputShapesMerged4d)),
                          testing::Values(ov::test::utils::DEVICE_NPU));
 
-INSTANTIATE_TEST_CASE_P(smoke_precommit_TransposeMerged4d, TransposeLayerTest_NPU3720, paramsMerged4d,
-                        TransposeLayerTest_NPU3720::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_TransposeMerged4d, TransposeLayerTest_NPU3720, paramsMerged4d,
+                         TransposeLayerTest_NPU3720::getTestCaseName);
 
 /* ============= NPU3720 Test permutation decomposition  ============= */
 
@@ -151,8 +151,8 @@ const auto paramsPermuteDecomposition =
                          testing::ValuesIn(ov::test::static_shapes_to_test_representation(inputShapeBatched5D)),
                          testing::Values(ov::test::utils::DEVICE_NPU));
 
-INSTANTIATE_TEST_CASE_P(smoke_precommit_Transpose_Permutation_Decomposition, TransposeLayerTest_NPU3720,
-                        paramsPermuteDecomposition, TransposeLayerTest_NPU3720::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_Transpose_Permutation_Decomposition, TransposeLayerTest_NPU3720,
+                         paramsPermuteDecomposition, TransposeLayerTest_NPU3720::getTestCaseName);
 
 /* ============= NPU3720 Test transpose to DMA  ============= */
 
@@ -164,8 +164,8 @@ const auto paramsTransposeToDMA =
                          testing::ValuesIn(ov::test::static_shapes_to_test_representation(specificInShape)),
                          testing::Values(ov::test::utils::DEVICE_NPU));
 
-INSTANTIATE_TEST_CASE_P(smoke_precommit_Transpose_To_DMA, TransposeLayerTest_NPU3720, paramsTransposeToDMA,
-                        TransposeLayerTest_NPU3720::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_Transpose_To_DMA, TransposeLayerTest_NPU3720, paramsTransposeToDMA,
+                         TransposeLayerTest_NPU3720::getTestCaseName);
 
 /* ============= NPU4000  ============= */
 
@@ -177,7 +177,7 @@ const auto paramsMemPerm =
                          testing::ValuesIn(ov::test::static_shapes_to_test_representation(inShapesMemPerm)),
                          testing::Values(ov::test::utils::DEVICE_NPU));
 
-INSTANTIATE_TEST_CASE_P(smoke_precommit_Transpose, TransposeLayerTest_NPU4000, paramsMemPerm,
-                        TransposeLayerTest_NPU4000::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_Transpose, TransposeLayerTest_NPU4000, paramsMemPerm,
+                         TransposeLayerTest_NPU4000::getTestCaseName);
 
 }  // namespace

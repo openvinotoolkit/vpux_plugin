@@ -4,7 +4,10 @@
 //
 
 #include "vpux/compiler/conversion/rewriters/VPUMI40XX2VPUASM/mapped_inference_rewriter.hpp"
+#include "vpux/compiler/dialect/IE/utils/resources.hpp"
 #include "vpux/compiler/dialect/VPUASM/ops.hpp"
+#include "vpux/compiler/dialect/VPUMI40XX/utils.hpp"
+#include "vpux/compiler/utils/analysis.hpp"
 
 namespace vpux {
 namespace vpumi40xx2vpuasm {
@@ -123,12 +126,48 @@ mlir::LogicalResult MappedInferenceRewriter::symbolize(VPUMI40XX::MappedInferenc
         }
 
         auto bootstrapWorkItemTasksCount = op.getBootsrapWorkItemsCount().value_or(0);
-
         mlir::SymbolRefAttr bootstrapItems = op.getBootstrapTasks() ? findSym(op.getBootstrapTasks()) : nullptr;
+
+        auto fillBits = [](uint8_t numberOfElements) {
+            return static_cast<uint8_t>((1 << numberOfElements) - 1);
+        };
+
+        uint8_t media_used = 0;
+        if (op.getMediaCount()) {
+            media_used = fillBits(1);
+        }
+        auto module = getModuleOp(op);
+        auto tileCount = static_cast<size_t>(IE::getTileExecutor(module).getCount());
+        uint8_t dpu_used = fillBits(tileCount);
+        auto dmaCount = parseIntArrayOfArrayAttr<int64_t>(op.getDmaCount());
+
+        uint8_t activeDmaDDR = 0;
+        uint8_t activeDMACMX = 0;
+        for (auto dmaTileIndex : irange(dmaCount.size())) {
+            if (dmaCount[dmaTileIndex][static_cast<size_t>(VPUMI40XX::DmaNnSrcType::DDR)] > 0) {
+                activeDmaDDR++;
+            }
+            if (dmaCount[dmaTileIndex][static_cast<size_t>(VPUMI40XX::DmaNnSrcType::CMX_NN)] > 0) {
+                activeDMACMX++;
+            }
+        }
+
+        uint8_t dma_from_ddr_used = fillBits(activeDmaDDR);
+        uint8_t dma_from_cmx_used = fillBits(activeDMACMX);
+
+        auto actKernelRangesCountVec = parseIntArrayAttr<int64_t>(op.getActKernelRangesCount());
+        uint8_t activeShaves = 0;
+        for (size_t tileIdx = 0; tileIdx < actKernelRangesCountVec.size(); ++tileIdx) {
+            if (actKernelRangesCountVec[tileIdx] > 0) {
+                activeShaves++;
+            }
+        }
+
+        uint8_t actshv_used = fillBits(activeShaves);
         auto managedMPI = rewriter.create<VPUASM::ManagedMappedInferenceOp>(
                 op.getLoc(), managedMPISymName, managedDmasAttr, workItems, barrierTasksAttr, bootstrapItems,
                 op.getDmaCountAttr(), workItemCount, op.getBarrierCount(), finalBarrierId, bootstrapTasksCount,
-                bootstrapWorkItemTasksCount);
+                bootstrapWorkItemTasksCount, actshv_used, dpu_used, media_used, dma_from_ddr_used, dma_from_cmx_used);
 
         managedMPISymRef = mlir::FlatSymbolRefAttr::get(managedMPISymName);
         rewriter.setInsertionPoint(managedMPI);

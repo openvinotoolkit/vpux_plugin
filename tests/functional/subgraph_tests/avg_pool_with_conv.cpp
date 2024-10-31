@@ -68,12 +68,12 @@ public:
     };
 };
 
-TEST_P(AvgPoolWithConvTestCommon, VPU3720_HW) {
+TEST_P(AvgPoolWithConvTestCommon, NPU3720_HW) {
     setDefaultHardwareMode();
     run(Platform::NPU3720);
 }
 
-TEST_P(AvgPoolWithConvTestCommon, VPU4000_HW) {
+TEST_P(AvgPoolWithConvTestCommon, NPU4000_HW) {
     setDefaultHardwareMode();
     run(Platform::NPU4000);
 }

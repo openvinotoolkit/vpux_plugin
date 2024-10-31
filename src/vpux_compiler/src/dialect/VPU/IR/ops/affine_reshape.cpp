@@ -119,39 +119,37 @@ mlir::LogicalResult vpux::VPU::AffineReshapeOp::inferReturnTypes(
 // DistributedCastOpInterface
 //
 
-mlir::FailureOr<VPU::DistributedTypeInterface> vpux::VPU::AffineReshapeOp::inferCastedDistOutput(
-        VPU::DistributedTensorType inDistributedType) {
-    if (inDistributedType == nullptr || inDistributedType.getDistribution() == nullptr) {
+mlir::FailureOr<std::pair<mlir::Type, VPU::DistributionInfo>>
+vpux::VPU::AffineReshapeOp::inferCastedTypeAndDistribution(vpux::NDTypeInterface inType,
+                                                           VPU::DistributionInfo& distribution) {
+    if (inType == nullptr || mlir::isa<VPU::DistributedTensorType>(inType) ||
+        distribution.getDistributionMode() == DistributionMode::NONE) {
         return mlir::failure();
     }
 
-    auto origDistribution = inDistributedType.getDistribution();
     // TODO: E-128707 - extend for other distribution modes
-    if (origDistribution.getMode().getValue() != VPU::DistributionMode::DUPLICATED) {
+    if (distribution.getDistributionMode() != VPU::DistributionMode::DUPLICATED) {
         return mlir::failure();
     }
 
-    const auto ctx = getContext();
     const auto dstType = getOutput().getType().cast<NDTypeInterface>();
     const auto outShape = dstType.getShape();
     const auto dstElemType = dstType.getElementType();
 
-    if (inDistributedType.getShape().size() != outShape.size()) {
+    if (inType.getShape().size() != outShape.size()) {
         return mlir::failure();
     }
 
-    if (!VPU::isDistributedAttrWithExplicitShapesAndOffsets(origDistribution)) {
+    if (!VPU::isDistributionWithExplicitShapesAndOffsets(distribution)) {
         const auto typeComponents =
                 TypeComponents().setShape(outShape).setDimsOrder(dstType.getDimsOrder()).setElementType(dstElemType);
-        return inDistributedType.changeTypeComponents(typeComponents).cast<VPU::DistributedTypeInterface>();
+        return std::make_pair(mlir::cast<mlir::Type>(inType.changeTypeComponents(typeComponents)), distribution);
     }
 
-    const auto dstDimsOrderAttr = mlir::AffineMapAttr::get(dstType.getDimsOrder().toAffineMap(ctx));
-    auto distribWithExplicitAttr = VPU::getNonOverlappedDistributedAttr(
-            outShape, origDistribution.getMode(), origDistribution.getNumTiles(), origDistribution.getNumClusters(),
-            origDistribution.getAlignment(), origDistribution.getUniformDistributedSegments(), ctx);
-
-    return VPU::DistributedTensorType::get(ctx, outShape.raw(), dstElemType, dstDimsOrderAttr,
-                                           inDistributedType.getMemSpace(), distribWithExplicitAttr)
-            .cast<VPU::DistributedTypeInterface>();
+    auto distribWithExplicitAttr = VPU::getNonOverlappedDistributedNative(
+            outShape, distribution.getDistributionMode(), distribution.getNumTiles(), distribution.getNumClusters(),
+            distribution.getAlignment(), distribution.hasUniformDistributedSegments());
+    const auto typeComponents =
+            TypeComponents().setShape(outShape).setDimsOrder(dstType.getDimsOrder()).setElementType(dstElemType);
+    return std::make_pair(mlir::cast<mlir::Type>(inType.changeTypeComponents(typeComponents)), distribWithExplicitAttr);
 }

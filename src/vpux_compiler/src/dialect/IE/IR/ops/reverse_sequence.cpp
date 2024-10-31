@@ -68,12 +68,12 @@ mlir::OpFoldResult vpux::IE::ReverseSequenceOp::fold(FoldAdaptor adaptor) {
     auto operands = adaptor.getOperands();
     VPUX_THROW_UNLESS(operands.size() == 2, "Wrong number of operands : {0}", operands.size());
 
-    const auto attr = mlir::dyn_cast_or_null<Const::ContentAttr>(operands[1]);
+    const auto attr = mlir::dyn_cast_or_null<Const::EphemeralContentAttr>(operands[1]);
     if (attr == nullptr || !attr.isSplat()) {
         return nullptr;
     }
 
-    const auto content = attr.fold();
+    const auto content = static_cast<Const::ContentAttr>(attr).fold();
     return (content.getSplatValue<int32_t>() == 1) ? getData() : nullptr;
 }
 

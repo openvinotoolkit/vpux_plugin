@@ -12,6 +12,6 @@ mlir::LogicalResult buildDPUVariantIDU(VPUASM::DPUVariantOp origVarOp, mlir::OpB
                                        ELF::SymbolReferenceMap& symRefMap);
 
 mlir::LogicalResult buildDPUVariantODU(VPUASM::DPUVariantOp origVarOp, mlir::OpBuilder& builder, const Logger& log,
-                                       ELF::SymbolReferenceMap& symRefMap);
+                                       mlir::Block* varBlock, ELF::SymbolReferenceMap& symRefMap);
 
 }  // namespace vpux::VPUIPDPU::arch40xx

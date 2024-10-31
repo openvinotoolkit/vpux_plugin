@@ -960,6 +960,36 @@ const auto fasterRcnnParams =
 INSTANTIATE_TEST_SUITE_P(precommit_smoke_DetectionOutput_faster_rcnn, DetectionOutputLayerTestCommon, fasterRcnnParams,
                          PrintTestCaseName());
 
+//
+// faster_rcnn_resnet
+//
+
+const auto fasterRcnnResnetNormalization =
+        NormalizationParams{Normalized(false), InputHeight(600), InputWidth(1000), VarianceEncodedInTarget(true)};
+
+const auto fasterRcnnResnetShapeParams =
+        TensorShapeParams{NumPriors(300), NumClasses(21), NumBatches(1), PriorBatchSizeOne(true), BackgroundLabelId(0)};
+
+const auto fasterRcnnResnetAttributes = ::testing::Combine(  //
+        ::testing::Values(ShareLocation(false)),             //
+        ::testing::Values(TopK(400)),                        //
+        ::testing::Values(KeepTopK(200)),                    //
+        ::testing::Values(CodeType(CodeType::CENTER_SIZE)),  //
+        ::testing::Values(NmsThreshold(0.3f)),               //
+        ::testing::Values(ConfidenceThreshold(0.5f)),        // actual confidence threshold is 0 for the network
+        ::testing::Values(ClipAfterNms(false)),              //
+        ::testing::Values(ClipBeforeNms(false)),             //
+        ::testing::Values(DecreaseLabelId(false))            //
+);
+
+const auto fasterRcnnResnetParams = ::testing::Combine(
+        ::testing::Values(fasterRcnnResnetNormalization), ::testing::Values(fasterRcnnResnetShapeParams),
+        fasterRcnnResnetAttributes, ::testing::ValuesIn(additionalInputsParams), ::testing::ValuesIn(metaParams),
+        ::testing::Values(ov::test::utils::DEVICE_NPU));
+
+INSTANTIATE_TEST_SUITE_P(precommit_smoke_DetectionOutput_faster_rcnn_resnet, DetectionOutputLayerTestCommon,
+                         fasterRcnnResnetParams, PrintTestCaseName());
+
 // ssd-resnet101-fpn-oid
 
 const auto ssdResnet101ShapeParams = TensorShapeParams{NumPriors(131040), NumClasses(602), NumBatches(1),

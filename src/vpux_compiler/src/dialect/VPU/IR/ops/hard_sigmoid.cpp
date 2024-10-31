@@ -44,13 +44,13 @@ void vpux::VPU::HardSigmoidOp::build(::mlir::OpBuilder& odsBuilder, ::mlir::Oper
     build(odsBuilder, odsState, input.getType(), input, alpha, beta, {});
 }
 
-vpux::VPU::DistributedTensorNative vpux::VPU::HardSigmoidOp::getExplicitDistributedTensorAttr(
+vpux::VPU::DistributionInfo vpux::VPU::HardSigmoidOp::getExplicitDistributionInfoAttr(
         vpux::ShapeRef shape, vpux::VPU::DistributionMode distributionMode, ArrayRef<int64_t> numTiles,
         const int64_t numClusters, ArrayRef<int64_t> alignment, const bool uniformDistributedSegments,
         const vpux::VPU::OverlapDistributionParams& overlapParams) {
-    return VPU::getSWExplicitDistributedTensorNative(mlir::cast<VPU::SWOpInterface>(getOperation()), shape,
-                                                     distributionMode, numTiles, numClusters, alignment,
-                                                     uniformDistributedSegments, overlapParams);
+    return VPU::getSWExplicitDistributionInfo(mlir::cast<VPU::SWOpInterface>(getOperation()), shape, distributionMode,
+                                              numTiles, numClusters, alignment, uniformDistributedSegments,
+                                              overlapParams);
 }
 
 //

@@ -40,7 +40,6 @@ func.func @SparseConvWeights(%arg0: memref<1x16x64x64xf16, #NHWC>, %arg1: memref
 
     %output_cmx = memref.alloc() : memref<1x32x64x64xf16, #NHWC, @CMX_NN>
     %conv_out = VPUIP.NCEClusterTask {
-            activation_window_channel_length = 27 : i64,
             kernel_padding = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
             kernel_size = [3, 3],
             kernel_strides = [1, 1],
@@ -161,7 +160,6 @@ func.func @SparseConvWeightsDistributed(%arg0: !IODistributed) -> !IODistributed
         outputs(%output_data as %arg5: !IOBuffer) -> !IODistributed {
 
         %conv_out = VPUIP.NCEClusterTask {
-            activation_window_channel_length = 27 : i64,
             kernel_padding = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
             kernel_size = [3, 3],
             kernel_strides = [1, 1],

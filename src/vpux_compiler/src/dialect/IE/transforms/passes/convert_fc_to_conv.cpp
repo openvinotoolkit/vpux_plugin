@@ -80,7 +80,7 @@ mlir::LogicalResult ConvertFCToConvPass::FullyConnectedOpConverter::matchAndRewr
     auto newDilations = getIntArrayAttr(getContext(), ov::Strides{1, 1});
     auto convOp = rewriter.create<IE::ConvolutionOp>(takeOpLoc(origOp, "as_convolution"), newInput, newFilter, newBias,
                                                      newStrides, newPadsBegin, newPadsEnd, newDilations, nullptr,
-                                                     nullptr, nullptr);
+                                                     nullptr, nullptr, nullptr, nullptr);
 
     const auto convShape = convOp.getOutput().getType().cast<vpux::NDTypeInterface>().getShape().raw();
     const std::array<int64_t, 2> outputShape = {convShape[0], convShape[1]};

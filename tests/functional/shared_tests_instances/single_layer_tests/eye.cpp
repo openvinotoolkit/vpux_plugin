@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2023 Intel Corporation
+// Copyright (C) 2023-2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -119,28 +119,22 @@ class EyeLayerTestWithConstantFoldingCommon : public EyeLayerTest, virtual publi
     }
 };
 
-class EyeLayerTest_NPU3720 : public EyeLayerTestCommon {};
-class EyeLayerTest_NPU4000 : public EyeLayerTestCommon {};
-
-class EyeLayerTestWithConstantFolding_NPU3720 : public EyeLayerTestWithConstantFoldingCommon {};
-class EyeLayerTestWithConstantFolding_NPU4000 : public EyeLayerTestWithConstantFoldingCommon {};
-
-TEST_P(EyeLayerTest_NPU3720, HW) {
+TEST_P(EyeLayerTestCommon, NPU3720_HW) {
     setDefaultHardwareMode();
     run(Platform::NPU3720);
 }
 
-TEST_P(EyeLayerTestWithConstantFolding_NPU3720, HW) {
-    setDefaultHardwareMode();
-    run(Platform::NPU3720);
-}
-
-TEST_P(EyeLayerTest_NPU4000, HW) {
+TEST_P(EyeLayerTestCommon, NPU4000_HW) {
     setDefaultHardwareMode();
     run(Platform::NPU4000);
 }
 
-TEST_P(EyeLayerTestWithConstantFolding_NPU4000, HW) {
+TEST_P(EyeLayerTestWithConstantFoldingCommon, NPU3720_HW) {
+    setDefaultHardwareMode();
+    run(Platform::NPU3720);
+}
+
+TEST_P(EyeLayerTestWithConstantFoldingCommon, NPU4000_HW) {
     setDefaultHardwareMode();
     run(Platform::NPU4000);
 }
@@ -184,28 +178,14 @@ const auto realNetParams = testing::Combine(testing::Values(eyeShape), testing::
                                             testing::Values(std::vector<int>{128, 128, 0}),
                                             testing::Values(modelTypes[0]), testing::Values(DEVICE_NPU));
 
-/* ============= NPU 3720 ============= */
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_Eye, EyeLayerTestCommon, noBatchShapeParams, EyeLayerTest::getTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_Eye, EyeLayerTest_NPU3720, noBatchShapeParams, EyeLayerTest::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_Eye_with_batch_shape, EyeLayerTest_NPU3720, withBatchShapeParams,
+INSTANTIATE_TEST_SUITE_P(smoke_Eye_with_batch_shape, EyeLayerTestCommon, withBatchShapeParams,
                          EyeLayerTest::getTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(smoke_Eye_real_net, EyeLayerTest_NPU3720, realNetParams, EyeLayerTest::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_Eye_real_net, EyeLayerTestCommon, realNetParams, EyeLayerTest::getTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(smoke_Eye_const_fold_real_net, EyeLayerTestWithConstantFolding_NPU3720, realNetParams,
-                         EyeLayerTest::getTestCaseName);
-
-/* ============= NPU 4000 ============= */
-
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_Eye, EyeLayerTest_NPU4000, noBatchShapeParams, EyeLayerTest::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_Eye_with_batch_shape, EyeLayerTest_NPU4000, withBatchShapeParams,
-                         EyeLayerTest::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_Eye_real_net, EyeLayerTest_NPU4000, realNetParams, EyeLayerTest::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_Eye_const_fold_real_net, EyeLayerTestWithConstantFolding_NPU4000, realNetParams,
+INSTANTIATE_TEST_SUITE_P(smoke_Eye_const_fold_real_net, EyeLayerTestWithConstantFoldingCommon, realNetParams,
                          EyeLayerTest::getTestCaseName);
 
 }  // namespace

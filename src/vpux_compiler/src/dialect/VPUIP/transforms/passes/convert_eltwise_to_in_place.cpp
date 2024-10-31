@@ -14,7 +14,8 @@ using namespace vpux;
 namespace {
 
 bool areInOutDistributionsCompatible(VPUIP::NCEClusterTaskOp clusterTaskOp, AliasesInfo& aliasesInfo,
-                                     mlir::Value& inputRootBuff, VPUIP::DistributedBufferType inRootBuffDistributedType,
+                                     mlir::Value& inputRootBuff, mlir::Value& originalInputRootBuff,
+                                     VPUIP::DistributedBufferType inRootBuffDistributedType,
                                      VPUIP::DistributedBufferType inDistributedType,
                                      VPUIP::DistributedBufferType outDistributedType, Logger log) {
     if (inRootBuffDistributedType.getDistribution() == outDistributedType.getDistribution()) {
@@ -33,12 +34,12 @@ bool areInOutDistributionsCompatible(VPUIP::NCEClusterTaskOp clusterTaskOp, Alia
     // not (e.g. NCE.Permute (SOW) -> ViewOp -> NCE.Eltwise (SOH)). Insert ViewOp.
     if (VPU::areDistributionAttrsCompatible(inRootBuffDistributedType, outDistributedType, true).failed()) {
         auto supportView = builder.create<VPUIP::ViewOp>(clusterTaskOp.getLoc(), inDistributedType, inputRootBuff);
-        aliasesInfo.addAlias(inputRootBuff, supportView.getResult());
+        aliasesInfo.addAlias(originalInputRootBuff, supportView.getResult());
         inputRootBuff = supportView.getResult();
     } else {
         auto distributedCastOp =
                 builder.create<VPUIP::DistributedCastOp>(clusterTaskOp.getLoc(), outDistributedType, inputRootBuff);
-        aliasesInfo.addAlias(inputRootBuff, distributedCastOp.getOutput());
+        aliasesInfo.addAlias(originalInputRootBuff, distributedCastOp.getOutput());
         inputRootBuff = distributedCastOp.getOutput();
     }
 
@@ -89,14 +90,29 @@ void makeInPlaceEltwise(VPUIP::NCEClusterTaskOp clusterTaskOp, AliasesInfo& alia
             inputRootBuff = supportView.getResult();
         }
 
+        const auto inRootDataBuffType = VPUIP::extractDataType(inputRootBuff).cast<NDTypeInterface>();
+        const auto outBuffType = VPUIP::extractDataType(outputRootBuff).cast<NDTypeInterface>();
+        auto originalInputRootBuff = inputRootBuff;
+        if (inRootDataBuffType.getShape() != outBuffType.getShape() &&
+            inRootDataBuffType.getDimsOrder() == outBuffType.getDimsOrder() &&
+            inRootDataBuffType.getNumElements() == outBuffType.getNumElements()) {
+            mlir::OpBuilder shapeCastBuilder(clusterTaskOp);
+            shapeCastBuilder.setInsertionPointAfterValue(inputRootBuff);
+            auto shapeCastOp = shapeCastBuilder.create<VPUIP::ShapeCastOp>(clusterTaskOp.getLoc(), inputRootBuff,
+                                                                           outBuffType.getShape());
+            aliasesInfo.addAlias(inputRootBuff, shapeCastOp.getResult());
+            inputRootBuff = shapeCastOp.getResult();
+        }
+
         // Ensure distribution compatibility
         const auto inRootBuffDistributedType =
                 VPUIP::extractDataType(inputRootBuff).dyn_cast<VPUIP::DistributedBufferType>();
         const auto inDistributedType = VPUIP::extractDataType(inputBuff).dyn_cast<VPUIP::DistributedBufferType>();
         const auto outDistributedType = VPUIP::extractDataType(outputRootBuff).dyn_cast<VPUIP::DistributedBufferType>();
         if (inDistributedType != nullptr && outDistributedType != nullptr && inRootBuffDistributedType != nullptr) {
-            if (!areInOutDistributionsCompatible(clusterTaskOp, aliasesInfo, inputRootBuff, inRootBuffDistributedType,
-                                                 inDistributedType, outDistributedType, nestLog)) {
+            if (!areInOutDistributionsCompatible(clusterTaskOp, aliasesInfo, inputRootBuff, originalInputRootBuff,
+                                                 inRootBuffDistributedType, inDistributedType, outDistributedType,
+                                                 nestLog)) {
                 continue;
             }
         }

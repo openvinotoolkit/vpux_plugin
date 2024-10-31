@@ -121,10 +121,10 @@ size_t softmaxChannelNum = 16;
 const auto basicCases = ::testing::Combine(::testing::ValuesIn(inputShape), ::testing::Values(softmaxAxis),
                                            ::testing::Values(softmaxChannelNum));
 
-INSTANTIATE_TEST_CASE_P(precommit, SoftmaxWithPermuteTest_NPU3720, basicCases,
-                        SoftmaxWithPermuteTestCommon::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(precommit, SoftmaxWithPermuteTest_NPU3720, basicCases,
+                         SoftmaxWithPermuteTestCommon::getTestCaseName);
 
-INSTANTIATE_TEST_CASE_P(precommit, SoftmaxWithPermuteTest_NPU4000, basicCases,
-                        SoftmaxWithPermuteTestCommon::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(precommit, SoftmaxWithPermuteTest_NPU4000, basicCases,
+                         SoftmaxWithPermuteTestCommon::getTestCaseName);
 
 }  // namespace ov::test

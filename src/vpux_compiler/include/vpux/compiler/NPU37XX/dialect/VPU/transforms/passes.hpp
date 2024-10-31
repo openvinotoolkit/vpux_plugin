@@ -16,9 +16,10 @@ namespace arch37xx {
 // Passes
 //
 
-std::unique_ptr<mlir::Pass> createAdjustForOptimizedSwKernelPass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createAdjustForOptimizedLayersPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createSplitRealDFTOpsPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createDecomposeMVNPass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createApplyTilingMVN1SumPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createAddProposalAuxiliaryBufferPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createCorrectNCEWorkloadsPass(Logger log = Logger::global());
 

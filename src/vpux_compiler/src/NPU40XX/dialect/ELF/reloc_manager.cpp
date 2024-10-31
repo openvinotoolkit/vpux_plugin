@@ -28,14 +28,16 @@ ELF::CreateRelocationSectionOp ELF::RelocManager::getRelocationSection(ELF::ElfS
     auto symTabRef = mlir::FlatSymbolRefAttr::get(symtabSymbolIface.getNameAttr());
 
     auto symTabFlags = symbolTable.getSecFlags();
-    auto relaSectionFlag = ELF::SectionFlagsAttr::SHF_NONE;
-    if (static_cast<uint32_t>(symTabFlags & ELF::SectionFlagsAttr::VPU_SHF_USERINPUT) ||
-        static_cast<uint32_t>(symTabFlags & ELF::SectionFlagsAttr::VPU_SHF_USEROUTPUT) ||
-        static_cast<uint32_t>(symTabFlags & ELF::SectionFlagsAttr::VPU_SHF_PROFOUTPUT)) {
-        relaSectionFlag = ELF::SectionFlagsAttr::VPU_SHF_JIT | symTabFlags;
-    }
 
-    auto flags = ELF::SectionFlagsAttrAttr::get(builder_.getContext(), relaSectionFlag);
+    auto relaSectionFlags = symTabFlags;
+    auto isJITRelaSection = (static_cast<uint32_t>(relaSectionFlags & ELF::SectionFlagsAttr::VPU_SHF_USERINPUT) ||
+                             static_cast<uint32_t>(relaSectionFlags & ELF::SectionFlagsAttr::VPU_SHF_USEROUTPUT) ||
+                             static_cast<uint32_t>(relaSectionFlags & ELF::SectionFlagsAttr::VPU_SHF_PROFOUTPUT));
+
+    VPUX_THROW_WHEN(isJITRelaSection && !ELF::bitEnumContainsAll(relaSectionFlags, ELF::SectionFlagsAttr::VPU_SHF_JIT),
+                    "Reloc Section for JIT symbols must have VPU_SHF_JIT Flag");
+
+    auto flags = ELF::SectionFlagsAttrAttr::get(builder_.getContext(), relaSectionFlags);
     auto newRelocSection = builder_.create<ELF::CreateRelocationSectionOp>(symbolTable.getLoc(), nameAttr,
                                                                            targetSectionRef, symTabRef, flags);
 
@@ -84,8 +86,8 @@ void ELF::RelocManager::createRelocations(mlir::Operation* op, ELF::RelocationIn
         offset += baseBinaryOp.getMemoryOffset();
     }
 
-    relocBuilder.create<ELF::RelocOp>(relocSection.getLoc(), offset, symForReloc, relocInfo.relocType,
-                                      relocInfo.addend);
+    relocBuilder.create<ELF::RelocOp>(relocSection.getLoc(), offset, symForReloc, relocInfo.relocType, relocInfo.addend,
+                                      relocInfo.description);
 }
 
 void ELF::RelocManager::createRelocations(mlir::Operation* op, std::vector<ELF::RelocationInfo>& relocInfo) {

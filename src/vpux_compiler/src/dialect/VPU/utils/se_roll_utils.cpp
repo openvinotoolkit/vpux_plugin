@@ -7,6 +7,7 @@
 
 #include "vpux/compiler/dialect/VPU/IR/se_attributes.hpp"
 #include "vpux/compiler/dialect/VPU/utils/conv_utils.hpp"
+#include "vpux/compiler/dialect/VPU/utils/max_kernel_size_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/se_roll_utils.hpp"
 
 #include "vpux/compiler/utils/error.hpp"
@@ -15,7 +16,7 @@ using namespace vpux;
 using namespace VPU;
 
 namespace {
-bool isSupportedSEPRollImpl(VPU::ArchKind arch, NDTypeInterface inputType, NDTypeInterface outputType,
+bool isSupportedSEPRollImpl(mlir::Operation* op, NDTypeInterface inputType, NDTypeInterface outputType,
                             ArrayRef<int64_t> axes, mlir::MLIRContext* ctx, LogCb logCb, bool checkLayout,
                             bool /*checkChannelAlignment*/, bool supportsInputActCompression) {
     const auto inputShape = inputType.getShape();
@@ -53,8 +54,8 @@ bool isSupportedSEPRollImpl(VPU::ArchKind arch, NDTypeInterface inputType, NDTyp
     PadInfo pads(0, 0, 0, 0);
     const auto dilations = SmallVector<int64_t>{1, 1};
 
-    return VPU::isNCEConvSupported(arch, inputType, weightsType, outputType, dilations, KY, KX, SY, SX, pads,
-                                   checkLayout, /*checkChannelAlignment*/ true, logCb, supportsInputActCompression);
+    return VPU::isNCEConvSupported(op, inputType, weightsType, outputType, dilations, KY, KX, SY, SX, pads, checkLayout,
+                                   /*checkChannelAlignment*/ true, logCb, supportsInputActCompression);
 }
 
 }  // namespace
@@ -72,7 +73,7 @@ bool VPU::isSupportedSEPRoll(IE::RollOp op, vpux::LogCb logCb, bool checkLayout,
     const auto shiftAndAxes = shiftAndAxesOrFail.value();
     const auto axes = shiftAndAxes.axes;
 
-    return isSupportedSEPRollImpl(getArch(op), inputType, outputType, axes, op.getContext(), logCb, checkLayout,
+    return isSupportedSEPRollImpl(op.getOperation(), inputType, outputType, axes, op.getContext(), logCb, checkLayout,
                                   checkChannelAlignment, supportsInputActCompression);
 }
 
@@ -89,7 +90,7 @@ bool VPU::isSupportedSEPRoll(VPU::RollOp op, vpux::LogCb logCb, bool checkLayout
     const auto shiftAndAxes = shiftAndAxesOrFail.value();
     const auto axes = shiftAndAxes.axes;
 
-    return isSupportedSEPRollImpl(getArch(op), inputType, outputType, axes, op.getContext(), logCb, checkLayout,
+    return isSupportedSEPRollImpl(op.getOperation(), inputType, outputType, axes, op.getContext(), logCb, checkLayout,
                                   checkChannelAlignment, supportsInputActCompression);
 }
 

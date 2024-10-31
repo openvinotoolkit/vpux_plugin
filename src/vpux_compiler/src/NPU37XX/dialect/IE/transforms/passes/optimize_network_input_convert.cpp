@@ -4,6 +4,7 @@
 //
 
 #include "vpux/compiler/NPU37XX/dialect/IE/transforms/passes.hpp"
+#include "vpux/compiler/NPU37XX/dialect/IE/utils/quantization.hpp"
 #include "vpux/compiler/dialect/IE/transforms/passes/convert_to_mixed_precision.hpp"
 #include "vpux/compiler/dialect/IE/utils/quantization.hpp"
 
@@ -108,7 +109,8 @@ mlir::LogicalResult NetworkInputConvRewriter::matchAndRewrite(IE::ConvolutionOp 
     rewriter.replaceOpWithNewOp<IE::ConvolutionOp>(origOp, origOp.getType(), maybeFloatInput, dequantFilter,
                                                    origOp.getBias(), origOp.getStrides(), origOp.getPadsBegin(),
                                                    origOp.getPadsEnd(), origOp.getDilations(), origOp.getPostOpAttr(),
-                                                   origOp.getClampAttr(), origOp.getStaticScaleAttr());
+                                                   origOp.getClampAttr(), origOp.getStaticScaleAttr(),
+                                                   origOp.getOutputChannelsAttr(), origOp.getInputChannelsAttr());
 
     return mlir::success();
 }
@@ -144,7 +146,8 @@ mlir::LogicalResult NetworkInputGroupConvRewriter::matchAndRewrite(IE::GroupConv
     rewriter.replaceOpWithNewOp<IE::GroupConvolutionOp>(
             origOp, origOp.getType(), maybeFloatInput, dequantFilter, origOp.getBias(), origOp.getStrides(),
             origOp.getPadsBegin(), origOp.getPadsEnd(), origOp.getDilations(), origOp.getGroupsAttr(),
-            origOp.getPostOpAttr(), origOp.getClampAttr());
+            origOp.getPostOpAttr(), origOp.getClampAttr(), origOp.getOutputChannelsAttr(),
+            origOp.getInputChannelsAttr());
 
     return mlir::success();
 }
@@ -173,10 +176,11 @@ mlir::LogicalResult NetworkInputAvgPoolRewriter::matchAndRewrite(IE::AvgPoolOp o
         return mlir::failure();
     }
 
-    rewriter.replaceOpWithNewOp<IE::AvgPoolOp>(origOp, origOp.getType(), maybeFloatInput, origOp.getKernelSize(),
-                                               origOp.getStrides(), origOp.getPadsBegin(), origOp.getPadsEnd(),
-                                               origOp.getRoundingTypeAttr(), origOp.getExcludePadsAttr(),
-                                               origOp.getPostOpAttr(), origOp.getClampAttr());
+    rewriter.replaceOpWithNewOp<IE::AvgPoolOp>(
+            origOp, origOp.getType(), maybeFloatInput, origOp.getKernelSize(), origOp.getStrides(),
+            origOp.getPadsBegin(), origOp.getPadsEnd(), origOp.getRoundingTypeAttr(), origOp.getExcludePadsAttr(),
+            origOp.getPostOpAttr(), origOp.getClampAttr(), origOp.getStaticScaleAttr(), origOp.getOutputChannelsAttr(),
+            origOp.getInputChannelsAttr());
 
     return mlir::success();
 }
@@ -211,7 +215,8 @@ mlir::LogicalResult NetworkInputAddRewriter::matchAndRewrite(IE::AddOp origOp, m
     }
 
     rewriter.replaceOpWithNewOp<IE::AddOp>(origOp, origOp.getType(), floatInputs[0], floatInputs[1],
-                                           origOp.getAutoBroadcast(), origOp.getPostOpAttr(), origOp.getClampAttr());
+                                           origOp.getAutoBroadcast(), origOp.getPostOpAttr(), origOp.getClampAttr(),
+                                           origOp.getOutputChannelsAttr(), origOp.getInputChannelsAttr());
 
     return mlir::success();
 }

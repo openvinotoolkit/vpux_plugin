@@ -8,6 +8,7 @@
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_sparsity.hpp"
 #include "vpux/compiler/dialect/VPUIP/interfaces/nce_invariant.hpp"
+#include "vpux/compiler/utils/attributes_properties_conversion.hpp"
 #include "vpux/compiler/utils/types.hpp"
 #include "vpux/utils/core/algo.hpp"
 
@@ -21,10 +22,17 @@ static constexpr float QUANT_RANGE_RATIO = 5.0;
 
 std::optional<int64_t> getQuantAxisIndex(mlir::Operation* fq, Logger log = Logger::global());
 bool areAnyUserQuantizeOps(mlir::Operation* op);
+bool areAllUsersQuantized(mlir::Operation* op);
+bool isPerAxisQuant(mlir::Value val);
 bool checkQuantApproximation(mlir::Operation* op);
 bool isPerTensorFQ(ArrayRef<IE::FakeQuantizeOp> fqOps);
+IE::FakeQuantizeOp createFQ(mlir::PatternRewriter& rewriter, mlir::Value inputOp, IE::FakeQuantizeOp fq,
+                            mlir::Location loc);
 Const::DeclareOp createFQConst(mlir::MLIRContext* ctx, mlir::Location loc, float val, mlir::RankedTensorType argType,
                                mlir::PatternRewriter& rewriter);
+mlir::Value createFQScaling(mlir::Location loc, mlir::Value input, float scaleFactor, mlir::Type elemType,
+                            std::optional<int64_t> levels, std::optional<mlir::Type> lowFpType,
+                            vpux::IE::AutoBroadcastTypeAttr autoBroadcast, mlir::PatternRewriter& rewriter);
 Const::details::ContentRange<float> getConst(Const::DeclareOp declOp);
 mlir::Value findQuantizedInput(mlir::Value opInput, bool allowPerAxisQuantize);
 bool isSymmetricQuantType(mlir::quant::QuantizedType type);
@@ -60,7 +68,7 @@ mlir::LogicalResult checkRescaledBiasRange(ConcreteOp op) {
                 return mlir::failure();
             }
             if (auto inputConst = biasDequantOp.getInput().template getDefiningOp<Const::DeclareOp>()) {
-                bias = inputConst.getContentAttr().dequantize();
+                bias = inputConst.transformContentAttr().dequantize().get();
             } else {
                 return mlir::failure();
             }
@@ -73,8 +81,5 @@ mlir::LogicalResult checkRescaledBiasRange(ConcreteOp op) {
     return mlir::success();
 }
 
-namespace arch37xx {
-bool isMixPrecisionSupported(mlir::Operation* origOp, const bool isPReLUSupported, Logger log);
-}  // namespace arch37xx
 }  // namespace IE
 }  // namespace vpux

@@ -221,3 +221,37 @@ func.func @AvoidTrivialSplitCandidate(%arg0: !DummyT) -> !DummyT {
 
     return %arg0 : !DummyT
 }
+
+// -----
+
+#NC = affine_map<(d0, d1) -> (d0, d1)>
+#NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
+
+!DummyT = memref<1x3x224x224xf16, @DDR>
+
+// CHECK-LABEL: @AssignSplitCandidateToNon4DDMA
+func.func @AssignSplitCandidateToNon4DDMA(%arg0: !DummyT) -> !DummyT {
+    %0 = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+    %1 = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+    %2 = VPURT.DeclareBuffer <CMX_NN> [0] <425984> -> memref<1024x683xf16, [@CMX_NN, 0]>
+    %3 = VPURT.DeclareBuffer <DDR> <5242880> -> memref<1024x683xf16, {order = #NC, strides = [2048, 1]}, @DDR>
+
+    %4 = VPURT.DeclareBuffer <CMX_NN> [1] <901888> -> memref<1x16x2x8xf16, [@CMX_NN, 1]>
+    %5 = VPURT.DeclareBuffer <DDR> <96288> -> memref<1x16x2x8xf16, {order = #NCHW, strides = [81920, 64, 8, 1]}, @DDR>
+
+    VPURT.Task waits(%0 : !VPURT.Barrier) updates(%1 : !VPURT.Barrier) {
+      %6 = VPUIP.NNDMA {port = 0 : i64}
+          inputs(%2 : memref<1024x683xf16, [@CMX_NN, 0]>)
+          outputs(%3 : memref<1024x683xf16, {order = #NC, strides = [2048, 1]}, @DDR>) -> memref<1024x683xf16, {order = #NC, strides = [2048, 1]}, @DDR>
+    }
+
+    VPURT.Task {
+      %7 = VPUIP.NNDMA {port = 1 : i64}
+          inputs(%4 : memref<1x16x2x8xf16, [@CMX_NN, 1]>)
+          outputs(%5 : memref<1x16x2x8xf16, {order = #NCHW, strides = [81920, 64, 8, 1]}, @DDR>) -> memref<1x16x2x8xf16, {order = #NCHW, strides = [81920, 64, 8, 1]}, @DDR>
+    }
+
+    // CHECK:       [[NNDMA:%.+]] = VPUIP.NNDMA {port = 0 : i64, split_candidate}
+
+    return %arg0: !DummyT
+}

@@ -18,10 +18,13 @@ using namespace vpux;
 //
 
 void vpux::VPURT::buildBarrierLegalizationPipeline(mlir::OpPassManager& pm, const bool wlmFlag,
+                                                   std::optional<int> virtualBarrierThresholdforWlm,
                                                    const bool unevenVariantSplitFlag, Logger log) {
     pm.addPass(VPURT::createSplitExceedingVariantCountBarriersPass(log));
-    pm.addPass(VPURT::createSatisfyOneWaitBarrierPerTaskPass(unevenVariantSplitFlag, log));
-    pm.addPass(VPURT::createReduceExceedingActiveCountBarriersPass(wlmFlag, unevenVariantSplitFlag, log));
+    pm.addPass(VPURT::createSatisfyOneWaitBarrierPerTaskPass(wlmFlag, virtualBarrierThresholdforWlm,
+                                                             unevenVariantSplitFlag, log));
+    pm.addPass(VPURT::createReduceExceedingActiveCountBarriersPass(wlmFlag, virtualBarrierThresholdforWlm,
+                                                                   unevenVariantSplitFlag, log));
 }
 
 //

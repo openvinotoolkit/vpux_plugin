@@ -7,9 +7,6 @@
 // REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 module @SingleLayer attributes {VPU.compilationMode = #VPU.compilation_mode<ReferenceSW>}  {
-  module @UsedMemory  {
-    IE.MemoryResource 2048 bytes of @DDR
-  }
   IE.CNNNetwork entryPoint : @main inputsInfo :  {
     DataInfo "inputCNN" : tensor<1x1000xf16>
   } outputsInfo :  {

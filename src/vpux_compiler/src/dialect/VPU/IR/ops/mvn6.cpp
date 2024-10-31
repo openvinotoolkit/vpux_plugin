@@ -66,13 +66,13 @@ bool vpux::VPU::MVN6Op::checkStrategyCompatibility(VPU::MultiClusterStrategy str
     return false;
 }
 
-vpux::VPU::DistributedTensorNative vpux::VPU::MVN6Op::getExplicitDistributedTensorAttr(
+vpux::VPU::DistributionInfo vpux::VPU::MVN6Op::getExplicitDistributionInfoAttr(
         vpux::ShapeRef shape, vpux::VPU::DistributionMode distributionMode, ArrayRef<int64_t> numTiles,
         const int64_t numClusters, ArrayRef<int64_t> alignment, const bool uniformDistributedSegments,
         const vpux::VPU::OverlapDistributionParams& overlapParams) {
-    return VPU::getSWExplicitDistributedTensorNative(mlir::cast<VPU::SWOpInterface>(getOperation()), shape,
-                                                     distributionMode, numTiles, numClusters, alignment,
-                                                     uniformDistributedSegments, overlapParams);
+    return VPU::getSWExplicitDistributionInfo(mlir::cast<VPU::SWOpInterface>(getOperation()), shape, distributionMode,
+                                              numTiles, numClusters, alignment, uniformDistributedSegments,
+                                              overlapParams);
 }
 
 //
@@ -80,8 +80,8 @@ vpux::VPU::DistributedTensorNative vpux::VPU::MVN6Op::getExplicitDistributedTens
 //
 
 bool vpux::VPU::MVN6Op::fitIntoCMX(llvm::ArrayRef<vpux::NDTypeInterface> buffers, Byte reservedMem) {
-    VPUX_THROW_UNLESS(buffers.size() == 2, "MVN6Op requires 1 input and 1 output, but the number of buffer is {0}",
-                      buffers.size());
+    VPUX_THROW_UNLESS((buffers.size() >= 2) && (buffers.size() <= 4),
+                      "MVN6Op requires 1-3 input(s) and 1 output, but the number of buffer is {0}", buffers.size());
 
     SmallVector<Byte> buffersSize;
     std::transform(buffers.begin(), buffers.end(), std::back_inserter(buffersSize), [](const auto buffer) {
@@ -111,5 +111,13 @@ bool vpux::VPU::MVN6Op::supportCycleCostCalculation() {
 void vpux::VPU::MVN6Op::build(::mlir::OpBuilder& builder, ::mlir::OperationState& state, ::mlir::Value input,
                               ::mlir::ArrayAttr axes, ::mlir::BoolAttr normalize_variance, ::mlir::FloatAttr eps,
                               vpux::IE::MvnEpsModeAttr eps_mode) {
-    build(builder, state, input.getType(), input, axes, normalize_variance, eps, eps_mode, {});
+    build(builder, state, input.getType(), input, nullptr /*scale*/, nullptr /*bias*/, axes, normalize_variance, eps,
+          eps_mode, {});
+}
+
+void vpux::VPU::MVN6Op::build(::mlir::OpBuilder& builder, ::mlir::OperationState& state, ::mlir::Value input,
+                              ::mlir::Value scale, ::mlir::Value bias, ::mlir::ArrayAttr axes,
+                              ::mlir::BoolAttr normalize_variance, ::mlir::FloatAttr eps,
+                              vpux::IE::MvnEpsModeAttr eps_mode) {
+    build(builder, state, input.getType(), input, scale, bias, axes, normalize_variance, eps, eps_mode, {});
 }

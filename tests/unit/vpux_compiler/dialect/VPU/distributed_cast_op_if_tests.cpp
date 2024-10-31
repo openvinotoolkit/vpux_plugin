@@ -22,8 +22,9 @@ using namespace vpux;
 using PerClusterShapesOffsetsVec = SmallVector<SmallVector<int64_t>>;
 constexpr StringRef CMX_NAME = "CMX_NN";
 
-void testDistributedAttr(llvm::StringLiteral inputIR, vpux::VPU::DistributedTensorType inputType,
-                         vpux::VPU::DistributedTensorType expectedDistributedType, mlir::MLIRContext* ctx) {
+void testDistributedAttr(llvm::StringLiteral inputIR, vpux::NDTypeInterface inputType,
+                         VPU::DistributionInfo& inputDistribution, vpux::NDTypeInterface expectedType,
+                         VPU::DistributionInfo& expectedDistribution, mlir::MLIRContext* ctx) {
     auto module = mlir::parseSourceString<mlir::ModuleOp>(inputIR, ctx);
     ASSERT_TRUE(module.get() != nullptr);
 
@@ -42,23 +43,24 @@ void testDistributedAttr(llvm::StringLiteral inputIR, vpux::VPU::DistributedTens
 
         ASSERT_EQ(res, exp);
     };
-
     for (auto& op : func.getOps()) {
         if (auto distributedCastOp = mlir::dyn_cast<vpux::VPU::DistributedCastOpInterface>(op)) {
-            auto resDistributedType = distributedCastOp.inferCastedDistOutput(inputType);
+            auto resDistributedTypeWithDistribution =
+                    distributedCastOp.inferCastedTypeAndDistribution(inputType, inputDistribution);
 
             // Could not infer output distribution
-            if (expectedDistributedType == nullptr) {
-                ASSERT_EQ(mlir::failed(resDistributedType), true);
+            if (expectedType == nullptr) {
+                ASSERT_EQ(mlir::failed(resDistributedTypeWithDistribution), true);
             } else {
-                ASSERT_EQ(mlir::succeeded(resDistributedType), true);
+                ASSERT_EQ(mlir::succeeded(resDistributedTypeWithDistribution), true);
 
-                auto resultType = resDistributedType.value().cast<vpux::VPU::DistributedTensorType>();
-                EXPECT_EQ(resultType.getShape(), expectedDistributedType.getShape());
-                EXPECT_EQ(resultType.getDimsOrder(), expectedDistributedType.getDimsOrder());
-                checkElementType(resultType.getElementType(), expectedDistributedType.getElementType());
-                EXPECT_EQ(resultType.getMemSpace(), expectedDistributedType.getMemSpace());
-                EXPECT_EQ(resultType.getDistribution(), expectedDistributedType.getDistribution());
+                auto resultType = mlir::cast<vpux::NDTypeInterface>(resDistributedTypeWithDistribution.value().first);
+                auto resultDistribution = resDistributedTypeWithDistribution.value().second;
+                EXPECT_EQ(resultType.getShape(), expectedType.getShape());
+                EXPECT_EQ(resultType.getDimsOrder(), expectedType.getDimsOrder());
+                checkElementType(resultType.getElementType(), expectedType.getElementType());
+                EXPECT_EQ(resultType.getMemSpace(), expectedType.getMemSpace());
+                EXPECT_EQ(resultDistribution, expectedDistribution);
             }
         }
     }
@@ -80,59 +82,44 @@ TEST_F(MLIR_DistributedCastOpInterfaceTest, QuantizeCast) {
     )";
     const vpux::Shape shape = {1, 128, 16, 16};
 
-    const auto numTiles = getIntArrayAttr(&ctx, SmallVector<int64_t>({1, 1, 2, 1}));
-    const auto numClusters = getIntAttr(&ctx, 2);
+    const auto numTiles = SmallVector<int64_t>({1, 1, 2, 1});
+    const auto numClusters = 2;
     const auto memSpace = vpux::IndexedSymbolAttr::get(&ctx, CMX_NAME);
-    const auto dimsOrder = mlir::AffineMapAttr::get(DimsOrder::NCHW.toAffineMap(&ctx));
+    const auto dimsOrder = DimsOrder::NCHW;
     const auto inQuantType = mlir::quant::UniformQuantizedType::get(0, getUInt8Type(&ctx), mlir::Float16Type::get(&ctx),
                                                                     0.01, 32, 0, 255);
     const auto outQuantType = mlir::quant::UniformQuantizedType::get(0, getUInt8Type(&ctx),
                                                                      mlir::Float16Type::get(&ctx), 0.02, 64, 0, 255);
 
     // Distribution does not change between input and output for QuantizeCast
-    auto getInputTypeAndTest = [&](VPU::DistributedTensorAttr distribution) {
-        const auto inputDistributedType = vpux::VPU::DistributedTensorType::get(&ctx, shape.raw(), inQuantType,
-                                                                                dimsOrder, memSpace, distribution);
-        const auto outputDistributedType = inputDistributedType.cast<NDTypeInterface>()
-                                                   .changeElemType(outQuantType)
-                                                   .cast<VPU::DistributedTensorType>();
+    auto getInputTypeAndTest = [&](VPU::DistributionInfo& distribution) {
+        const auto inputType = vpux::getTensorType(shape, inQuantType, dimsOrder, memSpace, nullptr);
+        const auto outputType = mlir::cast<NDTypeInterface>(inputType).changeElemType(outQuantType);
 
-        testDistributedAttr(inputIR, inputDistributedType, outputDistributedType, &ctx);
+        testDistributedAttr(inputIR, inputType, distribution, outputType, distribution, &ctx);
     };
 
     {
-        const auto overlappedMode = VPU::DistributionModeAttr::get(&ctx, VPU::DistributionMode::OVERLAPPED);
-        const PerClusterShapesOffsetsVec expectedPerClusterShapes(numClusters.getInt(),
-                                                                  SmallVector<int64_t>{1, 128, 8, 16});
+        const PerClusterShapesOffsetsVec expectedPerClusterShapes(numClusters, SmallVector<int64_t>{1, 128, 8, 16});
         const PerClusterShapesOffsetsVec expectedPerClusterOffsets(
                 {SmallVector<int64_t>{0, 0, 0, 0}, SmallVector<int64_t>{0, 0, 8, 0}});
 
-        const auto expectedPerClusterShapesAttr = getIntArrayOfArray(&ctx, expectedPerClusterShapes);
-        const auto expectedPerClusterOffsetsAttr = getIntArrayOfArray(&ctx, expectedPerClusterOffsets);
+        auto overlappedDistribution = VPU::DistributionInfo(
+                VPU::DistributionMode::OVERLAPPED, numTiles, {}, {}, {}, numClusters, {}, {}, expectedPerClusterShapes,
+                expectedPerClusterOffsets, expectedPerClusterShapes, expectedPerClusterOffsets, {});
 
-        const auto overlappedDistributedAtr = vpux::VPU::DistributedTensorAttr::get(
-                &ctx, overlappedMode, numTiles, nullptr, nullptr, nullptr, numClusters, nullptr, nullptr,
-                expectedPerClusterShapesAttr, expectedPerClusterOffsetsAttr, expectedPerClusterShapesAttr,
-                expectedPerClusterOffsetsAttr, nullptr);
-
-        getInputTypeAndTest(overlappedDistributedAtr);
+        getInputTypeAndTest(overlappedDistribution);
     }
 
     {
-        const auto duplicatedMode = VPU::DistributionModeAttr::get(&ctx, VPU::DistributionMode::DUPLICATED);
-        const PerClusterShapesOffsetsVec expectedPerClusterShapes(numClusters.getInt(),
-                                                                  SmallVector<int64_t>{1, 128, 16, 16});
-        const PerClusterShapesOffsetsVec expectedPerClusterOffsets(numClusters.getInt(),
-                                                                   SmallVector<int64_t>{0, 0, 0, 0});
+        const PerClusterShapesOffsetsVec expectedPerClusterShapes(numClusters, SmallVector<int64_t>{1, 128, 16, 16});
+        const PerClusterShapesOffsetsVec expectedPerClusterOffsets(numClusters, SmallVector<int64_t>{0, 0, 0, 0});
 
-        const auto expectedPerClusterShapesAttr = getIntArrayOfArray(&ctx, expectedPerClusterShapes);
-        const auto expectedPerClusterOffsetsAttr = getIntArrayOfArray(&ctx, expectedPerClusterOffsets);
-        const auto duplicatedDistributedAtr = VPU::DistributedTensorAttr::get(
-                &ctx, duplicatedMode, nullptr, nullptr, nullptr, nullptr, numClusters, nullptr, nullptr,
-                expectedPerClusterShapesAttr, expectedPerClusterOffsetsAttr, expectedPerClusterShapesAttr,
-                expectedPerClusterOffsetsAttr, nullptr);
+        auto duplicatedDistribution = VPU::DistributionInfo(
+                VPU::DistributionMode::DUPLICATED, {}, {}, {}, {}, numClusters, {}, {}, expectedPerClusterShapes,
+                expectedPerClusterOffsets, expectedPerClusterShapes, expectedPerClusterOffsets, {});
 
-        getInputTypeAndTest(duplicatedDistributedAtr);
+        getInputTypeAndTest(duplicatedDistribution);
     }
 }
 
@@ -151,100 +138,72 @@ TEST_F(MLIR_DistributedCastOpInterfaceTest, AffineReshape) {
     const vpux::Shape shape = {1, 128, 16, 16};
     const vpux::Shape newShape = {1, 128, 1, 256};
 
-    const auto numClusters = getIntAttr(&ctx, 2);
+    const auto numClusters = 2;
     const auto memSpace = vpux::IndexedSymbolAttr::get(&ctx, CMX_NAME);
-    const auto inDimsOrder = mlir::AffineMapAttr::get(DimsOrder::NHWC.toAffineMap(&ctx));
-    const auto outDimsOrder = mlir::AffineMapAttr::get(DimsOrder::NWCH.toAffineMap(&ctx));
+    const auto inDimsOrder = DimsOrder::NHWC;
+    const auto outDimsOrder = DimsOrder::NWCH;
     auto fp16Type = mlir::Float16Type::get(&ctx);
 
     // Only DUPLICATED distribution is legal for AffineReshape
-    auto getInputTypeAndTest = [&](VPU::DistributedTensorAttr inDistribution,
-                                   VPU::DistributedTensorAttr outDistribution) {
-        const auto inputDistributedType = vpux::VPU::DistributedTensorType::get(&ctx, shape.raw(), fp16Type,
-                                                                                inDimsOrder, memSpace, inDistribution);
+    auto getInputTypeAndTest = [&](VPU::DistributionInfo& inDistribution, VPU::DistributionInfo& outDistribution) {
+        const auto inputType = vpux::getTensorType(shape, fp16Type, inDimsOrder, memSpace, nullptr);
 
-        if (outDistribution == nullptr) {
-            testDistributedAttr(inputIR, inputDistributedType, nullptr, &ctx);
+        if (outDistribution.getDistributionMode() == VPU::DistributionMode::NONE) {
+            testDistributedAttr(inputIR, inputType, inDistribution, nullptr, outDistribution, &ctx);
             return;
         }
 
-        const auto outputDistributedType = vpux::VPU::DistributedTensorType::get(
-                &ctx, newShape.raw(), fp16Type, outDimsOrder, memSpace, outDistribution);
-
-        testDistributedAttr(inputIR, inputDistributedType, outputDistributedType, &ctx);
+        const auto outputType = vpux::getTensorType(newShape, fp16Type, outDimsOrder, memSpace, nullptr);
+        testDistributedAttr(inputIR, inputType, inDistribution, outputType, outDistribution, &ctx);
     };
 
     {
-        const auto numTiles = getIntArrayAttr(&ctx, SmallVector<int64_t>({1, 1, 2, 1}));
-        const auto segmentedMode = VPU::DistributionModeAttr::get(&ctx, VPU::DistributionMode::SEGMENTED);
-        const PerClusterShapesOffsetsVec inPerClusterShapes(numClusters.getInt(), SmallVector<int64_t>{1, 128, 8, 16});
+        const auto numTiles = SmallVector<int64_t>({1, 1, 2, 1});
+        const PerClusterShapesOffsetsVec inPerClusterShapes(numClusters, SmallVector<int64_t>{1, 128, 8, 16});
         const PerClusterShapesOffsetsVec inPerClusterOffsets(
                 {SmallVector<int64_t>{0, 0, 0, 0}, SmallVector<int64_t>{0, 0, 8, 0}});
 
-        const auto inPerClusterShapesAttr = getIntArrayOfArray(&ctx, inPerClusterShapes);
-        const auto inPerClusterOffsetsAttr = getIntArrayOfArray(&ctx, inPerClusterOffsets);
+        auto segDistribution = VPU::DistributionInfo(VPU::DistributionMode::SEGMENTED, numTiles, {}, {}, {},
+                                                     numClusters, {}, {}, inPerClusterShapes, inPerClusterOffsets,
+                                                     inPerClusterShapes, inPerClusterOffsets, {});
+        VPU::DistributionInfo emptyDistribution{};
 
-        const auto segDistributedAttr = vpux::VPU::DistributedTensorAttr::get(
-                &ctx, segmentedMode, numTiles, nullptr, nullptr, nullptr, numClusters, nullptr, nullptr,
-                inPerClusterShapesAttr, inPerClusterOffsetsAttr, inPerClusterShapesAttr, inPerClusterOffsetsAttr,
-                nullptr);
-
-        getInputTypeAndTest(segDistributedAttr, nullptr);
+        getInputTypeAndTest(segDistribution, emptyDistribution);
     }
 
     {
-        const auto duplicatedMode = VPU::DistributionModeAttr::get(&ctx, VPU::DistributionMode::DUPLICATED);
-        const PerClusterShapesOffsetsVec inPerClusterShapes(numClusters.getInt(), SmallVector<int64_t>{1, 128, 16, 16});
-        const PerClusterShapesOffsetsVec inPerClusterOffsets(numClusters.getInt(), SmallVector<int64_t>{0, 0, 0, 0});
+        const PerClusterShapesOffsetsVec inPerClusterShapes(numClusters, SmallVector<int64_t>{1, 128, 16, 16});
+        const PerClusterShapesOffsetsVec inPerClusterOffsets(numClusters, SmallVector<int64_t>{0, 0, 0, 0});
 
-        const auto inPerClusterShapesAttr = getIntArrayOfArray(&ctx, inPerClusterShapes);
-        const auto inPerClusterOffsetsAttr = getIntArrayOfArray(&ctx, inPerClusterOffsets);
+        auto inDistribution = VPU::DistributionInfo(VPU::DistributionMode::DUPLICATED, {}, {}, {}, {}, numClusters, {},
+                                                    {}, inPerClusterShapes, inPerClusterOffsets, inPerClusterShapes,
+                                                    inPerClusterOffsets, {});
 
-        const auto inDistributedAttr = vpux::VPU::DistributedTensorAttr::get(
-                &ctx, duplicatedMode, nullptr, nullptr, nullptr, nullptr, numClusters, nullptr, nullptr,
-                inPerClusterShapesAttr, inPerClusterOffsetsAttr, inPerClusterShapesAttr, inPerClusterOffsetsAttr,
-                nullptr);
+        const PerClusterShapesOffsetsVec expectedPerClusterShapes(numClusters, SmallVector<int64_t>{1, 128, 1, 256});
+        const PerClusterShapesOffsetsVec expectedPerClusterOffsets(numClusters, SmallVector<int64_t>{0, 0, 0, 0});
 
-        const PerClusterShapesOffsetsVec expectedPerClusterShapes(numClusters.getInt(),
-                                                                  SmallVector<int64_t>{1, 128, 1, 256});
-        const PerClusterShapesOffsetsVec expectedPerClusterOffsets(numClusters.getInt(),
-                                                                   SmallVector<int64_t>{0, 0, 0, 0});
+        auto duplicatedDistribution = VPU::DistributionInfo(
+                VPU::DistributionMode::DUPLICATED, {}, {}, {}, {}, numClusters, {}, {}, expectedPerClusterShapes,
+                expectedPerClusterOffsets, expectedPerClusterShapes, expectedPerClusterOffsets, {});
 
-        const auto expectedPerClusterShapesAttr = getIntArrayOfArray(&ctx, expectedPerClusterShapes);
-        const auto expectedPerClusterOffsetsAttr = getIntArrayOfArray(&ctx, expectedPerClusterOffsets);
-        const auto duplicatedDistributedAtr = VPU::DistributedTensorAttr::get(
-                &ctx, duplicatedMode, nullptr, nullptr, nullptr, nullptr, numClusters, nullptr, nullptr,
-                expectedPerClusterShapesAttr, expectedPerClusterOffsetsAttr, expectedPerClusterShapesAttr,
-                expectedPerClusterOffsetsAttr, nullptr);
-
-        getInputTypeAndTest(inDistributedAttr, duplicatedDistributedAtr);
+        getInputTypeAndTest(inDistribution, duplicatedDistribution);
     }
 
     {
-        const auto segDupMode = VPU::DistributionModeAttr::get(
-                &ctx, VPU::DistributionMode::SEGMENTED | VPU::DistributionMode::DUPLICATED);
-        const auto numTiles = getIntArrayAttr(&ctx, SmallVector<int64_t>({1, 2, 1, 1}));
+        const auto numTiles = SmallVector<int64_t>({1, 2, 1, 1});
 
-        const PerClusterShapesOffsetsVec inPerClusterComputeShapes(numClusters.getInt(),
-                                                                   SmallVector<int64_t>{1, 64, 16, 16});
+        const PerClusterShapesOffsetsVec inPerClusterComputeShapes(numClusters, SmallVector<int64_t>{1, 64, 16, 16});
         const PerClusterShapesOffsetsVec inPerClusterComputeOffsets(
                 {SmallVector<int64_t>{0, 0, 0, 0}, SmallVector<int64_t>{0, 64, 0, 0}});
-        const PerClusterShapesOffsetsVec inPerMemoryClusterShapes(numClusters.getInt(),
-                                                                  SmallVector<int64_t>{1, 128, 16, 16});
-        const PerClusterShapesOffsetsVec inPerMemoryClusterOffsets(numClusters.getInt(),
-                                                                   SmallVector<int64_t>{0, 0, 0, 0});
+        const PerClusterShapesOffsetsVec inPerMemoryClusterShapes(numClusters, SmallVector<int64_t>{1, 128, 16, 16});
+        const PerClusterShapesOffsetsVec inPerMemoryClusterOffsets(numClusters, SmallVector<int64_t>{0, 0, 0, 0});
 
-        const auto inPerClusterComputeShapesAttr = getIntArrayOfArray(&ctx, inPerClusterComputeShapes);
-        const auto inPerClusterComputeOffsetsAttr = getIntArrayOfArray(&ctx, inPerClusterComputeOffsets);
-        const auto inPerClusterMemoryShapesAttr = getIntArrayOfArray(&ctx, inPerMemoryClusterShapes);
-        const auto inPerClusterMemoryOffsetsAttr = getIntArrayOfArray(&ctx, inPerMemoryClusterOffsets);
-
-        const auto inDistributedAttr = vpux::VPU::DistributedTensorAttr::get(
-                &ctx, segDupMode, numTiles, nullptr, nullptr, nullptr, numClusters, nullptr, nullptr,
-                inPerClusterComputeShapesAttr, inPerClusterComputeOffsetsAttr, inPerClusterMemoryShapesAttr,
-                inPerClusterMemoryOffsetsAttr, nullptr);
-
-        getInputTypeAndTest(inDistributedAttr, nullptr);
+        auto inDistribution = VPU::DistributionInfo(
+                VPU::DistributionMode::SEGMENTED | VPU::DistributionMode::DUPLICATED, numTiles, {}, {}, {}, numClusters,
+                {}, {}, inPerClusterComputeShapes, inPerClusterComputeOffsets, inPerMemoryClusterShapes,
+                inPerMemoryClusterOffsets, {});
+        VPU::DistributionInfo emptyDistribution{};
+        getInputTypeAndTest(inDistribution, emptyDistribution);
     }
 }
 
@@ -264,131 +223,93 @@ TEST_F(MLIR_DistributedCastOpInterfaceTest, PermuteCast) {
     const vpux::Shape shape = {1, 256, 40, 1};
     const vpux::Shape newShape = {1, 40, 1, 256};
 
-    const auto numClusters = getIntAttr(&ctx, 2);
+    const auto numClusters = 2;
     const auto memSpace = vpux::IndexedSymbolAttr::get(&ctx, CMX_NAME);
-    const auto inDimsOrder = mlir::AffineMapAttr::get(DimsOrder::NHWC.toAffineMap(&ctx));
-    const auto outDimsOrder = mlir::AffineMapAttr::get(DimsOrder::NCHW.toAffineMap(&ctx));
+    const auto inDimsOrder = DimsOrder::NHWC;
+    const auto outDimsOrder = DimsOrder::NCHW;
     auto fp16Type = mlir::Float16Type::get(&ctx);
 
-    auto getTypesAndTest = [&](VPU::DistributedTensorAttr inDistribution, VPU::DistributedTensorAttr outDistribution) {
-        const auto inputDistributedType = vpux::VPU::DistributedTensorType::get(&ctx, shape.raw(), fp16Type,
-                                                                                inDimsOrder, memSpace, inDistribution);
+    auto getTypesAndTest = [&](VPU::DistributionInfo& inDistribution, VPU::DistributionInfo& outDistribution) {
+        const auto inputType = vpux::getTensorType(shape, fp16Type, inDimsOrder, memSpace, nullptr);
 
-        if (outDistribution == nullptr) {
-            testDistributedAttr(inputIR, inputDistributedType, nullptr, &ctx);
+        if (outDistribution.getDistributionMode() == VPU::DistributionMode::NONE) {
+            testDistributedAttr(inputIR, inputType, inDistribution, nullptr, outDistribution, &ctx);
             return;
         }
 
-        const auto outputDistributedType = vpux::VPU::DistributedTensorType::get(
-                &ctx, newShape.raw(), fp16Type, outDimsOrder, memSpace, outDistribution);
+        const auto outputType = vpux::getTensorType(newShape, fp16Type, outDimsOrder, memSpace, nullptr);
 
-        testDistributedAttr(inputIR, inputDistributedType, outputDistributedType, &ctx);
+        testDistributedAttr(inputIR, inputType, inDistribution, outputType, outDistribution, &ctx);
     };
 
     {
-        const auto inNumTiles = getIntArrayAttr(&ctx, SmallVector<int64_t>({1, 1, 2, 1}));
-        const auto ovrMode = VPU::DistributionModeAttr::get(&ctx, VPU::DistributionMode::OVERLAPPED);
-        const PerClusterShapesOffsetsVec inPerClusterShapes(numClusters.getInt(), SmallVector<int64_t>{1, 256, 20, 1});
+        const auto inNumTiles = SmallVector<int64_t>({1, 1, 2, 1});
+        const PerClusterShapesOffsetsVec inPerClusterShapes(numClusters, SmallVector<int64_t>{1, 256, 20, 1});
         const PerClusterShapesOffsetsVec inPerClusterOffsets(
                 {SmallVector<int64_t>{0, 0, 0, 0}, SmallVector<int64_t>{0, 0, 20, 0}});
 
-        const auto inPerClusterShapesAttr = getIntArrayOfArray(&ctx, inPerClusterShapes);
-        const auto inPerClusterOffsetsAttr = getIntArrayOfArray(&ctx, inPerClusterOffsets);
+        auto ovrDistribution = VPU::DistributionInfo(VPU::DistributionMode::OVERLAPPED, inNumTiles, {}, {}, {},
+                                                     numClusters, {}, {}, inPerClusterShapes, inPerClusterOffsets,
+                                                     inPerClusterShapes, inPerClusterOffsets, {});
 
-        const auto ovrDistributedAttr =
-                vpux::VPU::DistributedTensorAttr::get(&ctx, ovrMode, inNumTiles, nullptr, nullptr, nullptr, numClusters,
-                                                      nullptr, nullptr, inPerClusterShapesAttr, inPerClusterOffsetsAttr,
-                                                      inPerClusterShapesAttr, inPerClusterOffsetsAttr, nullptr);
-
-        const auto outNumTiles = getIntArrayAttr(&ctx, SmallVector<int64_t>({1, 2, 1, 1}));
-        const auto segMode = VPU::DistributionModeAttr::get(&ctx, VPU::DistributionMode::SEGMENTED);
-        const PerClusterShapesOffsetsVec outPerClusterShapes(numClusters.getInt(), SmallVector<int64_t>{1, 20, 1, 256});
+        const auto outNumTiles = SmallVector<int64_t>({1, 2, 1, 1});
+        const PerClusterShapesOffsetsVec outPerClusterShapes(numClusters, SmallVector<int64_t>{1, 20, 1, 256});
         const PerClusterShapesOffsetsVec outPerClusterOffsets(
                 {SmallVector<int64_t>{0, 0, 0, 0}, SmallVector<int64_t>{0, 20, 0, 0}});
+        auto segDistribution = VPU::DistributionInfo(VPU::DistributionMode::SEGMENTED, outNumTiles, {}, {}, {},
+                                                     numClusters, {}, {}, outPerClusterShapes, outPerClusterOffsets,
+                                                     outPerClusterShapes, outPerClusterOffsets, {});
 
-        const auto outPerClusterShapesAttr = getIntArrayOfArray(&ctx, outPerClusterShapes);
-        const auto outPerClusterOffsetsAttr = getIntArrayOfArray(&ctx, outPerClusterOffsets);
-
-        const auto segDistributedAttr = vpux::VPU::DistributedTensorAttr::get(
-                &ctx, segMode, outNumTiles, nullptr, nullptr, nullptr, numClusters, nullptr, nullptr,
-                outPerClusterShapesAttr, outPerClusterOffsetsAttr, outPerClusterShapesAttr, outPerClusterOffsetsAttr,
-                nullptr);
-
-        getTypesAndTest(ovrDistributedAttr, segDistributedAttr);
+        getTypesAndTest(ovrDistribution, segDistribution);
     }
 
     {
-        const auto inNumTiles = getIntArrayAttr(&ctx, SmallVector<int64_t>({1, 1, 2, 1}));
-        const auto ovrMode = VPU::DistributionModeAttr::get(&ctx, VPU::DistributionMode::OVERLAPPED);
-        const PerClusterShapesOffsetsVec inPerClusterComputeShapes(numClusters.getInt(),
-                                                                   SmallVector<int64_t>{1, 256, 20, 1});
+        const auto inNumTiles = SmallVector<int64_t>({1, 1, 2, 1});
+        const PerClusterShapesOffsetsVec inPerClusterComputeShapes(numClusters, SmallVector<int64_t>{1, 256, 20, 1});
         const PerClusterShapesOffsetsVec inPerClusterComputeOffsets(
                 {SmallVector<int64_t>{0, 0, 0, 0}, SmallVector<int64_t>{0, 0, 20, 0}});
-        const auto inPerClusterComputeShapesAttr = getIntArrayOfArray(&ctx, inPerClusterComputeShapes);
-        const auto inPerClusterComputeOffsetsAttr = getIntArrayOfArray(&ctx, inPerClusterComputeOffsets);
 
         const PerClusterShapesOffsetsVec inPerClusterMemoryShapes(
                 {SmallVector<int64_t>{1, 256, 22, 1}, SmallVector<int64_t>{1, 256, 21, 1}});
         const PerClusterShapesOffsetsVec inPerClusterMemoryOffsets(
                 {SmallVector<int64_t>{0, 0, 0, 0}, SmallVector<int64_t>{0, 0, 19, 0}});
 
-        const auto inPerClusterMemoryShapesAttr = getIntArrayOfArray(&ctx, inPerClusterMemoryShapes);
-        const auto inPerClusterMemoryOffsetsAttr = getIntArrayOfArray(&ctx, inPerClusterMemoryOffsets);
-
-        const auto ovrDistributedAttr = vpux::VPU::DistributedTensorAttr::get(
-                &ctx, ovrMode, inNumTiles, nullptr, nullptr, nullptr, numClusters, nullptr, nullptr,
-                inPerClusterComputeShapesAttr, inPerClusterComputeOffsetsAttr, inPerClusterMemoryShapesAttr,
-                inPerClusterMemoryOffsetsAttr, nullptr);
-
+        auto ovrDistribution =
+                VPU::DistributionInfo(VPU::DistributionMode::OVERLAPPED, inNumTiles, {}, {}, {}, numClusters, {}, {},
+                                      inPerClusterComputeShapes, inPerClusterComputeOffsets, inPerClusterMemoryShapes,
+                                      inPerClusterMemoryOffsets, {});
+        VPU::DistributionInfo emptyDistribution{};
         // output axis is C and Overlapped is not equivalent to Segmented => cannot infer distribution
-        getTypesAndTest(ovrDistributedAttr, nullptr);
+        getTypesAndTest(ovrDistribution, emptyDistribution);
     }
 
     {
-        const auto segDupMode = VPU::DistributionModeAttr::get(
-                &ctx, VPU::DistributionMode::SEGMENTED | VPU::DistributionMode::DUPLICATED);
-        const auto inNumTiles = getIntArrayAttr(&ctx, SmallVector<int64_t>({1, 2, 1, 1}));
+        const auto inNumTiles = SmallVector<int64_t>({1, 2, 1, 1});
 
-        const PerClusterShapesOffsetsVec inPerClusterComputeShapes(numClusters.getInt(),
-                                                                   SmallVector<int64_t>{1, 64, 40, 1});
+        const PerClusterShapesOffsetsVec inPerClusterComputeShapes(numClusters, SmallVector<int64_t>{1, 64, 40, 1});
         const PerClusterShapesOffsetsVec inPerClusterComputeOffsets(
                 {SmallVector<int64_t>{0, 0, 0, 0}, SmallVector<int64_t>{0, 64, 0, 0}});
-        const PerClusterShapesOffsetsVec inPerMemoryClusterShapes(numClusters.getInt(),
-                                                                  SmallVector<int64_t>{1, 128, 40, 1});
-        const PerClusterShapesOffsetsVec inPerMemoryClusterOffsets(numClusters.getInt(),
-                                                                   SmallVector<int64_t>{0, 0, 0, 0});
+        const PerClusterShapesOffsetsVec inPerMemoryClusterShapes(numClusters, SmallVector<int64_t>{1, 128, 40, 1});
+        const PerClusterShapesOffsetsVec inPerMemoryClusterOffsets(numClusters, SmallVector<int64_t>{0, 0, 0, 0});
 
-        const auto inPerClusterComputeShapesAttr = getIntArrayOfArray(&ctx, inPerClusterComputeShapes);
-        const auto inPerClusterComputeOffsetsAttr = getIntArrayOfArray(&ctx, inPerClusterComputeOffsets);
-        const auto inPerClusterMemoryShapesAttr = getIntArrayOfArray(&ctx, inPerMemoryClusterShapes);
-        const auto inPerClusterMemoryOffsetsAttr = getIntArrayOfArray(&ctx, inPerMemoryClusterOffsets);
+        auto inDistribution = VPU::DistributionInfo(
+                VPU::DistributionMode::SEGMENTED | VPU::DistributionMode::DUPLICATED, inNumTiles, {}, {}, {},
+                numClusters, {}, {}, inPerClusterComputeShapes, inPerClusterComputeOffsets, inPerMemoryClusterShapes,
+                inPerMemoryClusterOffsets, {});
 
-        const auto inDistributedAttr = vpux::VPU::DistributedTensorAttr::get(
-                &ctx, segDupMode, inNumTiles, nullptr, nullptr, nullptr, numClusters, nullptr, nullptr,
-                inPerClusterComputeShapesAttr, inPerClusterComputeOffsetsAttr, inPerClusterMemoryShapesAttr,
-                inPerClusterMemoryOffsetsAttr, nullptr);
+        const auto outNumTiles = SmallVector<int64_t>({1, 1, 1, 2});
 
-        const auto outNumTiles = getIntArrayAttr(&ctx, SmallVector<int64_t>({1, 1, 1, 2}));
-
-        const PerClusterShapesOffsetsVec outPerClusterComputeShapes(numClusters.getInt(),
-                                                                    SmallVector<int64_t>{1, 40, 1, 64});
+        const PerClusterShapesOffsetsVec outPerClusterComputeShapes(numClusters, SmallVector<int64_t>{1, 40, 1, 64});
         const PerClusterShapesOffsetsVec outPerClusterComputeOffsets(
                 {SmallVector<int64_t>{0, 0, 0, 0}, SmallVector<int64_t>{0, 0, 0, 64}});
-        const PerClusterShapesOffsetsVec outPerMemoryClusterShapes(numClusters.getInt(),
-                                                                   SmallVector<int64_t>{1, 40, 1, 128});
-        const PerClusterShapesOffsetsVec outPerMemoryClusterOffsets(numClusters.getInt(),
-                                                                    SmallVector<int64_t>{0, 0, 0, 0});
+        const PerClusterShapesOffsetsVec outPerMemoryClusterShapes(numClusters, SmallVector<int64_t>{1, 40, 1, 128});
+        const PerClusterShapesOffsetsVec outPerMemoryClusterOffsets(numClusters, SmallVector<int64_t>{0, 0, 0, 0});
 
-        const auto outPerClusterComputeShapesAttr = getIntArrayOfArray(&ctx, outPerClusterComputeShapes);
-        const auto outPerClusterComputeOffsetsAttr = getIntArrayOfArray(&ctx, outPerClusterComputeOffsets);
-        const auto outPerClusterMemoryShapesAttr = getIntArrayOfArray(&ctx, outPerMemoryClusterShapes);
-        const auto outPerClusterMemoryOffsetsAttr = getIntArrayOfArray(&ctx, outPerMemoryClusterOffsets);
+        auto outDistribution = VPU::DistributionInfo(
+                VPU::DistributionMode::SEGMENTED | VPU::DistributionMode::DUPLICATED, outNumTiles, {}, {}, {},
+                numClusters, {}, {}, outPerClusterComputeShapes, outPerClusterComputeOffsets, outPerMemoryClusterShapes,
+                outPerMemoryClusterOffsets, {});
 
-        const auto outDistributedAttr = vpux::VPU::DistributedTensorAttr::get(
-                &ctx, segDupMode, outNumTiles, nullptr, nullptr, nullptr, numClusters, nullptr, nullptr,
-                outPerClusterComputeShapesAttr, outPerClusterComputeOffsetsAttr, outPerClusterMemoryShapesAttr,
-                outPerClusterMemoryOffsetsAttr, nullptr);
-
-        getTypesAndTest(inDistributedAttr, outDistributedAttr);
+        getTypesAndTest(inDistribution, outDistribution);
     }
 }

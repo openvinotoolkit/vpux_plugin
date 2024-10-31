@@ -747,7 +747,7 @@ func.func @RemoveExplicitDependenciesWithControlGraphSplit() -> memref<1x16x1x1x
             -> memref<1x16x1x1xf16, #NHWC, @DDR>
     }
 
-    // sync point 
+    // sync point
     VPURT.Task waits(%bar1 : !VPURT.Barrier) updates(%bar2 : !VPURT.Barrier) attributes {"sync-task"} {
       VPUIP.NNDMA
             inputs(%buf0: memref<1x16x1x1xf16, #NHWC, @DDR>)
@@ -776,7 +776,7 @@ func.func @RemoveExplicitDependenciesWithControlGraphSplit() -> memref<1x16x1x1x
             -> memref<1x16x1x1xf16, #NHWC, @DDR>
     }
 
-    // sync point 
+    // sync point
     VPURT.Task waits(%bar4 : !VPURT.Barrier) updates(%bar5 : !VPURT.Barrier) attributes {"sync-task"} {
       VPUIP.NNDMA
             inputs(%buf0: memref<1x16x1x1xf16, #NHWC, @DDR>)

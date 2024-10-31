@@ -69,12 +69,15 @@ Const::DeclareOp ConvolutionRewriter::replaceConstDeclare(Const::DeclareOp origO
 
     constexpr auto symmetricU8ToI8ConvertionDifference = 128;
     auto originalContentAttr = origOp.getContentAttr();
-    const auto newContentAttr = originalContentAttr.quantCast()
-                                        .convertElemType(mlir::Float16Type::get(rewriter.getContext()))
-                                        .add(checked_cast<double>(-symmetricU8ToI8ConvertionDifference))
-                                        .convertElemType(getSInt8Type(getContext()))
-                                        .quantCast(newQuantType);
-    auto newConstantOp = rewriter.create<Const::DeclareOp>(origOp->getLoc(), newType, newContentAttr);
+
+    auto newContentAttr = originalContentAttr.transform()
+                                  .castElemType(normalizeQuantStorageType(origQuantType))
+                                  .castElemType(mlir::Float16Type::get(rewriter.getContext()))
+                                  .add(checked_cast<double>(-symmetricU8ToI8ConvertionDifference))
+                                  .castElemType(getSInt8Type(getContext()))
+                                  .quantCast(newQuantType)
+                                  .get();
+    auto newConstantOp = rewriter.create<Const::DeclareOp>(origOp->getLoc(), newType, std::move(newContentAttr));
     return newConstantOp;
 }
 
@@ -92,10 +95,10 @@ mlir::LogicalResult ConvolutionRewriter::matchAndRewrite(IE::ConvolutionOp origO
 
     auto newDequantizeOp = rewriter.create<IE::DequantizeOp>(origOp->getLoc(), newCstDeclareOp.getOutput(),
                                                              filterOp.getDstElemTypeAttr());
-    rewriter.replaceOpWithNewOp<IE::ConvolutionOp>(origOp, origOp.getInput(), newDequantizeOp, origOp.getBias(),
-                                                   origOp.getStrides(), origOp.getPadsBegin(), origOp.getPadsEnd(),
-                                                   origOp.getDilations(), origOp.getPostOpAttr(), origOp.getClampAttr(),
-                                                   origOp.getStaticScaleAttr());
+    rewriter.replaceOpWithNewOp<IE::ConvolutionOp>(
+            origOp, origOp.getInput(), newDequantizeOp, origOp.getBias(), origOp.getStrides(), origOp.getPadsBegin(),
+            origOp.getPadsEnd(), origOp.getDilations(), origOp.getPostOpAttr(), origOp.getClampAttr(),
+            origOp.getStaticScaleAttr(), origOp.getOutputChannelsAttr(), origOp.getInputChannelsAttr());
     return mlir::success();
 }
 

@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation
+// Copyright (C) 2022-2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -14,15 +14,13 @@ namespace ov {
 namespace test {
 
 class MaxMinLayerTestCommon : public MaxMinLayerTest, virtual public VpuOv2LayerTest {};
-class MaxMinLayerTest_NPU3720 : public MaxMinLayerTestCommon {};
-class MaxMinLayerTest_NPU4000 : public MaxMinLayerTestCommon {};
 
-TEST_P(MaxMinLayerTest_NPU3720, SW) {
+TEST_P(MaxMinLayerTestCommon, NPU3720_SW) {
     setReferenceSoftwareMode();
     run(Platform::NPU3720);
 }
 
-TEST_P(MaxMinLayerTest_NPU4000, SW) {
+TEST_P(MaxMinLayerTestCommon, NPU4000_SW) {
     setReferenceSoftwareMode();
     run(Platform::NPU4000);
 }
@@ -65,28 +63,9 @@ const auto params3 = testing::Combine(::testing::ValuesIn(static_shapes_to_test_
                                       ::testing::ValuesIn(opType), ::testing::ValuesIn(modelTypes),
                                       ::testing::ValuesIn(inputType), ::testing::Values(DEVICE_NPU));
 
-//
-// NPU3720 Instantiation
-//
-INSTANTIATE_TEST_SUITE_P(smoke_Min_Max_test0, MaxMinLayerTest_NPU3720, params0,
-                         MaxMinLayerTest_NPU3720::getTestCaseName);
-INSTANTIATE_TEST_SUITE_P(smoke_Min_Max_test1, MaxMinLayerTest_NPU3720, params1,
-                         MaxMinLayerTest_NPU3720::getTestCaseName);
-INSTANTIATE_TEST_SUITE_P(smoke_Min_Max_test2, MaxMinLayerTest_NPU3720, params2,
-                         MaxMinLayerTest_NPU3720::getTestCaseName);
-INSTANTIATE_TEST_SUITE_P(smoke_Min_Max_test3, MaxMinLayerTest_NPU3720, params3,
-                         MaxMinLayerTest_NPU3720::getTestCaseName);
-
-//
-// NPU4000 Instantiation
-//
-INSTANTIATE_TEST_SUITE_P(smoke_Min_Max_test0, MaxMinLayerTest_NPU4000, params0,
-                         MaxMinLayerTest_NPU4000::getTestCaseName);
-INSTANTIATE_TEST_SUITE_P(smoke_Min_Max_test1, MaxMinLayerTest_NPU4000, params1,
-                         MaxMinLayerTest_NPU4000::getTestCaseName);
-INSTANTIATE_TEST_SUITE_P(smoke_Min_Max_test2, MaxMinLayerTest_NPU4000, params2,
-                         MaxMinLayerTest_NPU4000::getTestCaseName);
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_Min_Max_test3, MaxMinLayerTest_NPU4000, params3,
-                         MaxMinLayerTest_NPU4000::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_Min_Max_test0, MaxMinLayerTestCommon, params0, MaxMinLayerTestCommon::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_Min_Max_test1, MaxMinLayerTestCommon, params1, MaxMinLayerTestCommon::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_Min_Max_test2, MaxMinLayerTestCommon, params2, MaxMinLayerTestCommon::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_Min_Max_test3, MaxMinLayerTestCommon, params3, MaxMinLayerTestCommon::getTestCaseName);
 
 }  // namespace

@@ -6,17 +6,106 @@
 #include "vpux/compiler/dialect/ELFNPU37XX/export.hpp"
 #include "vpux/compiler/dialect/ELFNPU37XX/metadata.hpp"
 
-using namespace vpux;
+namespace vpux::ELFNPU37XX {
 
-std::vector<uint8_t> vpux::ELFNPU37XX::exportToELF(mlir::ModuleOp module,
-                                                   const std::vector<std::shared_ptr<const ov::Node>>& parameters,
-                                                   const std::vector<std::shared_ptr<const ov::Node>>& results,
-                                                   Logger log) {
-    log.setName("ELF BackEnd");
+namespace {
+
+// current API forces to create & return elf::Writer object
+// + pass section, symbol and symbol reference maps as calculation
+// of blob size done together with populating ELF headers.
+//
+// refactor APIs, so that blob storage size calculation is
+// decoupled from elf::Writer API and function returns just
+// integral value
+//
+// consider getting rid of section and symbol maps here as well
+// to calculate blob size
+// ticket: <TBD>
+elf::Writer calculateBlobSize(mlir::func::FuncOp main, Logger log, SectionMapType& sectionMap,
+                              SymbolMapType& symbolMap) {
+    elf::Writer elfWriter;
+
+    log.trace("Serialization setup '{0}' ops", CreateMetadataSectionOp::getOperationName());
+    for (auto createMetadataSectionOp : main.getOps<CreateMetadataSectionOp>()) {
+        createMetadataSectionOp.preserialize(elfWriter, sectionMap);
+    }
+
+    auto createProfSectionOps = to_small_vector(main.getOps<CreateProfilingSectionOp>());
+    if (!createProfSectionOps.empty()) {
+        VPUX_THROW_UNLESS(createProfSectionOps.size() == 1, "Expected exactly one CreateProfilingSectionOp. Got {0}",
+                          createProfSectionOps.size());
+        log.trace("Serialization setup '{0}' ops", CreateProfilingSectionOp::getOperationName());
+        auto createProfSectionOp = createProfSectionOps[0];
+        createProfSectionOp.preserialize(elfWriter, sectionMap);
+    }
+
+    log.trace("Serialization setup '{0}' ops", CreateSectionOp::getOperationName());
+    for (auto createSectionOp : main.getOps<CreateSectionOp>()) {
+        createSectionOp.preserialize(elfWriter, sectionMap);
+    }
+
+    log.trace("Serialization setup '{0}' ops", CreateLogicalSectionOp::getOperationName());
+    for (auto logicalSectionOp : main.getOps<CreateLogicalSectionOp>()) {
+        logicalSectionOp.preserialize(elfWriter, sectionMap);
+    }
+
+    // symbol tables and relocation sections don't implement preserialize step and store
+    // their data into internal elf::Writer storage before copying into final blob storage
+    // as they have internal state to be updated (relocation and symbol entries)
+    // memory overhead is small
+    // note: it needs to be called here (before elf::Writer::prepareWriter), to populate
+    // sections data fields that are used during preparation
+    // E#136375
+    log.trace("Serializing '{0}' ops", CreateSymbolTableSectionOp::getOperationName());
+    for (auto symTabOp : main.getOps<CreateSymbolTableSectionOp>()) {
+        symTabOp.serialize(elfWriter, sectionMap, symbolMap);
+    }
+
+    log.trace("Serializing '{0}' ops", CreateRelocationSectionOp::getOperationName());
+    for (auto relocSectionOp : main.getOps<CreateRelocationSectionOp>()) {
+        relocSectionOp.serialize(elfWriter, sectionMap, symbolMap);
+    }
+
+    return elfWriter;
+}
+
+void serializeTo(uint8_t* storage, mlir::func::FuncOp main, Logger log, elf::Writer& elfWriter,
+                 SectionMapType& sectionMap, SymbolMapType& symbolMap) {
+    elfWriter.generateELF(storage);
+    elfWriter.setSectionsStartAddr(storage);
+
+    log.trace("Serializing '{0}' ops", CreateMetadataSectionOp::getOperationName());
+    for (auto createMetadataSectionOp : main.getOps<CreateMetadataSectionOp>()) {
+        auto metadataPtr = constructMetadata(main->getParentOfType<mlir::ModuleOp>(), log);
+        auto& metadata = *metadataPtr;
+        createMetadataSectionOp.serialize(elfWriter, sectionMap, symbolMap, metadata);
+    }
+
+    auto createProfSectionOps = to_small_vector(main.getOps<CreateProfilingSectionOp>());
+    if (!createProfSectionOps.empty()) {
+        log.trace("Serializing '{0}' ops", CreateProfilingSectionOp::getOperationName());
+        auto createProfSectionOp = createProfSectionOps[0];
+        createProfSectionOp.serialize(elfWriter, sectionMap, symbolMap);
+    }
+
+    log.trace("Serializing '{0}' ops", CreateSectionOp::getOperationName());
+    for (auto createSectionOp : main.getOps<CreateSectionOp>()) {
+        createSectionOp.serialize(elfWriter, sectionMap, symbolMap);
+    }
+
+    log.trace("Serializing '{0}' ops", CreateLogicalSectionOp::getOperationName());
+    for (auto logicalSectionOp : main.getOps<CreateLogicalSectionOp>()) {
+        logicalSectionOp.serialize(elfWriter, sectionMap, symbolMap);
+    }
+}
+
+}  // namespace
+
+std::vector<uint8_t> exportToELF(mlir::ModuleOp module, Logger log) {
+    log.setName("ELFNPU37XX BackEnd");
 
     log.trace("Extract '{0}' from Module (ELF File)", IE::CNNNetworkOp::getOperationName());
 
-    elf::Writer elfWriter;
     // Associate the respective mlir::Operation* of
     //   CreateSectionOp/CreateLogicalSectionOp/CreateSymbolSectionOp/CreateRelocationSectionOp
     //   with the respective created elf::writer::Section* for it.
@@ -25,55 +114,44 @@ std::vector<uint8_t> vpux::ELFNPU37XX::exportToELF(mlir::ModuleOp module,
     //   elf::writer::Symbol* for it.
     SymbolMapType symbolMap;
 
-    // Normally the ELF serialization process requires raw data to be serialized first,
-    // then symbols, then relocations, simply because of data dependency.
-    // However ticket #29166 plans to introduce ordering constraints on IR validity,
-    // which would allow us to serialize all data in one function and just use
-    // a SectionInterface rather than ops themselves.
+    IE::CNNNetworkOp netOp;
+    mlir::func::FuncOp main;
+    IE::CNNNetworkOp::getFromModule(module, netOp, main);
+
+    auto elfWriter = calculateBlobSize(main, log, sectionMap, symbolMap);
+    elfWriter.prepareWriter();
+
+    std::vector<uint8_t> blob(elfWriter.getTotalSize());
+    serializeTo(blob.data(), main, log, elfWriter, sectionMap, symbolMap);
+
+    return blob;
+}
+
+BlobView exportToELF(mlir::ModuleOp module, BlobAllocator& allocator, Logger log) {
+    log.setName("ELFNPU37XX BackEnd");
+
+    log.trace("Extract '{0}' from Module (ELF File)", IE::CNNNetworkOp::getOperationName());
+
+    // Associate the respective mlir::Operation* of
+    //   CreateSectionOp/CreateLogicalSectionOp/CreateSymbolSectionOp/CreateRelocationSectionOp
+    //   with the respective created elf::writer::Section* for it.
+    SectionMapType sectionMap;
+    // Associate the respective mlir::Operation* of a SymbolOp with the newly created
+    //   elf::writer::Symbol* for it.
+    SymbolMapType symbolMap;
 
     IE::CNNNetworkOp netOp;
-    mlir::func::FuncOp netFunc;
-    IE::CNNNetworkOp::getFromModule(module, netOp, netFunc);
+    mlir::func::FuncOp main;
+    IE::CNNNetworkOp::getFromModule(module, netOp, main);
 
-    log.trace("Serializing '{0}' ops", ELFNPU37XX::CreateMetadataSectionOp::getOperationName());
-    auto createMetadataSectionOps = netFunc.getOps<ELFNPU37XX::CreateMetadataSectionOp>();
-    for (auto createMetadataSectionOp : createMetadataSectionOps) {
-        auto metadataPtr = vpux::ELFNPU37XX::constructMetadata(module, netOp, netFunc, parameters, results, log.nest());
-        auto& metadata = *metadataPtr.get();
-        createMetadataSectionOp.serialize(elfWriter, sectionMap, symbolMap, metadata);
-    }
+    auto elfWriter = calculateBlobSize(main, log, sectionMap, symbolMap);
+    elfWriter.prepareWriter();
 
-    auto createProfilingSectionOps = netFunc.getOps<ELFNPU37XX::CreateProfilingSectionOp>();
-    if (!createProfilingSectionOps.empty()) {
-        log.trace("Serializing '{0}' ops", ELFNPU37XX::CreateProfilingSectionOp::getOperationName());
-        for (auto createProfilingSectionOp : createProfilingSectionOps) {
-            createProfilingSectionOp.serialize(elfWriter, sectionMap, symbolMap);
-        }
-    }
+    const auto size = elfWriter.getTotalSize();
+    auto blob = allocator.allocate(Byte{static_cast<int64_t>(size)});
+    serializeTo(blob, main, log, elfWriter, sectionMap, symbolMap);
 
-    log.trace("Serializing '{0}' ops", ELFNPU37XX::CreateSectionOp::getOperationName());
-    auto createSectionOps = netFunc.getOps<ELFNPU37XX::CreateSectionOp>();
-    for (auto createSectionOp : createSectionOps) {
-        createSectionOp.serialize(elfWriter, sectionMap, symbolMap);
-    }
-
-    log.trace("Serializing '{0}' ops", ELFNPU37XX::CreateLogicalSectionOp::getOperationName());
-    auto createLogicalSectionOps = netFunc.getOps<ELFNPU37XX::CreateLogicalSectionOp>();
-    for (auto createLogicalSectionOp : createLogicalSectionOps) {
-        createLogicalSectionOp.serialize(elfWriter, sectionMap, symbolMap);
-    }
-
-    log.trace("Serializing '{0}' ops", ELFNPU37XX::CreateSymbolTableSectionOp::getOperationName());
-    auto createSymTabOps = netFunc.getOps<ELFNPU37XX::CreateSymbolTableSectionOp>();
-    for (auto createSymTabOp : createSymTabOps) {
-        createSymTabOp.serialize(elfWriter, sectionMap, symbolMap);
-    }
-
-    log.trace("Serializing '{0}' ops", ELFNPU37XX::CreateRelocationSectionOp::getOperationName());
-    auto createRelocSectionOps = netFunc.getOps<ELFNPU37XX::CreateRelocationSectionOp>();
-    for (auto createRelocSection : createRelocSectionOps) {
-        createRelocSection.serialize(elfWriter, sectionMap, symbolMap);
-    }
-
-    return elfWriter.generateELF();
+    return {blob, static_cast<uint64_t>(size)};
 }
+
+}  // namespace vpux::ELFNPU37XX

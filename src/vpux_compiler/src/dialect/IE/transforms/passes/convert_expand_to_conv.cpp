@@ -225,15 +225,16 @@ mlir::Type composeExpressedType(const mlir::Type convolutionInputType) {
     return convolutionInputType;
 }
 
-Const::ContentAttr applyWeightTransformations(const Const::ContentAttr weightContentAttr,
+Const::ContentAttr applyWeightTransformations(const Const::ContentAttr& weightContentAttr,
                                               const mlir::Type weightExpressedElemType) {
+    auto setup = weightContentAttr.transform();
+
     // For quantized types convert weights to storage type. Usually that's UInt8. Then apply quantCast.
     // For float case just convert weights to expressed element type.
     if (auto quantType = weightExpressedElemType.dyn_cast<mlir::quant::QuantizedType>()) {
-        const auto contentStorageAttr = weightContentAttr.convertElemType(quantType.getStorageType());
-        return contentStorageAttr.quantCast(quantType);
+        return setup.castElemType(quantType.getStorageType()).quantCast(quantType).get();
     }
-    return weightContentAttr.convertElemType(weightExpressedElemType);
+    return setup.castElemType(weightExpressedElemType).get();
 }
 
 mlir::Value composeWeights(mlir::Location loc, ShapeRef origInShape, ShapeRef origOutShape,
@@ -251,8 +252,8 @@ mlir::Value composeWeights(mlir::Location loc, ShapeRef origInShape, ShapeRef or
 
     const auto weightExpressedElemType = composeExpressedType(convolutionInputType);
     const auto weightExpressedType = mlir::RankedTensorType::get(weightShape.raw(), weightExpressedElemType);
-    const auto targetContentAttr = applyWeightTransformations(weightContentAttr, weightExpressedElemType);
-    auto declOp = rewriter.create<Const::DeclareOp>(declLoc, weightExpressedType, targetContentAttr);
+    auto targetContentAttr = applyWeightTransformations(weightContentAttr, weightExpressedElemType);
+    auto declOp = rewriter.create<Const::DeclareOp>(declLoc, weightExpressedType, std::move(targetContentAttr));
 
     const auto reorderLoc = appendLoc(loc, "reorder weights for DPU expand");
     const auto weightTypeNCHW = declOp.getOutput().getType().cast<vpux::NDTypeInterface>();
@@ -282,7 +283,8 @@ IE::ConvolutionOp buildConvolution(IE::ExpandOp expandOp, mlir::Value activation
     const auto convOutType = origOutType.changeShape(convOutShape).changeElemType(convOutElemType);
     return rewriter.create<IE::ConvolutionOp>(expandOp.getLoc(), convOutType, activation, weights,
                                               /*bias=*/nullptr, strides, kernelPadsBegin, kernelPadsEnd, dilations,
-                                              /*postOp=*/nullptr, /*clamp=*/nullptr, /*staticScale=*/nullptr);
+                                              /*postOp=*/nullptr, /*clamp=*/nullptr, /*staticScale=*/nullptr,
+                                              /*outputChannels=*/nullptr, /*inputChannels=*/nullptr);
 }
 
 bool isDerivedFromQuantize(mlir::Operation* op) {

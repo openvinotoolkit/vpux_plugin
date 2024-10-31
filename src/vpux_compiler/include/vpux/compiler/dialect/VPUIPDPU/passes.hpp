@@ -6,6 +6,7 @@
 #pragma once
 
 #include "vpux/compiler/dialect/VPUIPDPU/ops.hpp"
+#include "vpux/compiler/dialect/VPURegMapped/types.hpp"
 #include "vpux/compiler/utils/passes.hpp"
 
 #include "vpux/utils/core/logger.hpp"

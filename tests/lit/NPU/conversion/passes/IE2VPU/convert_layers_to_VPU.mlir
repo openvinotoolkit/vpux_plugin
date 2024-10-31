@@ -28,9 +28,23 @@ func.func @LogSoftmax(%arg0: tensor<1x1000xf16>) -> tensor<1x1000xf16> {
 
 // -----
 
+// CHECK-LABEL: @LoopSelect
+// CHECK-SAME:     ([[ARG0:%.+]]: tensor<1xi8>, [[ARG1:%.+]]: tensor<100xi8>, [[ARG2:%.+]]: tensor<200x1000xf16>)
+func.func @LoopSelect(%arg0: tensor<1xi8>, %arg1: tensor<100xi8>, %arg2: tensor<200x1000xf16>) -> tensor<2x1000xf16> {
+    %res = IE.LoopSelect(%arg0, %arg1, %arg2) {axis = 0 : i64, do_concat = false, stride = 1 : i64} : tensor<1xi8>, tensor<100xi8>, tensor<200x1000xf16> -> tensor<2x1000xf16>
+    return %res : tensor<2x1000xf16>
+
+    // CHECK: [[LOOP_SELECT:%.+]] = VPU.LoopSelect([[ARG0]], [[ARG1]], [[ARG2]]) 
+    // CHECK-SAME: {axis = 0 : i64, do_concat = false, stride = 1 : i64} : 
+    // CHECK-SAME: tensor<1xi8>, tensor<100xi8>, tensor<200x1000xf16> -> tensor<2x1000xf16>
+    // CHECK: return [[LOOP_SELECT]] : tensor<2x1000xf16>
+}
+
+// -----
+
 // CHECK-LABEL: @LSTMCell
 func.func @LSTMCell(%arg0: tensor<1x512xf16>, %arg1: tensor<1x256xf16>, %arg2: tensor<1x256xf16>, %arg3: tensor<1024x512xf16>, %arg4: tensor<1024x256xf16>, %arg5: tensor<1024xf16>) -> (tensor<1x256xf16>, tensor<1x256xf16>) {
-    %hiddenState, %cellState = IE.LSTMCell(%arg0, %arg1, %arg2, %arg3, %arg4, %arg5) {hiddenSize = 256}
+    %hiddenState, %cellState = IE.LSTMCell(%arg0, %arg1, %arg2, %arg3, %arg4, %arg5) {operandSegmentSizes = array<i32: 1, 1, 1, 1, 1, 1>, hiddenSize = 256}
         : tensor<1x512xf16>, tensor<1x256xf16>, tensor<1x256xf16>, tensor<1024x512xf16>, tensor<1024x256xf16>, tensor<1024xf16>
         -> tensor<1x256xf16>, tensor<1x256xf16>
     return %hiddenState, %cellState : tensor<1x256xf16>, tensor<1x256xf16>
@@ -84,11 +98,11 @@ func.func @If(%cond: tensor<1xsi8>, %input1: tensor<1x1x4x4xf32>, %input2: tenso
 
 // CHECK-LABEL: @Broadcast
 func.func @Broadcast(%arg0: tensor<1x64x1x1xf16, {order = #NHWC}>) -> tensor<1x64x1x1xf16> {
-    %cst = const.Declare tensor<4xsi32> = dense<1> : tensor<4xsi64>, [#const.ConvertElemType<si32>]
+    %cst = const.Declare tensor<4xsi32> = dense<1> : tensor<4xsi64>, [#const.CastElemType<si32>]
     %0 = IE.Broadcast(%arg0, %cst) {mode = #IE.broadcast_type<BIDIRECTIONAL>} : tensor<1x64x1x1xf16, {order = #NHWC}>, tensor<4xsi32> -> tensor<1x64x1x1xf16>
     return %0 : tensor<1x64x1x1xf16>
 
-    // CHECK-DAG:       [[CST:%.*]] = const.Declare tensor<4xsi32> = dense<1> : tensor<4xsi64>, [#const.ConvertElemType<si32>]
+    // CHECK-DAG:       [[CST:%.*]] = const.Declare tensor<4xsi32> = dense<1> : tensor<4xsi64>, [#const.CastElemType<si32>]
     // CHECK:       [[VAR0:%.+]] = VPU.Broadcast(%arg0, [[CST]]) {mode = #IE.broadcast_type<BIDIRECTIONAL>}
     // CHECK-SAME:    : tensor<1x64x1x1xf16, {order = #NHWC}>, tensor<4xsi32> -> tensor<1x64x1x1xf16>
     // CHECK:       return [[VAR0]] : tensor<1x64x1x1xf16>
@@ -144,6 +158,18 @@ func.func @CTCGreedyDecoderSeqLenNoBlankIndex(%arg0: tensor<1x1x10xf16>) -> (ten
     // CHECK:       [[VAR0:%.+]] = VPU.CTCGreedyDecoderSeqLen(%arg0, %cst, %cst_0) {mergeRepeated}
     // CHECK-SAME:    : tensor<1x1x10xf16>, tensor<1xsi32>, tensor<1xsi32> -> tensor<1x1xsi32>, tensor<1xsi32>
     // CHECK:       return %output, %outputLength : tensor<1x1xsi32>, tensor<1xsi32>
+}
+
+// -----
+
+// CHECK-LABEL: @GroupNormalization
+func.func @GroupNormalization(%arg0: tensor<1x4x4x16xf32>, %arg1: tensor<4xf32>, %arg2: tensor<4xf32>) -> tensor<1x4x4x16xf32> {
+    %0 = IE.GroupNormalization(%arg0, %arg1, %arg2) {epsilon = 9.99999974E-5 : f32, num_groups = 2 : i32} : 
+         tensor<1x4x4x16xf32>, tensor<4xf32>, tensor<4xf32> -> tensor<1x4x4x16xf32>
+    return %0 : tensor<1x4x4x16xf32>
+
+    // CHECK: [[GROUP_NORM:%.+]] = VPU.GroupNormalization(%arg0, %arg1, %arg2) {epsilon = 9.99999974E-5 : f32, num_groups = 2 : i32} : tensor<1x4x4x16xf32>, tensor<4xf32>, tensor<4xf32> -> tensor<1x4x4x16xf32>
+    // CHECK: return [[GROUP_NORM]] : tensor<1x4x4x16xf32>
 }
 
 // -----
@@ -207,13 +233,13 @@ func.func @Selu(%arg0: tensor<1x32x112x112xf16>) -> tensor<1x32x112x112xf16> {
 
 // CHECK-LABEL: @Roll
 func.func @Roll(%arg0: tensor<3x10x100x200xf16>) -> tensor<3x10x100x200xf16> {
-    %cst = const.Declare tensor<1xsi32> = dense<3> : tensor<1xsi64>, [#const.ConvertElemType<si32>]
-    %cst_0 = const.Declare tensor<2xsi32> = dense<3> : tensor<2xsi64>, [#const.ConvertElemType<si32>]
+    %cst = const.Declare tensor<1xsi32> = dense<3> : tensor<1xsi64>, [#const.CastElemType<si32>]
+    %cst_0 = const.Declare tensor<2xsi32> = dense<3> : tensor<2xsi64>, [#const.CastElemType<si32>]
     %0 = IE.Roll(%arg0, %cst, %cst_0) : tensor<3x10x100x200xf16>, tensor<1xsi32>, tensor<2xsi32> -> tensor<3x10x100x200xf16>
     return %0 : tensor<3x10x100x200xf16>
 
-    // CHECK-DAG: [[VAR0:%.+]] = const.Declare tensor<1xsi32> = dense<3> : tensor<1xsi64>, [#const.ConvertElemType<si32>]
-    // CHECK-DAG: [[VAR1:%.+]] = const.Declare tensor<2xsi32> = dense<3> : tensor<2xsi64>, [#const.ConvertElemType<si32>]
+    // CHECK-DAG: [[VAR0:%.+]] = const.Declare tensor<1xsi32> = dense<3> : tensor<1xsi64>, [#const.CastElemType<si32>]
+    // CHECK-DAG: [[VAR1:%.+]] = const.Declare tensor<2xsi32> = dense<3> : tensor<2xsi64>, [#const.CastElemType<si32>]
     // CHECK: [[VAR2:%.+]] = VPU.Roll(%arg0, [[VAR0]], [[VAR1]]) : tensor<3x10x100x200xf16>, tensor<1xsi32>, tensor<2xsi32> -> tensor<3x10x100x200xf16>
     // CHECK: return [[VAR2]] : tensor<3x10x100x200xf16>
 }
@@ -329,6 +355,7 @@ func.func @GRUSequence(%arg0: tensor<2x1x10xf16>, %arg1: tensor<2x1x4xf16>) -> (
 
 // CHECK-LABEL: @EmbeddingBagPackedSumWithWeights
 func.func @EmbeddingBagPackedSumWithWeights(%arg0: tensor<5x10xf16>) -> tensor<3x10xf16> {
+    // CHECK:  ([[ARG0:[^:]+]]: tensor<5x10xf16>)
     %cst = const.Declare tensor<3x2xf16> = dense<9.997550e-02> : tensor<3x2xf16>
     %cst_0 = const.Declare tensor<3x2xsi32> = dense<[[0, 2], [1, 2], [3, 4]]> : tensor<3x2xsi32>
     %0 = VPU.EmbeddingBagPackedSum(%arg0, %cst_0, %cst) : tensor<5x10xf16>, tensor<3x2xsi32>, tensor<3x2xf16> -> tensor<3x10xf16>
@@ -337,7 +364,7 @@ func.func @EmbeddingBagPackedSumWithWeights(%arg0: tensor<5x10xf16>) -> tensor<3
     // CHECK: [[CST:%.+]] = const.Declare tensor<3x2xf16> = dense<9.997550e-02> : tensor<3x2xf16>
     // CHECK: [[CST0:%.+]] = const.Declare tensor<3x2xsi32>
     // CHECK-SAME{LITERAL}: = dense<[[0, 2], [1, 2], [3, 4]]> : tensor<3x2xsi32>
-    // CHECK: [[VAR0:%.+]] = VPU.EmbeddingBagPackedSum(%arg0, [[CST0]], [[CST]]) : tensor<5x10xf16>, tensor<3x2xsi32>, tensor<3x2xf16> -> tensor<3x10xf16>
+    // CHECK: [[VAR0:%.+]] = VPU.EmbeddingBagPackedSum([[ARG0]], [[CST0]], [[CST]]) : tensor<5x10xf16>, tensor<3x2xsi32>, tensor<3x2xf16> -> tensor<3x10xf16>
     // CHECK: return [[VAR0]] : tensor<3x10xf16>
 }
 
@@ -345,15 +372,15 @@ func.func @EmbeddingBagPackedSumWithWeights(%arg0: tensor<5x10xf16>) -> tensor<3
 
 // CHECK-LABEL: @EmbeddingBagPackedSumNoWeights
 func.func @EmbeddingBagPackedSumNoWeights(%arg0: tensor<5x10xf16>) -> tensor<3x10xf16> {
+    // CHECK:  ([[ARG0:[^:]+]]: tensor<5x10xf16>)
     %cst = const.Declare tensor<3x2xsi32> = dense<[[0, 2], [1, 2], [3, 4]]> : tensor<3x2xsi32>
     %0 = IE.EmbeddingBagPackedSum(%arg0, %cst) : tensor<5x10xf16>, tensor<3x2xsi32> -> tensor<3x10xf16>
     return %0 : tensor<3x10xf16>
 
-    // CHECK: [[CST:%.+]] = const.Declare tensor<3x2xsi32>
-    // CHECK-SAME{LITERAL}: = dense<[[0, 2], [1, 2], [3, 4]]> : tensor<3x2xsi32>
-    // CHECK: [[CST0:%.+]] = const.Declare tensor<3x2xf16> = dense<1.000000e+00> : tensor<3x2xf16>
-    // CHECK: [[VAR0:%.+]] = VPU.EmbeddingBagPackedSum(%arg0, [[CST]], [[CST0]]) : tensor<5x10xf16>, tensor<3x2xsi32>, tensor<3x2xf16> -> tensor<3x10xf16>
-    // CHECK: return [[VAR0]] : tensor<3x10xf16>
+    // CHECK: [[CST:%.+]] = const.Declare tensor<3x2xsi32> 
+    // CHECK-SAME{LITERAL}:= dense<[[0, 2], [1, 2], [3, 4]]> : tensor<3x2xsi32>
+    // CHECK: [[VAR0:%.+]] = VPU.EmbeddingBagPackedSum([[ARG0]], [[CST]]) : tensor<5x10xf16>, tensor<3x2xsi32> -> tensor<3x10xf16>
+    // CHECK: return [[VAR0]]  : tensor<3x10xf16>
 }
 
 // -----
@@ -383,7 +410,7 @@ func.func @EyeNoBatchShape(%arg0: tensor<1xsi32>) -> tensor<128x128xf16> {
 
 // CHECK-LABEL: @CumSum
 func.func @CumSum(%arg0: tensor<1x9xf16>) -> tensor<1x9xf16> {
-    %cst = const.Declare tensor<si32> = dense<1> : tensor<si64>, [#const.ConvertElemType<si32>]
+    %cst = const.Declare tensor<si32> = dense<1> : tensor<si64>, [#const.CastElemType<si32>]
     %0 = IE.CumSum(%arg0, %cst) {axis_value = 1 : i64, exclusive, reverse} : tensor<1x9xf16>, tensor<si32> -> tensor<1x9xf16>
     return %0 : tensor<1x9xf16>
 
@@ -429,11 +456,12 @@ func.func @OneHot(%arg0: tensor<4xsi32>) -> tensor<4x3xf16> {
 // CHECK-LABEL: @ScatterElementsUpdate
 func.func @ScatterElementsUpdate(%arg0: tensor<2x3x4xf16>, %arg1: tensor<1x3x1xf16>) -> tensor<2x3x4xf16> {
     %cst = const.Declare tensor<1x3x1xsi32> = dense<[[[1], [0], [1]]]> : tensor<1x3x1xsi32>
-    %0 = IE.ScatterElementsUpdate(%arg0, %cst, %arg1) {axis_value = 1 : i64} : tensor<2x3x4xf16>, tensor<1x3x1xsi32>, tensor<1x3x1xf16> -> tensor<2x3x4xf16>
+    %0 = IE.ScatterElementsUpdate(%arg0, %cst, %arg1) {axis_value = 1 : i64, reduction = #IE.scatter_elements_update_reduction_type<NONE>, use_init_val = true} : tensor<2x3x4xf16>, tensor<1x3x1xsi32>, tensor<1x3x1xf16> -> tensor<2x3x4xf16>
     return %0 : tensor<2x3x4xf16>
 
-    // CHECK: [[VAR0:%.+]] = VPU.ScatterElementsUpdate(%arg0, %cst, %arg1) {axis = 1 : i64} : tensor<2x3x4xf16>, tensor<1x3x1xsi32>, tensor<1x3x1xf16> -> tensor<2x3x4xf16>
-    // CHECK: return [[VAR0]] : tensor<2x3x4xf16>
+    // CHECK:        [[VAR0:%.+]] = VPU.ScatterElementsUpdate
+    // CHECK-SAME:     {axis = 1 : i64, reduction = #IE.scatter_elements_update_reduction_type<NONE>, use_init_val = true} : tensor<2x3x4xf16>, tensor<1x3x1xsi32>, tensor<1x3x1xf16> -> tensor<2x3x4xf16>
+    // CHECK:        return [[VAR0]] : tensor<2x3x4xf16>
 }
 
 // -----
@@ -555,7 +583,7 @@ func.func @InterpolateQuantized(%arg0: tensor<1x16x3x3x!qElemType>) -> tensor<1x
     // CHECK-SAME:                           pads_end = [0, 0, 0, 0],
     // CHECK-SAME:                           cube_coeff = -7.500000e-01 : f64>,
     // CHECK-SAME:    axes_attr = [2, 3],
-    // CHECK-SAME:    operandSegmentSizes = array<i32: 1, 0, 0, 0, 0, 0>,
+    // CHECK-SAME:    operandSegmentSizes = array<i32: 1, 0, 0, 0>,
     // CHECK-SAME:    scales_attr = [2.000000e+00, 2.000000e+00],
     // CHECK-SAME:    sizes_attr = [6, 6]}
     // CHECK-SAME:  : tensor<1x16x3x3x!qElemType> -> tensor<1x16x6x6x!qElemType1>
@@ -665,8 +693,8 @@ func.func @TransposedConvWithNCHWOutputLayout(%arg0: tensor<1x32x64x1xf16, {orde
 
 // CHECK: func.func @TransposedConvWithBiasInput([[INPUT_DATA:%.+]]: tensor<1x16x64x64xf16, {order = #NHWC}>) -> tensor<1x16x129x129xf16, {order = #NHWC}> {
 func.func @TransposedConvWithBiasInput(%arg0: tensor<1x16x64x64xf16, {order = #NHWC}> ) -> tensor<1x16x129x129xf16, {order = #NHWC}> {
-    %filter = const.Declare tensor<16x16x2x2xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<16x3x2x2xf32>, [#const.ConvertElemType<f16>, #const.Reorder<#NHWC>, #const.PadWithZero<[0, 0, 0, 0], [0, 13, 0, 0]>]
-    %bias = const.Declare tensor<1x16x1x1xf16> = dense<1.000000e+00> : tensor<1x16x1x1xf32>, [#const.ConvertElemType<f16>]
+    %filter = const.Declare tensor<16x16x2x2xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<16x3x2x2xf32>, [#const.CastElemType<f16>, #const.Reorder<#NHWC>, #const.PadWithZero<[0, 0, 0, 0], [0, 13, 0, 0]>]
+    %bias = const.Declare tensor<1x16x1x1xf16> = dense<1.000000e+00> : tensor<1x16x1x1xf32>, [#const.CastElemType<f16>]
 
     %1 = IE.TransposedConvolution(%arg0, %filter, %bias) {
             dilations = [1, 1],
@@ -679,8 +707,8 @@ func.func @TransposedConvWithBiasInput(%arg0: tensor<1x16x64x64xf16, {order = #N
 
     return %1 : tensor<1x16x129x129xf16, {order = #NHWC}>
 
-    // CHECK-DAG:   [[FILTER:%.+]] = const.Declare tensor<16x16x2x2xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<16x3x2x2xf32>, [#const.ConvertElemType<f16>, #const.Reorder<#NHWC>, #const.PadWithZero<[0, 0, 0, 0], [0, 13, 0, 0]>]
-    // CHECK-DAG:   [[BIAS:%.+]] = const.Declare tensor<1x16x1x1xf16> = dense<1.000000e+00> : tensor<1x16x1x1xf32>, [#const.ConvertElemType<f16>]
+    // CHECK-DAG:   [[FILTER:%.+]] = const.Declare tensor<16x16x2x2xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<16x3x2x2xf32>, [#const.CastElemType<f16>, #const.Reorder<#NHWC>, #const.PadWithZero<[0, 0, 0, 0], [0, 13, 0, 0]>]
+    // CHECK-DAG:   [[BIAS:%.+]] = const.Declare tensor<1x16x1x1xf16> = dense<1.000000e+00> : tensor<1x16x1x1xf32>, [#const.CastElemType<f16>]
     // CHECK:       [[TRANSPOSED_CONV:%.+]] = VPU.TransposedConvolution([[INPUT_DATA]], [[FILTER]], [[BIAS]]) {
     // CHECK-SAME:          dilations = [1, 1],
     // CHECK-SAME:          operandSegmentSizes = array<i32: 1, 1, 0, 1>,
@@ -778,4 +806,93 @@ func.func @SelectTest(%arg0: tensor<1x1x1x1024xf16>, %arg1: tensor<1x1x1x1xsi32>
     // CHECK:       [[SELECT:%.+]] = VPU.Select([[INPUT0]], [[INPUT1]], [[INPUT2]]) {
     // CHECK-SAME:          auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x1x1x1024xf16>, tensor<1x1x1x1xsi32>, tensor<1x1x1x1024xsi32> -> tensor<1x1x1x1024xsi32>
     // CHECK:       return [[SELECT]] : tensor<1x1x1x1024xsi32>
+}
+
+// -----
+
+// CHECK-LABEL: @BatchToSpaceTest
+// CHECK-SAME:  ([[INPUT:%.+]]: tensor<4x4x4x4xf16>)
+func.func @BatchToSpaceTest(%arg0: tensor<4x4x4x4xf16>) -> tensor<1x8x3x7xf16> {
+    %0 = IE.BatchToSpace(%arg0) {block_shape_value = [1, 2, 1, 2], crops_begin_value = [0, 0, 1, 0], crops_end_value = [0, 0, 0, 1], operandSegmentSizes = array<i32: 1, 0, 0, 0>} : tensor<4x4x4x4xf16> -> tensor<1x8x3x7xf16>
+    return %0 : tensor<1x8x3x7xf16>
+
+    // CHECK:       [[BATCHTOSPACE:%.+]] = VPU.BatchToSpace([[INPUT]])
+    // CHECK-SAME:             {block_shape_value = [1, 2, 1, 2], crops_begin_value = [0, 0, 1, 0], crops_end_value = [0, 0, 0, 1]} : tensor<4x4x4x4xf16> -> tensor<1x8x3x7xf16>
+    // CHECK:       return [[BATCHTOSPACE]] : tensor<1x8x3x7xf16>
+}
+
+// -----
+
+#NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
+#NCWH = affine_map<(d0, d1, d2, d3) -> (d0, d1, d3, d2)>
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
+!qElemType = !quant.uniform<i4:f16:3, {
+    0.0090698242187499996,0.0081949869791666674,0.0094848632812500003,0.0088582356770833329,
+    0.0012343245435345496,0.0065432542565655245,0.0036563635634563234,0.0026546757583627375,
+    0.0053674764737747778,0.0026426537476477476,0.0086378436757362766,0.0034536471222546565,
+    0.0012365436457242523,0.0053259162542665254,0.0093246453600034325,0.0083662676547733329,
+    0.0090698242187499996,0.0081949869791666674,0.0094848632812500003,0.0088582356770833329,
+    0.0012343245435345496,0.0065432542565655245,0.0036563635634563234,0.0026546757583627375,
+    0.0053674764737747778,0.0026426537476477476,0.0086378436757362766,0.0034536471222546565,
+    0.0012365436457242523,0.0053259162542665254,0.0093246453600034325,0.0083662676547733329}>
+
+!qElemType1 = !quant.uniform<i4:f16:1, {
+    0.0090698242187499996,0.0081949869791666674,0.0094848632812500003,0.0088582356770833329,
+    0.0012343245435345496,0.0065432542565655245,0.0036563635634563234,0.0026546757583627375,
+    0.0053674764737747778,0.0026426537476477476,0.0086378436757362766,0.0034536471222546565,
+    0.0012365436457242523,0.0053259162542665254,0.0093246453600034325,0.0083662676547733329,
+    0.0090698242187499996,0.0081949869791666674,0.0094848632812500003,0.0088582356770833329,
+    0.0012343245435345496,0.0065432542565655245,0.0036563635634563234,0.0026546757583627375,
+    0.0053674764737747778,0.0026426537476477476,0.0086378436757362766,0.0034536471222546565,
+    0.0012365436457242523,0.0053259162542665254,0.0093246453600034325,0.0083662676547733329}>
+
+// CHECK-LABEL: @PermuteCastWithPerAxisQuantizeType
+// CHECK-SAME:      [[INPUT:%.+]]: tensor<1x128x1x32x!qElemType>
+func.func @PermuteCastWithPerAxisQuantizeType(%arg0: tensor<1x128x1x32x!qElemType>) -> tensor<1x32x128x1x!qElemType1, {order = #NHWC}> {
+    %0 = IE.PermuteCast(%arg0) {dst_order = #NHWC, mem_perm = #NCHW} : tensor<1x128x1x32x!qElemType> -> tensor<1x32x128x1x!qElemType1, {order = #NHWC}>
+
+    return %0 : tensor<1x32x128x1x!qElemType1, {order = #NHWC}>
+
+    // CHECK: [[VPU_PERMUTE_CAST:%.+]] = VPU.PermuteCast([[INPUT]]) {dst_order = #NHWC, mem_perm = #NCHW} : tensor<1x128x1x32x!qElemType> -> tensor<1x32x128x1x!qElemType1, {order = #NHWC}>
+    // CHECK: return [[VPU_PERMUTE_CAST]] : tensor<1x32x128x1x!qElemType1, {order = #NHWC}>
+}
+
+// -----
+
+// CHECK-LABEL: @RMSNormTest
+// CHECK-SAME: ([[INPUT:%.+]]: tensor<1x2x6xf32>) -> tensor<1x2x6xf32>
+func.func @RMSNormTest(%arg0: tensor<1x2x6xf32>) -> tensor<1x2x6xf32> {
+    %cst = const.Declare tensor<6xf32> = dense<[2.900000e-02, 1.400000e-02, 3.000000e-03, 1.300000e-02, 1.500000e-02, 0.00899999961]> : tensor<6xf32>
+    %0 = IE.RMS(%arg0, %cst) {epsilon = 9.9999997473787516E-6 : f64} : tensor<1x2x6xf32>, tensor<6xf32> -> tensor<1x2x6xf32>
+    return %0 : tensor<1x2x6xf32>
+
+    // CHECK:       [[CST:%.*]] = const.Declare tensor<6xf32> = dense<[2.900000e-02, 1.400000e-02, 3.000000e-03, 1.300000e-02, 1.500000e-02, 0.00899999961]> : tensor<6xf32>
+    // CHECK:       [[RMS:%.+]] = VPU.RMS([[INPUT]], [[CST]])
+    // CHECK-SAME:         {epsilon = 9.9999997473787516E-6 : f64} : tensor<1x2x6xf32>, tensor<6xf32> -> tensor<1x2x6xf32>
+    // CHECK:       return [[RMS]] : tensor<1x2x6xf32>
+}
+
+// -----
+
+// CHECK-LABEL: @DeformableConvolution
+func.func @DeformableConvolution(%arg0: tensor<1x128x19x19xf16>, %arg1: tensor<1x18x19x19xf16>, %arg2: tensor<128x128x3x3xf16>, %arg3: tensor<1x9x19x19xf16>) -> tensor<1x128x19x19xf16> {
+    %0 = IE.DeformableConvolution(%arg0, %arg1, %arg2, %arg3) {biliniar_interpolate_pad, deformable_group = 1 : i64, dilations = [1, 1], group = 1 : i64, pads_begin = [1, 1], pads_end = [1, 1], strides = [1, 1]} : tensor<1x128x19x19xf16>, tensor<1x18x19x19xf16>, tensor<128x128x3x3xf16>, tensor<1x9x19x19xf16> -> tensor<1x128x19x19xf16>
+    return %0 : tensor<1x128x19x19xf16>
+
+    // CHECK: [[VAR0:%.+]] = VPU.DeformableConvolution(%arg0, %arg1, %arg2, %arg3) {biliniar_interpolate_pad, deformable_group = 1 : i64, dilations = [1, 1], group = 1 : i64, pads_begin = [1, 1], pads_end = [1, 1], strides = [1, 1]} : tensor<1x128x19x19xf16>, tensor<1x18x19x19xf16>, tensor<128x128x3x3xf16>, tensor<1x9x19x19xf16> -> tensor<1x128x19x19xf16>
+    // CHECK: return [[VAR0]] : tensor<1x128x19x19xf16>
+}
+
+// -----
+
+// CHECK-LABEL: @InverseTest
+// CHECK-SAME: ([[INPUT:%.+]]: tensor<1x10x2x2xf32>) -> tensor<1x10x2x2xf32>
+func.func @InverseTest(%arg0: tensor<1x10x2x2xf32>) -> tensor<1x10x2x2xf32> {
+    %0 = IE.Inverse(%arg0) {adjoint} : tensor<1x10x2x2xf32> -> tensor<1x10x2x2xf32>
+    return %0 : tensor<1x10x2x2xf32>
+
+    // CHECK:       [[INVERSE:%.+]] = VPU.Inverse([[INPUT]])
+    // CHECK-SAME:         {adjoint} : tensor<1x10x2x2xf32> -> tensor<1x10x2x2xf32>
+    // CHECK:       return [[INVERSE]] : tensor<1x10x2x2xf32>
 }

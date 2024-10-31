@@ -56,36 +56,34 @@ mlir::FailureOr<TilingStorage> vpux::VPU::calculateTilingRegions(mlir::Operation
     TilingStorage storage;
 
     if (auto tilingInfoInterface = mlir::dyn_cast<VPU::TilingInfoOpInterface>(operation)) {
-        try {
-            if (!isMultiClusterCompatibleForTiling(operation, tiles, log) ||
-                !tilingInfoInterface.isSupportedTiling(tiles, TilingMode::ISOLATED, log)) {
-                return mlir::failure();
-            }
-        } catch (Exception&) {
+        if (!isMultiClusterCompatibleForTiling(operation, tiles, log)) {
             return mlir::failure();
         }
     }
 
+    std::set<Shape> uniqueShapes;
     for (const auto& item : tiles | indexed) {
         auto tile = item.value();
 
         auto inputTiling = TilingInfo(ArrayRef({tile}));
-        if (auto tilingBuilderOp = mlir::dyn_cast<VPU::TilingBuilderOpInterface>(operation)) {
-            inputTiling = tilingBuilderOp.backInferTileInfo(tile, log);
-        } else if (auto tilingViewLikeOp = mlir::dyn_cast<VPU::TilingViewLikeOpInterface>(operation)) {
-            inputTiling = tilingViewLikeOp.backInferTileInfo(tile, log);
-        } else {
-            VPUX_THROW("Unsupported operation type {0} for VF", operation->getName());
-        }
-
-        if (auto alignInterface = mlir::dyn_cast<IE::AlignedChannelsOpInterface>(operation)) {
-            auto types = getTileTypes(operation, tile, inputTiling);
-            VPUX_THROW_WHEN(types.empty(), "Cannot get tile types for operation {0} and tile {1}", operation->getName(),
-                            tile);
-            if (!vpux::VPU::NCEInvariant::isOutputActTypeSupported(types.back(),
-                                                                   alignInterface.getOutputChannelAlignment())) {
-                return mlir::failure();
+        try {
+            if (auto tilingBuilderOp = mlir::dyn_cast<VPU::TilingBuilderOpInterface>(operation)) {
+                inputTiling = tilingBuilderOp.backInferTileInfo(tile, log);
+                if (uniqueShapes.find(tile.shape) == uniqueShapes.end()) {
+                    if (auto tilingInfoOp = mlir::dyn_cast<VPU::TilingInfoOpInterface>(operation)) {
+                        if (!tilingInfoOp.isSupportedTiling({tile}, TilingMode::ISOLATED, log)) {
+                            return mlir::failure();
+                        }
+                    }
+                    uniqueShapes.insert(tile.shape);
+                }
+            } else if (auto tilingViewLikeOp = mlir::dyn_cast<VPU::TilingViewLikeOpInterface>(operation)) {
+                inputTiling = tilingViewLikeOp.backInferTileInfo(tile, log);
+            } else {
+                VPUX_THROW("Unsupported operation type {0} for VF", operation->getName());
             }
+        } catch (Exception&) {
+            return mlir::failure();
         }
 
         const auto tileNumber = numTile.value_or(item.index());
@@ -520,17 +518,14 @@ VPU::VerticalFusionOp vpux::VPU::fuseOpsInBlock(mlir::PatternRewriter& rewriter,
 }
 
 VPUNNCostParameters fillInCostParam(mlir::Operation* operation, const OutputTiling& tiling,
-                                    const SmallVector<TileInfo>& inputTiles, const bool enablePrefetching, Logger log) {
+                                    const SmallVector<TileInfo>& inputTiles, const bool enablePrefetching) {
     auto mcStrategy = VPU::MultiClusterStrategy::Clustering;
     if (auto mcOperation = mlir::dyn_cast<VPU::ClusteredOpInterface>(operation)) {
         mcStrategy = mcOperation.getMultiClusterStrategy().value_or(mcStrategy);
     }
 
-    auto mode = TilingMode::ISOLATED;
-    if (auto tilingBuilder = mlir::dyn_cast<VPU::TilingBuilderOpInterface>(operation)) {
-        // cache it in the storage E-121580
-        mode = getTilingSupportedMode(tilingBuilder, enablePrefetching, log);
-    }
+    // for cost calculation there is no need to distinguish between pipelining and prefetching
+    auto mode = enablePrefetching ? TilingMode::PREFETCHING : TilingMode::ISOLATED;
     SmallVector<OutputTiling> inputAllTiles;
     if (!inputTiles.empty()) {
         inputAllTiles.push_back(inputTiles);
@@ -539,7 +534,7 @@ VPUNNCostParameters fillInCostParam(mlir::Operation* operation, const OutputTili
 }
 
 VPUNNCostParameters fillInCostParam(mlir::Operation* operation,
-                                    const std::unique_ptr<TilingOperationStorage>& opStorage, size_t index, Logger log,
+                                    const std::unique_ptr<TilingOperationStorage>& opStorage, size_t index,
                                     bool enablePrefetching) {
     auto inputOutputTiling = opStorage->get(operation, index);
 
@@ -548,7 +543,7 @@ VPUNNCostParameters fillInCostParam(mlir::Operation* operation,
     const auto inputOutputTilingPair = inputOutputTiling.value();
 
     return fillInCostParam(operation, {inputOutputTilingPair.second}, inputOutputTilingPair.first.tiles,
-                           enablePrefetching, log);
+                           enablePrefetching);
 }
 
 void existedVFSpilling(mlir::Operation* operation, const std::unique_ptr<TilingOperationStorage>& opStorage,
@@ -574,7 +569,7 @@ void existedVFSpilling(mlir::Operation* operation, const std::unique_ptr<TilingO
 
 StrategyCost getVFCostPipelined(const int tilesNumber, VFConfig& config,
                                 const std::unique_ptr<TilingOperationStorage>& opStorage,
-                                const std::unique_ptr<VPU::LayerVPUNNCost>& costFunction, Logger log) {
+                                const std::unique_ptr<VPU::LayerVPUNNCost>& costFunction) {
     StrategyCost pipelinedCost = 0;
     // create a structure which reflects the execution order of the IR
     // same way as scheduler does
@@ -603,13 +598,13 @@ StrategyCost getVFCostPipelined(const int tilesNumber, VFConfig& config,
             for (auto opIndex : irange(operations.size())) {
                 pipelinedStructure.emplace_back(VFPipelineContainer(
                         operations[opIndex],
-                        fillInCostParam(operations[opIndex], opStorage, index, log, config.isPipelined())));
+                        fillInCostParam(operations[opIndex], opStorage, index, config.isPipelined())));
             }
             continue;
         }
 
         for (auto opIndex : irange(operations.size())) {
-            auto tilingInfo = fillInCostParam(operations[opIndex], opStorage, index, log, config.isPipelined());
+            auto tilingInfo = fillInCostParam(operations[opIndex], opStorage, index, config.isPipelined());
             auto containerNumber = pipelinedStructure.size() - VF_PIPELINE_LENGTH + 1 + opIndex;
 
             if (containerNumber >= pipelinedStructure.size()) {
@@ -637,21 +632,24 @@ StrategyCost vpux::VPU::getVFCost(const std::unique_ptr<VPU::LayerVPUNNCost>& co
     }
 
     auto tilingDims = parseIntArrayAttr<int64_t>(tilingStrategyAttr);
-    VFConfig vfConfig(vfOp, prefetching);
-    auto operations = vfConfig.getVFOperations();
-
     const auto dim = getVFTilingDim(tilingDims);
 
+    VFConfig vfConfig(vfOp, prefetching);
+    auto operations = to_small_vector(vfConfig.getVFOperations() | filtered([](auto* op) {
+                                          return !mlir::isa<VPU::TilingViewLikeOpInterface>(op);
+                                      }));
+    // Process block if there's only one non-view-like operation
     if (operations.size() == 1) {
         auto* operation = operations.front();
         OutputTiling tiles;
+
         if (dim.has_value()) {
             auto tiling = fillDividedTiles(operation, Shape(tilingDims), getShape(operation->getResult(0)));
             VPUX_THROW_WHEN(mlir::failed(tiling), "Incorrect tiling {0} for vf {1}", tilingDims, vfOp);
             tiles = tiling.value();
         }
 
-        const auto costParameters = fillInCostParam(operation, tiles, {}, prefetching, log);
+        const auto costParameters = fillInCostParam(operation, tiles, {}, prefetching);
         return costFunction->getStrategyCost(operation, costParameters);
     }
 
@@ -666,7 +664,7 @@ StrategyCost vpux::VPU::getVFCost(const std::unique_ptr<VPU::LayerVPUNNCost>& co
     // validate CMX size to check if it's a real pipelining case, so that we can get accurate VF cost
     if (vfConfig.isPipelined() && validateCMXSize(vfConfig, operationStorage, log)) {
         VPUX_THROW_UNLESS(tileNum > 1, "Subgraph cannot be pipelined with {0} tiles", tileNum);
-        return getVFCostPipelined(tileNum, vfConfig, operationStorage, costFunction, log);
+        return getVFCostPipelined(tileNum, vfConfig, operationStorage, costFunction);
     }
 
     // sizes of dmas from cmx
@@ -688,7 +686,7 @@ StrategyCost vpux::VPU::getVFCost(const std::unique_ptr<VPU::LayerVPUNNCost>& co
                                           return value > 1;
                                       }) &&
                         !vfConfig.isPotentiallyPipelined()) {
-                        const auto userCostParam = fillInCostParam(operation, operationStorage, 0, log, prefetching);
+                        const auto userCostParam = fillInCostParam(operation, operationStorage, 0, prefetching);
                         fullCost += costFunction->getSpillingReadCost(operation, userCostParam, parentOp, findOperand);
                     }
                 }
@@ -698,7 +696,7 @@ StrategyCost vpux::VPU::getVFCost(const std::unique_ptr<VPU::LayerVPUNNCost>& co
 
     for (auto index : irange(tileNum)) {
         for (auto* op : operations) {
-            const auto costParameters = fillInCostParam(op, operationStorage, index, log, prefetching);
+            const auto costParameters = fillInCostParam(op, operationStorage, index, prefetching);
 
             // isolated operation cost
             fullCost += costFunction->getStrategyCost(op, costParameters);
@@ -709,7 +707,7 @@ StrategyCost vpux::VPU::getVFCost(const std::unique_ptr<VPU::LayerVPUNNCost>& co
             if (!spillUsers.empty()) {
                 fullCost += costFunction->getSpillingWriteCost(op, costParameters);
                 for (auto* user : spillUsers) {
-                    const auto userCostParam = fillInCostParam(user, operationStorage, index, log, prefetching);
+                    const auto userCostParam = fillInCostParam(user, operationStorage, index, prefetching);
                     fullCost += costFunction->getSpillingReadCost(user, userCostParam, op);
                 }
             }

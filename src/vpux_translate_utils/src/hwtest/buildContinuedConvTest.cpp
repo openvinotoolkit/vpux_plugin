@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -9,6 +9,7 @@
 
 #include <mlir/Dialect/Quant/QuantTypes.h>
 
+#include "vpux/compiler/dialect/VPU/transforms/factories/nce_sparsity_converters.hpp"
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_sparsity.hpp"
 #include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
@@ -34,6 +35,17 @@ namespace hwtest {
 void buildContinuedConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp module, mlir::OpBuilder builder,
                         Logger& log, mlir::Type inputType, mlir::Type weightsType, mlir::Type outputType) {
     using namespace VPUIP;
+
+    // set runtime resources
+    std::optional<vpux::Byte> availableCMXMemory = std::nullopt;
+
+    mlir::PassManager pmBuilderInit(module->getName(), mlir::OpPassManager::Nesting::Implicit);
+    auto initCompilerOptions = VPU::InitCompilerOptions(testDesc.getArchitecture(), VPU::CompilationMode::DefaultHW);
+    initCompilerOptions.numberOfDPUGroups = 1;
+    initCompilerOptions.setAvailableCMXMemory(availableCMXMemory);
+
+    VPU::buildInitCompilerPipeline(pmBuilderInit, initCompilerOptions, log);
+    VPUX_THROW_UNLESS(mlir::succeeded(pmBuilderInit.run(module)), "Init compilation failed");
 
     auto* ctx = builder.getContext();
     const auto int32 = builder.getIntegerType(32, true);
@@ -116,23 +128,27 @@ void buildContinuedConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::Module
     const auto weightsPartialParamType = getMemRef(weightsPartialShape, weightsType, vpux::VPU::MemoryKind::DDR);
     auto weightsPartial0Values = splitWeightsOverC(weightsValues, weightsShape, weightsType, builder.getContext(),
                                                    /*startC*/ 0, /*endC*/ weightsPartialShape[1]);
-    auto weightsPartial0Attribute = Const::ContentAttr::get(weightsPartial0Values);
+    auto weightsPartial0AttributeSetup = Const::ContentAttr::transform(weightsPartial0Values);
     if (auto qty = weightsType.dyn_cast<mlir::quant::QuantizedType>()) {
-        weightsPartial0Attribute = weightsPartial0Attribute.quantCast(qty);
+        weightsPartial0AttributeSetup = weightsPartial0AttributeSetup.quantCast(qty);
     }
-    auto weightsPartial0DDR = functionBuilder.create<Const::DeclareOp>(
-            builder.getUnknownLoc(), weightsPartialParamType, weightsPartial0Attribute.reorder(DimsOrder::NHWC));
+
+    auto weightsPartial0Attribute = weightsPartial0AttributeSetup.reorder(DimsOrder::NHWC).get();
+    auto weightsPartial0DDR = functionBuilder.create<Const::DeclareOp>(builder.getUnknownLoc(), weightsPartialParamType,
+                                                                       std::move(weightsPartial0Attribute));
 
     // Weights partial 1
     auto weightsPartial1Values =
             splitWeightsOverC(weightsValues, weightsShape, weightsType, ctx,
                               /*startC*/ weightsPartialShape[1], /*endC*/ 2 * weightsPartialShape[1]);
-    auto weightsPartial1Attribute = Const::ContentAttr::get(weightsPartial1Values);
+    auto weightsPartial1AttributeSetup = Const::ContentAttr::transform(weightsPartial1Values);
     if (auto qty = weightsType.dyn_cast<mlir::quant::QuantizedType>()) {
-        weightsPartial1Attribute = weightsPartial1Attribute.quantCast(qty);
+        weightsPartial1AttributeSetup = weightsPartial1AttributeSetup.quantCast(qty);
     }
-    auto weightsPartial1DDR = functionBuilder.create<Const::DeclareOp>(
-            builder.getUnknownLoc(), weightsPartialParamType, weightsPartial1Attribute.reorder(DimsOrder::NHWC));
+
+    auto weightsPartial1Attribute = weightsPartial1AttributeSetup.reorder(DimsOrder::NHWC).get();
+    auto weightsPartial1DDR = functionBuilder.create<Const::DeclareOp>(builder.getUnknownLoc(), weightsPartialParamType,
+                                                                       std::move(weightsPartial1Attribute));
 
     auto inputCMX = getCMXTensor(inputShape, inputType, INPUT_CMX_OFFSET);
 
@@ -149,11 +165,13 @@ void buildContinuedConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::Module
     // weights table 0
     const auto weightsTableDDRType = mlir::RankedTensorType::get(weightsTableShape, int32);
     const auto sparsityPtrStep = 0;
+    const auto ppeConverter = VPU::NCESparsity::getPPEConverterCb(testDesc.getArchitecture());
+    const auto biasConverter = VPU::NCESparsity::getBiasConverterCb(testDesc.getArchitecture());
     const auto weightsTable0 = VPU::NCESparsity::getWeightsTable(
             inputType, outputType, static_cast<std::int32_t>(WEIGHTS_PARTIAL_0_CMX_OFFSET),
             static_cast<std::int32_t>(weightsPartialShape[1] * weightsPartialShape[2] * weightsPartialShape[3] *
                                       getElemTypeSize(weightsType).count() / 8),
-            VPU::NCESparsity::SPARSITY_PTR_WHEN_NO_SPARSITY, sparsityPtrStep, testDesc.getArchitecture(),
+            VPU::NCESparsity::SPARSITY_PTR_WHEN_NO_SPARSITY, sparsityPtrStep, ppeConverter, biasConverter,
             outputShape[1], weightsType);
 
     const auto weightsTableDDRMemRef = getMemRef(weightsTableShape, int32, VPU::MemoryKind::DDR);
@@ -161,22 +179,23 @@ void buildContinuedConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::Module
             mlir::DenseElementsAttr::get(weightsTableDDRType, llvm::ArrayRef<std::int32_t>(weightsTable0));
     auto weightsTable0DDR = functionBuilder.create<vpux::Const::DeclareOp>(
             builder.getUnknownLoc(), weightsTableDDRMemRef,
-            vpux::Const::ContentAttr::get(weightsTable0Values).reorder(vpux::DimsOrder::NHWC));
+            vpux::Const::ContentAttr::transform(weightsTable0Values).reorder(vpux::DimsOrder::NHWC).get());
     auto weightsTable0CMX = getCMXTensor(weightsTableShape, int32, WEIGHTSTABLE_0_CMX_OFFSET);
 
     // weights table 1
+
     const auto weightsTable1 = VPU::NCESparsity::getWeightsTable(
             inputType, outputType, static_cast<std::int32_t>(WEIGHTS_PARTIAL_1_CMX_OFFSET),
             static_cast<std::int32_t>(weightsPartialShape[1] * weightsPartialShape[2] * weightsPartialShape[3] *
                                       getElemTypeSize(weightsType).count() / 8),
-            VPU::NCESparsity::SPARSITY_PTR_WHEN_NO_SPARSITY, sparsityPtrStep, testDesc.getArchitecture(),
+            VPU::NCESparsity::SPARSITY_PTR_WHEN_NO_SPARSITY, sparsityPtrStep, ppeConverter, biasConverter,
             outputShape[1], weightsType);
 
     const auto weightsTable1Values =
             mlir::DenseElementsAttr::get(weightsTableDDRType, llvm::ArrayRef<std::int32_t>(weightsTable1));
     auto weightsTable1DDR = functionBuilder.create<vpux::Const::DeclareOp>(
             builder.getUnknownLoc(), weightsTableDDRMemRef,
-            vpux::Const::ContentAttr::get(weightsTable1Values).reorder(vpux::DimsOrder::NHWC));
+            vpux::Const::ContentAttr::transform(weightsTable1Values).reorder(vpux::DimsOrder::NHWC).get());
     auto weightsTable1CMX = getCMXTensor(weightsTableShape, int32, WEIGHTSTABLE_1_CMX_OFFSET);
 
     auto [waitWLMBarrier, freeBarrierId] =
@@ -225,10 +244,8 @@ void buildContinuedConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::Module
     auto nceTask_0 = VPURT::wrapIntoTaskOp<NCEClusterTaskOp>(
             functionBuilder, barriers[0], barriers[1], builder.getUnknownLoc(), inputPartial0CMX.getBuffer(),
             weightsPartial0CMX.getBuffer(), weightsTable0CMX.getBuffer(), /*instruction_table_list=*/nullptr,
-            /*spr_lookup_table*/ nullptr,
-            /*activation_window=*/nullptr, inputPartial0CMX.getBuffer(), output0CMX.getBuffer(), output0CMX.getBuffer(),
-            VPUIP::NCETaskType::CONV, kernelSize, strides, kernelPaddings,
-            /*activation_window_channel_length=*/nullptr, isContinued, /*sp_pattern*/ nullptr);
+            /*spr_lookup_table*/ nullptr, inputPartial0CMX.getBuffer(), output0CMX.getBuffer(), output0CMX.getBuffer(),
+            VPUIP::NCETaskType::CONV, kernelSize, strides, kernelPaddings, isContinued, /*sp_pattern*/ nullptr);
 
     const auto start = getIntArrayAttr(ctx, std::vector<std::int64_t>{0, 0, 0});
     const auto outEnd =
@@ -246,10 +263,8 @@ void buildContinuedConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::Module
     auto nceTask_1 = VPURT::wrapIntoTaskOp<NCEClusterTaskOp>(
             functionBuilder, barriers[1], barriers[2], builder.getUnknownLoc(), inputPartial1CMX.getBuffer(),
             weightsPartial1CMX.getBuffer(), weightsTable1CMX.getBuffer(), /*instruction_table_list=*/nullptr,
-            /*spr_lookup_table*/ nullptr,
-            /*activation_window=*/nullptr, inputPartial1CMX.getBuffer(), output1CMX.getBuffer(), output1CMX.getBuffer(),
+            /*spr_lookup_table*/ nullptr, inputPartial1CMX.getBuffer(), output1CMX.getBuffer(), output1CMX.getBuffer(),
             VPUIP::NCETaskType::CONV, kernelSize, strides, kernelPaddings,
-            /*activation_window_channel_length=*/nullptr,
             /*is_continued*/ nullptr, /*sp_pattern*/ nullptr);
 
     nceTask_1.addDPUTask(functionBuilder, start, outEnd, start, inEnd, pad, VPU::MPEMode::CUBOID_16x16);
@@ -258,17 +273,6 @@ void buildContinuedConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::Module
                                           output1CMX.getOperation()->getResult(0), functionOutput, 0);
 
     functionBuilder.create<mlir::func::ReturnOp>(builder.getUnknownLoc(), functionOutput);
-
-    // set runtime resources
-    std::optional<vpux::Byte> availableCMXMemory = std::nullopt;
-
-    mlir::PassManager pm(module->getName(), mlir::OpPassManager::Nesting::Implicit);
-    auto initCompilerOptions = VPU::InitCompilerOptions(testDesc.getArchitecture(), VPU::CompilationMode::DefaultHW);
-    initCompilerOptions.numberOfDPUGroups = 1;
-    initCompilerOptions.setAvailableCMXMemory(availableCMXMemory);
-    VPU::buildInitCompilerPipeline(pm, initCompilerOptions, log);
-
-    VPUX_THROW_UNLESS(mlir::succeeded(pm.run(module)), "Compilation failed");
 
     buildCNNOp(builder, function.getName(),
                {getTensorType(ShapeRef(inputShape), inputType, vpux::DimsOrder::NHWC, nullptr)},

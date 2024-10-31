@@ -52,9 +52,6 @@ public:
     vpux::VPU::PaddingAttr getPad(mlir::Operation* op) const {
         return mlir::cast<ConcreteOp>(op).getPad();
     }
-    mlir::Value getActivationWindowOperand(mlir::Operation* op) const {
-        return mlir::cast<ConcreteOp>(op).getActivationWindow();
-    }
 };
 
 template <typename ConcreteModel, typename ConcreteOp>
@@ -65,9 +62,6 @@ public:
     }
     vpux::VPU::PaddingAttr getPad(mlir::Operation* op) const {
         return mlir::cast<ConcreteOp>(op).getPad();
-    }
-    mlir::Value getActivationWindowOperand(mlir::Operation*) const {
-        return nullptr;
     }
 };
 
@@ -80,9 +74,6 @@ public:
     vpux::VPU::PaddingAttr getPad(mlir::Operation* op) const {
         return vpux::VPU::getPaddingAttr(mlir::cast<ConcreteOp>(op).getContext(), 0, 0, 0, 0);
     }
-    mlir::Value getActivationWindowOperand(mlir::Operation*) const {
-        return nullptr;
-    }
 };
 
 template <typename ConcreteModel, typename ConcreteOp>
@@ -94,10 +85,6 @@ public:
 
     vpux::VPU::PaddingAttr getPad(mlir::Operation* op) const {
         return vpux::VPU::getPaddingAttr(mlir::cast<ConcreteOp>(op).getContext(), 0, 0, 0, 0);
-    }
-
-    mlir::Value getActivationWindowOperand(mlir::Operation*) const {
-        return nullptr;
     }
 };
 
@@ -128,9 +115,6 @@ public:
     mlir::Value getWeightsTableOperand(mlir::Operation*) const {
         return nullptr;
     }
-    mlir::Value getActivationWindowOperand(mlir::Operation*) const {
-        return nullptr;
-    }
 };
 
 template <typename ConcreteModel, typename ConcreteOp>
@@ -138,9 +122,6 @@ class NCEMaxPoolOpModel : public NCEPoolOpBaseModel<ConcreteModel, ConcreteOp> {
 public:
     mlir::Value getWeightsTableOperand(mlir::Operation* op) const {
         return mlir::cast<ConcreteOp>(op).getWeightsTable();
-    }
-    mlir::Value getActivationWindowOperand(mlir::Operation* op) const {
-        return mlir::cast<ConcreteOp>(op).getActivationWindow();
     }
 };
 
@@ -162,6 +143,30 @@ public:
     }
     VPU::MPEMode getMpeMode(mlir::Operation* op, mlir::Type inElemType, mlir::Type outElemType, ShapeRef shape) const {
         return static_cast<const ConcreteModel*>(this)->getMpeModeImpl(op, inElemType, outElemType, shape);
+    }
+};
+
+//
+// NCEReduce op model
+//
+
+template <typename ConcreteModel, typename ConcreteOp>
+class NCEReduceOpModel : public VPU::NCEOpInterface::ExternalModel<ConcreteModel, ConcreteOp> {
+public:
+    SmallVector<int64_t> getKernelSizeVal(mlir::Operation*) const {
+        return {1, 1};
+    }
+    SmallVector<int64_t> getStridesVal(mlir::Operation*) const {
+        return {1, 1};
+    }
+    vpux::VPU::PaddingAttr getPad(mlir::Operation* op) const {
+        return vpux::VPU::getPaddingAttr(mlir::cast<ConcreteOp>(op).getContext(), 0, 0, 0, 0);
+    }
+    VPU::MPEMode getMpeMode(mlir::Operation* op, mlir::Type inElemType, mlir::Type outElemType, ShapeRef shape) const {
+        return static_cast<const ConcreteModel*>(this)->getMpeModeImpl(op, inElemType, outElemType, shape);
+    }
+    mlir::Value getWeightsTableOperand(mlir::Operation*) const {
+        return nullptr;
     }
 };
 

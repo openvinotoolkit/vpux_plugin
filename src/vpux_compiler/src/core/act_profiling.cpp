@@ -266,12 +266,9 @@ mlir::Value UniformNonTiledActShaveProfiler::replaceOpWithProfiledOp(VPUIP::SwKe
                                                                      VPUIP::SwProfilingMetadataAttr profMeta) {
     _log.trace("Replace op with new profiled task '{0}'", loc);
 
-    auto swTask = _builder.create<VPUIP::SwKernelOp>(
-            loc, origSwTask.getResults().getTypes(), origSwTask.getDynamicOutputShapes().getTypes(),
-            profilingBuffer.getType(), origSwTask.getKernelFunction(), origSwTask.getInputs(),
-            origSwTask.getDynamicInputShapes(), origSwTask.getDynamicInputShapesMapAttr(), origSwTask.getOutputBuffs(),
-            origSwTask.getDynamicOutputShapeBuffs(), origSwTask.getDynamicOutputShapesMapAttr(), profilingBuffer,
-            origSwTask.getTileIndexAttr(), origSwTask.getStridesAttr(), profMeta);
+    auto swTask = _builder.create<VPUIP::SwKernelOp>(loc, origSwTask, profilingBuffer);
+    swTask.getProfilingDataMutable().assign(profilingBuffer);
+    swTask.setProfilingMetadataAttr(profMeta);
 
     swTask.getRegion().takeBody(origSwTask.getRegion());
 
@@ -291,7 +288,7 @@ VPUIP::DistributedBufferType NCETiledActShaveProfiler::getDistributedBufferType(
     const auto numTiles = getIntArrayAttr(_ctx, tiles);
     const auto numClusters = getIntAttr(_ctx, _clustersNum);
     const auto memKindAttr = IndexedSymbolAttr::get(_memKindAttr.getLeafNameAttr());
-    auto distributedTensorAttr = VPU::DistributedTensorAttr::get(
+    auto distributedTensorAttr = VPU::DistributionInfoAttr::get(
             _ctx, distributionModeAttr, numTiles, nullptr, nullptr, nullptr, numClusters, nullptr,
             /*uniformDistributedSegments=*/mlir::UnitAttr::get(_ctx), nullptr, nullptr, nullptr, nullptr, nullptr);
     return VPUIP::DistributedBufferType::get(_ctx, {totalElements}, getActShaveProfilingElementType(_ctx), layout,
@@ -393,12 +390,9 @@ mlir::Value NCETiledActShaveProfiler::replaceOpWithProfiledOp(VPUIP::SwKernelOp 
         profilingSlot = viewOp.getResult();
     }
 
-    auto swTask = _builder.create<VPUIP::SwKernelOp>(
-            loc, origSwTask.getResults().getTypes(), origSwTask.getDynamicOutputShapes().getTypes(),
-            profilingSlot.getType(), origSwTask.getKernelFunction(), origSwTask.getInputs(),
-            origSwTask.getDynamicInputShapes(), origSwTask.getDynamicInputShapesMapAttr(), origSwTask.getOutputBuffs(),
-            origSwTask.getDynamicOutputShapeBuffs(), origSwTask.getDynamicOutputShapesMapAttr(), profilingSlot,
-            origSwTask.getTileIndexAttr(), origSwTask.getStridesAttr(), profMeta);
+    auto swTask = _builder.create<VPUIP::SwKernelOp>(loc, origSwTask, profilingSlot);
+    swTask.getProfilingDataMutable().assign(profilingSlot);
+    swTask.setProfilingMetadataAttr(profMeta);
 
     swTask.getRegion().takeBody(origSwTask.getRegion());
 

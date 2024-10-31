@@ -62,6 +62,15 @@ mlir::LogicalResult ConvertVPUIPDPU2NPUReg40XXPass::initialize(mlir::MLIRContext
 
 void ConvertVPUIPDPU2NPUReg40XXPass::safeRunOnModule() {
     auto moduleOp = getOperation();
+
+    auto arch = VPU::getArch(moduleOp);
+    if (arch != VPU::ArchKind::NPU40XX) {
+        _log.error("Unsupported architecture for ConvertVPUIPDPU2NPUReg40XXPass: {0}! Required architecture: NPU40XX.",
+                   arch);
+        signalPassFailure();
+        return;
+    }
+
     auto& ctx = getContext();
     mlir::func::FuncOp netFunc;
     IE::CNNNetworkOp cnnOp;

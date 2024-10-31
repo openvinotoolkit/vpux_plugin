@@ -205,7 +205,12 @@ bool isLegalConv(ConcreteOp op) {
     auto padStart = Shape(parseIntArrayAttr<int64_t>(op.getPadsBegin()));
     auto padEnd = Shape(parseIntArrayAttr<int64_t>(op.getPadsEnd()));
     auto kernelShape = getShape(op.getFilter());
-
+    const auto dilations = parseIntArrayAttr<int64_t>(op.getDilations());
+    // Required for SEP Dilated Group Convolution case , for all other case it does not change padding
+    padStart[Dims4D::PadsBegin::Top] -= dilations[Dims4D::Dilation::Y.ind()] - 1;
+    padStart[Dims4D::PadsBegin::Left] -= dilations[Dims4D::Dilation::X.ind()] - 1;
+    padEnd[Dims4D::PadsEnd::Bottom] -= dilations[Dims4D::Dilation::Y.ind()] - 1;
+    padEnd[Dims4D::PadsEnd::Right] -= dilations[Dims4D::Dilation::X.ind()] - 1;
     return isPaddingSupported(padStart, padEnd, {kernelShape[Dims4D::Filter::KY], kernelShape[Dims4D::Filter::KX]});
 }
 

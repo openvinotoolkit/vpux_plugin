@@ -106,7 +106,8 @@ mlir::LogicalResult FuseConstantPadWithConv::matchAndRewrite(IE::ConvolutionOp o
                 rewriter.replaceOpWithNewOp<IE::ConvolutionOp>(
                         origConvolutionOp, origPadInput, origConvolutionOp.getFilter(), origConvolutionOp.getBias(),
                         origConvolutionOp.getStridesAttr(), newPadsBegin, newPadsEnd,
-                        origConvolutionOp.getDilationsAttr(), nullptr, nullptr, origConvolutionOp.getStaticScaleAttr());
+                        origConvolutionOp.getDilationsAttr(), nullptr, nullptr, origConvolutionOp.getStaticScaleAttr(),
+                        origConvolutionOp.getOutputChannelsAttr(), origConvolutionOp.getInputChannelsAttr());
             },
             _log.nest());
 }
@@ -145,7 +146,8 @@ mlir::LogicalResult FuseConstantPadWithGroupConv::matchAndRewrite(IE::GroupConvo
                         origGroupConvolutionOp, origPadInput, origGroupConvolutionOp.getFilter(),
                         origGroupConvolutionOp.getBias(), origGroupConvolutionOp.getStridesAttr(), newPadsBegin,
                         newPadsEnd, origGroupConvolutionOp.getDilationsAttr(), origGroupConvolutionOp.getGroupsAttr(),
-                        origGroupConvolutionOp.getPostOpAttr(), origGroupConvolutionOp.getClampAttr());
+                        origGroupConvolutionOp.getPostOpAttr(), origGroupConvolutionOp.getClampAttr(),
+                        origGroupConvolutionOp.getOutputChannelsAttr(), origGroupConvolutionOp.getInputChannelsAttr());
             },
             _log.nest());
 }
@@ -180,7 +182,8 @@ mlir::LogicalResult FuseConstantPadWithMaxpool::matchAndRewrite(IE::MaxPoolOp or
                 rewriter.replaceOpWithNewOp<IE::MaxPoolOp>(
                         origMaxPoolOp, origPadInput, origMaxPoolOp.getKernelSizeAttr(), origMaxPoolOp.getStridesAttr(),
                         newPadsBegin, newPadsEnd, origMaxPoolOp.getRoundingType(), origMaxPoolOp.getPostOpAttr(),
-                        origMaxPoolOp.getClampAttr());
+                        origMaxPoolOp.getClampAttr(), origMaxPoolOp.getOutputChannelsAttr(),
+                        origMaxPoolOp.getInputChannelsAttr());
             },
             _log.nest());
 }

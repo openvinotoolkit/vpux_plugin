@@ -13,15 +13,12 @@ namespace test {
 
 class GatherNDLayerTestCommon : public GatherND8LayerTest, virtual public VpuOv2LayerTest {};
 
-class GatherNDLayerTest_NPU3720 : public GatherNDLayerTestCommon {};
-class GatherNDLayerTest_NPU4000 : public GatherNDLayerTestCommon {};
-
-TEST_P(GatherNDLayerTest_NPU3720, HW) {
+TEST_P(GatherNDLayerTestCommon, NPU3720_HW) {
     setDefaultHardwareMode();
     run(Platform::NPU3720);
 }
 
-TEST_P(GatherNDLayerTest_NPU4000, HW) {
+TEST_P(GatherNDLayerTestCommon, NPU4000_HW) {
     setDefaultHardwareMode();
     run(Platform::NPU4000);
 }
@@ -68,24 +65,13 @@ const auto gatherNDArgsSubsetTiling = testing::Combine(
         testing::ValuesIn(std::vector<ov::Shape>({{2, 1, 100, 2}})), testing::ValuesIn(std::vector<int>({1})),
         testing::Values(ov::element::i32), testing::Values(ov::element::i32), testing::Values(DEVICE_NPU));
 
-// ------ NPU3720 ------
-INSTANTIATE_TEST_SUITE_P(smoke_GatherND, GatherNDLayerTest_NPU3720, gatherNDArgsSubset1,
+INSTANTIATE_TEST_SUITE_P(smoke_GatherND, GatherNDLayerTestCommon, gatherNDArgsSubset1,
                          GatherND8LayerTest::getTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_GatherND, GatherNDLayerTest_NPU3720, gatherNDArgsSubsetPrecommit,
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_GatherND, GatherNDLayerTestCommon, gatherNDArgsSubsetPrecommit,
                          GatherND8LayerTest::getTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(smoke_tiling_GatherND, GatherNDLayerTest_NPU3720, gatherNDArgsSubsetTiling,
-                         GatherND8LayerTest::getTestCaseName);
-
-// ------ NPU4000 ------
-INSTANTIATE_TEST_SUITE_P(smoke_GatherND, GatherNDLayerTest_NPU4000, gatherNDArgsSubset1,
-                         GatherND8LayerTest::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_GatherND, GatherNDLayerTest_NPU4000, gatherNDArgsSubsetPrecommit,
-                         GatherND8LayerTest::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_tiling_GatherND, GatherNDLayerTest_NPU4000, gatherNDArgsSubsetTiling,
+INSTANTIATE_TEST_SUITE_P(smoke_tiling_GatherND, GatherNDLayerTestCommon, gatherNDArgsSubsetTiling,
                          GatherND8LayerTest::getTestCaseName);
 
 }  // namespace

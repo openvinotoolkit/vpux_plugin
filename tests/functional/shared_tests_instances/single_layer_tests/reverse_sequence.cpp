@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation
+// Copyright (C) 2022-2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -51,15 +51,12 @@ class ReverseSequenceLayerTestCommon : public ReverseSequenceLayerTest, virtual 
     }
 };
 
-class ReverseSequenceLayerTest_NPU3720 : public ReverseSequenceLayerTestCommon {};
-class ReverseSequenceLayerTest_NPU4000 : public ReverseSequenceLayerTestCommon {};
-
-TEST_P(ReverseSequenceLayerTest_NPU3720, HW) {
+TEST_P(ReverseSequenceLayerTestCommon, NPU3720_HW) {
     VpuOv2LayerTest::setDefaultHardwareMode();
     VpuOv2LayerTest::run(Platform::NPU3720);
 }
 
-TEST_P(ReverseSequenceLayerTest_NPU4000, SW) {
+TEST_P(ReverseSequenceLayerTestCommon, NPU4000_SW) {
     VpuOv2LayerTest::setReferenceSoftwareMode();
     VpuOv2LayerTest::run(Platform::NPU4000);
 }
@@ -72,31 +69,17 @@ using namespace ov::test;
 namespace {
 
 const std::vector<ov::element::Type> netPrecisions = {ov::element::f16, ov::element::u8};
-
 const std::vector<int64_t> batchAxisIndices = {0L};
-
 const std::vector<int64_t> seqAxisIndices = {1L};
-
-const std::vector<std::vector<size_t>> inputShapes = {{3, 10}};  //, 10, 20
-
-const std::vector<std::vector<size_t>> inputShapesNPU3720 = {{3, 10}, {3, 10, 12}, {3, 10, 11, 20}};
-
+const std::vector<std::vector<size_t>> inputShapes = {{3, 10}, {3, 10, 12}, {3, 10, 11, 20}};
 const std::vector<std::vector<size_t>> reversSeqLengthsVecShapes = {{3}};
 
-INSTANTIATE_TEST_SUITE_P(smoke_ReverseSequence, ReverseSequenceLayerTest_NPU3720,
-                         ::testing::Combine(::testing::ValuesIn(batchAxisIndices), ::testing::ValuesIn(seqAxisIndices),
-                                            ::testing::ValuesIn(inputShapesNPU3720),
-                                            ::testing::ValuesIn(reversSeqLengthsVecShapes),
-                                            ::testing::Values(InputLayerType::PARAMETER),
-                                            ::testing::ValuesIn(netPrecisions), ::testing::Values(DEVICE_NPU)),
-                         ReverseSequenceLayerTest_NPU3720::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_ReverseSequence, ReverseSequenceLayerTest_NPU4000,
+INSTANTIATE_TEST_SUITE_P(smoke_ReverseSequence, ReverseSequenceLayerTestCommon,
                          ::testing::Combine(::testing::ValuesIn(batchAxisIndices), ::testing::ValuesIn(seqAxisIndices),
                                             ::testing::ValuesIn(inputShapes),
                                             ::testing::ValuesIn(reversSeqLengthsVecShapes),
                                             ::testing::Values(InputLayerType::PARAMETER),
-                                            ::testing::Values(ov::element::f16), ::testing::Values(DEVICE_NPU)),
-                         ReverseSequenceLayerTest_NPU4000::getTestCaseName);
+                                            ::testing::ValuesIn(netPrecisions), ::testing::Values(DEVICE_NPU)),
+                         ReverseSequenceLayerTestCommon::getTestCaseName);
 
 }  // namespace

@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
-// RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --one-shot-bufferize-VPU-to-VPUIP %s | FileCheck %s
+// RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch% ppe-version=IntPPE" --one-shot-bufferize-VPU-to-VPUIP %s | FileCheck %s
 // REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 // CHECK: func.func @SingleInput({{[^:]+}}: memref<1x1x1x1000xf16>)
@@ -19,7 +19,7 @@ func.func @SingleInput(%input: tensor<1x1x1x1000xf16>) -> tensor<1x1x1x1000xf16>
 
 // CHECK: func.func @OnlyOneOutput() -> memref<1x2x2x2xf16> {
 func.func @OnlyOneOutput() -> tensor<1x2x2x2xf16> {
-    %output = const.Declare tensor<1x2x2x2xf16> = dense<1.000000e+00> : tensor<1x2x2x2xf32>, [#const.ConvertElemType<f16>]
+    %output = const.Declare tensor<1x2x2x2xf16> = dense<1.000000e+00> : tensor<1x2x2x2xf32>, [#const.CastElemType<f16>]
     return %output : tensor<1x2x2x2xf16>
 
     // CHECK: return

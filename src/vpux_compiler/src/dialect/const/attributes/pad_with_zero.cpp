@@ -267,12 +267,7 @@ Const::Content vpux::Const::PadWithZeroAttr::transform(vpux::Const::Content& inp
     return output;
 }
 
-//
-// ContentAttr::padWithZero
-//
-
-Const::ContentAttr vpux::Const::ContentAttr::padWithZero(ShapeRef padBefore, ShapeRef padAfter) const {
-    return ContentAttr::addTransformation(*this, Const::PadWithZeroAttr::get(getIntArrayAttr(getContext(), padBefore),
-                                                                             getIntArrayAttr(getContext(), padAfter))
-                                                         .cast<Const::TransformAttrInterface>());
+Const::ContentSetup vpux::Const::ContentSetup::padWithZero(ShapeRef padBefore, ShapeRef padAfter) {
+    return ContentSetup::addTransformation(Const::PadWithZeroAttr::get(getIntArrayAttr(getContext(), padBefore),
+                                                                       getIntArrayAttr(getContext(), padAfter)));
 }

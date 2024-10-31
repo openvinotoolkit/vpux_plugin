@@ -46,7 +46,7 @@ func.func @SparseConvWeights(%arg0: memref<1x32x3x3xf16, #NHWC, [@CMX_NN, 0]>, %
     -> memref<1x64x3x3xf16, #NHWC, [@CMX_NN, 0]> variants : {
       DPUTask {cluster_id = 0 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [15, 2, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     } PPE : {
-      PPETask <NOOP> {clamp_high = 2147483647 : i64, clamp_low = -2147483648 : i64, fp_prelu_alpha = 1.000000e+00 : f64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64}
+      PPETask {opaque_ppe = #VPU.PPEStub<>}
     }
   }
 
@@ -136,7 +136,7 @@ func.func @SparseConvWeightsDistributed(%arg0: memref<1x32x3x3xf16, #NHWC, [@CMX
         outStart = [0, 0, 0],
         pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     } PPE : {
-      PPETask <NOOP> {clamp_high = 2147483647 : i64, clamp_low = -2147483648 : i64, fp_prelu_alpha = 1.000000e+00 : f64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64}
+      PPETask {opaque_ppe = #VPU.PPEStub<>}
     }
   }
 

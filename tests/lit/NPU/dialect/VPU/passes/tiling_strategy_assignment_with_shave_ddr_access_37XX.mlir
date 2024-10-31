@@ -9,11 +9,11 @@
 // CHECK-LABEL: func.func @GatherDDRAccessWithoutTiling
 // CHECK-SAME:        [[INPUT:%arg[0-9]]]: tensor<51865x512xf16>
 func.func @GatherDDRAccessWithoutTiling(%arg0: tensor<51865x512xf16>) -> tensor<1x16x512xf16> {
-    %cst = const.Declare tensor<1x16xsi32> = dense<1> : tensor<1x16xsi64>, [#const.ConvertElemType<si32>]
+    %cst = const.Declare tensor<1x16xsi32> = dense<1> : tensor<1x16xsi64>, [#const.CastElemType<si32>]
     %0 = VPU.Gather(%arg0, %cst) {axis_value = 0 : i64, batch_dims = 0 : i64} : tensor<51865x512xf16>, tensor<1x16xsi32> -> tensor<1x16x512xf16>
     return %0 : tensor<1x16x512xf16>
 
-    // CHECK-DAG: [[INDICES:%.+]] = const.Declare tensor<1x16xsi32> = dense<1> : tensor<1x16xsi64>, [#const.ConvertElemType<si32>]
+    // CHECK-DAG: [[INDICES:%.+]] = const.Declare tensor<1x16xsi32> = dense<1> : tensor<1x16xsi64>, [#const.CastElemType<si32>]
 
     // CHECK:     [[GATHER:%.+]] = VPU.Gather([[INPUT]], [[INDICES]]) {axis_value = 0 : i64, batch_dims = 0 : i64} : tensor<51865x512xf16>, tensor<1x16xsi32> -> tensor<1x16x512xf16>
 
@@ -25,11 +25,11 @@ func.func @GatherDDRAccessWithoutTiling(%arg0: tensor<51865x512xf16>) -> tensor<
 // CHECK-LABEL: func.func @GatherAssignTilingStrategy
 // CHECK-SAME:        [[INPUT:%arg[0-9]]]: tensor<51865x512xf16>
 func.func @GatherAssignTilingStrategy(%arg0: tensor<51865x512xf16>) -> tensor<1x2000x512xf16> {
-    %cst = const.Declare tensor<1x2000xsi32> = dense<1> : tensor<1x2000xsi64>, [#const.ConvertElemType<si32>]
+    %cst = const.Declare tensor<1x2000xsi32> = dense<1> : tensor<1x2000xsi64>, [#const.CastElemType<si32>]
     %0 = VPU.Gather(%arg0, %cst) {axis_value = 0 : i64, batch_dims = 0 : i64} : tensor<51865x512xf16>, tensor<1x2000xsi32> -> tensor<1x2000x512xf16>
     return %0 : tensor<1x2000x512xf16>
 
-    // CHECK-DAG: [[INDICES:%.+]] = const.Declare tensor<1x2000xsi32> = dense<1> : tensor<1x2000xsi64>, [#const.ConvertElemType<si32>]
+    // CHECK-DAG: [[INDICES:%.+]] = const.Declare tensor<1x2000xsi32> = dense<1> : tensor<1x2000xsi64>, [#const.CastElemType<si32>]
 
     // CHECK:     [[GATHER:%.+]] = VPU.Gather([[INPUT]], [[INDICES]]) {axis_value = 0 : i64, batch_dims = 0 : i64, tilingStrategy = [1, 1, 29]} : tensor<51865x512xf16>, tensor<1x2000xsi32> -> tensor<1x2000x512xf16>
 

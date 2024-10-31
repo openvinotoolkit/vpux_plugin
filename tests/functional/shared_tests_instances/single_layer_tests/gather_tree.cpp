@@ -14,9 +14,6 @@ namespace test {
 
 class GatherTreeLayerTestCommon : public GatherTreeLayerTest, virtual public VpuOv2LayerTest {};
 
-class GatherTreeLayerTest_NPU3720 : public GatherTreeLayerTestCommon {};
-class GatherTreeLayerTest_NPU4000 : public GatherTreeLayerTestCommon {};
-
 void skipCompilationCallBackImpl(std::stringstream& skip, InputLayerType secInType, ov::element::Type precision) {
     if (secInType == InputLayerType::PARAMETER) {
         skip << "Unsupported secondaryInputType, OV provides scalor end_token only, but plugin only supports "
@@ -27,7 +24,7 @@ void skipCompilationCallBackImpl(std::stringstream& skip, InputLayerType secInTy
     }
 }
 
-TEST_P(GatherTreeLayerTest_NPU3720, HW) {
+TEST_P(GatherTreeLayerTestCommon, NPU3720_HW) {
     setSkipCompilationCallback([](std::stringstream& skip) {
         InputLayerType secondaryInputType = std::get<1>(GetParam());
         ov::element::Type modelType = std::get<2>(GetParam());
@@ -37,7 +34,7 @@ TEST_P(GatherTreeLayerTest_NPU3720, HW) {
     run(Platform::NPU3720);
 }
 
-TEST_P(GatherTreeLayerTest_NPU4000, SW) {
+TEST_P(GatherTreeLayerTestCommon, NPU4000_SW) {
     setSkipCompilationCallback([](std::stringstream& skip) {
         InputLayerType secondaryInputType = std::get<1>(GetParam());
         ov::element::Type modelType = std::get<2>(GetParam());
@@ -71,10 +68,7 @@ const auto gatherTreeArgsSubsetPrecommit =
                          testing::ValuesIn(modelType),            // Model type
                          testing::Values(DEVICE_NPU));            // Device name
 
-INSTANTIATE_TEST_SUITE_P(precommit_gather_tree, GatherTreeLayerTest_NPU3720, gatherTreeArgsSubsetPrecommit,
-                         GatherTreeLayerTest::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(precommit_gather_tree, GatherTreeLayerTest_NPU4000, gatherTreeArgsSubsetPrecommit,
+INSTANTIATE_TEST_SUITE_P(precommit_gather_tree, GatherTreeLayerTestCommon, gatherTreeArgsSubsetPrecommit,
                          GatherTreeLayerTest::getTestCaseName);
 
 }  // namespace

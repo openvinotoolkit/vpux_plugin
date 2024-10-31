@@ -272,7 +272,7 @@ func.func @NearestToBroadCastConverterWithSIZESMode(%arg0: tensor<1x96x1x1xf32>)
     return %0 : tensor<1x96x33x33xf32>
 
     // CHECK-NOT: IE.Interpolate
-    // CHECK: [[CST:%.*]] = const.Declare tensor<4xsi32> = dense<[1, 96, 33, 33]> : tensor<4xsi64>, [#const.ConvertElemType<si32>]
+    // CHECK: [[CST:%.*]] = const.Declare tensor<4xsi32> = dense<[1, 96, 33, 33]> : tensor<4xsi64>, [#const.CastElemType<si32>]
     // CHECK: [[CONCAT_OUT:%.*]] = IE.Broadcast(%arg0, [[CST]]) {mode = #IE.broadcast_type<NUMPY>} : tensor<1x96x1x1xf32>, tensor<4xsi32> -> tensor<1x96x33x33xf32>
     // CHECK: return [[CONCAT_OUT]] : tensor<1x96x33x33xf32>
 }
@@ -288,7 +288,7 @@ func.func @NearestToBroadCastConverterWithSCALESMode(%arg0: tensor<1x96x1x1xf32>
     return %0 : tensor<1x96x33x33xf32>
 
     // CHECK-NOT: IE.Interpolate
-    // CHECK: [[CST:%.*]] = const.Declare tensor<4xsi32> = dense<[1, 96, 33, 33]> : tensor<4xsi64>, [#const.ConvertElemType<si32>]
+    // CHECK: [[CST:%.*]] = const.Declare tensor<4xsi32> = dense<[1, 96, 33, 33]> : tensor<4xsi64>, [#const.CastElemType<si32>]
     // CHECK: [[CONCAT_OUT:%.*]] = IE.Broadcast(%arg0, [[CST]]) {mode = #IE.broadcast_type<NUMPY>} : tensor<1x96x1x1xf32>, tensor<4xsi32> -> tensor<1x96x33x33xf32>
     // CHECK: return [[CONCAT_OUT]] : tensor<1x96x33x33xf32>
 }

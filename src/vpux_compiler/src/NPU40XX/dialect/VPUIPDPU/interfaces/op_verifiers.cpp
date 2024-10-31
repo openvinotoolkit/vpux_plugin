@@ -36,7 +36,7 @@ class DPUVariantOpInterfaceModel final :
         public VPUIPDPU::DPUVariantOpInterface::ExternalModel<DPUVariantOpInterfaceModel, VPUIPDPU::DPUVariantOp> {
 public:
     mlir::LogicalResult verifyInnerOps(mlir::Operation* op) const {
-        return VPUIPDPU::arch40xx::verifyDPUVariantOp(mlir::cast<VPUIPDPU::DPUVariantOp>(op));
+        return VPUIPDPU::arch37xx::verifyDPUVariantOp(mlir::cast<VPUIPDPU::DPUVariantOp>(op));
     }
 };
 
@@ -51,19 +51,6 @@ mlir::LogicalResult vpux::VPUIPDPU::arch40xx::verifyODUCfgOp(VPUIPDPU::ODUCfgOp 
     if (!hasOptionalSingleInstanceChildren<VPUIPDPU::ODUCfgOp, VPUIPDPU::ODUCmxPortsOp,
                                            VPUIPDPU::ODUWriteCombineBufferOp>(op)) {
         return errorAt(op.getLoc(), "Operation {0}: too many optional child ops", op.getOperationName());
-    }
-
-    return ::mlir::success();
-}
-
-mlir::LogicalResult vpux::VPUIPDPU::arch40xx::verifyDPUVariantOp(VPUIPDPU::DPUVariantOp op) {
-    auto verifier37XX = VPUIPDPU::arch37xx::verifyDPUVariantOp(op);
-    if (verifier37XX.failed()) {
-        return verifier37XX;
-    }
-
-    if (getEntryBlockSize<VPUIPDPU::ODUHaloRegionOp>(op.getOperation()) > 5) {
-        return errorAt(op.getLoc(), "Operation {0}: too many halo regions defined", op.getOperationName());
     }
 
     return ::mlir::success();

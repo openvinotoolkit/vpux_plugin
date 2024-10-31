@@ -50,14 +50,14 @@ mlir::LogicalResult PowerToMultRewriter::matchAndRewrite(IE::PowerOp powerOp, ml
     }
 
     // TODO: Exponents of N > 2 could also be replaced by a chain/tree of multiplication
-    // operations. Such transformation would require further testing to understand from
-    // which point it is more performant to leave it as a IE.Power later handled UPA
+    // operations.
 
     const auto broadcastType =
             vpux::IE::AutoBroadcastTypeAttr::get(getContext(), IE::AutoBroadcastType::NONE_OR_EXPLICIT);
 
     rewriter.replaceOpWithNewOp<IE::MultiplyOp>(powerOp, powerOp.getInput1(), powerOp.getInput1(), broadcastType,
-                                                /*post_op=*/nullptr, /*clamp=*/nullptr);
+                                                /*post_op=*/nullptr, /*clamp=*/nullptr, /*output_channels=*/nullptr,
+                                                /*input_channels=*/nullptr);
 
     return mlir::success();
 }

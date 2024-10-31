@@ -86,10 +86,8 @@ def VPUIP_NCETaskType :
             I64EnumAttrCase<"DWCONV",           1>,
             I64EnumAttrCase<"MAXPOOL",          2>,
             I64EnumAttrCase<"AVEPOOL",          3>,
-            I64EnumAttrCase<"FCL",              4>,
-            I64EnumAttrCase<"ELTWISE",          5>,
-            I64EnumAttrCase<"IDENTITY",         6>,
-            I64EnumAttrCase<"CMCONV",           7>
+            I64EnumAttrCase<"ELTWISE",          4>,
+            I64EnumAttrCase<"IDENTITY",         5>,
         ]
     > {
 }

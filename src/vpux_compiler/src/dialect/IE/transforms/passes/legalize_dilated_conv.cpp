@@ -6,6 +6,8 @@
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/IE/transforms/passes.hpp"
 #include "vpux/compiler/dialect/IE/utils/const_attributes.hpp"
+#include "vpux/compiler/dialect/VPU/utils/conv_utils.hpp"
+#include "vpux/compiler/dialect/VPU/utils/max_kernel_size_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_invariant.hpp"
 
 #include "vpux/compiler/core/layers.hpp"
@@ -38,11 +40,12 @@ Shape getSlicedShape(int64_t dilationX, int64_t dilationY, int64_t kernelX, int6
 }
 
 mlir::Value createNewOp(mlir::PatternRewriter& rewriter, mlir::Operation* origOp, ArrayRef<mlir::Value> operands,
-                        ShapeRef padStart, ShapeRef padEnd, bool updatePad, bool removePostOp) {
+                        ShapeRef padStart, ShapeRef padEnd, bool updatePad, bool removePostOp, StringRef locSuffix) {
     mlir::IRMapping mapper;
     mlir::Builder builder(origOp->getContext());
     mapper.map(origOp->getOperands(), operands);
     auto* newOp = rewriter.clone(*origOp, mapper);
+    extendOpLoc(newOp, locSuffix);
 
     if (updatePad) {
         auto padBeginAttr =
@@ -83,7 +86,8 @@ SmallVector<mlir::Value> getSlicedFilters(mlir::PatternRewriter& rewriter, mlir:
             offsets[Dims4D::Filter::KY] = ky;
             SmallVector<int64_t> sliceShape{OC, IC, kernelY / slicedShape[Dims4D::Kernel::Y],
                                             kernelX / slicedShape[Dims4D::Kernel::X]};
-            auto slice = rewriter.create<IE::SliceOp>(origOp->getLoc(), input, getIntArrayAttr(ctx, offsets.raw()),
+            auto slice = rewriter.create<IE::SliceOp>(takeOpLoc(origOp, StringLiteral("filter_slice_{0}_{1}"), kx, ky),
+                                                      input, getIntArrayAttr(ctx, offsets.raw()),
                                                       getIntArrayAttr(ctx, sliceShape));
             slicedFilters.push_back(slice);
         }
@@ -226,8 +230,9 @@ mlir::LogicalResult ConvGeneralRewriter<ConcreteOp>::matchAndRewrite(ConcreteOp 
     const auto kernelX = filterShape[Dims4D::Filter::KX];
     const auto expandKernelX = (kernelX - 1) * dilations[Dims4D::Dilation::X] + 1;
     const auto expandKernelY = (kernelY - 1) * dilations[Dims4D::Dilation::Y] + 1;
-    const auto isKernelSupportedByNCE = expandKernelX <= vpux::VPU::NCEInvariant::MAX_KERNEL_SIZE &&
-                                        expandKernelY <= vpux::VPU::NCEInvariant::MAX_KERNEL_SIZE;
+    const auto maxKernelSize = VPU::getMaxKernelSize(origOp);
+
+    const auto isKernelSupportedByNCE = expandKernelX <= maxKernelSize && expandKernelY <= maxKernelSize;
     const auto isFilterConstant = mlir::succeeded(IE::getConstParentOp(origOp.getFilter()));
 
     // The dilation can be resolved by expanding the filter with zeroes by the dilation factor
@@ -237,11 +242,11 @@ mlir::LogicalResult ConvGeneralRewriter<ConcreteOp>::matchAndRewrite(ConcreteOp 
     // constant transformation since there is no full lowering path for this operation
     if (isKernelSupportedByNCE && isFilterConstant) {
         _log.trace("Expand dilated '{0}' layer at '{1}'", origOp->getName(), origOp->getLoc());
-        auto dilatedFilter =
-                rewriter.create<IE::ExpandDilatedOp>(origOp->getLoc(), origOp.getFilter(), origOp.getDilations());
+        auto dilatedFilter = rewriter.create<IE::ExpandDilatedOp>(takeOpLoc(origOp, "dilatedfilter_in"),
+                                                                  origOp.getFilter(), origOp.getDilations());
         auto newOp = createNewOp(rewriter, origOp, {origOp.getInput(), dilatedFilter.getResult(), origOp.getBias()},
                                  Shape(parseIntArrayAttr<int64_t>(origOp.getPadsBegin())),
-                                 Shape(parseIntArrayAttr<int64_t>(origOp.getPadsEnd())), false, false);
+                                 Shape(parseIntArrayAttr<int64_t>(origOp.getPadsEnd())), false, false, "expanded");
         rewriter.replaceOp(origOp, newOp);
         return mlir::success();
     }
@@ -282,9 +287,13 @@ mlir::LogicalResult ConvGeneralRewriter<ConcreteOp>::matchAndRewrite(ConcreteOp 
         offsets[Dims4D::Act::H] = parameter.offsetY;
         SmallVector<int64_t> sliceShape{inputShape[Dims4D::Act::N], inputShape[Dims4D::Act::C], parameter.sizeY,
                                         parameter.sizeX};
+        const std::string locSuffixBase = llvm::formatv("slice_in_{0}_{1}_{2}_{3}", parameter.offsetY,
+                                                        parameter.offsetX, parameter.sizeY, parameter.sizeX)
+                                                  .str();
+        auto sliceActLoc = takeOpLoc(origOp, locSuffixBase);
         auto slicedActivation =
-                rewriter.create<IE::SliceOp>(origOp->getLoc(), origOp->getOperand(0),
-                                             getIntArrayAttr(ctx, offsets.raw()), getIntArrayAttr(ctx, sliceShape));
+                rewriter.create<IE::SliceOp>(sliceActLoc, origOp->getOperand(0), getIntArrayAttr(ctx, offsets.raw()),
+                                             getIntArrayAttr(ctx, sliceShape));
 
         SmallVector<mlir::Value> operands;
         if (origOp.getBias() != nullptr) {
@@ -293,8 +302,9 @@ mlir::LogicalResult ConvGeneralRewriter<ConcreteOp>::matchAndRewrite(ConcreteOp 
         } else {
             operands = {slicedActivation, slicedFilters[parameter.index]};
         }
+        const auto locSuffix = "conv_" + locSuffixBase;
         newConvs.push_back(createNewOp(rewriter, origOp, operands, parameter.padStart, parameter.padEnd, true,
-                                       origOp.getPostOpAttr() != nullptr));
+                                       origOp.getPostOpAttr() != nullptr, locSuffix));
     }
 
     // 4. add the new convolution one by one
@@ -307,9 +317,10 @@ mlir::LogicalResult ConvGeneralRewriter<ConcreteOp>::matchAndRewrite(ConcreteOp 
                 vpux::IE::AutoBroadcastTypeAttr::get(origOp->getContext(), IE::AutoBroadcastType::NONE_OR_EXPLICIT);
         mlir::Value add = newConvs.front();
         for (size_t i = 1; i < newConvs.size(); i++)
-            add = rewriter.create<IE::AddOp>(origOp->getLoc(), add, newConvs[i], broadcastType,
-                                             (i == newConvs.size() - 1) ? origOp.getClampAttr(),
-                                             origOp.getPostOpAttr() : nullptr, nullptr)
+            add = rewriter.create<IE::AddOp>(takeOpLoc(origOp, StringLiteral("add_{0}"), i), add, newConvs[i],
+                                             broadcastType, (i == newConvs.size() - 1) ? origOp.getClampAttr(),
+                                             origOp.getPostOpAttr() : nullptr, nullptr, origOp.getOutputChannelsAttr(),
+                                             origOp.getInputChannelsAttr())
                           ->getResult(0);
         rewriter.replaceOp(origOp, add);
 
@@ -326,16 +337,48 @@ mlir::LogicalResult ConvGeneralRewriter<ConcreteOp>::matchAndRewrite(ConcreteOp 
 
 class LegalizeDilatedConvolutionPass final : public IE::LegalizeDilatedConvolutionBase<LegalizeDilatedConvolutionPass> {
 public:
-    explicit LegalizeDilatedConvolutionPass(Logger log) {
+    explicit LegalizeDilatedConvolutionPass(bool enableSEPDilatedGroupConv, Logger log)
+            : _enableSEPDilatedGroupConv{enableSEPDilatedGroupConv} {
         Base::initLogger(log, Base::getArgumentName());
     }
 
 private:
     void safeRunOnFunc() final;
+    mlir::LogicalResult initialize(mlir::MLIRContext* ctx) final;
+
+private:
+    bool _enableSEPDilatedGroupConv;
 };
 
-template <class ConcreteOp>
-bool isLegalOp(ConcreteOp op) {
+mlir::LogicalResult LegalizeDilatedConvolutionPass::initialize(mlir::MLIRContext* ctx) {
+    if (mlir::failed(Base::initialize(ctx))) {
+        return mlir::failure();
+    }
+
+    // LIT test override
+    if (enableSEPDilatedGroupConv.hasValue()) {
+        _enableSEPDilatedGroupConv = enableSEPDilatedGroupConv.getValue();
+    }
+
+    return mlir::success();
+}
+
+bool isLegalGroupConvOpImpl(IE::GroupConvolutionOp op, bool enableDilatedGroupConv, Logger log) {
+    const auto dilations = parseIntArrayAttr<int64_t>(op.getDilations());
+    const auto logCb = [&](const formatv_object_base& msg) {
+        log.trace("{0}", msg.str());
+    };
+    if ((dilations[Dims4D::Dilation::X.ind()] == 1 && dilations[Dims4D::Dilation::Y.ind()] == 1)) {
+        return true;
+    }
+    auto isDilationSupported = enableDilatedGroupConv ? VPU::isSupportedSEPDilatedConv(op, logCb, /*checkLayout=*/false,
+                                                                                       /*checkChannelAlignment=*/false)
+                                                      : false;
+
+    return isDilationSupported;
+}
+
+bool isLegalConvOp(IE::ConvolutionOp op) {
     const auto dilations = parseIntArrayAttr<int64_t>(op.getDilations());
     return dilations[Dims4D::Dilation::X.ind()] == 1 && dilations[Dims4D::Dilation::Y.ind()] == 1;
 }
@@ -343,9 +386,13 @@ bool isLegalOp(ConcreteOp op) {
 void LegalizeDilatedConvolutionPass::safeRunOnFunc() {
     auto& ctx = getContext();
 
+    auto isLegalGroupConvOp = [&](IE::GroupConvolutionOp op) {
+        return isLegalGroupConvOpImpl(op, _enableSEPDilatedGroupConv, _log);
+    };
+
     mlir::ConversionTarget target(ctx);
-    target.addDynamicallyLegalOp<IE::GroupConvolutionOp>(&isLegalOp<IE::GroupConvolutionOp>);
-    target.addDynamicallyLegalOp<IE::ConvolutionOp>(&isLegalOp<IE::ConvolutionOp>);
+    target.addDynamicallyLegalOp<IE::GroupConvolutionOp>(isLegalGroupConvOp);
+    target.addDynamicallyLegalOp<IE::ConvolutionOp>(&isLegalConvOp);
 
     target.addLegalOp<IE::ExpandDilatedOp>();
     target.addLegalOp<IE::ConcatOp>();
@@ -369,6 +416,6 @@ void LegalizeDilatedConvolutionPass::safeRunOnFunc() {
 // createLegalizeDilatedConvolutionPass
 //
 
-std::unique_ptr<mlir::Pass> vpux::IE::createLegalizeDilatedConvolutionPass(Logger log) {
-    return std::make_unique<LegalizeDilatedConvolutionPass>(log);
+std::unique_ptr<mlir::Pass> vpux::IE::createLegalizeDilatedConvolutionPass(bool enableDilatedGroupConv, Logger log) {
+    return std::make_unique<LegalizeDilatedConvolutionPass>(enableDilatedGroupConv, log);
 }

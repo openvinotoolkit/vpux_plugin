@@ -289,3 +289,31 @@ func.func @ConvertTransposedConv2DWithBiasToConv2D(%input: tensor<1x32x23x30xf16
     // CHECK-SAME:      tensor<1x32x47x61xf16>, tensor<16x32x2x2xf16>, tensor<1x16x1x1xf16> -> tensor<1x16x46x60xf16>
     // CHECK:       return [[CONV]]
 }
+
+// -----
+
+// CHECK-LABEL: @ConvertTransposedConv2DWithOutputShapeToConv2D
+// CHECK-SAME:      [[INPUT:%.+]]: tensor<1x32x128x128xf16>
+func.func @ConvertTransposedConv2DWithOutputShapeToConv2D(%input: tensor<1x32x128x128xf16>) -> tensor<1x64x128x128xf16> {
+    %weights = const.Declare tensor<64x32x2x2xf16> = dense<1.000000e+00> : tensor<64x32x2x2xf16>
+    %output_shape = const.Declare tensor<2xsi32> = dense<128> : tensor<2xsi32>
+    %output = IE.TransposedConvolution(%input, %weights, %output_shape) {dilations = [1, 1], operandSegmentSizes = array<i32: 1, 1, 1, 0>, output_padding = [0, 0], pads_begin = [64, 64], pads_end = [64, 64], strides = [2, 2]} : tensor<1x32x128x128xf16>, tensor<64x32x2x2xf16>, tensor<2xsi32> -> tensor<1x64x128x128xf16>
+    return %output : tensor<1x64x128x128xf16>
+
+    // CHECK-DAG:   [[WEIGHTS:%.+]] = const.Declare tensor<64x32x2x2xf16> = dense<1.000000e+00> : tensor<64x32x2x2xf16>
+    // CHECK-DAG:   [[OUTPUT_SHAPE:%.+]] = const.Declare tensor<2xsi32> = dense<128> : tensor<2xsi32>
+    // CHECK-NOT:   IE.TransposedConvolution
+    // CHECK:       [[UPS:%.+]] = IE.Upsampling
+    // CHECK-SAME:      #IE.UpsamplingPad<pads_channel = [0, 0], pads_height = [0, 0], pads_width = [0, 0]>
+    // CHECK-SAME:      upsampling_factor = [2, 2, 1]
+    // CHECK-SAME:      tensor<1x32x128x128xf16> -> tensor<1x32x255x255xf16>
+
+    // CHECK:       [[CONV:%.+]] = IE.Convolution([[UPS]], [[WEIGHTS]])
+    // CHECK-SAME:      dilations = [1, 1]
+    // CHECK-SAME:      pads_begin = [0, 0]
+    // CHECK-SAME:      pads_end = [0, 0]
+    // CHECK-SAME:      strides = [1, 1]
+    // CHECK-SAME:      tensor<1x32x255x255xf16>, tensor<64x32x2x2xf16> -> tensor<1x64x254x254xf16>
+    // CHECK:       [[SLICE:%.+]] = IE.Slice [[CONV]] [0, 0, 63, 63] [1, 64, 128, 128] : tensor<1x64x254x254xf16> to tensor<1x64x128x128xf16>
+    // CHECK:       return [[SLICE]]
+}

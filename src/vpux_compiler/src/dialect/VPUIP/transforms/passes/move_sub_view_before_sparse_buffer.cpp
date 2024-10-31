@@ -73,10 +73,10 @@ mlir::LogicalResult MoveViewOpUp::matchAndRewrite(VPUIP::SubViewOp origSubViewOp
         if (auto constOp = value.getDefiningOp<Const::DeclareOp>()) {
             // Recreate constant with subview attribute. Do not split into 2 ops otherwise when constant is
             // fused with subview then type is changed (strides are erased) without further type propagation.
-            auto newContentAttr = constOp.getContentAttr().subview(offsets, sizes);
+            auto newContentAttr = constOp.transformContentAttr().subview(offsets, sizes).get();
             auto newConstOp = rewriter.create<Const::DeclareOp>(
                     constOp.getLoc(), vpux::convertToMemRef(newContentAttr.getType().cast<mlir::RankedTensorType>()),
-                    newContentAttr);
+                    std::move(newContentAttr));
             return newConstOp.getOutput();
         }
         auto newSubViewOp = rewriter.create<VPUIP::SubViewOp>(value.getLoc(), value, getIntArrayAttr(ctx, offsets),

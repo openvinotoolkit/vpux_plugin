@@ -43,7 +43,7 @@ void AddProfilingSection::safeRunOnModule() {
     auto metadataOp = profilingMetadataOps[0];
 
     auto profilingSection = builder.create<ELF::CreateProfilingSectionOp>(elfMain.getLoc(), ".profiling", 1,
-                                                                          ELF::SectionFlagsAttr::SHF_NONE);
+                                                                          ELF::SectionFlagsAttr::SHF_ALLOC);
 
     builder.setInsertionPointToEnd(&profilingSection.getContent().emplaceBlock());
     auto op = builder.create<VPUASM::ProfilingMetadataOp>(metadataOp.getLoc(), metadataOp.getSymNameAttr(),

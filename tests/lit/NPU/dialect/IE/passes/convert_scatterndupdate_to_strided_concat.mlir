@@ -81,7 +81,7 @@ func.func @ConvertToSliceConcatElementsUpdateWithOneElement(%arg0:  tensor<1x1x1
 
 // CHECK-LABEL: @ConvertToSliceConcatElementsUpdateWithReplaceOneElement
 func.func @ConvertToSliceConcatElementsUpdateWithReplaceOneElement(%arg0:  tensor<1x10x1xf16>, %arg1 : tensor<1x1x1xf16> ) -> tensor<1x10x1xf16>{
-    %cst = const.Declare tensor<1x1x1x3xsi32> = dense<0> : tensor<1x1x1x3xsi64>, [#const.ConvertElemType<si32>]
+    %cst = const.Declare tensor<1x1x1x3xsi32> = dense<0> : tensor<1x1x1x3xsi64>, [#const.CastElemType<si32>]
     %0 = IE.ScatterNDUpdate(%arg0, %cst, %arg1) : tensor<1x10x1xf16>, tensor<1x1x1x3xsi32>, tensor<1x1x1xf16> -> tensor<1x10x1xf16>
 
     return %0 : tensor<1x10x1xf16>
@@ -95,7 +95,7 @@ func.func @ConvertToSliceConcatElementsUpdateWithReplaceOneElement(%arg0:  tenso
 
 // CHECK-LABEL: @ConvertToSliceConcatElementsUpdateWithTwoSlice
 func.func @ConvertToSliceConcatElementsUpdateWithTwoSlice(%arg0:  tensor<1x326x1xf16>, %arg1 : tensor<1x7x1xf16> ) -> tensor<1x326x1xf16>{
-    %cst = const.Declare tensor<1x7x1x3xsi32> = dense<[[[[0, 249, 0]], [[0, 250, 0]], [[0, 251, 0]], [[0, 252, 0]], [[0, 253, 0]], [[0, 254, 0]], [[0, 255, 0]]]]> : tensor<1x7x1x3xsi64>, [#const.ConvertElemType<si32>]
+    %cst = const.Declare tensor<1x7x1x3xsi32> = dense<[[[[0, 249, 0]], [[0, 250, 0]], [[0, 251, 0]], [[0, 252, 0]], [[0, 253, 0]], [[0, 254, 0]], [[0, 255, 0]]]]> : tensor<1x7x1x3xsi64>, [#const.CastElemType<si32>]
     %0 = IE.ScatterNDUpdate(%arg0, %cst, %arg1) : tensor<1x326x1xf16>, tensor<1x7x1x3xsi32>, tensor<1x7x1xf16> -> tensor<1x326x1xf16>
 
     return %0 : tensor<1x326x1xf16>
@@ -110,7 +110,7 @@ func.func @ConvertToSliceConcatElementsUpdateWithTwoSlice(%arg0:  tensor<1x326x1
 
 // CHECK-LABEL: @ConvertToSliceConcatElementsUpdateWithRightSlice
 func.func @ConvertToSliceConcatElementsUpdateWithRightSlice(%arg0:  tensor<1x326x1xf16>, %arg1 : tensor<1x7x1xf16> ) -> tensor<1x326x1xf16>{
-    %cst = const.Declare tensor<1x7x1x3xsi32> = dense<[[[[0, 0, 0]], [[0, 1, 0]], [[0, 2, 0]], [[0, 3, 0]], [[0, 4, 0]], [[0, 5, 0]], [[0, 6, 0]]]]> : tensor<1x7x1x3xsi64>, [#const.ConvertElemType<si32>]
+    %cst = const.Declare tensor<1x7x1x3xsi32> = dense<[[[[0, 0, 0]], [[0, 1, 0]], [[0, 2, 0]], [[0, 3, 0]], [[0, 4, 0]], [[0, 5, 0]], [[0, 6, 0]]]]> : tensor<1x7x1x3xsi64>, [#const.CastElemType<si32>]
     %0 = IE.ScatterNDUpdate(%arg0, %cst, %arg1) : tensor<1x326x1xf16>, tensor<1x7x1x3xsi32>, tensor<1x7x1xf16> -> tensor<1x326x1xf16>
 
     return %0 : tensor<1x326x1xf16>
@@ -124,7 +124,7 @@ func.func @ConvertToSliceConcatElementsUpdateWithRightSlice(%arg0:  tensor<1x326
 
 // CHECK-LABEL: @ConvertToSliceConcatElementsUpdateWithLeftSlice
 func.func @ConvertToSliceConcatElementsUpdateWithLeftSlice(%arg0:  tensor<1x326x1xf16>, %arg1 : tensor<1x7x1xf16> ) -> tensor<1x326x1xf16>{
-    %cst = const.Declare tensor<1x7x1x3xsi32> = dense<[[[[0, 319, 0]], [[0, 320, 0]], [[0, 321, 0]], [[0, 322, 0]], [[0, 323, 0]], [[0, 324, 0]], [[0, 325, 0]]]]> : tensor<1x7x1x3xsi64>, [#const.ConvertElemType<si32>]
+    %cst = const.Declare tensor<1x7x1x3xsi32> = dense<[[[[0, 319, 0]], [[0, 320, 0]], [[0, 321, 0]], [[0, 322, 0]], [[0, 323, 0]], [[0, 324, 0]], [[0, 325, 0]]]]> : tensor<1x7x1x3xsi64>, [#const.CastElemType<si32>]
     %0 = IE.ScatterNDUpdate(%arg0, %cst, %arg1) : tensor<1x326x1xf16>, tensor<1x7x1x3xsi32>, tensor<1x7x1xf16> -> tensor<1x326x1xf16>
 
     return %0 : tensor<1x326x1xf16>
@@ -138,7 +138,7 @@ func.func @ConvertToSliceConcatElementsUpdateWithLeftSlice(%arg0:  tensor<1x326x
 
 // CHECK-LABEL: @NotConvertToSliceConcatElementsUpdateWithIllegalIndicesData
 func.func @NotConvertToSliceConcatElementsUpdateWithIllegalIndicesData(%arg0:  tensor<1x326x1xf16>, %arg1 : tensor<1x7x1xf16> ) -> tensor<1x326x1xf16>{
-    %cst = const.Declare tensor<1x7x1x3xsi32> = dense<[[[[0, 319, 0]], [[0, 320, 0]], [[0, 100, 0]], [[0, 322, 0]], [[0, 323, 0]], [[0, 324, 0]], [[0, 325, 0]]]]> : tensor<1x7x1x3xsi64>, [#const.ConvertElemType<si32>]
+    %cst = const.Declare tensor<1x7x1x3xsi32> = dense<[[[[0, 319, 0]], [[0, 320, 0]], [[0, 100, 0]], [[0, 322, 0]], [[0, 323, 0]], [[0, 324, 0]], [[0, 325, 0]]]]> : tensor<1x7x1x3xsi64>, [#const.CastElemType<si32>]
     %0 = IE.ScatterNDUpdate(%arg0, %cst, %arg1) : tensor<1x326x1xf16>, tensor<1x7x1x3xsi32>, tensor<1x7x1xf16> -> tensor<1x326x1xf16>
 
     return %0 : tensor<1x326x1xf16>

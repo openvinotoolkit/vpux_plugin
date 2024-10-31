@@ -138,9 +138,9 @@ def MakeOpsWithDistributedTensor : PassBase<"make-ops-with-distributed-tensor", 
 
     let options = [
         Option<
-            "enableExplicitDistributedTensorAttr", "enable-explicit-distributed-attr",
+            "enableExplicitDistributionInfoAttr", "enable-explicit-distributed-attr",
             "bool", "false",
-            "Flag to enable generating explicit DistributedTensorAttr for Distributed data type."
+            "Flag to enable generating explicit DistributionInfoAttr for Distributed data type."
         >
     ];
 
@@ -558,24 +558,6 @@ def CMXConcat : PassBase<"cmx-concat", "vpux::FunctionPass"> {
 }
 
 //
-// ResolvePWLPostOps
-//
-
-def ResolvePWLPostOps : PassBase<"resolve-pwl-post-ops", "vpux::FunctionPass"> {
-    let summary = "Resolve requirements for fused PWL post-ops";
-
-    let description = [{
-        Ensures the correct quantization ranges are used for fused PWL activation functions.
-    }];
-
-    let constructor = "vpux::VPU::createResolvePWLPostOpsPass()";
-
-    let dependentDialects = [
-        "vpux::VPU::VPUDialect"
-    ];
-}
-
-//
 // SplitGRUSequence
 //
 
@@ -685,9 +667,9 @@ def OptimizeSparsifyDesparsifyPairs : PassBase<"optimize-sparsify-desparsify-pai
 
     let options = [
         Option<
-            "sparsityProfile", "sparsity-profile",
+            "actSparsityProfile", "act-sparsity-profile",
             "std::string", [{""}],
-            "Flag to choose sparsity profile"
+            "Flag to choose activation sparsity profile"
         >
     ];
 }
@@ -1026,8 +1008,8 @@ def DetectionOutputDecomposition : PassBase<"detection-output-decomposition", "v
     ];
 }
 
-def AdjustLSTMCellInputsOrder : PassBase<"adjust-lstmcell-inputs-order", "vpux::FunctionPass"> {
-    let summary = "Reorder the weights for LSTMCell";
+def AdjustLSTMCellInputs : PassBase<"adjust-lstmcell-inputs", "vpux::FunctionPass"> {
+    let summary = "Reorder and reshape the weights for LSTMCell";
 
     let description = [{
         To satisfy the software kernel constraints necessary for performance,
@@ -1040,7 +1022,7 @@ def AdjustLSTMCellInputsOrder : PassBase<"adjust-lstmcell-inputs-order", "vpux::
         biases - 4D tensor of shape [1, 1, 4, hidden_size] and layout NCWH.
     }];
 
-    let constructor = "vpux::VPU::createAdjustLSTMCellInputsOrderPass()";
+    let constructor = "vpux::VPU::createAdjustLSTMCellInputsPass()";
 
     let dependentDialects = [
         "vpux::VPU::VPUDialect"
@@ -1048,56 +1030,18 @@ def AdjustLSTMCellInputsOrder : PassBase<"adjust-lstmcell-inputs-order", "vpux::
 }
 
 //
-// ComputeInterpolateCoordinates
+// Tile LSTMSequence
 //
 
-def ComputeInterpolateCoordinates : PassBase<"compute-interpolate-coordinates", "vpux::FunctionPass"> {
-    let summary = "Compute interpolate coordinates and lambdas for the innermost axis.";
+def TileLSTMSequence : PassBase<"tile-lstm-sequence", "vpux::FunctionPass"> {
+    let summary = "Tile the LSTMSequenceOp sequentially";
 
     let description = [{
-        The interpolate coordinates and lambdas coefficients are computed at
-        compile time to improve performance and simplify the kernel.
-
-        This computation is only done for the innermost axis because this is
-        where the kernel's main loop operates and where the most complexity
-        lies. Without this pass, the kernel would need to calculate these
-        constants multiple times to avoid excessive stack usage. Calculating
-        these constants for other axes would make the multi-cluster and
-        multi-shave tiling more restrictive.
-
-        This pass has to run after the Interpolate operation is tiled to fit
-        into CMX and before the operation is wrapped into NCEClusterTiling.
-        Additionally, the interpolate operation must ensure that the constants
-        calculated by this pass will also fit into CMX.
-
-        The coordinates are byte offsets in the tiled input. The lambdas
-        contain two interleaved values for each coordinate.
-
+        Tile the LSTMSequenceOp sequentially, creating a chain of
+        LSTMSequenceOps split on the seq_length dimension.
     }];
 
-    let constructor = "vpux::VPU::createComputeInterpolateCoordinatesPass()";
-
-    let dependentDialects = [
-        "vpux::VPU::VPUDialect"
-    ];
-}
-
-//
-// SetupPPEPass
-//
-
-def SetupPPEPass : PassBase<"setup-ppe", "vpux::FunctionPass"> {
-    let summary = "Sets activation function for NPU37XX and NPU40XX PPE based on clamp range";
-
-    let description = [{
-        Ensures the correct activation function and clamping is used for PPE.
-        Namely:
-        * When ReLU shift value is non-zero, set leaky ReLU.
-        * Otherwise, set NOOP.
-        * Deduce clamping via output element type.
-    }];
-
-    let constructor = "vpux::VPU::createSetupPPEPass()";
+    let constructor = "vpux::VPU::createTileLSTMSequencePass()";
 
     let dependentDialects = [
         "vpux::VPU::VPUDialect"
@@ -1180,9 +1124,19 @@ def SetupPipelineOptions : PassBase<"setup-pipeline-options", "vpux::ModulePass"
 
     let options = [
         Option<
+            "archOpt", "vpu-arch",
+            "std::string", "",
+            "VPU architecture to compile for"
+        >,
+        Option<
             "allowCustomValues", "allow-custom-values",
             "bool", "",
             "[Optional] Allows keep predefined values in IR"
+        >,
+        Option<
+            "ppeVersionOpt", "ppe-version",
+            "std::string", [{"Auto"}],
+            "Specifies the compiler's target PPE hardware version ['Auto', 'IntPPE', 'FpPPE']. When set to 'Auto', the latest PPE version available on the target architecture is picked."
         >
     ];
 
@@ -1228,6 +1182,32 @@ def SetupPerBarrierVariantConstraint : PassBase<"setup-per-barrier-variant-const
 }
 
 //
+// SetupMaxKernelSize
+//
+
+def SetupMaxKernelSize : PassBase<"setup-max-kernel-size", "vpux::ModulePass"> {
+    let summary = "Set maximum kernel size allowed by arch in the model/IR";
+
+    let description = [{
+        Uses the PipelineOptionsOp structure from the IR so the constant could be exposed globally
+    }];
+
+    let constructor = "vpux::VPU::createSetupMaxKernelSizePass()";
+
+    let options = [
+        Option<
+            "allowCustomValues", "allow-custom-values",
+            "bool", "",
+            "[Optional] Allows keep predefined values in IR"
+        >
+    ];
+
+    let dependentDialects = [
+        "vpux::VPU::VPUDialect"
+    ];
+}
+
+//
 // SetupChannelsAutoPadding
 //
 
@@ -1245,6 +1225,11 @@ def SetupChannelsAutoPadding : PassBase<"setup-channels-auto-padding", "vpux::Mo
             "enableAutoPaddingODU", "enable-auto-padding-odu",
             "bool", "false",
             "[Optional] Set auto padding for ODU to true/false"
+        >,
+        Option<
+            "enableAutoPaddingIDU", "enable-auto-padding-idu",
+            "bool", "false",
+            "[Optional] Set auto padding for IDU to true/false"
         >,
         Option<
             "allowCustomValues", "allow-custom-values",
@@ -1298,8 +1283,8 @@ def ConvertOpToDMAForPerformantExecution : PassBase<"convert-op-to-dma-for-perfo
 
     let description = [{
         If op can be done with DMA efficiently this pass will, convert the op to DMA related op.
-        Only added to NPU40XX+ pipelines as only op converted via this pass is Gather and is only supported
-        on NPU40XX+ pipelines.
+        Only added to VPU40XX+ pipelines as only op converted via this pass is Gather and is only supported
+        on VPU40XX+ pipelines.
 
         Currently GatherOp -> GatherDMAOp is supported ( on NPU40XX and newer architectures)
         Gather -> Reshape + Convert + (Optional) Copy + GatherDMA + Reshape + Copy
@@ -1386,6 +1371,64 @@ def AddExplicitPaddingBeforeNCEPermute : PassBase<"add-explicit-padding-before-n
     }];
 
     let constructor = "vpux::VPU::createAddExplicitPaddingBeforeNCEPermutePass()";
+
+    let dependentDialects = [
+        "vpux::VPU::VPUDialect"
+    ];
+}
+
+def LegalizeDynamicShapeConcatForSWLayers : PassBase<"legalize-dynamic-shape-concat-for-sw-layers", "vpux::FunctionPass"> {
+    let summary = "Unroll a `VPU.Concat` with more than two dynamic operands.";
+
+    let description = [{
+        Express `VPU.Concat` with more then two dynamic inputs as a chain of concatenations.
+        For example:
+        ```
+            %0 = VPU.Concat(%arg0, %arg1, %arg2) {static_offsets = [[0, 0, 0, 0], [0, 2, 0, 0], [0, 4, 0, 0]]}
+        ```
+        becomes
+        ```
+            %0 = VPU.Concat(%arg0, %arg1) {static_offsets = [[0, 0, 0, 0], [0, 2, 0, 0]]}
+            %1 = VPU.Concat(%0, %arg2) {static_offsets = [[0, 0, 0, 0], [0, 4, 0, 0]]}
+        ```
+        This transformation is necessary because a concatenation with dynamic inputs
+        is executed as an activation shave kernel. The kernel expects only two inputs.
+        This pass expresses a `VPU.Concat` that cannon be lowered into the kernel with
+        a chain of concatenations that can be lowered.
+    }];
+
+    let constructor = "vpux::VPU::createLegalizeDynamicShapeConcatForSWLayersPass()";
+
+    let dependentDialects = [
+        "vpux::VPU::VPUDialect"
+    ];
+}
+
+//
+// SetupEnableFP16CompressedConv
+//
+
+def SetupEnableFP16CompressedConv : PassBase<"setup-enable-fp16-compressed-conv", "vpux::ModulePass"> {
+    let summary = "Enable fp16 compressed convolution and store it in the model/IR";
+
+    let description = [{
+        Uses the PipelineOptionsOp structure from the IR so the options could be exposed globally
+    }];
+
+    let constructor = "vpux::VPU::createSetupEnableFP16CompressedConvPass()";
+
+    let options = [
+        Option<
+            "enableFP16CompressedConvolution", "enable-fp16-compressed-convolution",
+            "bool", "false",
+            "Enable FP16 Compressed convolution op"
+        >,
+        Option<
+            "allowCustomValues", "allow-custom-values",
+            "bool", "",
+            "[Optional] Allows keep predefined values in IR"
+        >
+    ];
 
     let dependentDialects = [
         "vpux::VPU::VPUDialect"

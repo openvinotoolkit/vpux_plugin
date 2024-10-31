@@ -43,9 +43,6 @@ mlir::LogicalResult verifyAndBroadcastInput(mlir::Location loc, mlir::Value& inp
         }
         while (operation && mlir::isa<IE::ReshapeOp, IE::FakeQuantizeOp, Const::DeclareOp>(operation)) {
             if (mlir::isa<IE::ReshapeOp, IE::FakeQuantizeOp>(operation)) {
-                if (!operation->hasOneUse()) {
-                    return mlir::failure();
-                }
                 opsVec.insert(opsVec.begin(), operation);
                 operation = operation->getOperand(0).getDefiningOp();
                 continue;  // Continue searching for Const::DeclareOp
@@ -62,13 +59,13 @@ mlir::LogicalResult verifyAndBroadcastInput(mlir::Location loc, mlir::Value& inp
             return mlir::failure();
         }
 
-        Const::ContentAttr dataAttr = input2Const.getContentAttr().broadcast(C, outputShape[C]);
+        Const::ContentAttr dataAttr = input2Const.transformContentAttr().broadcast(C, outputShape[C]).get();
 
         if (dataAttr == nullptr) {
             return mlir::failure();
         }
 
-        auto dataConstOp = rewriter.create<Const::DeclareOp>(loc, dataAttr.getType(), dataAttr);
+        auto dataConstOp = rewriter.create<Const::DeclareOp>(loc, dataAttr.getType(), std::move(dataAttr));
 
         if (opsVec.size() == 0) {
             // [Const]->[Multiply/Add] case
@@ -121,10 +118,7 @@ mlir::LogicalResult ConvertBiasToScaleShift<BiasTypeOp>::matchAndRewrite(BiasTyp
         return mlir::failure();
     }
 
-    const auto lhsType = biasOp.getInput1().getType().template cast<vpux::NDTypeInterface>();
-    const auto outShapeRes = biasOp.getOutput().getType().template cast<vpux::NDTypeInterface>();
-
-    bool lhsIsActivation = (lhsType == outShapeRes);
+    bool lhsIsActivation = mlir::failed(IE::getConstParentOp(biasOp.getInput1()));
     mlir::Value activationInput = lhsIsActivation ? biasOp.getInput1() : biasOp.getInput2();
     mlir::Value biasInput = lhsIsActivation ? biasOp.getInput2() : biasOp.getInput1();
 
@@ -147,6 +141,7 @@ mlir::LogicalResult ConvertBiasToScaleShift<BiasTypeOp>::matchAndRewrite(BiasTyp
         return mlir::failure();
     }
 
+    findBiasConst = IE::getConstParentOp(biasInput);
     auto biasConst = findBiasConst.value();
 
     // Convert:
@@ -168,8 +163,9 @@ mlir::LogicalResult ConvertBiasToScaleShift<BiasTypeOp>::matchAndRewrite(BiasTyp
     //              |
 
     if (mlir::isa<IE::NegativeOp>(biasInput.getDefiningOp()) || mlir::isa<IE::SubtractOp>(biasOp)) {
-        const auto negativeConstAttr = biasConst.getContentAttr().rescale(-1.0);
-        biasInput = rewriter.create<Const::DeclareOp>(biasConst->getLoc(), biasConst.getType(), negativeConstAttr)
+        auto negativeConstAttr = biasConst.transformContentAttr().rescale(-1.0).get();
+        biasInput = rewriter.create<Const::DeclareOp>(takeOpLoc(biasOp, "bias_in"), biasConst.getType(),
+                                                      std::move(negativeConstAttr))
                             .getOutput();
     }
 

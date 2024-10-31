@@ -27,6 +27,19 @@ void buildReadAfterWriteACTDMATest(const nb::TestCaseJsonDescriptor& testDesc, m
     const auto iterationCount = testDesc.getIterationCount();
     const auto cluster = testDesc.getClusterNumber();
 
+    mlir::PassManager pmBuilderInit(module->getName(), mlir::OpPassManager::Nesting::Implicit);
+    std::optional<int> numTiles = std::nullopt;
+    if (testDesc.getArchitecture() == vpux::VPU::ArchKind::NPU40XX) {
+        // E#77729
+        numTiles = 2;
+    }
+    auto initCompilerOptions = VPU::InitCompilerOptions(testDesc.getArchitecture(), VPU::CompilationMode::DefaultHW);
+    initCompilerOptions.setNumberOfDPUGroups(numTiles);
+
+    VPU::buildInitCompilerPipeline(pmBuilderInit, initCompilerOptions, log);
+
+    VPUX_THROW_UNLESS(mlir::succeeded(pmBuilderInit.run(module)), "Init compilation failed");
+
     const SmallVector<std::int64_t> inputShape{input.shape.begin(), input.shape.end()};
     const SmallVector<std::int64_t> outputShape{output.shape.begin(), output.shape.end()};
     const SmallVector<std::int64_t> overwritingShape{1, 1, 1, 1};
@@ -120,19 +133,6 @@ void buildReadAfterWriteACTDMATest(const nb::TestCaseJsonDescriptor& testDesc, m
                                           outputCMX.getOperation()->getResult(0), functionOutput, 0);
 
     functionBuilder.create<mlir::func::ReturnOp>(loc, mlir::ValueRange{functionOutput});
-
-    mlir::PassManager pm(module->getName(), mlir::OpPassManager::Nesting::Implicit);
-    std::optional<int> numTiles = std::nullopt;
-    if (testDesc.getArchitecture() == vpux::VPU::ArchKind::NPU40XX) {
-        // E#77729
-        numTiles = 2;
-    }
-    auto initCompilerOptions = VPU::InitCompilerOptions(testDesc.getArchitecture(), VPU::CompilationMode::DefaultHW);
-    initCompilerOptions.setNumberOfDPUGroups(numTiles);
-
-    VPU::buildInitCompilerPipeline(pm, initCompilerOptions, log);
-
-    VPUX_THROW_UNLESS(mlir::succeeded(pm.run(module)), "Compilation failed");
 
     buildCNNOp(builder, function.getName(),
                {getTensorType(ShapeRef(inputShape), inputType, vpux::DimsOrder::NHWC, nullptr)},

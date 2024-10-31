@@ -347,8 +347,7 @@ llvm::DenseMap<VPUMI40XX::ConfigureBarrierOp, int64_t> updateBarrierDependencies
 
 class BarrierTopologicalMappingPass : public VPUMI40XX::BarrierTopologicalMappingBase<BarrierTopologicalMappingPass> {
 public:
-    explicit BarrierTopologicalMappingPass(const int barrierThreshold, Logger log)
-            : _barrierThreshold(static_cast<size_t>(barrierThreshold)) {
+    explicit BarrierTopologicalMappingPass(Logger log) {
         Base::initLogger(std::move(log), Base::getArgumentName());
     }
 
@@ -361,7 +360,6 @@ private:
      * we must switch to non-WLM flow. In case if we skip transitive reduction, we will get stuck in add_enqueues pass.
      * E125659
      */
-    size_t _barrierThreshold;
 };
 
 //
@@ -376,12 +374,8 @@ void BarrierTopologicalMappingPass::safeRunOnFunc() {
 
     auto barriers = vpux::to_small_vector(netFunc.getOps<VPUMI40XX::ConfigureBarrierOp>());
 
-    _log.trace("barriers count: {0}, mpi barriers count: {1}, barriers count threshold: {2}", barriers.size(),
-               mpi.getBarrierCount(), _barrierThreshold);
+    _log.trace("barriers count: {0}, mpi barriers count: {1}", barriers.size(), mpi.getBarrierCount());
     VPUX_THROW_WHEN(barriers.size() != mpi.getBarrierCount(), "Number of barriers is not equal to barrier count");
-    VPUX_THROW_TYPED_WHEN(WlmRollbackException, barriers.size() > _barrierThreshold,
-                          "Number of barriers {0} is above threshold {1} which suitable for WLM optimization",
-                          barriers.size(), _barrierThreshold);
 
     //
     // We should consider two types of dependencies here:
@@ -484,7 +478,6 @@ void BarrierTopologicalMappingPass::safeRunOnFunc() {
 // createBarrierTopologicalMappingPass
 //
 
-std::unique_ptr<mlir::Pass> vpux::VPUMI40XX::createBarrierTopologicalMappingPass(const int barrierThreshold,
-                                                                                 Logger log) {
-    return std::make_unique<BarrierTopologicalMappingPass>(barrierThreshold, log);
+std::unique_ptr<mlir::Pass> vpux::VPUMI40XX::createBarrierTopologicalMappingPass(Logger log) {
+    return std::make_unique<BarrierTopologicalMappingPass>(log);
 }

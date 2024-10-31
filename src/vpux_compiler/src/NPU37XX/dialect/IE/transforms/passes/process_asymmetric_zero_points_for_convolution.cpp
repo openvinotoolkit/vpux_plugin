@@ -152,10 +152,12 @@ mlir::LogicalResult ZeroPointWithConvolution::matchAndRewrite(IE::ConvolutionOp 
     const double diff = (zeroPoints.front() + int8Min) * scales.front();
     auto insertionPointBackup = rewriter.saveInsertionPoint();
     rewriter.setInsertionPointAfter(oHiConst);
-    auto newOutLoContent = oLoConst.getContentAttr().add(diff);
-    auto newLoInput = rewriter.create<Const::DeclareOp>(oLoConst.getLoc(), oLoConst.getType(), newOutLoContent);
-    auto newOutHiContent = oHiConst.getContentAttr().add(diff);
-    auto newHiInput = rewriter.create<Const::DeclareOp>(oHiConst.getLoc(), oHiConst.getType(), newOutHiContent);
+    auto newOutLoContent = oLoConst.transformContentAttr().add(diff).get();
+    auto newLoInput =
+            rewriter.create<Const::DeclareOp>(oLoConst.getLoc(), oLoConst.getType(), std::move(newOutLoContent));
+    auto newOutHiContent = oHiConst.transformContentAttr().add(diff).get();
+    auto newHiInput =
+            rewriter.create<Const::DeclareOp>(oHiConst.getLoc(), oHiConst.getType(), std::move(newOutHiContent));
 
     rewriter.replaceOp(oLoConst, newLoInput);
     rewriter.replaceOp(oHiConst, newHiInput);
@@ -189,11 +191,13 @@ mlir::LogicalResult ZeroPointWithConvolution::matchAndRewrite(IE::ConvolutionOp 
             convOp.getDilationsAttr(),
             /*postOp=*/nullptr,
             /*clamp=*/nullptr,
-            /*static_scale=*/nullptr);
+            /*static_scale=*/nullptr,
+            /*output_channels=*/nullptr,
+            /*input_channels=*/nullptr);
     auto sub = rewriter.create<IE::AddOp>(
             appendLoc(convOp.getLoc(), "new_add"), origConvClone->getResult(0), newConv->getResult(0),
             IE::AutoBroadcastTypeAttr::get(rewriter.getContext(), IE::AutoBroadcastType::NONE_OR_EXPLICIT), nullptr,
-            nullptr);
+            nullptr, nullptr, nullptr);
     rewriter.replaceOp(convOp, sub.getOutput());
     return mlir::success();
 }

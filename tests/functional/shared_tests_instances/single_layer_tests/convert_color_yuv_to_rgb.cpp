@@ -17,53 +17,47 @@ namespace test {
 class ConvertColorNV12LayerTestCommon : public ConvertColorNV12LayerTest, virtual public VpuOv2LayerTest {};
 class ConvertColorI420LayerTestCommon : public ConvertColorI420LayerTest, virtual public VpuOv2LayerTest {};
 
-class ConvertColorNV12LayerTest_NPU3720 : public ConvertColorNV12LayerTestCommon {};
-class ConvertColorI420LayerTest_NPU3720 : public ConvertColorI420LayerTestCommon {};
-
-class ConvertColorNV12LayerTest_NPU4000 : public ConvertColorNV12LayerTestCommon {};
-class ConvertColorI420LayerTest_NPU4000 : public ConvertColorI420LayerTestCommon {};
-
-class ConvertColorNV12M2ILayerTest_NPU4000 : public ConvertColorNV12LayerTestCommon {
+class ConvertColorNV12M2ILayerTest : public ConvertColorNV12LayerTestCommon {
     void configure_model() override {
         configuration[ov::intel_npu::compilation_mode_params.name()] = "enable-m2i=true";
     }
 };
-class ConvertColorI420M2ILayerTest_NPU4000 : public ConvertColorI420LayerTestCommon {
+class ConvertColorI420M2ILayerTest : public ConvertColorI420LayerTestCommon {
     void configure_model() override {
         configuration[ov::intel_npu::compilation_mode_params.name()] = "enable-m2i=true";
     }
 };
 
 // NPU3720
-TEST_P(ConvertColorNV12LayerTest_NPU3720, SW) {
+TEST_P(ConvertColorNV12LayerTestCommon, NPU3720_SW) {
     setReferenceSoftwareMode();
     run(Platform::NPU3720);
 }
 
-TEST_P(ConvertColorI420LayerTest_NPU3720, SW) {
+TEST_P(ConvertColorI420LayerTestCommon, NPU3720_SW) {
     setReferenceSoftwareMode();
     run(Platform::NPU3720);
 }
 
 // NPU4000
-TEST_P(ConvertColorNV12LayerTest_NPU4000, SW) {
+TEST_P(ConvertColorNV12LayerTestCommon, NPU4000_SW) {
     setReferenceSoftwareMode();
     run(Platform::NPU4000);
 }
 
-TEST_P(ConvertColorI420LayerTest_NPU4000, SW) {
+TEST_P(ConvertColorI420LayerTestCommon, NPU4000_SW) {
     setReferenceSoftwareMode();
     run(Platform::NPU4000);
 }
 
 // NPU4000 M2I
-TEST_P(ConvertColorNV12M2ILayerTest_NPU4000, HW) {
+TEST_P(ConvertColorNV12M2ILayerTest, NPU4000_HW) {
     abs_threshold = 1.0f;
     setDefaultHardwareMode();
     run(Platform::NPU4000);
 }
 
-TEST_P(ConvertColorI420M2ILayerTest_NPU4000, HW) {
+TEST_P(ConvertColorI420M2ILayerTest, NPU4000_HW) {
     abs_threshold = 1.0f;
     setDefaultHardwareMode();
     run(Platform::NPU4000);
@@ -111,7 +105,7 @@ ov::element::Type dTypes[] = {
         ov::element::f16,
 };
 
-// Cases for 3720/4000
+// Cases for 3720/4000/5010
 auto inputShapeTrueI420 = generate_input_static_shapes(inShapes, I420, true);
 auto inputShapeFalseI420 = generate_input_static_shapes(inShapes, I420, false);
 auto inputShapeTrueNV12 = generate_input_static_shapes(inShapes, NV12, true);
@@ -147,6 +141,7 @@ const auto params_falseNV12 =
 // Case for 4000 M2I
 auto inputShapeM2ITrueI420 = generate_input_static_shapes(inShapeM2I, I420, true);
 auto inputShapeM2ITrueNV12 = generate_input_static_shapes(inShapeM2I, NV12, true);
+
 // I420
 const auto paramsM2II420 =
         testing::Combine(testing::ValuesIn(static_shapes_to_test_representation(inputShapeM2ITrueI420)),  // QVGA
@@ -162,33 +157,21 @@ const auto paramsM2INV12 =
                          testing::Values(true),  // is_single_plane
                          testing::Values(DEVICE_NPU));
 
-// NPU3720
-INSTANTIATE_TEST_SUITE_P(smoke_ConvertColorNV12_true, ConvertColorNV12LayerTest_NPU3720, params_trueNV12,
-                         ConvertColorNV12LayerTest_NPU3720::getTestCaseName);
-INSTANTIATE_TEST_SUITE_P(smoke_ConvertColorNV12_false, ConvertColorNV12LayerTest_NPU3720, params_falseNV12,
-                         ConvertColorNV12LayerTest_NPU3720::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_ConvertColorNV12_true, ConvertColorNV12LayerTestCommon, params_trueNV12,
+                         ConvertColorNV12LayerTestCommon::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_ConvertColorNV12_false, ConvertColorNV12LayerTestCommon, params_falseNV12,
+                         ConvertColorNV12LayerTestCommon::getTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(smoke_ConvertColorI420_true, ConvertColorI420LayerTest_NPU3720, params_trueI420,
-                         ConvertColorI420LayerTest_NPU3720::getTestCaseName);
-INSTANTIATE_TEST_SUITE_P(smoke_ConvertColorI420_false, ConvertColorI420LayerTest_NPU3720, params_falseI420,
-                         ConvertColorI420LayerTest_NPU3720::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_ConvertColorI420_true, ConvertColorI420LayerTestCommon, params_trueI420,
+                         ConvertColorI420LayerTestCommon::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_ConvertColorI420_false, ConvertColorI420LayerTestCommon, params_falseI420,
+                         ConvertColorI420LayerTestCommon::getTestCaseName);
 
-// NPU4000
-INSTANTIATE_TEST_SUITE_P(smoke_ConvertColorNV12_true, ConvertColorNV12LayerTest_NPU4000, params_trueNV12,
-                         ConvertColorNV12LayerTest_NPU4000::getTestCaseName);
-INSTANTIATE_TEST_SUITE_P(smoke_ConvertColorNV12_false, ConvertColorNV12LayerTest_NPU4000, params_falseNV12,
-                         ConvertColorNV12LayerTest_NPU4000::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_ConvertColorI420_true, ConvertColorI420LayerTest_NPU4000, params_trueI420,
-                         ConvertColorI420LayerTest_NPU4000::getTestCaseName);
-INSTANTIATE_TEST_SUITE_P(smoke_ConvertColorI420_false, ConvertColorI420LayerTest_NPU4000, params_falseI420,
-                         ConvertColorI420LayerTest_NPU4000::getTestCaseName);
-
-// NPU4000 - M2I
+// M2I
 // [Tracking number: E#107046]
-INSTANTIATE_TEST_SUITE_P(DISABLED_TMP_smoke_ConvertColorNV12_M2I, ConvertColorNV12M2ILayerTest_NPU4000, paramsM2INV12,
-                         ConvertColorNV12M2ILayerTest_NPU4000::getTestCaseName);
-INSTANTIATE_TEST_SUITE_P(DISABLED_TMP_smoke_ConvertColorI420_M2I, ConvertColorI420M2ILayerTest_NPU4000, paramsM2II420,
-                         ConvertColorI420M2ILayerTest_NPU4000::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(DISABLED_TMP_smoke_ConvertColorNV12_M2I, ConvertColorNV12M2ILayerTest, paramsM2INV12,
+                         ConvertColorNV12M2ILayerTest::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(DISABLED_TMP_smoke_ConvertColorI420_M2I, ConvertColorI420M2ILayerTest, paramsM2II420,
+                         ConvertColorI420M2ILayerTest::getTestCaseName);
 
 }  // namespace

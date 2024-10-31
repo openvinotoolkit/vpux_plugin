@@ -14,7 +14,7 @@ using namespace npu37xx;
 // nn_public structs which describe hw descriptors for different dialects defined in different headers but have the same
 // names (VpuDMATask,VpuDPUInvariant,VpuDPUInvariant,VpuBarrierCountConfig,VpuActKernelInvocation,VpuActKernelRange) and
 // are put into the same namespace. It cause problems with gtest lib because NPUReg37XX_RegisterTest class inherit
-// TestWithParam class which is parametrized by tested struct from nn_public headers twice:first time in NPU40XX related
+// TestWithParam class which is parametrized by tested struct from nn_public headers twice:first time in VPU40XX related
 // tests, second time in NPUReg37XX related tests. Gtest lib complaining in runtime about duplicate parameterized test
 // name That's why we re-define tested hw descriptor as new struct - it helps us to avoid inner gtest conflicts with the
 // test for the same descriptor for different dialects
@@ -57,5 +57,5 @@ std::vector<std::pair<MappedRegValues, Npu37XXBarrierCfg>> barrierFieldSetNPUReg
          CREATE_HW_BARRIER_DESC(barrier.real_id_, 0xFF)},
 };
 
-INSTANTIATE_TEST_CASE_P(NPUReg37XX_MappedRegs, NPUReg37XX_NpuBarrierCountConfigTest,
-                        testing::ValuesIn(barrierFieldSetNPUReg37XX));
+INSTANTIATE_TEST_SUITE_P(NPUReg37XX_MappedRegs, NPUReg37XX_NpuBarrierCountConfigTest,
+                         testing::ValuesIn(barrierFieldSetNPUReg37XX));

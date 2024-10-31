@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation
+// Copyright (C) 2022-2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -13,34 +13,29 @@ using namespace ov::test::utils;
 namespace ov {
 namespace test {
 
-class LrnLayerTestCommon : public LrnLayerTest, virtual public VpuOv2LayerTest {};
-class LrnLayerTest_FP16_NPU3720 : public LrnLayerTestCommon {};
-class LrnLayerTest_FP16_NPU4000 : public LrnLayerTestCommon {};
-class LrnLayerTest_SW_FP32 : public LrnLayerTestCommon {
+class LrnLayerTestCommon_FP16 : public LrnLayerTest, virtual public VpuOv2LayerTest {};
+class LrnLayerTestCommon_FP32 : public LrnLayerTestCommon_FP16 {
     void configure_model() override {
         configuration[ov::intel_npu::compilation_mode_params.name()] = "convert-precision-to-fp16=false";
     }
 };
-class LrnLayerTest_FP32_NPU3720 : public LrnLayerTest_SW_FP32 {};
-class LrnLayerTest_FP32_NPU4000 : public LrnLayerTest_SW_FP32 {};
 
-// FP16
-TEST_P(LrnLayerTest_FP16_NPU3720, HW) {
+TEST_P(LrnLayerTestCommon_FP16, NPU3720_HW) {
     setDefaultHardwareMode();
     run(Platform::NPU3720);
 }
 
-TEST_P(LrnLayerTest_FP16_NPU4000, SW) {
+TEST_P(LrnLayerTestCommon_FP16, NPU4000_SW) {
     setReferenceSoftwareMode();
     run(Platform::NPU4000);
 }
 
-TEST_P(LrnLayerTest_FP32_NPU3720, SW) {
+TEST_P(LrnLayerTestCommon_FP32, NPU3720_SW) {
     setReferenceSoftwareMode();
     run(Platform::NPU3720);
 }
 
-TEST_P(LrnLayerTest_FP32_NPU4000, SW) {
+TEST_P(LrnLayerTestCommon_FP32, NPU4000_SW) {
     setReferenceSoftwareMode();
     run(Platform::NPU4000);
 }
@@ -59,9 +54,6 @@ const double beta = 2;
 const double bias = 1.0;
 const size_t size = 5;
 
-//
-// NPU3720/4000
-//
 const std::vector<std::vector<int64_t>> axes = {{1}, {2}, {1, 2}, {2, 3}, {1, 2, 3}};
 
 const auto lrnParams_FP16 = ::testing::Combine(
@@ -92,27 +84,11 @@ const auto lrnParams_FP32 = ::testing::Combine(::testing::Values(9.9e-05),      
                                                        std::vector<std::vector<ov::Shape>>({{{1, 32, 56, 56}}}))),
                                                ::testing::Values(DEVICE_NPU));
 
-//
-// NPU3720 Instantiation
-// FP16 HW
-
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_LrnCheck, LrnLayerTest_FP16_NPU3720, lrnParams_FP16,
-                         LrnLayerTest_FP16_NPU3720::getTestCaseName);
-
-//
-// NPU4000 Instantiation
-// FP16 SW
-
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_LrnGooglenetV1, LrnLayerTest_FP16_NPU4000, lrnGooglenetV1Params_FP16,
-                         LrnLayerTest_FP16_NPU4000::getTestCaseName);
-
-//
-// NPU3720/4000 Instantiation
-// FP32 SW
-
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_LrnGooglenetV1_FP32, LrnLayerTest_FP32_NPU3720, lrnParams_FP32,
-                         LrnLayerTest_FP32_NPU3720::getTestCaseName);
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_LrnGooglenetV1_FP32, LrnLayerTest_FP32_NPU4000, lrnParams_FP32,
-                         LrnLayerTest_FP32_NPU4000::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_LrnCheck, LrnLayerTestCommon_FP16, lrnParams_FP16,
+                         LrnLayerTestCommon_FP16::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_LrnGooglenetV1, LrnLayerTestCommon_FP16, lrnGooglenetV1Params_FP16,
+                         LrnLayerTestCommon_FP16::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_LrnGooglenetV1_FP32, LrnLayerTestCommon_FP32, lrnParams_FP32,
+                         LrnLayerTestCommon_FP32::getTestCaseName);
 
 }  // namespace

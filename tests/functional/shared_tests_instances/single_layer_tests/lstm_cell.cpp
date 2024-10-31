@@ -1,4 +1,4 @@
-// Copyright (C) 2018-2023 Intel Corporation
+// Copyright (C) 2018-2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -14,16 +14,14 @@ namespace ov {
 namespace test {
 
 class LSTMCellLayerTestCommon : public LSTMCellTest, virtual public VpuOv2LayerTest {};
-class LSTMCellLayerTest_NPU3720 : public LSTMCellLayerTestCommon {};
-class LSTMCellLayerTest_NPU4000 : public LSTMCellLayerTestCommon {};
 
-TEST_P(LSTMCellLayerTest_NPU3720, HW) {
+TEST_P(LSTMCellLayerTestCommon, NPU3720_HW) {
     rel_threshold = 0.06;
     setDefaultHardwareMode();
     run(Platform::NPU3720);
 }
 
-TEST_P(LSTMCellLayerTest_NPU4000, HW) {
+TEST_P(LSTMCellLayerTestCommon, NPU4000_HW) {
     rel_threshold = 0.06;
     setDefaultHardwareMode();
     run(Platform::NPU4000);
@@ -40,7 +38,6 @@ std::vector<std::vector<std::string>> activations = {{"sigmoid", "tanh", "tanh"}
 std::vector<float> clip{0.f};
 std::vector<ov::element::Type> modelTypes = {ov::element::f16};
 
-// NPU3720/4000 tests
 std::vector<size_t> batch{1};
 std::vector<size_t> hidden_size{4, 64};
 std::vector<size_t> input_size{6, 24};
@@ -59,17 +56,9 @@ const auto lstmCellPrecommitConfig = ::testing::Combine(
         ::testing::Values(InputLayerType::CONSTANT), ::testing::Values(InputLayerType::CONSTANT),
         ::testing::Values(InputLayerType::CONSTANT), ::testing::ValuesIn(modelTypes), ::testing::Values(DEVICE_NPU));
 
-// ------ NPU3720 ------
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_LSTMCellCommon, LSTMCellLayerTestCommon, lstmCellPrecommitConfig,
+                         LSTMCellTest::getTestCaseName);
 
-INSTANTIATE_TEST_CASE_P(smoke_precommit_LSTMCellCommon, LSTMCellLayerTest_NPU3720, lstmCellPrecommitConfig,
-                        LSTMCellTest::getTestCaseName);
-
-INSTANTIATE_TEST_CASE_P(smoke_LSTMCellCommon, LSTMCellLayerTest_NPU3720, lstmCellConfig, LSTMCellTest::getTestCaseName);
-
-// ------ NPU4000 ------
-
-INSTANTIATE_TEST_CASE_P(smoke_precommit_LSTMCellCommon, LSTMCellLayerTest_NPU4000, lstmCellPrecommitConfig,
-                        LSTMCellTest::getTestCaseName);
-INSTANTIATE_TEST_CASE_P(smoke_LSTMCellCommon, LSTMCellLayerTest_NPU4000, lstmCellConfig, LSTMCellTest::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_LSTMCellCommon, LSTMCellLayerTestCommon, lstmCellConfig, LSTMCellTest::getTestCaseName);
 
 }  // namespace

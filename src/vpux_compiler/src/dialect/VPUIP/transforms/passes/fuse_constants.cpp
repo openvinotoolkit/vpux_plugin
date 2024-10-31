@@ -162,20 +162,6 @@ mlir::LogicalResult getInputsInFusingOrder(VPUIP::NCEClusterTaskOp& nceOp,
             return matchFailed(rewriter, nceOp, "The layer weights sparsity map is not constant");
         }
     }
-
-    if (nceOp.getActivationWindow() != nullptr) {
-        resetTemporaries();
-        vpux::ConstantFusing::getCopyAndDeclareOpForFusion(nceOp.getActivationWindow(), copyOp, declareOp,
-                                                           allocDistributed);
-        if (declareOp != nullptr && copyOp != nullptr) {
-            if (!copyOp->hasOneUse()) {
-                return matchFailed(rewriter, nceOp, "Weights activation window copy op has more than one use");
-            }
-
-            constantVector[3] = {copyOp, declareOp};
-            tilingVector[3] = allocDistributed;
-        }
-    }
     return mlir::success();
 }
 
@@ -237,18 +223,20 @@ mlir::LogicalResult FuseConstants::matchAndRewrite(VPUIP::NCEClusterTaskOp nceOp
     const auto newLoc = appendLoc(nceOp.getLoc(), "_fused_constant");
     auto newContentAttr = Const::ContentAttr::get(fakeBaseContent);
     auto tensorType = getFusedConstantType(constantVector, rewriter);
-    auto const weightsTable = constantVector[0].second != nullptr ? constantVector[0].second.getContentAttr() : nullptr;
-    auto const weights = constantVector[1].second != nullptr ? constantVector[1].second.getContentAttr() : nullptr;
-    auto const sparsity = constantVector[2].second != nullptr ? constantVector[2].second.getContentAttr() : nullptr;
-    auto const activations = constantVector[3].second != nullptr ? constantVector[3].second.getContentAttr() : nullptr;
-    auto fusedContentAttr = newContentAttr.fuse(tensorType, weightsTable, weights, sparsity, activations);
+    auto const weightsTable =
+            constantVector[0].second != nullptr ? constantVector[0].second.getContentAttr() : Const::ContentAttr{};
+    auto const weights =
+            constantVector[1].second != nullptr ? constantVector[1].second.getContentAttr() : Const::ContentAttr{};
+    auto const sparsity =
+            constantVector[2].second != nullptr ? constantVector[2].second.getContentAttr() : Const::ContentAttr{};
+    auto fusedContentAttr = newContentAttr.transform().fuse(tensorType, weightsTable, weights, sparsity, {}).get();
     // 2. Create fused constant of u8 type with size of weights + weights sparsity map + weights table + activation
     // window Fill it with the original binary data
     VPUX_THROW_UNLESS(tensorType != nullptr, "Couldn't fuse constant tensor type");
 
     // 3. Build new constant memref
     auto fusedTensorTypeMemref = vpux::convertToMemRef(tensorType);
-    auto fusedConstant = rewriter.create<Const::DeclareOp>(newLoc, fusedTensorTypeMemref, fusedContentAttr);
+    auto fusedConstant = rewriter.create<Const::DeclareOp>(newLoc, fusedTensorTypeMemref, std::move(fusedContentAttr));
 
     // 4. build new AllocOp
     auto allocOp = createAllocOp(fusedConstant, tilingVector[0], rewriter);

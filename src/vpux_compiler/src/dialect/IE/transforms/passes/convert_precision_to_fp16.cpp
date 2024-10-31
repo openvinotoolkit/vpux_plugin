@@ -5,6 +5,7 @@
 
 #include "vpux/compiler/dialect/IE/transforms/passes.hpp"
 
+#include "vpux/compiler/dialect/IE/IR/dialect.hpp"
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/IE/utils/convert_op_types.hpp"
 
@@ -68,8 +69,10 @@ void ConvertPrecisionToFP16Pass::safeRunOnModule() {
     target.addDynamicallyLegalOp<mlir::func::CallOp>(isLegalOp);
     target.addLegalOp<mlir::ModuleOp>();
     target.addLegalOp<IE::DynamicQuantizeOp>();
+    target.addLegalOp<IE::DynamicDequantizeOp>();
     target.addLegalOp<IE::IfOp>();
     target.addLegalOp<IE::YieldOp>();
+    target.addLegalOp<IE::LoopSelectOp>();
     target.addLegalOp<IE::EqualOp>();
     target.addLegalOp<IE::LessOp>();
     target.addLegalOp<IE::LessEqualOp>();
@@ -83,6 +86,8 @@ void ConvertPrecisionToFP16Pass::safeRunOnModule() {
     target.addLegalOp<IE::BitwiseOrOp>();
     target.addLegalOp<IE::BitwiseXorOp>();
     target.addLegalOp<IE::BitwiseNotOp>();
+    target.addLegalOp<IE::ReduceL2Op>();
+    target.addLegalOp<IE::InverseOp>();
     target.addDynamicallyLegalOp<mlir::func::FuncOp>([&](mlir::func::FuncOp funcOp) {
         return typeConverter.isSignatureLegal(funcOp.getFunctionType());
     });
@@ -129,7 +134,7 @@ void ConvertPrecisionToFP16Pass::safeRunOnModule() {
     };
 
     module.walk([&](mlir::Operation* op) {
-        if (isTargetOp(op)) {
+        if (isTargetOp(op) && target.isIllegal(op)) {
             const auto outputTypeAttrStr = "outputType";
             const auto outputTypeAttr = op->getAttr(outputTypeAttrStr);
             VPUX_THROW_UNLESS(outputTypeAttr != nullptr, "Failed to get attribute '{0}'", outputTypeAttrStr);
@@ -141,6 +146,25 @@ void ConvertPrecisionToFP16Pass::safeRunOnModule() {
     });
 
     if (mlir::failed(runConvertPrecision(module, typeConverter, target, _log))) {
+        signalPassFailure();
+    }
+
+    mlir::TypeConverter comparisonOpTypeConverter;
+    setupConvertPrecision(comparisonOpTypeConverter, [](mlir::Type elemType) -> mlir::Type {
+        if (elemType.isF32()) {
+            return mlir::Float16Type::get(elemType.getContext());
+        } else {
+            return elemType;
+        }
+    });
+
+    const auto isLegalComparisonOp = [&](mlir::Operation* op) {
+        return comparisonOpTypeConverter.isLegal(op);
+    };
+
+    mlir::ConversionTarget comparisonOpTarget(ctx);
+    comparisonOpTarget.addDynamicallyLegalOp<IE::LessOp>(isLegalComparisonOp);
+    if (mlir::failed(runConvertPrecision(module, comparisonOpTypeConverter, comparisonOpTarget, _log))) {
         signalPassFailure();
     }
 }

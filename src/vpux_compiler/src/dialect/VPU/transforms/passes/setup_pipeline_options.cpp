@@ -3,14 +3,31 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+#include "vpux/compiler/NPU37XX/dialect/VPU/impl/ppe_factory.hpp"
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
+#include "vpux/compiler/dialect/VPU/utils/ppe_version_config.hpp"
 #include "vpux/compiler/dialect/VPU/utils/setup_pipeline_options_utils.hpp"
 #include "vpux/compiler/utils/analysis.hpp"
 #include "vpux/utils/core/error.hpp"
+
 using namespace vpux;
 
 namespace {
+
+static std::mutex& getPpeFactoryMutex() {
+    static std::mutex mtx;
+    return mtx;
+}
+
+template <typename ConcreteFactoryT>
+static void registerPpeFactory() {
+    // Note: Multi-threaded compilation tests will concurrently call SetupPipelineOptions in the same
+    // compile_tool instance with alternating PPE versions. A mutex prevents data races, but also allows switches
+    // between versions.
+    std::lock_guard lock(getPpeFactoryMutex());
+    VPU::PpeVersionConfig::setFactory<ConcreteFactoryT>();
+}
 
 //
 // SetupPipelineOptionsPass
@@ -49,8 +66,25 @@ mlir::LogicalResult SetupPipelineOptionsPass::initializeOptions(StringRef option
 }
 
 void SetupPipelineOptionsPass::initializeFromOptions() {
+    auto archStr = VPU::symbolizeEnum<VPU::ArchKind>(archOpt.getValue());
+    VPUX_THROW_UNLESS(archStr.has_value(), "Unknown VPU architecture : '{0}'", archOpt.getValue());
+    const auto _arch = archStr.value();
+
     if (allowCustomValues.hasValue()) {
         _allowCustomValues = allowCustomValues.getValue();
+    }
+
+    // Register the default PPE factory singleton
+    const auto& ppeVersion = ppeVersionOpt.getValue();
+    if (ppeVersion == "Auto") {
+        if (_arch == VPU::ArchKind::NPU37XX || _arch == VPU::ArchKind::NPU40XX) {
+            registerPpeFactory<VPU::arch37xx::PpeFactory>();
+            _log.info("Auto target PPE version set to: 'IntPPE'");
+        }
+    } else if (ppeVersion == "IntPPE") {
+        registerPpeFactory<VPU::arch37xx::PpeFactory>();
+    } else {
+        _log.error("Unknown PPE version name: '{0}'", ppeVersion);
     }
 }
 

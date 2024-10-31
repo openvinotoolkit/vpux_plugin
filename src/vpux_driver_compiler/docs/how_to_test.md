@@ -26,6 +26,8 @@ The optional command params are:
 - `config`: set device info, log level and other properties defined in [`Supported Properties` part](https://github.com/openvinotoolkit/openvino/blob/master/src/plugins/intel_npu/README.md#supported-properties).
 - `NPU_COMPILATION_MODE_PARAMS`: set compile config defined in [here](../../../src/vpux_compiler/include/vpux/compiler/core/pipelines_options.hpp).
 
+To get a entire config file for a model, refer to this [link](https://github.com/intel-innersource/applications.ai.vpu-accelerators.flex-cid-tools/blob/develop/docs/how-to-test-and-debug.md#compilerTest).
+
 
 ## profilingTest
 
@@ -36,7 +38,7 @@ Gerenal command:
 ./profilingTest <blobfile>.blob profiling-0.bin
 ```
 
-To get the <blobfile>.blob,  please use the compilerTest or [compile_tool](https://github.com/openvinotoolkit/npu_plugin.git/tree/master/tools/compile_tool) of [NPU-Plugin Project].
+To get the <blobfile>.blob,  please use the compilerTest or [compile_tool](https://github.com/intel-innersource/applications.ai.vpu-accelerators.vpux-plugin/tree/master/tools/compile_tool) of [NPU-Plugin Project].
 
 To get the profiling-0.bin and more profiling detail, please see **[how to use profiling.md](../../../guides/how-to-use-profiling.md)** in [NPU-Plugin Project].
 
@@ -50,6 +52,13 @@ Gerenal command:
 ./loaderTest -v=1
 ./loaderTest -v=0
 ```
+
+
+## vpuxCompilerL0Test
+
+`vpuxCompilerL0Test` is the test suit of the driver compiler. Its test range is defined in [release-tools/CiD Project](https://github.com/intel-innersource/applications.ai.vpu-accelerators.flex-cid-tools/tree/master/release-tools). You can test it in git bash on windows or linux shell. 
+
+To run vpuxCompilerL0Test, you need to set `POR_PATH` manually. Here use this [POR model](https://af01p-ir.devtools.intel.com/artifactory/ir-public-models-ir-local/20230703_vpu-models-mtl-por-ir_v11_ov_2023.0.0-10926-b4452d56304.tar.gz) as example to test with the following command:
 
 ```bash
 #copy and unpack POR model to special location.
@@ -76,4 +85,5 @@ Or you can run the tests via the gtest_filter, e.g., if you want to test the res
 
 
 [OpenVINO Project]: https://github.com/openvinotoolkit/openvino
-[NPU-Plugin Project]: https://github.com/openvinotoolkit/npu_plugin.git
+[NPU-Plugin Project]: https://github.com/intel-innersource/applications.ai.vpu-accelerators.vpux-plugin
+[CiD Project]: https://github.com/intel-innersource/applications.ai.vpu-accelerators.flex-cid-tools

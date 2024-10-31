@@ -137,8 +137,8 @@ mlir::OpFoldResult vpux::IE::SqueezeOp::fold(FoldAdaptor adaptor) {
 
     VPUX_THROW_UNLESS(!operands.empty(), "Wrong number of operands : {0}", operands.size());
 
-    if (const auto attr = operands[0].dyn_cast_or_null<Const::ContentAttr>()) {
-        return attr.reshape(getShape(getOutput()));
+    if (const auto attr = operands[0].dyn_cast_or_null<Const::EphemeralContentAttr>()) {
+        return static_cast<Const::ContentAttr>(attr).transform().reshape(getShape(getOutput())).get();
     }
 
     return nullptr;

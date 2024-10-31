@@ -20,9 +20,24 @@
 #include <condition_variable>
 #include <mutex>
 #include <utility>
+#include <variant>
 
 namespace vpux {
 namespace Const {
+
+// Marks two ContentAttr objects as being equivalent for background folding.
+//
+// This attribute is meant to be used in the request queue for the background
+// folding feature. It shows that two ContentAttr objects are equivalent in
+// terms of folding, meaning that the `fold()` method will produce the same
+// result for both attributes. The main use-case for this attribute is to allow
+// the list of transformations of a ContentAttr to be optimized (e.g. produce
+// the same result but with fewer transformations or less compute per
+// transformation), without losing the computation that was already performed.
+struct EquivalenceRequest {
+    Const::ContentAttr originalAttr = {};
+    Const::ContentAttr newAttr = {};
+};
 
 //
 // FoldingRequest
@@ -34,8 +49,9 @@ namespace Const {
 //                      `newTransformation`, in order to reuse the existing folded values from the cache. This value is
 //                      optional, in which case `nullptr` can be used.
 struct FoldingRequest {
-    Const::RequestQueueAttrInterface attr;
-    Const::TransformAttrInterface newTransformation;
+    using TerminationToken = std::monostate;
+    std::variant<TerminationToken, Const::ContentAttr, Const::EquivalenceRequest> attr = {};
+    Const::TransformAttrInterface newTransformation = nullptr;
 };
 
 //
@@ -44,13 +60,21 @@ struct FoldingRequest {
 
 namespace details {
 
-struct ContentAttrHash {
-    static size_t hash(Const::ContentAttr attr) {
-        auto hashValue = mlir::hash_value(attr);
-        return static_cast<size_t>(hashValue);
+struct ContentAttrHashCode : llvm::hash_code {
+    vpux::Byte totalAllocSize = {};  // Note: used for memory usage statistics.
+
+    ContentAttrHashCode(const Const::ContentAttr& attr)
+            : llvm::hash_code(hash_value(attr)),
+              totalAllocSize(mlir::cast<NDTypeInterface>(attr.getType()).getTotalAllocSize()) {
     }
-    static bool equal(Const::ContentAttr lhs, Const::ContentAttr rhs) {
-        return lhs == rhs;
+};
+
+struct IdentityHashCompare {
+    static size_t hash(const ContentAttrHashCode& hash) {
+        return static_cast<size_t>(hash);
+    }
+    static bool equal(const ContentAttrHashCode& x, const ContentAttrHashCode& y) {
+        return x == y;
     }
 };
 
@@ -71,7 +95,7 @@ struct CachedContent {
 };
 
 using RequestQueue = tbb::concurrent_bounded_queue<FoldingRequest>;
-using ContentMap = tbb::concurrent_hash_map<Const::ContentAttr, CachedContent, ContentAttrHash>;
+using ContentMap = tbb::concurrent_hash_map<ContentAttrHashCode, CachedContent, IdentityHashCompare>;
 
 struct CacheStatistics {
     std::atomic<size_t> numElementsAddedToCache = 0;
@@ -133,7 +157,7 @@ public:
      * @param `attr`: the folding request whose folding result should be added to the cache
      * @param `content`: the folding result
      */
-    void addContent(Const::ContentAttr attr, const Const::Content& content);
+    void addContent(Const::details::ContentAttrHashCode attr, Const::Content&& content);
 
     /**
      * @brief Sets the memory usage limit for the cache
@@ -176,7 +200,7 @@ public:
      * @details This method is thread-safe
      * @param `attr`: the folding request whose folding result should be removed from the cache
      */
-    void removeContent(Const::ContentAttr attr);
+    void removeContent(Const::details::ContentAttrHashCode attr);
 
     /**
      * @brief Tries to get the folding result from the cache for the given request (represented as an attribute). In

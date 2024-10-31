@@ -55,14 +55,11 @@ TEST_P(ElfConfigTests, CompilationWithSpecificConfig) {
     }
 }
 
-const std::vector<ov::AnyMap> configs = {
-        {{ov::intel_npu::platform(ov::intel_npu::Platform::NPU3720)},
-         {ov::intel_npu::use_elf_compiler_backend(ov::intel_npu::ElfCompilerBackend::NO)}}};
+const std::vector<ov::AnyMap> configs = {{{ov::intel_npu::platform(ov::intel_npu::Platform::NPU3720)}}};
 
 // Driver compiler type config
 const std::vector<ov::AnyMap> driverCompilerConfigs = {
         {{ov::intel_npu::platform(ov::intel_npu::Platform::NPU3720)},
-         {ov::intel_npu::use_elf_compiler_backend(ov::intel_npu::ElfCompilerBackend::NO)},
          ov::intel_npu::compiler_type(ov::intel_npu::CompilerType::DRIVER)}};
 
 INSTANTIATE_TEST_SUITE_P(smoke_BehaviorTest_ELF, ElfConfigTests,

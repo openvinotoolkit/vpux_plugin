@@ -140,7 +140,6 @@ Const::details::PositionRequirement vpux::Const::BitPackAttr::getPositionRequire
     return Const::details::PositionRequirement::LAST;
 }
 
-Const::ContentAttr vpux::Const::ContentAttr::bitPack(int64_t width) const {
-    return ContentAttr::addTransformation(
-            *this, Const::BitPackAttr::get(getIntAttr(getContext(), width)).cast<Const::TransformAttrInterface>());
+Const::ContentSetup vpux::Const::ContentSetup::bitPack(int64_t width) {
+    return addTransformation(Const::BitPackAttr::get(getIntAttr(getContext(), width)));
 }

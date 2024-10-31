@@ -24,16 +24,13 @@ class AdaPoolLayerTestCommon : public AdaPoolLayerTest, virtual public VpuOv2Lay
     }
 };
 
-class AdaPoolLayerTest_NPU3720 : public AdaPoolLayerTestCommon {};
-class AdaPoolLayerTest_NPU4000 : public AdaPoolLayerTestCommon {};
-
-TEST_P(AdaPoolLayerTest_NPU3720, SW) {
+TEST_P(AdaPoolLayerTestCommon, NPU3720_SW) {
     abs_threshold = 0.02;
     setReferenceSoftwareMode();
     run(Platform::NPU3720);
 }
 
-TEST_P(AdaPoolLayerTest_NPU4000, SW) {
+TEST_P(AdaPoolLayerTestCommon, NPU4000_SW) {
     abs_threshold = 0.02;
     setReferenceSoftwareMode();
     run(Platform::NPU4000);
@@ -51,7 +48,11 @@ const std::vector<ov::element::Type> netPrecisions = {
 
 };
 
-/* ============= 3D/4D AdaptivePool NPU3720/NPU4000 ============= */
+std::vector<std::vector<ov::Shape>> inShape3DCases = {{{2, 3, 7}}, {{1, 1, 3}}};
+std::vector<std::vector<ov::Shape>> inShape4DCases = {{{1, 3, 32, 32}}, {{1, 1, 3, 2}}};
+std::vector<std::vector<ov::Shape>> inShape5DCases = {{{1, 17, 4, 5, 4}}, {{1, 1, 3, 2, 3}}};
+
+/* ============= 3D/4D AdaptivePool ============= */
 
 std::vector<std::vector<ov::Shape>> inShape3DSingleCases = {{{2, 3, 7}}};
 std::vector<std::vector<ov::Shape>> inShape4DSingleCases = {{{1, 128, 32, 64}}};
@@ -68,20 +69,10 @@ const auto AdaPoolCase4D =
                            ::testing::ValuesIn(std::vector<std::string>{"avg", "max"}),
                            ::testing::ValuesIn(netPrecisions), ::testing::Values(DEVICE_NPU));
 
-// ------ NPU3720 ------
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_TestsAdaPool3D, AdaPoolLayerTestCommon, AdaPoolCase3D,
+                         AdaPoolLayerTestCommon::getTestCaseName);
 
-INSTANTIATE_TEST_CASE_P(smoke_precommit_TestsAdaPool3D, AdaPoolLayerTest_NPU3720, AdaPoolCase3D,
-                        AdaPoolLayerTest_NPU3720::getTestCaseName);
-
-INSTANTIATE_TEST_CASE_P(smoke_precommit_TestsAdaPool4D, AdaPoolLayerTest_NPU3720, AdaPoolCase4D,
-                        AdaPoolLayerTest_NPU3720::getTestCaseName);
-
-// ------ NPU4000 ------
-
-INSTANTIATE_TEST_CASE_P(smoke_precommit_TestsAdaPool3D, AdaPoolLayerTest_NPU4000, AdaPoolCase3D,
-                        AdaPoolLayerTest_NPU4000::getTestCaseName);
-
-INSTANTIATE_TEST_CASE_P(smoke_precommit_TestsAdaPool4D, AdaPoolLayerTest_NPU4000, AdaPoolCase4D,
-                        AdaPoolLayerTest_NPU4000::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_TestsAdaPool4D, AdaPoolLayerTestCommon, AdaPoolCase4D,
+                         AdaPoolLayerTestCommon::getTestCaseName);
 
 }  // namespace
