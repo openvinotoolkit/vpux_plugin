@@ -3,11 +3,6 @@
 # SPDX-License-Identifier: Apache 2.0
 #
 
-if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
-string(REPLACE "/sdl" "" CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE}")
-string(REPLACE "/sdl" "" CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE}")
-endif()
-
 set(CID_COMPONENT "CiD")
 ov_cpack_add_component(${CID_COMPONENT})
 

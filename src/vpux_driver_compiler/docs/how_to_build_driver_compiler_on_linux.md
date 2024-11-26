@@ -85,7 +85,7 @@ Driver Compiler is built with OpenVINO static runtime. To build the library and 
     -D ENABLE_OV_TF_LITE_FRONTEND=OFF \
     -D ENABLE_OV_JAX_FRONTEND=OFF \
     -D ENABLE_OV_IR_FRONTEND=ON \
-    -D THREADING=TBB \
+    -D THREADING=SEQ \
     -D ENABLE_TBBBIND_2_5=OFF \
     -D ENABLE_SYSTEM_TBB=OFF \
     -D ENABLE_TBB_RELEASE_ONLY=OFF \
@@ -132,7 +132,7 @@ Driver Compiler is built with OpenVINO static runtime. To build the library and 
     <details>
     <summary>2.2.2 Build option list in OpenVino Project</summary>
 
-    For more details on the build options, please refer to this [OpenVino features.cmake](https://github.com/openvinotoolkit/openvino/blob/13a6f317dc4ed18c2fca83d601f54e8a7319b018/cmake/features.cmake) and this [NPU  features.cmake](https://github.com/openvinotoolkit/openvino/blob/13a6f317dc4ed18c2fca83d601f54e8a7319b018/src/plugins/intel_npu/cmake/features.cmake) in [OpenVINO Project], which provides explanations for all the available build options.
+    For more details on the build options, please refer to this [OpenVino features.cmake](https://github.com/openvinotoolkit/openvino/blob/0ebff040fd22daa37612a82fdf930ffce4ebb099/cmake/features.cmake) and this [NPU features.cmake](https://github.com/openvinotoolkit/openvino/blob/0ebff040fd22daa37612a82fdf930ffce4ebb099/src/plugins/intel_npu/cmake/features.cmake) in [OpenVINO Project], which provides explanations for all the available build options.
 
     ```sh
         # Specify external repo
@@ -208,29 +208,21 @@ Driver Compiler is built with OpenVINO static runtime. To build the library and 
     2.3 (Optional) Instruction notes about TBB:
 
     <details>
-    <summary>2.3.1 Default tbb location</summary>
+    <summary>2.3.1 Default build mode</summary>
 
-    The build instructions uses the `-DENABLE_SYSTEM_TBB=OFF` option, which means that the TBB library downloaded by [OpenVINO Project] will be used. The download path for this TBB library is `$OPENVINO_HOME/temp/tbb`. Within the downloaded TBB folder, `$OPENVINO_HOME/temp/tbb/lib/libtbb.so.12` and `$OPENVINO_HOME/temp/tbb/lib/libtbbmalloc.so.2` are required for the Release version. 
+    Nowadays the Driver Compiler is building without TBB using `-D THREADING=SEQ`. More info about SEQ mode, please refer to this [file](https://github.com/openvinotoolkit/openvino/blob/0ebff040fd22daa37612a82fdf930ffce4ebb099/docs/dev/cmake_options_for_custom_compilation.md#options-affecting-binary-size).
 
     </details>
 
     <details>
     <summary>2.3.2 Use different TBB version</summary>
 
-    If you wish to build with system TBB, you need install TBB in your local system first and then use `-DENABLE_SYSTEM_TBB=ON` option to instead of `-DENABLE_SYSTEM_TBB=OFF` option.
-
-    If you wish to build with a specific version of TBB, you can download it from [oneTBB Project] and unzip its release package. Then use the `-DENABLE_SYSTEM_TBB=OFF -DTBBROOT=/home/username/path/to/downloaded/tbb` option to build.
+    If you wish to build with a specific version of TBB, you can download it from [oneTBB Project] and unzip its [release package](https://github.com/oneapi-src/oneTBB/releases). Then, remove `-D THREADING=SEQ`and use the `-DENABLE_SYSTEM_TBB=OFF -DTBBROOT=/home/username/path/to/downloaded/tbb` option to build.
     
-    The version of TBB download by [OpenVINO Project] is 2021.2.4 and you can find the version info in this [file](https://github.com/openvinotoolkit/openvino/blob/master/cmake/dependencies.cmake#L120) in [OpenVINO Project]. If you would like to build TBB on your own, please refer to [INSTALL.md](https://github.com/oneapi-src/oneTBB/blob/master/INSTALL.md#build-onetbb) in [oneTBB Project] or [how to build tbb.md](./how-to-build-tbb.md).
+    The version of TBB download by [OpenVINO Project] is 2021.2.5 and you can find the version info in this [file](https://github.com/openvinotoolkit/openvino/blob/0ebff040fd22daa37612a82fdf930ffce4ebb099/cmake/dependencies.cmake#L120) in [OpenVINO Project]. If you would like to build TBB on your own, please refer to [INSTALL.md](https://github.com/oneapi-src/oneTBB/blob/master/INSTALL.md#build-onetbb) in [oneTBB Project].
 
     </details>
 
-    <details>
-    <summary>2.3.3 Do not use TBB</summary>
-
-    If you wish to build without TBB (which will result in a slower build process), you need change `-D THREADING=TBB` to `-D THREADING=SEQ`. More info about SEQ mode, please refer to this [file](https://github.com/openvinotoolkit/openvino/blob/master/docs/dev/cmake_options_for_custom_compilation.md#options-affecting-binary-size).
-
-    </details>
 
 3. (Optional) Prepare final Driver Compiler package for driver:
 

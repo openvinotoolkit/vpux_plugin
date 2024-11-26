@@ -221,7 +221,7 @@
                 "ENABLE_OV_IR_FRONTEND": true,
                 "THREADING": {
                     "type": "STRING",
-                    "value": "TBB"
+                    "value": "SEQ"
                 },
                 "ENABLE_TBBBIND_2_5": false,
                 "BUILD_COMPILER_FOR_DRIVER": true,

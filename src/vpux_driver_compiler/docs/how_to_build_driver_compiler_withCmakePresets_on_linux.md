@@ -105,18 +105,18 @@ Here provides a default pre-configured CMake presets for users named: "npuCidRel
 5. (Optional) Instruction notes about TBB:
 
     <details>
-    <summary>5.1 Default tbb location</summary>
+    <summary>5.1 Default build mode</summary>
 
-    The [build instructions](../../../CMakePresets.json#L268) uses the `"ENABLE_SYSTEM_TBB": false` option, which means that the TBB library downloaded by [OpenVINO Project] will be used. The download path for this TBB library is `$OPENVINO_HOME/temp/tbb`. Within the downloaded TBB folder, `$OPENVINO_HOME/temp/tbb/lib/libtbb.so.12` and `$OPENVINO_HOME/temp/tbb/lib/libtbbmalloc.so.2` are required for the Release version. 
+    Nowadays the Driver Compiler is building without TBB using `-D THREADING=SEQ`. More info about SEQ mode, please refer to this [file](https://github.com/openvinotoolkit/openvino/blob/0ebff040fd22daa37612a82fdf930ffce4ebb099/docs/dev/cmake_options_for_custom_compilation.md#options-affecting-binary-size).
 
     </details>
 
     <details>
     <summary>5.2 Use different TBB version</summary>
 
-    If you wish to build with system TBB, you need install TBB in your local system first and then use `"ENABLE_SYSTEM_TBB": true` option to instead of `"ENABLE_SYSTEM_TBB": false` option in [here](../../../CMakePresets.json#L268).
-
-    If you wish to build with a specific version of TBB, you can download it from [oneTBB Project] and unzip its release package. Then, add the following new lines after line 286 in [CMakePresets.json](../../../CMakePresets.json#L286) file.
+        If you wish to build with a specific version of TBB, you can download it from [oneTBB Project] and unzip its [release package](https://github.com/oneapi-src/oneTBB/releases)
+    
+    The version of TBB download by [OpenVINO Project] is 2021.13.0 and you can find the version info in this [file](https://github.com/openvinotoolkit/openvino/blob/0ebff040fd22daa37612a82fdf930ffce4ebb099/cmake/dependencies.cmake#L120) in [OpenVINO Project]. If you would like to build TBB on your own, please refer to [INSTALL.md](https://github.com/oneapi-src/oneTBB/blob/master/INSTALL.md#build-onetbb) in [oneTBB Project].
 
     ```sh
         "TBBROOT": {
@@ -128,11 +128,6 @@ Here provides a default pre-configured CMake presets for users named: "npuCidRel
     The version of TBB downloaded by [OpenVINO Project] is 2021.2.4, and you can find the version information in the [corresponding file](https://github.com/openvinotoolkit/openvino/blob/master/cmake/dependencies.cmake#L120) within [OpenVINO Project]. If you would like to build TBB on your own, please refer to [INSTALL.md](https://github.com/oneapi-src/oneTBB/blob/master/INSTALL.md#build-onetbb) in [oneTBB Project] or [how to build tbb.md](./how-to-build-tbb.md).
 
     </details>
-
-    <details>
-    <summary>5.3 Do not use TBB</summary>
-
-    If you wish to build without TBB (which will result in a slower build process), you need change `"value": "TBB"` to `"value": "SEQ"` in [here](../../../CMakePresets.json#L224). More info about SEQ mode, please refer to this [file](https://github.com/openvinotoolkit/openvino/blob/master/docs/dev/cmake_options_for_custom_compilation.md#options-affecting-binary-size).
 
     </details>
 

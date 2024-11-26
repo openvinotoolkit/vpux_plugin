@@ -3,13 +3,6 @@
 # SPDX-License-Identifier: Apache 2.0
 #
 
-if(BUILD_COMPILER_FOR_DRIVER)
-    if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
-        string(REPLACE "/sdl" "" CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE}")
-        string(REPLACE "/sdl" "" CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE}")
-    endif()
-endif()
-
 file(GLOB_RECURSE SRC_FILES *.cpp)
 set(TARGET_NAME "npu_compiler_frontend")
 add_mlir_library(${TARGET_NAME}
