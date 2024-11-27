@@ -110,23 +110,20 @@ All instructions are perfromed on **x64 Native Tools Command Prompt for VS XXXX(
     <details>
     <summary>5.1 Default build mode</summary>
 
-    Nowadays the Driver Compiler is building without TBB using `-D THREADING=SEQ`. More info about SEQ mode, please refer to this [file](https://github.com/openvinotoolkit/openvino/blob/0ebff040fd22daa37612a82fdf930ffce4ebb099/docs/dev/cmake_options_for_custom_compilation.md#options-affecting-binary-size).
+    Nowadays the Driver Compiler is building with TBB mode as default using `-D THREADING=TBB`.
+    
+    You can also use Sequential mode `-D THREADING=SEQ` to compile. More info about SEQ mode, please refer to this [file](https://github.com/openvinotoolkit/openvino/blob/0ebff040fd22daa37612a82fdf930ffce4ebb099/docs/dev/cmake_options_for_custom_compilation.md#options-affecting-binary-size).
 
     </details>
 
     <details>
     <summary>5.2 Use different TBB version</summary>
 
-    If you wish to build with a specific version of TBB, you can download it from [oneTBB Project] and unzip its [release package](https://github.com/oneapi-src/oneTBB/releases). Then, add the following new lines after line 342 in [CMakePresets.json](../../../CMakePresets.json#L342) file.
+    When use TBB mode in build option, the default TBB is downloaded by [OpenVINO Project], located in `%OPENVINO_HME%\temp\tbb`.
 
-    ```sh
-        "TBBROOT": {
-            "type": "FILEPATH",
-            "value": "C:\Users\Local_Admin\workspace\path\to\downloaded\tbb"
-        }
-    ```
+    If you wish to build with a specific version of TBB, you can download it from [oneTBB Project] and unzip its [release package](https://github.com/oneapi-src/oneTBB/releases). Then, use the `-D ENABLE_SYSTEM_TBB=OFF -D TBBROOT=C:\Users\Local_Admin\workspace\path\to\downloaded\tbb` option to build.
     
-    The version of TBB download by [OpenVINO Project] is 2021.2.5 and you can find the version info in this [file](https://github.com/openvinotoolkit/openvino/blob/0ebff040fd22daa37612a82fdf930ffce4ebb099/cmake/dependencies.cmake#L105) in [OpenVINO Project]. If you would like to build TBB on your own, please refer to [INSTALL.md](https://github.com/oneapi-src/oneTBB/blob/master/INSTALL.md#build-onetbb) in [oneTBB Project].
+    If you would like to build TBB on your own, please refer to [INSTALL.md](https://github.com/oneapi-src/oneTBB/blob/master/INSTALL.md#build-onetbb) in [oneTBB Project] and add `-D CMAKE_MSVC_RUNTIME_LIBRARY="MultiThreaded"` in build option.
 
     </details>
 
