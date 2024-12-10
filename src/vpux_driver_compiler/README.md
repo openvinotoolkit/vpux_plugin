@@ -59,27 +59,15 @@ vclCompilerDestroy
 
 ## How to build related targets locally
 
-Driver Compiler provides npu_driver_compiler, compilerTest, profilingTest and loaderTest to compile network and test. To build Driver Compiler related targets locally, refer to [How to build driver compiler](./docs/how_to_build_driver_compiler.md).
+Driver Compiler provides npu_driver_compiler, compilerTest, profilingTest and loaderTest to compile network and test. To build Driver Compiler related targets locally, refer to
 
+- (Recommended) build using CMake Presets, requiring CMake version 3.19 or higher.
+    - [linux](./docs/how_to_build_driver_compiler_withCmakePresets_on_linux.md)
+    - [windows](./docs/how_to_build_driver_compiler_withCmakePresets_on_windows.md)
 
-## How to release Driver Compiler package
-
-Unlike local build of Driver Compiler related targets, we need to apply some patches to [OpenVINO Project] and [NPU-Plugin Project] and also pack the elf, pdb and tbb files together to meet driver requirements. 
-
-To get more info about Driver Compiler package, refer to [introduction of Driver Compiler package](https://github.com/intel-innersource/applications.ai.vpu-accelerators.flex-cid-tools/blob/develop/docs/introductio-of-driver_compiler_package.md) in [CiD project] repo.
-
-To build Driver Compiler package, refer to [How to Release Driver Compiler package.md](https://github.com/intel-innersource/applications.ai.vpu-accelerators.flex-cid-tools/blob/develop/docs/how-to-release-package.md) in [CiD project] repo.
-
-
-## How to test
-
-Please refer to [How to test](./docs/how_to_test.md).
-
-
-## How to debug
-
-Please refer to [How to debug](./docs/how_to_debug.md).
+- build with cmake options
+    - [linux](./docs/how_to_build_driver_compiler_on_linux.md)
+    - [windows](./docs/how_to_build_driver_compiler_on_windows.md)
 
 [OpenVINO Project]: https://github.com/openvinotoolkit/openvino
-[NPU-Plugin Project]: https://github.com/intel-innersource/applications.ai.vpu-accelerators.vpux-plugin
-[CiD Project]: https://github.com/intel-innersource/applications.ai.vpu-accelerators.flex-cid-tools
+[NPU-Plugin Project]: https://github.com/openvinotoolkit/npu_plugin
