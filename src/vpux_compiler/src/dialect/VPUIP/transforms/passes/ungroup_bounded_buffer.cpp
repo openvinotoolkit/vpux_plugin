@@ -105,9 +105,6 @@ mlir::LogicalResult UngroupSwKernelOp::matchAndRewrite(VPUIP::SwKernelOp origOp,
         }
     }
 
-    VPUX_THROW_WHEN(origOp.getOutputBuffs().size() != 1 || origOp.getOutputs().size() != 1,
-                    "UngroupBoundedBuffers pass supports SwKernelOp with single output for now");
-
     SmallVector<mlir::Value> swKernelOutputBuffs;
     SmallVector<mlir::Value> swKernelDynamicOutputShapes;
     SmallVector<int32_t> swKernelDynamicOutputShapesMap;
@@ -134,20 +131,17 @@ mlir::LogicalResult UngroupSwKernelOp::matchAndRewrite(VPUIP::SwKernelOp origOp,
     auto args = kernelArgsRange(origOp);
     initSwKernel(swKernelOp, swKernelOperands, swKernelOutputBuffs, args, _log.nest());
 
-    for (auto result : origOp.getResults()) {
-        if (result.getType().isa<VPUIP::BoundedBufferType>()) {
-            // if result is BoundedBufferType, then it is guaranteed to have swKernelDynamicOutputShapes not empty
-            // Tracking number [E#115679]
-            // TODO: SwKernelOp's results 0 and 1 may not always be correct here, only in the case where
-            // there is only one bounded result. Similarly, using replaceOp here when there are more than
-            // one result will not behave as intended.
-            auto groupOp = rewriter.create<VPUIP::GroupBoundedBufferOp>(swKernelOp.getLoc(), swKernelOp.getResult(0),
-                                                                        swKernelOp.getResult(1));
-            rewriter.replaceOp(origOp, groupOp.getOutput());
+    SmallVector<mlir::Value> newResults;
+    for (auto i : irange(origOp.getNumResults())) {
+        if (mlir::isa<VPUIP::BoundedBufferType>(origOp.getResult(i).getType())) {
+            auto groupOp = rewriter.create<VPUIP::GroupBoundedBufferOp>(swKernelOp.getLoc(), swKernelOp.getResult(i),
+                                                                        swKernelOp.getDynamicOutputShapes()[i]);
+            newResults.push_back(groupOp.getOutput());
         } else {
-            rewriter.replaceOp(origOp, swKernelOp.getResults());
+            newResults.push_back(swKernelOp.getResult(i));
         }
     }
+    rewriter.replaceOp(origOp, newResults);
 
     return mlir::success();
 }
