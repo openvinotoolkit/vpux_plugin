@@ -57,7 +57,6 @@ endif()
 
 ov_option(ENABLE_NPU_LOADER "Enable npu-loader" OFF)
 ov_option(ENABLE_NPU_LSP_SERVER "Enable npu-lsp-server" ON)
-ov_option(ENABLE_NPU_PROTOPIPE "Enable protopipe" ON)
 
 get_target_property(ov_linked_libs openvino::runtime IMPORTED_LINK_DEPENDENT_LIBRARIES_RELEASE)
 if(THREADING STREQUAL "TBB" OR THREADING STREQUAL "TBB_AUTO" OR "TBB::tbb" IN_LIST ov_linked_libs)
@@ -78,6 +77,8 @@ ov_option(ENABLE_SPLIT_DWARF "Use -gsplit-dwarf when compiling the project and -
 
 ov_option(LIT_TESTS_USE_LINKS "Create symlink to lit-tests in the binary directory instead of copying them" OFF)
 
+ov_option(ENABLE_NPU_MICRO_BENCHMARKS "NPU micro benchmarks" OFF)
+
 if(ENABLE_VPUX_DOCS)
     find_package(Doxygen)
     if(DOXYGEN_FOUND)
@@ -97,8 +98,8 @@ if(ENABLE_VPUX_DOCS)
     endif()
 endif()
 
-function (print_enabled_kmb_features)
-    message(STATUS "KMB Plugin enabled features: ")
+function (print_enabled_npu_features)
+    message(STATUS "NPU Plugin enabled features: ")
     message(STATUS "")
     foreach(var IN LISTS OV_OPTIONS)
         message(STATUS "    ${var} = ${${var}}")
