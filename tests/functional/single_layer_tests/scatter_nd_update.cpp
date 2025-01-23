@@ -187,7 +187,6 @@ protected:
 
 TEST_P(ScatterNDUpdateCustomLayerTest, NPU3720_HW) {
     abs_threshold = std::numeric_limits<float>::epsilon();
-    setMLIRCompilerType();
     setDefaultHardwareMode();
     run(Platform::NPU3720);
 }

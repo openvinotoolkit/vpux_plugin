@@ -79,7 +79,7 @@ func.func @Reshape(%arg0 : tensor<1x512x1x1xf32>) -> tensor<1x512xf32> {
     %0 = IE.Reshape(%arg0) { shape_value = [1, 512] } : tensor<1x512x1x1xf32> -> tensor<1x512xf32>
     return %0 : tensor<1x512xf32>
 
-    // CHECK: [[VAR0:%.*]] = IERT.GenericReshape inputs([[ARG0]] : memref<1x512x1x1xf32>) -> memref<1x512xf32>
+    // CHECK: [[VAR0:%.*]] = IERT.GenericReshape inputs([[ARG0]] : memref<1x512x1x1xf32>) outputs({{[^:]+}} : memref<1x512xf32>) -> memref<1x512xf32>
     // CHECK: [[VAR1:%.*]] = VPUIP.Copy inputs([[VAR0]] : memref<1x512xf32>) outputs([[ARG1]] : memref<1x512xf32>) -> memref<1x512xf32>
     // CHECK: return [[VAR1]] : memref<1x512xf32>
 }
@@ -102,14 +102,14 @@ func.func @ReshapeInGraph(%arg0 : tensor<1x512x1x1xf32>) -> tensor<1x512x1x1xf32
     %2 = IE.Reshape(%1) { shape_value = [1, 512, 1, 1] } : tensor<1x512xf32> -> tensor<1x512x1x1xf32>
     return %2 : tensor<1x512x1x1xf32>
 
-    // CHECK: [[VAR0:%.*]] = IERT.GenericReshape inputs([[ARG0]] : memref<1x512x1x1xf32>) -> memref<1x512xf32>
+    // CHECK: [[VAR0:%.*]] = IERT.GenericReshape inputs([[ARG0]] : memref<1x512x1x1xf32>) outputs({{[^:]+}} : memref<1x512xf32>) -> memref<1x512xf32>
     // CHECK: [[VAR1:%.*]] = memref.alloc() : memref<1x512xf32>
     // CHECK: [[VAR2:%.*]] = IERT.SoftMax
     // CHECK-SAME:              axisInd = 1
     // CHECK-SAME:              inputs([[VAR0]] : memref<1x512xf32>)
     // CHECK-SAME:              outputs([[VAR1]] : memref<1x512xf32>)
 
-    // CHECK: [[VAR3:%.*]] = IERT.GenericReshape inputs([[VAR2]] : memref<1x512xf32>) -> memref<1x512x1x1xf32>
+    // CHECK: [[VAR3:%.*]] = IERT.GenericReshape inputs([[VAR2]] : memref<1x512xf32>) outputs({{[^:]+}} : memref<1x512x1x1xf32>) -> memref<1x512x1x1xf32>
     // CHECK: [[VAR4:%.*]] = VPUIP.Copy inputs([[VAR3]] : memref<1x512x1x1xf32>) outputs([[ARG1]] : memref<1x512x1x1xf32>) -> memref<1x512x1x1xf32>
     // CHECK: return [[VAR4]] : memref<1x512x1x1xf32>
 }

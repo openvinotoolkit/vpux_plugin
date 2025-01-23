@@ -34,8 +34,8 @@ func.func @LoopSelect(%arg0: tensor<1xi8>, %arg1: tensor<100xi8>, %arg2: tensor<
     %res = IE.LoopSelect(%arg0, %arg1, %arg2) {axis = 0 : i64, do_concat = false, stride = 1 : i64} : tensor<1xi8>, tensor<100xi8>, tensor<200x1000xf16> -> tensor<2x1000xf16>
     return %res : tensor<2x1000xf16>
 
-    // CHECK: [[LOOP_SELECT:%.+]] = VPU.LoopSelect([[ARG0]], [[ARG1]], [[ARG2]]) 
-    // CHECK-SAME: {axis = 0 : i64, do_concat = false, stride = 1 : i64} : 
+    // CHECK: [[LOOP_SELECT:%.+]] = VPU.LoopSelect([[ARG0]], [[ARG1]], [[ARG2]])
+    // CHECK-SAME: {axis = 0 : i64, do_concat = false, stride = 1 : i64} :
     // CHECK-SAME: tensor<1xi8>, tensor<100xi8>, tensor<200x1000xf16> -> tensor<2x1000xf16>
     // CHECK: return [[LOOP_SELECT]] : tensor<2x1000xf16>
 }
@@ -164,7 +164,7 @@ func.func @CTCGreedyDecoderSeqLenNoBlankIndex(%arg0: tensor<1x1x10xf16>) -> (ten
 
 // CHECK-LABEL: @GroupNormalization
 func.func @GroupNormalization(%arg0: tensor<1x4x4x16xf32>, %arg1: tensor<4xf32>, %arg2: tensor<4xf32>) -> tensor<1x4x4x16xf32> {
-    %0 = IE.GroupNormalization(%arg0, %arg1, %arg2) {epsilon = 9.99999974E-5 : f32, num_groups = 2 : i32} : 
+    %0 = IE.GroupNormalization(%arg0, %arg1, %arg2) {epsilon = 9.99999974E-5 : f32, num_groups = 2 : i32} :
          tensor<1x4x4x16xf32>, tensor<4xf32>, tensor<4xf32> -> tensor<1x4x4x16xf32>
     return %0 : tensor<1x4x4x16xf32>
 
@@ -377,7 +377,7 @@ func.func @EmbeddingBagPackedSumNoWeights(%arg0: tensor<5x10xf16>) -> tensor<3x1
     %0 = IE.EmbeddingBagPackedSum(%arg0, %cst) : tensor<5x10xf16>, tensor<3x2xsi32> -> tensor<3x10xf16>
     return %0 : tensor<3x10xf16>
 
-    // CHECK: [[CST:%.+]] = const.Declare tensor<3x2xsi32> 
+    // CHECK: [[CST:%.+]] = const.Declare tensor<3x2xsi32>
     // CHECK-SAME{LITERAL}:= dense<[[0, 2], [1, 2], [3, 4]]> : tensor<3x2xsi32>
     // CHECK: [[VAR0:%.+]] = VPU.EmbeddingBagPackedSum([[ARG0]], [[CST]]) : tensor<5x10xf16>, tensor<3x2xsi32> -> tensor<3x10xf16>
     // CHECK: return [[VAR0]]  : tensor<3x10xf16>
@@ -583,7 +583,7 @@ func.func @InterpolateQuantized(%arg0: tensor<1x16x3x3x!qElemType>) -> tensor<1x
     // CHECK-SAME:                           pads_end = [0, 0, 0, 0],
     // CHECK-SAME:                           cube_coeff = -7.500000e-01 : f64>,
     // CHECK-SAME:    axes_attr = [2, 3],
-    // CHECK-SAME:    operandSegmentSizes = array<i32: 1, 0, 0, 0>,
+    // CHECK-SAME:    operandSegmentSizes = array<i32: 1, 0, 0, 0, 0, 0>,
     // CHECK-SAME:    scales_attr = [2.000000e+00, 2.000000e+00],
     // CHECK-SAME:    sizes_attr = [6, 6]}
     // CHECK-SAME:  : tensor<1x16x3x3x!qElemType> -> tensor<1x16x6x6x!qElemType1>
@@ -886,6 +886,22 @@ func.func @DeformableConvolution(%arg0: tensor<1x128x19x19xf16>, %arg1: tensor<1
 
 // -----
 
+#C = affine_map<(d0) -> (d0)>
+
+// CHECK-LABEL: @Range
+// CHECK-SAME:  [[INPUT0:%arg[0-9]]]: tensor<1xf32>
+// CHECK-SAME:  [[INPUT1:%arg[0-9]]]: tensor<1xf32>
+// CHECK-SAME:  [[INPUT2:%arg[0-9]]]: tensor<1xf32>
+func.func @Range(%arg0: tensor<1xf32>, %arg1: tensor<1xf32>, %arg2: tensor<1xf32>) -> tensor<?xf32, {bounds = [1024], order = affine_map<(d0) -> (d0)>}> {
+    %0 = IE.Range(%arg0, %arg1, %arg2) {dstElemType = f32} : tensor<1xf32>, tensor<1xf32>, tensor<1xf32> -> tensor<?xf32, {bounds = [1024], order = affine_map<(d0) -> (d0)>}>
+    return %0 : tensor<?xf32, {bounds = [1024], order = affine_map<(d0) -> (d0)>}>
+
+    // CHECK:    [[RANGE:%.+]] = VPU.Range([[INPUT0]], [[INPUT1]], [[INPUT2]])  {dstElemType = f32} : tensor<1xf32>, tensor<1xf32>, tensor<1xf32> -> tensor<?xf32, {bounds = [1024], order = #C}>
+    // CHECK:    return [[RANGE]] : tensor<?xf32, {bounds = [1024], order = #C}>
+}
+
+// -----
+
 // CHECK-LABEL: @InverseTest
 // CHECK-SAME: ([[INPUT:%.+]]: tensor<1x10x2x2xf32>) -> tensor<1x10x2x2xf32>
 func.func @InverseTest(%arg0: tensor<1x10x2x2xf32>) -> tensor<1x10x2x2xf32> {
@@ -895,4 +911,250 @@ func.func @InverseTest(%arg0: tensor<1x10x2x2xf32>) -> tensor<1x10x2x2xf32> {
     // CHECK:       [[INVERSE:%.+]] = VPU.Inverse([[INPUT]])
     // CHECK-SAME:         {adjoint} : tensor<1x10x2x2xf32> -> tensor<1x10x2x2xf32>
     // CHECK:       return [[INVERSE]] : tensor<1x10x2x2xf32>
+}
+
+// -----
+
+#CHW = affine_map<(d0, d1, d2) -> (d0, d1, d2)>
+#NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
+#NWHC = affine_map<(d0, d1, d2, d3) -> (d0, d3, d2, d1)>
+
+// CHECK-LABEL: @dynamicLSTMSequence
+// CHECK-SAME: ([[ARG_0:.+]]: tensor<1x1x?x512xf16, {bounds = [1, 1, 35, 512], order = #NCHW}>, [[ARG_1:.+]]: tensor<1x1x1x128xf16>, [[ARG_2:.+]]: tensor<1x1x1x128xf16>) -> (tensor<1x1x?x128xf16, {bounds = [1, 1, 35, 128], order = #NCHW}>, tensor<1x1x1x128xf16>, tensor<1x1x1x128xf16>) {
+func.func @dynamicLSTMSequence(%arg0: tensor<1x1x?x512xf16, {bounds = [1, 1, 35, 512], order = #NCHW}>, %arg1: tensor<1x1x1x128xf16>, %arg2: tensor<1x1x1x128xf16>) -> (tensor<1x1x?x128xf16, {bounds = [1, 1, 35, 128], order = #NCHW}>, tensor<1x1x1x128xf16>, tensor<1x1x1x128xf16>) {
+    %cst = const.Declare tensor<1x4x128x128xf16, {order = #NWHC}> = dense<0.000000e+00> : tensor<1x512x128xf32>, [#const.Reshape<[1, 4, 128, 128]>, #const.CastElemType<f16>, #const.Reorder<#NWHC>]
+    %outputHiddenValues, %outputHiddenState, %outputCellState = IE.LSTMSequence(%arg0, %arg1, %arg2, %cst) {direction = #IE.rnn_seq_direction<FORWARD>, operandSegmentSizes = array<i32: 1, 1, 1, 0, 1, 0>} : tensor<1x1x?x512xf16, {bounds = [1, 1, 35, 512], order = #NCHW}>, tensor<1x1x1x128xf16>, tensor<1x1x1x128xf16>, tensor<1x4x128x128xf16, {order = #NWHC}> -> tensor<1x1x?x128xf16, {bounds = [1, 1, 35, 128], order = #NCHW}>, tensor<1x1x1x128xf16>, tensor<1x1x1x128xf16>
+    return %outputHiddenValues, %outputHiddenState, %outputCellState : tensor<1x1x?x128xf16, {bounds = [1, 1, 35, 128], order = #NCHW}>, tensor<1x1x1x128xf16>, tensor<1x1x1x128xf16>
+
+    // CHECK: [[CST:%.+]] = const.Declare tensor<1x4x128x128xf16, {order = #NWHC}> = dense<0.000000e+00> : tensor<1x512x128xf32>, [#const.Reshape<[1, 4, 128, 128]>, #const.CastElemType<f16>, #const.Reorder<#NWHC>]
+    // CHECK: [[CST_0:%.+]] = const.Declare tensor<1x1x1x2xsi32> = dense<0> : tensor<1x1x1x2xsi32>
+    // CHECK: [[OUT_HV:%.+]], [[OUT_HS:%.+]], [[OUT_CS:%.+]] = VPU.LSTMSequence([[ARG_0]], [[ARG_1]], [[ARG_2]], [[CST]], [[CST_0]]) {direction = #IE.rnn_seq_direction<FORWARD>} : tensor<1x1x?x512xf16, {bounds = [1, 1, 35, 512], order = #NCHW}>, tensor<1x1x1x128xf16>, tensor<1x1x1x128xf16>, tensor<1x4x128x128xf16, {order = #NWHC}>, tensor<1x1x1x2xsi32> -> tensor<1x1x?x128xf16, {bounds = [1, 1, 35, 128], order = #NCHW}>, tensor<1x1x1x128xf16>, tensor<1x1x1x128xf16>
+    // CHECK: return [[OUT_HV]], [[OUT_HS]], [[OUT_CS]] : tensor<1x1x?x128xf16, {bounds = [1, 1, 35, 128], order = #NCHW}>, tensor<1x1x1x128xf16>, tensor<1x1x1x128xf16>
+}
+
+// -----
+
+#C = affine_map<(d0) -> (d0)>
+
+// CHECK-LABEL: @StridedSliceWithNonConstEnds
+func.func @StridedSliceWithNonConstEnds(%arg0: tensor<1xsi64>) -> tensor<?xf32, {bounds = [9], order = #C}> {
+// CHECK:  ([[ARG0:[^:]+]]: tensor<1xsi64>)
+    %cst = const.Declare tensor<9xf32> = dense<[1.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00, -1.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00, -1.000000e+00]> : tensor<9xf32>
+    %cst_0 = const.Declare tensor<1xsi64> = dense<0> : tensor<1xsi64>
+    %cst_1 = const.Declare tensor<1xsi64> = dense<1> : tensor<1xsi64>
+
+    %0 = IE.StridedSlice(%cst, %cst_0, %arg0, %cst_1) {begin_mask = [0], ellipsis_mask = [], end_mask = [0], new_axis_mask = [], operandSegmentSizes = array<i32: 1, 1, 1, 1>, shrink_axis_mask = []}
+       : tensor<9xf32>, tensor<1xsi64>, tensor<1xsi64>, tensor<1xsi64> -> tensor<?xf32, {bounds = [9], order = #C}>
+
+    return %0 : tensor<?xf32, {bounds = [9], order = #C}>
+    // CHECK: [[CONST0:%.*]] = const.Declare tensor<9xf32>
+    // CHECK: [[CONST1:%.*]] = const.Declare tensor<1xsi64>
+    // CHECK: [[CONST2:%.*]] = const.Declare tensor<1xsi64>
+    // CHECK: [[VAR0:%.+]] = VPU.StridedSlice([[CONST0]], [[CONST1]], [[ARG0]], [[CONST2]]) {
+    // CHECK-SAME:      begin_mask = [0], ellipsis_mask = [], end_mask = [0], new_axis_mask = [], operandSegmentSizes = array<i32: 1, 1, 1, 1>, shrink_axis_mask = []
+    // CHECK-SAME: } : tensor<9xf32>, tensor<1xsi64>, tensor<1xsi64>, tensor<1xsi64> -> tensor<?xf32, {bounds = [9], order = #C}>
+
+    // CHECK: return [[VAR0]]
+}
+
+
+// -----
+
+// CHECK-LABEL: @GatherNDDynamicIndices
+// CHECK:           ([[INPUT:%.*]]: tensor<1x88xsi32>, [[INDICES:%.*]]: tensor<?x2xsi32, {bounds = [88, 2], order = #NC}>) -> tensor<?xsi32, {bounds = [88], order = #C}>
+func.func @GatherNDDynamicIndices(%arg0: tensor<1x88xsi32>, %arg1: tensor<?x2xsi32, {bounds = [88, 2], order = affine_map<(d0, d1) -> (d0, d1)>}>)
+        -> tensor<?xsi32, {bounds = [88], order = affine_map<(d0) -> (d0)>}> {
+    %0 = IE.GatherND(%arg0, %arg1) {batch_dims = 0 : i64} : tensor<1x88xsi32>, tensor<?x2xsi32, {bounds = [88, 2], order = affine_map<(d0, d1) -> (d0, d1)>}>
+        -> tensor<?xsi32, {bounds = [88], order = affine_map<(d0) -> (d0)>}>
+    return %0 : tensor<?xsi32, {bounds = [88], order = affine_map<(d0) -> (d0)>}>
+
+    // CHECK-NOT:   IE.GatherND
+    // CHECK:       [[VAR0:%.+]] = VPU.GatherND([[INPUT]], [[INDICES]]) {batch_dims = 0 : i64} : tensor<1x88xsi32>, tensor<?x2xsi32, {bounds = [88, 2], order = #NC}> -> tensor<?xsi32, {bounds = [88], order = #C}>
+    // CHECK:       return [[VAR0]] : tensor<?xsi32, {bounds = [88], order = #C}>
+}
+
+
+// -----
+
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
+// CHECK-LABEL: @ConvertAccumulateWithScales
+func.func @ConvertAccumulateWithScales(
+    %LHS: tensor<1x64x16x1xf16, {order = #NHWC}>,
+    %RHS: tensor<1x64x16x1xf16, {order = #NHWC}>,
+    %LHS_SCALE: tensor<1x64x1x1xf16, {order = #NHWC}>,
+    %RHS_SCALE: tensor<1x64x1x1xf16, {order = #NHWC}>
+) -> tensor<1x64x16x1xf16, {order = #NHWC}> {
+    // CHECK:   ([[LHS:%.*]]: tensor<1x64x16x1xf16, {order = #NHWC}>, [[RHS:%.*]]: tensor<1x64x16x1xf16, {order = #NHWC}>,
+    // CHECK-SAME:  [[LHS_SCALE:%.*]]: tensor<1x64x1x1xf16, {order = #NHWC}>, [[RHS_SCALE:%.*]]: tensor<1x64x1x1xf16, {order = #NHWC}>)
+    %ACCUMULATE = IE.Accumulate(%LHS, %RHS, %LHS_SCALE, %RHS_SCALE) {
+        operandSegmentSizes = array<i32: 1, 1, 1, 1>
+    } : tensor<1x64x16x1xf16, {order = #NHWC}>,
+        tensor<1x64x16x1xf16, {order = #NHWC}>,
+        tensor<1x64x1x1xf16, {order = #NHWC}>,
+        tensor<1x64x1x1xf16, {order = #NHWC}> -> tensor<1x64x16x1xf16, {order = #NHWC}>
+
+    // CHECK:   [[ACCUMULATE:%.*]] = VPU.Accumulate([[LHS]], [[RHS]], [[LHS_SCALE]], [[RHS_SCALE]]) :
+    // CHECK-SAME:  tensor<1x64x16x1xf16, {order = #NHWC}>,
+    // CHECK-SAME:  tensor<1x64x16x1xf16, {order = #NHWC}>,
+    // CHECK-SAME:  tensor<1x64x1x1xf16, {order = #NHWC}>,
+    // CHECK-SAME:  tensor<1x64x1x1xf16, {order = #NHWC}> -> tensor<1x64x16x1xf16, {order = #NHWC}>
+
+    return %ACCUMULATE : tensor<1x64x16x1xf16, {order = #NHWC}>
+    // CHECK:   return [[ACCUMULATE]] : tensor<1x64x16x1xf16, {order = #NHWC}>
+}
+
+// -----
+
+// CHECK-LABEL: @Reverse
+// CHECK:           ([[ARG0:%.+]]: tensor<3x3xf16>)
+func.func @Reverse(%arg0: tensor<3x3xf16>) -> tensor<3x3xf16> {
+    %0 = IE.Reverse(%arg0) {axis_value = [0], mode = #IE.reverse_mode<INDEX>} : tensor<3x3xf16> -> tensor<3x3xf16>
+    %1 = IE.Reverse(%0) {axis_value = [1], mode = #IE.reverse_mode<INDEX>} : tensor<3x3xf16> -> tensor<3x3xf16>
+    return %1 : tensor<3x3xf16>
+
+    // CHECK:   [[VAL0:%.+]] =  VPU.Reverse([[ARG0]]) {axis_value = [0], mode = #IE.reverse_mode<INDEX>} : tensor<3x3xf16> -> tensor<3x3xf16>
+    // CHECK:   [[VAL1:%.+]] =  VPU.Reverse([[VAL0]]) {axis_value = [1], mode = #IE.reverse_mode<INDEX>} : tensor<3x3xf16> -> tensor<3x3xf16>
+    // CHECK:   return [[VAL1]] : tensor<3x3xf16>
+}
+
+// -----
+
+// CHECK-LABEL: @MaxPool8
+// CHECK:           ([[ARG0:%.+]]: tensor<1x3x30x30xf16>)
+func.func @MaxPool8(%arg0: tensor<1x3x30x30xf16>) -> (tensor<1x3x13x26xf16>, tensor<1x3x13x26xsi32>) {
+    %output, %output_index = IE.MaxPool8(%arg0) {axis = 0 : i64, dilations = [2, 2], index_element_type = si32, kernel_size = [3, 5], pads_begin = [0, 2], pads_end = [0, 2], rounding_type = #IE.rounding_type<FLOOR>, strides = [2, 1]} : tensor<1x3x30x30xf16> -> tensor<1x3x13x26xf16>, tensor<1x3x13x26xsi32>
+    return %output, %output_index : tensor<1x3x13x26xf16>, tensor<1x3x13x26xsi32>
+
+    // CHECK:   [[MAXPOOL8:%.+]], [[INDICES:%.+]] = VPU.MaxPool8([[ARG0]]) {axis = 0 : i64, dilations = [2, 2], index_element_type = si32, kernel_size = [3, 5], pads_begin = [0, 2], pads_end = [0, 2], rounding_type = #IE.rounding_type<FLOOR>, strides = [2, 1]} : tensor<1x3x30x30xf16> -> tensor<1x3x13x26xf16>, tensor<1x3x13x26xsi32>
+    // CHECK:   return [[MAXPOOL8]], [[INDICES]] : tensor<1x3x13x26xf16>, tensor<1x3x13x26xsi32>
+}
+
+// -----
+
+!qElemType = !quant.uniform<i4:f16:1, {0.0090698242187499996,0.0081949869791666674,0.0094848632812500003,0.0088582356770833329}>
+!qElemType1 = !quant.uniform<i4:f16:0, {0.0090698242187499996,0.0081949869791666674,0.0094848632812500003,0.0088582356770833329}>
+
+// CHECK-LABEL: @ConvertAffineReshapeOnQuantAxis
+func.func @ConvertAffineReshapeOnQuantAxis(%arg0: tensor<1x4x1x4096x!qElemType>) -> tensor<4x4096x1x1x!qElemType1> {
+    %0 = IE.AffineReshape(%arg0) {dim_mapping = [[0], [0], [0], [1, 2, 3]], shape_value = [4, 4096, 1, 1]} :
+        tensor<1x4x1x4096x!qElemType> -> tensor<4x4096x1x1x!qElemType1>
+    // CHECK:   [[RESHAPE:%.*]] = VPU.AffineReshape(%arg0)
+    // CHECK-SAME{LITERAL}:    {dim_mapping = [[0], [0], [0], [1, 2, 3]], shape_value = [4, 4096, 1, 1]} :
+    // CHECK-SAME:    tensor<1x4x1x4096x!qElemType> -> tensor<4x4096x1x1x!qElemType1>
+    return %0 : tensor<4x4096x1x1x!qElemType1>
+    // CHECK:    return [[RESHAPE]] : tensor<4x4096x1x1x!qElemType1>
+}
+
+// -----
+
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+#OYXI = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
+// CHECK-LABEL: @ConvertDilatedGroupConv
+// CHECK-SAME:  [[ARG0:%.+]]: tensor<1x80x56x56xf16, {order = #NHWC}>
+func.func @ConvertDilatedGroupConv(%arg: tensor<1x80x56x56xf16, {order = #NHWC}>) ->  tensor<1x80x28x28xf16, {order = #NHWC}> {
+    %cst = const.Declare tensor<1x80x1x1xf16> = dense<1.000000e+00> : tensor<1x80x1x1xf16>
+    %cst_0 = const.Declare tensor<80x1x3x3xf16, {order = #OYXI}> = dense<1.000000e+00> : tensor<80x1x3x3xf16>, [#const.Reorder<#OYXI>]
+    %1 = IE.GroupConvolution(%arg, %cst_0, %cst)
+    {dilations = [3, 3], groups = 80 : i64, pads_begin = [3, 3], pads_end = [3, 3], strides = [2, 2]}
+     : tensor<1x80x56x56xf16, {order = #NHWC}>,
+      tensor<80x1x3x3xf16, {order = #OYXI}>,
+        tensor<1x80x1x1xf16> -> tensor<1x80x28x28xf16, {order = #NHWC}>
+    return %1 :  tensor<1x80x28x28xf16, {order = #NHWC}>
+
+    // CHECK:       [[CST:%.+]] = const.Declare tensor<1x80x1x1xf16> = dense<1.000000e+00> : tensor<1x80x1x1xf16>
+    // CHECK:       [[CST0:%.+]] = const.Declare tensor<80x1x3x3xf16, {order = #NHWC}> = dense<1.000000e+00> : tensor<80x1x3x3xf16>, [#const.Reorder<#NHWC>]
+    // CHECK:       [[GROUPCONV:%.+]] = VPU.GroupConvolution([[ARG0]], [[CST0]], [[CST]]) {dilations = [3, 3], groups = 80 : i64, pads_begin = [3, 3],
+    // CHECK-SAME:  pads_end = [3, 3], strides = [2, 2]} : tensor<1x80x56x56xf16, {order = #NHWC}>, tensor<80x1x3x3xf16, {order = #NHWC}>, tensor<1x80x1x1xf16>
+    // CHECK-SAME:  -> tensor<1x80x28x28xf16, {order = #NHWC}>
+    // CHECK: return [[GROUPCONV]] :  tensor<1x80x28x28xf16, {order = #NHWC}>
+}
+
+// -----
+
+#CHW = affine_map<(d0, d1, d2) -> (d0, d1, d2)>
+#NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
+
+// CHECK-LABEL: @DynamicUnsqueeze
+func.func @DynamicUnsqueeze(%arg0: tensor<1x1x?xf16, {bounds = [1, 1, 10], order = #CHW}>) -> tensor<1x1x?x1xf16, {bounds = [1, 1, 10, 1], order = #NCHW}> {
+    %0 = IE.Unsqueeze(%arg0) {axes_value = [3]} : tensor<1x1x?xf16, {bounds = [1, 1, 10], order = #CHW}> -> tensor<1x1x?x1xf16, {bounds = [1, 1, 10, 1], order = #NCHW}>
+    return %0 : tensor<1x1x?x1xf16, {bounds = [1, 1, 10, 1], order = #NCHW}>
+    // CHECK:       VPU.Unsqueeze
+    // CHECK-SAME:      tensor<1x1x?xf16, {bounds = [1, 1, 10], order = #CHW}>
+    // CHECK-SAME:      -> tensor<1x1x?x1xf16, {bounds = [1, 1, 10, 1], order = #NCHW}>
+}
+
+// -----
+
+#NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
+
+module @DynamicTileFromBroadcast_case0 {
+IE.CNNNetwork entryPoint : @main inputsInfo : {
+    DataInfo "input_1" : tensor<1x1x1x1xsi64>
+    DataInfo "input_0" : tensor<1x1x10x5xsi64>
+  } outputsInfo : {
+    DataInfo "Broadcast_63" friendlyName = "Result_67" : tensor<1x1x10x5xsi64>
+  }
+  // CHECK: func.func @main([[ARG0:%.+]]: tensor<1x1x1x1xsi64>, [[ARG1:%.+]]: tensor<1x1x?x?xsi64, {bounds = [1, 1, 10, 5], order = #NCHW}>) -> tensor<1x1x?x?xsi64, {bounds = [1, 1, 10, 5], order = #NCHW}> {
+  func.func @main(%arg0: tensor<1x1x1x1xsi64>, %arg1: tensor<1x1x?x?xsi64, {bounds = [1, 1, 10, 5], order = #NCHW}>) -> tensor<1x1x?x?xsi64, {bounds = [1, 1, 10, 5], order = #NCHW}> {
+    %0 = IE.Convert(%arg1) {dstElemType = si32} : tensor<1x1x?x?xsi64, {bounds = [1, 1, 10, 5], order = #NCHW}> -> tensor<1x1x?x?xsi32, {bounds = [1, 1, 10, 5], order = #NCHW}>
+    %1 = IE.ShapeOf(%0) {dstElemType = si32} : tensor<1x1x?x?xsi32, {bounds = [1, 1, 10, 5], order = #NCHW}> -> tensor<4xsi32>
+    %2 = IE.Convert(%arg0) {dstElemType = si32} : tensor<1x1x1x1xsi64> -> tensor<1x1x1x1xsi32>
+    %3 = IE.DynamicTile(%2, %1) {output_bounds = [1, 1, 10, 5], output_shape = [1, 1, -9223372036854775808, -9223372036854775808]} : tensor<1x1x1x1xsi32>, tensor<4xsi32> -> tensor<1x1x?x?xsi32, {bounds = [1, 1, 10, 5], order = #NCHW}>
+    %4 = IE.Convert(%3) {dstElemType = si64} : tensor<1x1x?x?xsi32, {bounds = [1, 1, 10, 5], order = #NCHW}> -> tensor<1x1x?x?xsi64, {bounds = [1, 1, 10, 5], order = #NCHW}>
+    return %4 : tensor<1x1x?x?xsi64, {bounds = [1, 1, 10, 5], order = #NCHW}>
+
+    // CHECK-NOT:   IE.DynamicTile
+
+    // CHECK:       [[CONVERT_0:%.+]] = VPU.Convert([[ARG1]]) {dstElemType = si32} : tensor<1x1x?x?xsi64, {bounds = [1, 1, 10, 5], order = #NCHW}> -> tensor<1x1x?x?xsi32, {bounds = [1, 1, 10, 5], order = #NCHW}>
+    // CHECK:       [[SHAPEOF:%.+]] = VPU.ShapeOf([[CONVERT_0]]) : tensor<1x1x?x?xsi32, {bounds = [1, 1, 10, 5], order = #NCHW}> -> tensor<4xsi32>
+    // CHECK:       [[CONVERT_1:%.+]] = VPU.Convert([[ARG0]]) {dstElemType = si32} : tensor<1x1x1x1xsi64> -> tensor<1x1x1x1xsi32>
+    // CHECK:       [[TILE:%.+]] = VPU.DynamicTile([[CONVERT_1]], [[SHAPEOF]]) {output_bounds = [1, 1, 10, 5], output_shape = [1, 1, -9223372036854775808, -9223372036854775808]} : tensor<1x1x1x1xsi32>, tensor<4xsi32> -> tensor<1x1x?x?xsi32, {bounds = [1, 1, 10, 5], order = #NCHW}>
+  }
+}
+
+// -----
+
+#CHW = affine_map<(d0, d1, d2) -> (d0, d1, d2)>
+#NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
+
+// CHECK: func.func @DynamicTileFromBroadcast_case1([[ARG0:%.+]]: tensor<1x1x?xsi64, {bounds = [1, 1, 10], order = #CHW}>, [[ARG1:%.+]]: tensor<4xsi32>) -> tensor<1x1x?x?xsi64, {bounds = [1, 1, 10, 5], order = #NCHW}> {
+func.func @DynamicTileFromBroadcast_case1(%arg0: tensor<1x1x?xsi64, {bounds = [1, 1, 10], order = #CHW}>, %arg1: tensor<4xsi32>) -> tensor<1x1x?x?xsi64, {bounds = [1, 1, 10, 5], order = #NCHW}> {
+    %0 = IE.DynamicTile(%arg0, %arg1) {output_bounds = [1, 1, 10, 5], output_shape = [1, 1, -9223372036854775808, -9223372036854775808]} : tensor<1x1x?xsi64, {bounds = [1, 1, 10], order = #CHW}>, tensor<4xsi32> -> tensor<1x1x?x?xsi64, {bounds = [1, 1, 10, 5], order = #NCHW}>
+    return %0 : tensor<1x1x?x?xsi64, {bounds = [1, 1, 10, 5], order = #NCHW}>
+
+    // CHECK-NOT:   IE.DynamicTile
+    // CHECK:       VPU.DynamicTile([[ARG0]], [[ARG1]]) {output_bounds = [1, 1, 10, 5], output_shape = [1, 1, -9223372036854775808, -9223372036854775808]} : tensor<1x1x?xsi64, {bounds = [1, 1, 10], order = #CHW}>, tensor<4xsi32> -> tensor<1x1x?x?xsi64, {bounds = [1, 1, 10, 5], order = #NCHW}>
+}
+
+// -----
+
+!qElemType = !quant.uniform<i4:f16, 1.000000e+00>
+
+// CHECK-LABEL: @DynamicDequantize
+// CHECK-SAME:  [[INPUT:%.+]]: tensor<1x28x4608x128x!qElemType>
+// CHECK-SAME:  [[SCALE:%.+]]: tensor<1x28x4608x1xf16>
+func.func @DynamicDequantize(%arg0: tensor<1x28x4608x128x!qElemType>, %arg1: tensor<1x28x4608x1xf16>) ->  tensor<1x28x4608x128xf16> {
+    %0 = IE.DynamicDequantize(%arg0, %arg1) {dstElemType = f16} : tensor<1x28x4608x128x!qElemType>, tensor<1x28x4608x1xf16> -> tensor<1x28x4608x128xf16>
+    return %0 :  tensor<1x28x4608x128xf16>
+
+    // CHECK-NOT:   IE.DynamicDequantize
+    // CHECK:       VPU.DynamicDequantize([[INPUT]], [[SCALE]]) {dstElemType = f16} : tensor<1x28x4608x128x!qElemType>, tensor<1x28x4608x1xf16> -> tensor<1x28x4608x128xf16>
+}
+
+// -----
+
+!qElemType = !quant.uniform<i4:f16, 1.000000e+00>
+
+// CHECK-LABEL: @DynamicDequantizeWithZP
+// CHECK-SAME:  [[INPUT:%.+]]: tensor<1x28x4608x128x!qElemType>
+// CHECK-SAME:  [[SCALE:%.+]]: tensor<1x28x4608x1xf16>
+// CHECK-SAME:  [[ZP:%.+]]: tensor<1x28x4608x128xi4>
+func.func @DynamicDequantizeWithZP(%arg0: tensor<1x28x4608x128x!qElemType>, %arg1: tensor<1x28x4608x1xf16>, %arg2: tensor<1x28x4608x128xi4>) ->  tensor<1x28x4608x128xf16> {
+    %0 = IE.DynamicDequantize(%arg0, %arg1, %arg2) {dstElemType = f16} : tensor<1x28x4608x128x!qElemType>, tensor<1x28x4608x1xf16>, tensor<1x28x4608x128xi4> -> tensor<1x28x4608x128xf16>
+    return %0 :  tensor<1x28x4608x128xf16>
+
+    // CHECK-NOT:   IE.DynamicDequantize
+    // CHECK:       VPU.DynamicDequantize([[INPUT]], [[SCALE]], [[ZP]]) {dstElemType = f16} : tensor<1x28x4608x128x!qElemType>, tensor<1x28x4608x1xf16>, tensor<1x28x4608x128xi4> -> tensor<1x28x4608x128xf16>
 }

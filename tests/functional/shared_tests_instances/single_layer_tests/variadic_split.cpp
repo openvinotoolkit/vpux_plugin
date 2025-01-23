@@ -1,4 +1,4 @@
-// Copyright (C) Intel Corporation
+// Copyright (C) 2021 - 2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 #include "shared_test_classes/single_op/variadic_split.hpp"
@@ -13,11 +13,10 @@ std::shared_ptr<ov::Node> makeVariadicSplit(const ov::Output<ov::Node>& in, cons
 }
 
 namespace ov {
-
 namespace test {
 
 class VariadicSplitLayerTestCommon : public VariadicSplitLayerTest, virtual public VpuOv2LayerTest {};
-class VariadicSplitLayerTestAxisInt32_NPU3720 : public VariadicSplitLayerTestCommon {
+class VariadicSplitLayerTestAxisInt32 : public VariadicSplitLayerTestCommon {
     void SetUp() override {
         int32_t axisInt32;
         std::vector<size_t> numSplits;
@@ -36,26 +35,24 @@ class VariadicSplitLayerTestAxisInt32_NPU3720 : public VariadicSplitLayerTestCom
     }
 };
 
-TEST_P(VariadicSplitLayerTestCommon, NPU3720) {
+TEST_P(VariadicSplitLayerTestCommon, NPU3720_SW) {
     setReferenceSoftwareMode();
     run(Platform::NPU3720);
 }
 
-TEST_P(VariadicSplitLayerTestAxisInt32_NPU3720, SW) {
+TEST_P(VariadicSplitLayerTestAxisInt32, NPU3720_SW) {
     setReferenceSoftwareMode();
     run(Platform::NPU3720);
 }
 
-TEST_P(VariadicSplitLayerTestCommon, NPU4000) {
+TEST_P(VariadicSplitLayerTestCommon, NPU4000_SW) {
     setReferenceSoftwareMode();
     run(Platform::NPU4000);
 }
-
 }  // namespace test
-
 }  // namespace ov
 
-using ov::test::VariadicSplitLayerTestAxisInt32_NPU3720;
+using ov::test::VariadicSplitLayerTestAxisInt32;
 using ov::test::VariadicSplitLayerTestCommon;
 
 namespace {
@@ -115,7 +112,7 @@ INSTANTIATE_TEST_SUITE_P(smoke_VariadicSplitPosAxis, VariadicSplitLayerTestCommo
 INSTANTIATE_TEST_SUITE_P(smoke_precommit_VariadicSplitNegAxis, VariadicSplitLayerTestCommon, variadicSplitParams4,
                          VariadicSplitLayerTestCommon::getTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(smoke_VariadicSplitInt32Axis, VariadicSplitLayerTestAxisInt32_NPU3720, variadicSplitParams3,
-                         VariadicSplitLayerTestAxisInt32_NPU3720::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_VariadicSplitInt32Axis, VariadicSplitLayerTestAxisInt32, variadicSplitParams3,
+                         VariadicSplitLayerTestAxisInt32::getTestCaseName);
 
 }  // namespace

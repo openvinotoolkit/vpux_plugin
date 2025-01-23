@@ -39,7 +39,7 @@ module @mainModule {
       %8 = VPUIP.NCEClusterTask {kernel_padding = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 1 : i64, bottom = 1 : i64>, kernel_size = [2, 2], kernel_strides = [2, 2], task_type = #VPUIP.nce_task_type<MAXPOOL>} input(%0 : memref<1x64x16x16xf16, #NHWC, [@CMX_NN, 0]>) weight_table(%7 : memref<64x1x1x4xsi32, #NHWC, [@CMX_NN, 0]>) parent_input(%2 : memref<1x64x16x16xf16, #NHWC, [@CMX_NN, 0]>) parent_output(%3 : memref<1x64x9x8xf16, #NHWC, [@CMX_NN, 0]>) outputs(%1 : memref<1x64x9x8xf16, #NHWC, [@CMX_NN, 0]>) -> memref<1x64x9x8xf16, #NHWC, [@CMX_NN, 0]> variants : {
         DPUTask {inStart = [0, 0, 0], inEnd = [15, 15, 15], outEnd = [7, 8, 63], mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 1 : i64, bottom = 1 : i64>, outStart = [0, 0, 0]}
       } PPE : {
-        PPETask {opaque_ppe = #VPU.PPEStub<>}
+        PPETask {ppe = #VPU.PPEStub<>}
       }
     }
     VPURT.Task waits(%5 : !VPURT.Barrier) {
@@ -160,7 +160,7 @@ module @mainModule {
         DPUTask {inEnd = [111, 37, 63], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [55, 18, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 1 : i64, right = 0 : i64, top = 1 : i64, bottom = 0 : i64>}
       }
       PPE : {
-        PPETask {opaque_ppe = #VPU.PPEStub<>}
+        PPETask {ppe = #VPU.PPEStub<>}
       }
     }
     VPURT.Task waits(%bar_2 : !VPURT.Barrier) updates(%bar_3 : !VPURT.Barrier) attributes {isTrailingSWLayer = false} {
@@ -197,7 +197,7 @@ module @mainModule {
       variants : {
         DPUTask {inEnd = [111, 38, 63], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [55, 18, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 1 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
       } PPE : {
-        PPETask {opaque_ppe = #VPU.PPEStub<>}
+        PPETask {ppe = #VPU.PPEStub<>}
       }
     }
     VPURT.Task waits(%bar_7 : !VPURT.Barrier) updates(%bar_8, %bar_9 : !VPURT.Barrier, !VPURT.Barrier) attributes {isTrailingSWLayer = false} {
@@ -225,7 +225,7 @@ module @mainModule {
       variants : {
         DPUTask {inEnd = [111, 36, 63], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [55, 17, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 1 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
       } PPE : {
-        PPETask {opaque_ppe = #VPU.PPEStub<>}
+        PPETask {ppe = #VPU.PPEStub<>}
       }
     }
     VPURT.Task waits(%bar_10 : !VPURT.Barrier) updates(%bar_12 : !VPURT.Barrier) attributes {isTrailingSWLayer = false} {

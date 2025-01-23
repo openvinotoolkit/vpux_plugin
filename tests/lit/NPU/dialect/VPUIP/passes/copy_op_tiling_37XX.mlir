@@ -948,3 +948,89 @@ func.func @NotSplitSingleOneStrideCopyWithConcatUser(
 
     // CHECK: return [[CONCAT]]
 }
+
+// -----
+
+#NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
+
+// CHECK-LABEL: @RecursiveSplitCopyWithLargeSinglePlaneSize
+// CHECK-SAME:      [[INPUT:%.+]]: memref<2x64x288x576xf16, @DDR>
+// CHECK-SAME:      [[OUTPUT:%.+]]: memref<2x64x288x576xf16, {order = #NCHW, strides = [22560768, 331776, 1152, 1]}, @DDR>
+func.func @RecursiveSplitCopyWithLargeSinglePlaneSize(%arg0: memref<2x64x288x576xf16, @DDR>,
+        %arg1: memref<2x64x288x576xf16, {order = #NCHW, strides = [22560768, 331776, 1152, 1]}, @DDR>)
+        -> memref<2x64x288x576xf16, {order = #NCHW, strides = [22560768, 331776, 1152, 1]}, @DDR> {
+    %0 = VPUIP.Copy inputs(%arg0 : memref<2x64x288x576xf16, @DDR>)
+                    outputs(%arg1 : memref<2x64x288x576xf16, {order = #NCHW, strides = [22560768, 331776, 1152, 1]}, @DDR>)
+                    -> memref<2x64x288x576xf16, {order = #NCHW, strides = [22560768, 331776, 1152, 1]}, @DDR>
+
+
+    return %0 : memref<2x64x288x576xf16, {order = #NCHW, strides = [22560768, 331776, 1152, 1]}, @DDR>
+
+    // CHECK: [[IN_SLICE_0:%.+]] = VPUIP.SubView [[INPUT]] [0, 0, 0, 0] [1, 64, 288, 576] :
+    // CHECK-SAME:             memref<2x64x288x576xf16, @DDR>
+    // CHECK-SAME:             to memref<1x64x288x576xf16, @DDR>
+    // CHECK: [[OUT_SLICE_0:%.+]] = VPUIP.SubView [[OUTPUT]] [0, 0, 0, 0] [1, 64, 288, 576] :
+    // CHECK-SAME:             memref<2x64x288x576xf16, {order = #NCHW, strides = [22560768, 331776, 1152, 1]}, @DDR>
+    // CHECK-SAME:             to memref<1x64x288x576xf16, {order = #NCHW, strides = [22560768, 331776, 1152, 1]}, @DDR>
+
+    // CHECK: [[IN_SLICE_0_0:%.+]] = VPUIP.SubView [[IN_SLICE_0]] [0, 0, 0, 0] [1, 32, 288, 576] :
+    // CHECK-SAME:             memref<1x64x288x576xf16, @DDR>
+    // CHECK-SAME:             to memref<1x32x288x576xf16, {order = #NCHW, strides = [10616832, 165888, 576, 1]}, @DDR>
+    // CHECK: [[OUT_SLICE_0_0:%.+]] = VPUIP.SubView [[OUT_SLICE_0]] [0, 0, 0, 0] [1, 32, 288, 576] :
+    // CHECK-SAME:             memref<1x64x288x576xf16, {order = #NCHW, strides = [22560768, 331776, 1152, 1]}, @DDR>
+    // CHECK-SAME:             to memref<1x32x288x576xf16, {order = #NCHW, strides = [22560768, 331776, 1152, 1]}, @DDR>
+    // CHECK: [[COPY_0_0:%.+]] = VPUIP.Copy
+    // CHECK-SAME:           inputs([[IN_SLICE_0_0]] : memref<1x32x288x576xf16, {order = #NCHW, strides = [10616832, 165888, 576, 1]}, @DDR>)
+    // CHECK-SAME:           outputs([[OUT_SLICE_0_0]] : memref<1x32x288x576xf16, {order = #NCHW, strides = [22560768, 331776, 1152, 1]}, @DDR>) -> memref<1x32x288x576xf16, {order = #NCHW, strides = [22560768, 331776, 1152, 1]}, @DDR>
+
+    // CHECK: [[IN_SLICE_0_1:%.+]] = VPUIP.SubView [[IN_SLICE_0]] [0, 32, 0, 0] [1, 32, 288, 576] :
+    // CHECK-SAME:             memref<1x64x288x576xf16, @DDR>
+    // CHECK-SAME:             to memref<1x32x288x576xf16, {order = #NCHW, strides = [10616832, 165888, 576, 1]}, @DDR>
+    // CHECK: [[OUT_SLICE_0_1:%.+]] = VPUIP.SubView [[OUT_SLICE_0]] [0, 32, 0, 0] [1, 32, 288, 576] :
+    // CHECK-SAME:             memref<1x64x288x576xf16, {order = #NCHW, strides = [22560768, 331776, 1152, 1]}, @DDR>
+    // CHECK-SAME:             to memref<1x32x288x576xf16, {order = #NCHW, strides = [22560768, 331776, 1152, 1]}, @DDR>
+    // CHECK: [[COPY_0_1:%.+]] = VPUIP.Copy
+    // CHECK-SAME:           inputs([[IN_SLICE_0_1]] : memref<1x32x288x576xf16, {order = #NCHW, strides = [10616832, 165888, 576, 1]}, @DDR>)
+    // CHECK-SAME:           outputs([[OUT_SLICE_0_1]] : memref<1x32x288x576xf16, {order = #NCHW, strides = [22560768, 331776, 1152, 1]}, @DDR>) -> memref<1x32x288x576xf16, {order = #NCHW, strides = [22560768, 331776, 1152, 1]}, @DDR>
+
+    // CHECK: [[CONCAT_0:%.+]] = VPUIP.ConcatView
+    // CHECK-SAME:           inputs([[COPY_0_0]], [[COPY_0_1]] : memref<1x32x288x576xf16, {order = #NCHW, strides = [22560768, 331776, 1152, 1]}, @DDR>, memref<1x32x288x576xf16, {order = #NCHW, strides = [22560768, 331776, 1152, 1]}, @DDR>)
+    // CHECK-SAME:           outputs([[OUT_SLICE_0]] : memref<1x64x288x576xf16, {order = #NCHW, strides = [22560768, 331776, 1152, 1]}, @DDR>) -> memref<1x64x288x576xf16, {order = #NCHW, strides = [22560768, 331776, 1152, 1]}, @DDR>
+
+    // CHECK: [[IN_SLICE_1:%.+]] = VPUIP.SubView [[INPUT]] [1, 0, 0, 0] [1, 64, 288, 576] :
+    // CHECK-SAME:             memref<2x64x288x576xf16, @DDR>
+    // CHECK-SAME:             to memref<1x64x288x576xf16, @DDR>
+    // CHECK: [[OUT_SLICE_1:%.+]] = VPUIP.SubView [[OUTPUT]] [1, 0, 0, 0] [1, 64, 288, 576] :
+    // CHECK-SAME:             memref<2x64x288x576xf16, {order = #NCHW, strides = [22560768, 331776, 1152, 1]}, @DDR>
+    // CHECK-SAME:             to memref<1x64x288x576xf16, {order = #NCHW, strides = [22560768, 331776, 1152, 1]}, @DDR>
+
+    // CHECK: [[IN_SLICE_1_0:%.+]] = VPUIP.SubView [[IN_SLICE_1]] [0, 0, 0, 0] [1, 32, 288, 576] :
+    // CHECK-SAME:             memref<1x64x288x576xf16, @DDR>
+    // CHECK-SAME:             to memref<1x32x288x576xf16, {order = #NCHW, strides = [10616832, 165888, 576, 1]}, @DDR>
+    // CHECK: [[OUT_SLICE_1_0:%.+]] = VPUIP.SubView [[OUT_SLICE_1]] [0, 0, 0, 0] [1, 32, 288, 576] :
+    // CHECK-SAME:             memref<1x64x288x576xf16, {order = #NCHW, strides = [22560768, 331776, 1152, 1]}, @DDR>
+    // CHECK-SAME:             to memref<1x32x288x576xf16, {order = #NCHW, strides = [22560768, 331776, 1152, 1]}, @DDR>
+    // CHECK: [[COPY_1_0:%.+]] = VPUIP.Copy
+    // CHECK-SAME:           inputs([[IN_SLICE_1_0]] : memref<1x32x288x576xf16, {order = #NCHW, strides = [10616832, 165888, 576, 1]}, @DDR>)
+    // CHECK-SAME:           outputs([[OUT_SLICE_1_0]] : memref<1x32x288x576xf16, {order = #NCHW, strides = [22560768, 331776, 1152, 1]}, @DDR>) -> memref<1x32x288x576xf16, {order = #NCHW, strides = [22560768, 331776, 1152, 1]}, @DDR>
+
+    // CHECK: [[IN_SLICE_1_1:%.+]] = VPUIP.SubView [[IN_SLICE_1]] [0, 32, 0, 0] [1, 32, 288, 576] :
+    // CHECK-SAME:             memref<1x64x288x576xf16, @DDR>
+    // CHECK-SAME:             to memref<1x32x288x576xf16, {order = #NCHW, strides = [10616832, 165888, 576, 1]}, @DDR>
+    // CHECK: [[OUT_SLICE_1_1:%.+]] = VPUIP.SubView [[OUT_SLICE_1]] [0, 32, 0, 0] [1, 32, 288, 576] :
+    // CHECK-SAME:             memref<1x64x288x576xf16, {order = #NCHW, strides = [22560768, 331776, 1152, 1]}, @DDR>
+    // CHECK-SAME:             to memref<1x32x288x576xf16, {order = #NCHW, strides = [22560768, 331776, 1152, 1]}, @DDR>
+    // CHECK: [[COPY_1_1:%.+]] = VPUIP.Copy
+    // CHECK-SAME:           inputs([[IN_SLICE_1_1]] : memref<1x32x288x576xf16, {order = #NCHW, strides = [10616832, 165888, 576, 1]}, @DDR>)
+    // CHECK-SAME:           outputs([[OUT_SLICE_1_1]] : memref<1x32x288x576xf16, {order = #NCHW, strides = [22560768, 331776, 1152, 1]}, @DDR>) -> memref<1x32x288x576xf16, {order = #NCHW, strides = [22560768, 331776, 1152, 1]}, @DDR>
+
+    // CHECK: [[CONCAT_1:%.+]] = VPUIP.ConcatView
+    // CHECK-SAME:           inputs([[COPY_1_0]], [[COPY_1_1]] : memref<1x32x288x576xf16, {order = #NCHW, strides = [22560768, 331776, 1152, 1]}, @DDR>, memref<1x32x288x576xf16, {order = #NCHW, strides = [22560768, 331776, 1152, 1]}, @DDR>)
+    // CHECK-SAME:           outputs([[OUT_SLICE_1]] : memref<1x64x288x576xf16, {order = #NCHW, strides = [22560768, 331776, 1152, 1]}, @DDR>) -> memref<1x64x288x576xf16, {order = #NCHW, strides = [22560768, 331776, 1152, 1]}, @DDR>
+
+    // CHECK: [[CONCAT_2:%.+]] = VPUIP.ConcatView
+    // CHECK-SAME:           inputs([[CONCAT_0]], [[CONCAT_1]] : memref<1x64x288x576xf16, {order = #NCHW, strides = [22560768, 331776, 1152, 1]}, @DDR>, memref<1x64x288x576xf16, {order = #NCHW, strides = [22560768, 331776, 1152, 1]}, @DDR>)
+    // CHECK-SAME:           outputs([[OUTPUT]] : memref<2x64x288x576xf16, {order = #NCHW, strides = [22560768, 331776, 1152, 1]}, @DDR>) -> memref<2x64x288x576xf16, {order = #NCHW, strides = [22560768, 331776, 1152, 1]}, @DDR>
+
+    // CHECK: return [[CONCAT_2]]
+}

@@ -675,6 +675,24 @@ func.func @UniquifyMultiSlice(%arg0: tensor<1x128x96x64xf16>) -> (tensor<1x64x96
 
 // -----
 
+// CHECK-LABEL: @UniquifyMultiSliceWithMultiOffset
+func.func @UniquifyMultiSliceWithMultiOffset(%arg0: tensor<1x128x96x64xf16>) -> (tensor<1x64x96x64xf16>, tensor<1x64x96x64xf16>, tensor<1x64x96x64xf16>, tensor<1x64x96x64xf16>, tensor<1x64x96x64xf16>, tensor<1x64x96x64xf16>) {
+    %0 = IE.Slice %arg0 [0, 0, 0, 0] [1, 64, 96, 64] : tensor<1x128x96x64xf16> to tensor<1x64x96x64xf16>
+    %1 = IE.Slice %arg0 [0, 4, 0, 0] [1, 64, 96, 64] : tensor<1x128x96x64xf16> to tensor<1x64x96x64xf16>
+    %2 = IE.Slice %arg0 [0, 8, 0, 0] [1, 64, 96, 64] : tensor<1x128x96x64xf16> to tensor<1x64x96x64xf16>
+    %3 = IE.Slice %arg0 [0, 0, 0, 0] [1, 64, 96, 64] : tensor<1x128x96x64xf16> to tensor<1x64x96x64xf16>
+    %4 = IE.Slice %arg0 [0, 4, 0, 0] [1, 64, 96, 64] : tensor<1x128x96x64xf16> to tensor<1x64x96x64xf16>
+    %5 = IE.Slice %arg0 [0, 8, 0, 0] [1, 64, 96, 64] : tensor<1x128x96x64xf16> to tensor<1x64x96x64xf16>
+    return %0, %1, %2, %3, %4, %5 : tensor<1x64x96x64xf16>, tensor<1x64x96x64xf16>, tensor<1x64x96x64xf16>, tensor<1x64x96x64xf16>, tensor<1x64x96x64xf16>, tensor<1x64x96x64xf16>
+
+    //CHECK:      [[SLICE_OFFSET0:%.+]] = IE.Slice {{[^:]+}} [0, 0, 0, 0] [1, 64, 96, 64] : tensor<1x128x96x64xf16> to tensor<1x64x96x64xf16>
+    //CHECK:      [[SLICE_OFFSET4:%.+]] = IE.Slice {{[^:]+}} [0, 4, 0, 0] [1, 64, 96, 64] : tensor<1x128x96x64xf16> to tensor<1x64x96x64xf16>
+    //CHECK:      [[SLICE_OFFSET8:%.+]] = IE.Slice {{[^:]+}} [0, 8, 0, 0] [1, 64, 96, 64] : tensor<1x128x96x64xf16> to tensor<1x64x96x64xf16>
+    //CHECK:      return  [[SLICE_OFFSET0]], [[SLICE_OFFSET4]], [[SLICE_OFFSET8]], [[SLICE_OFFSET0]], [[SLICE_OFFSET4]], [[SLICE_OFFSET8]]
+}
+
+// -----
+
 // CHECK-LABEL: @NotUniquifySliceWithDifferentOffset
 func.func @NotUniquifySliceWithDifferentOffset(%arg0: tensor<1x128x96x64xf16>) -> (tensor<1x64x96x64xf16>, tensor<1x64x96x64xf16>) {
     %0 = IE.Slice %arg0 [0, 0, 0, 0] [1, 64, 96, 64] : tensor<1x128x96x64xf16> to tensor<1x64x96x64xf16>

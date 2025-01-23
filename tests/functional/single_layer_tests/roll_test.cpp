@@ -1,5 +1,5 @@
 //
-// Copyright (C) Intel Corporation
+// Copyright (C) 2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -144,5 +144,4 @@ INSTANTIATE_TEST_SUITE_P(smoke_SEPRollTest_Channel, SEPRollLayerTest_NPU4000,
                                             ::testing::Values(ov::element::f16), ::testing::Values(ov::Layout("NHWC")),
                                             ::testing::Values(ov::Layout("NCHW"))),
                          SEPRollLayerTest_NPU4000::getTestCaseName);
-
 }  // namespace ov::test

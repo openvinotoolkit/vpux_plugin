@@ -57,7 +57,6 @@ TEST_P(RdftLayerTestCommon, NPU4000) {
     VpuOv2LayerTest::setDefaultHardwareMode();
     VpuOv2LayerTest::run(Platform::NPU4000);
 }
-
 }  // namespace test
 }  // namespace ov
 

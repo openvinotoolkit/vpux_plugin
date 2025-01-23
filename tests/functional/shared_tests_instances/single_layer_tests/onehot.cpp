@@ -23,7 +23,6 @@ TEST_P(OneHotLayerTestCommon, NPU4000_HW) {
     setDefaultHardwareMode();
     run(Platform::NPU4000);
 }
-
 }  // namespace test
 }  // namespace ov
 

@@ -119,18 +119,35 @@ func.func @NotSwapWithHeightSlice(%arg0 : tensor<1x320x4096x1xf16>) -> tensor<20
 #map = affine_map<(d0, d1, d2, d3) -> (d1, d2, d3, d0)>
 
 // CHECK-LABEL: @SwapWithAvgPool
-func.func @SwapWithAvgPool(%arg0: tensor<1x512x768x1xf32>) -> tensor<512x768x1x1xf16> {
+func.func @SwapWithAvgPool(%arg0: tensor<1x512x768x1xf16>) -> tensor<512x768x1x1xf16> {
+    %0 = IE.Add(%arg0, %arg0)  { auto_broadcast = #IE.auto_broadcast_type<NUMPY> } : tensor<1x512x768x1xf16>, tensor<1x512x768x1xf16> -> tensor<1x512x768x1xf16>
+    %1 = IE.Transpose(%0) {order_value = #map} : tensor<1x512x768x1xf16> -> tensor<512x768x1x1xf16>
+    %2 = IE.AvgPool(%1) {exclude_pads, kernel_size = [1, 1], pads_begin = [0, 0], pads_end = [0, 0], post_op = #IE.PostOp<name = "IE.LeakyRelu", attrs = {negative_slope = 0.10000000149011612 : f64}>, rounding_type = #IE.rounding_type<FLOOR>, strides = [1, 1]} : tensor<512x768x1x1xf16> -> tensor<512x768x1x1xf16>
+    return %2: tensor<512x768x1x1xf16>
+
+    // CHECK:        [[ADD:%.*]] = IE.Add
+    // CHECK:        [[AVGPOOL:%.*]] = IE.AvgPool([[ADD]]) {exclude_pads, kernel_size = [1, 1],
+    // CHECK-SAME:     tensor<1x512x768x1xf16> -> tensor<1x512x768x1xf16>
+    // CHECK-NEXT:   [[TRANSPOSE:%.*]] = IE.Transpose([[AVGPOOL]])
+    // CHECK-SAME{LITERAL}: {order_value = #map} : tensor<1x512x768x1xf16> -> tensor<512x768x1x1xf16>
+    // CHECK-NEXT:   return [[TRANSPOSE]] : tensor<512x768x1x1xf16>
+}
+
+// -----
+
+#map = affine_map<(d0, d1, d2, d3) -> (d1, d2, d3, d0)>
+
+// CHECK-LABEL: @NotSwapWithAvgPoolConvertInput
+func.func @NotSwapWithAvgPoolConvertInput(%arg0: tensor<1x512x768x1xf32>) -> tensor<512x768x1x1xf16> {
     %0 = IE.Convert(%arg0) {dstElemType = f16} : tensor<1x512x768x1xf32> -> tensor<1x512x768x1xf16>
     %1 = IE.Transpose(%0) {order_value = #map} : tensor<1x512x768x1xf16> -> tensor<512x768x1x1xf16>
     %2 = IE.AvgPool(%1) {exclude_pads, kernel_size = [1, 1], pads_begin = [0, 0], pads_end = [0, 0], post_op = #IE.PostOp<name = "IE.LeakyRelu", attrs = {negative_slope = 0.10000000149011612 : f64}>, rounding_type = #IE.rounding_type<FLOOR>, strides = [1, 1]} : tensor<512x768x1x1xf16> -> tensor<512x768x1x1xf16>
     return %2: tensor<512x768x1x1xf16>
 
-    // CHECK:        [[CONVERT:%.*]] = IE.Convert
-    // CHECK:        [[AVGPOOL:%.*]] = IE.AvgPool([[CONVERT]]) {exclude_pads, kernel_size = [1, 1],
-    // CHECK-SAME:     tensor<1x512x768x1xf16> -> tensor<1x512x768x1xf16>
-    // CHECK-NEXT:   [[TRANSPOSE:%.*]] = IE.Transpose([[AVGPOOL]])
-    // CHECK-SAME{LITERAL}: {order_value = #map} : tensor<1x512x768x1xf16> -> tensor<512x768x1x1xf16>
-    // CHECK-NEXT:   return [[TRANSPOSE]] : tensor<512x768x1x1xf16>
+    // CHECK:        [[CONVERT:%.+]] = IE.Convert
+    // CHECK-NEXT:   [[TRANSPOSE:%.+]] = IE.Transpose([[CONVERT]])
+    // CHECK-NEXT:   [[AVGPOOL:%.+]] = IE.AvgPool([[TRANSPOSE]])
+    // CHECK:   return [[AVGPOOL]] : tensor<512x768x1x1xf16>
 }
 
 // -----
@@ -144,10 +161,10 @@ func.func @NotSwapWithAvgPoolAsChannelAlign(%arg0: tensor<1x24x768x1xf32>) -> te
     %2 = IE.AvgPool(%1) {exclude_pads, kernel_size = [1, 1], pads_begin = [0, 0], pads_end = [0, 0], post_op = #IE.PostOp<name = "IE.LeakyRelu", attrs = {negative_slope = 0.10000000149011612 : f64}>, rounding_type = #IE.rounding_type<FLOOR>, strides = [1, 1]} : tensor<24x768x1x1xf16> -> tensor<24x768x1x1xf16>
     return %2: tensor<24x768x1x1xf16>
 
-    // CHECK:        [[CONVERT:%.*]] = IE.Convert
-    // CHECK:        [[TRANSPOSE:%.*]] = IE.Transpose([[CONVERT]])
+    // CHECK:        [[CONVERT:%.+]] = IE.Convert
+    // CHECK:        [[TRANSPOSE:%.+]] = IE.Transpose([[CONVERT]])
     // CHECK-SAME{LITERAL}: {order_value = #map} : tensor<1x24x768x1xf16> -> tensor<24x768x1x1xf16>
-    // CHECK-NEXT:   [[AVGPOOL:%.*]] = IE.AvgPool([[TRANSPOSE]]) {exclude_pads, kernel_size = [1, 1],
+    // CHECK-NEXT:   [[AVGPOOL:%.+]] = IE.AvgPool([[TRANSPOSE]]) {exclude_pads, kernel_size = [1, 1],
     // CHECK-SAME:     tensor<24x768x1x1xf16> -> tensor<24x768x1x1xf16>
     // CHECK-NEXT:   return [[AVGPOOL]] : tensor<24x768x1x1xf16>
 }
@@ -356,6 +373,52 @@ func.func @SwapWithMultiply(%arg0: tensor<1x1280x4096x1xf16>, %arg1: tensor<1x12
     // CHECK:           [[MULTIPLY:%.+]] = IE.Multiply([[INPUT0]], [[INPUT1]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x1280x4096x1xf16>, tensor<1x1280x4096x1xf16> -> tensor<1x1280x4096x1xf16>
     // CHECK:           [[TRANSPOSE:%.+]] = IE.Transpose([[MULTIPLY]]) {order_value = #map} : tensor<1x1280x4096x1xf16> -> tensor<4096x1280x1x1xf16>
     // CHECK:           return [[TRANSPOSE]] : tensor<4096x1280x1x1xf16>
+}
+
+// -----
+
+#HCNW = affine_map<(d0, d1, d2, d3) -> (d2, d1, d0, d3)>
+// CHECK: [[HCNW:#.+]] = affine_map<(d0, d1, d2, d3) -> (d2, d1, d0, d3)>
+
+// CHECK: @SwapWithBroadcastableMultiply
+// CHECK-SAME:     ([[INPUT0:%arg[0-9]]]: tensor<1x11008x1024x1xf16>, [[INPUT1:%arg[0-9]]]: tensor<1x11008x1x1xf16>)
+func.func @SwapWithBroadcastableMultiply(%arg0: tensor<1x11008x1024x1xf16>, %arg1: tensor<1x11008x1x1xf16>) -> tensor<1024x11008x1x1xf16> {
+    %0 = IE.Transpose(%arg0) {order_value = #HCNW} : tensor<1x11008x1024x1xf16> -> tensor<1024x11008x1x1xf16>
+    %1 = IE.Multiply(%0, %arg1) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>}
+        : tensor<1024x11008x1x1xf16>, tensor<1x11008x1x1xf16> -> tensor<1024x11008x1x1xf16>
+    return %1 : tensor<1024x11008x1x1xf16>
+
+    // CHECK:        [[TRANSPOSE_IN:%.+]] = IE.Transpose([[INPUT1]]) {order_value = [[HCNW]]}
+    // CHECK-SAME:      : tensor<1x11008x1x1xf16> -> tensor<1x11008x1x1xf16>
+    // CHECK:        [[MULTIPLY:%.+]] = IE.Multiply([[INPUT0]], [[TRANSPOSE_IN]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>}
+    // CHECK-SAME:      : tensor<1x11008x1024x1xf16>, tensor<1x11008x1x1xf16> -> tensor<1x11008x1024x1xf16>
+    // CHECK:        [[TRANSPOSE:%.+]] = IE.Transpose([[MULTIPLY]]) {order_value = [[HCNW]]}
+    // CHECK-SAME:      : tensor<1x11008x1024x1xf16> -> tensor<1024x11008x1x1xf16>
+    // CHECK:        return [[TRANSPOSE]] : tensor<1024x11008x1x1xf16>
+}
+
+// -----
+
+#HCNW = affine_map<(d0, d1, d2, d3) -> (d2, d1, d0, d3)>
+// CHECK: [[HCNW:#.+]] = affine_map<(d0, d1, d2, d3) -> (d2, d1, d0, d3)>
+
+// CHECK: @NotSwapWithBroadcastableMultiplyMultipleUses
+// CHECK-SAME:     ([[INPUT0:%arg[0-9]]]: tensor<1x11008x1024x1xf16>, [[INPUT1:%arg[0-9]]]: tensor<1x11008x1x1xf16>)
+func.func @NotSwapWithBroadcastableMultiplyMultipleUses(
+        %arg0: tensor<1x11008x1024x1xf16>, %arg1: tensor<1x11008x1x1xf16>)
+            -> (tensor<1024x11008x1x1xf16>, tensor<1024x11008x1x1xf16>) {
+    %0 = IE.Transpose(%arg0) {order_value = #HCNW} : tensor<1x11008x1024x1xf16> -> tensor<1024x11008x1x1xf16>
+    %1 = IE.Multiply(%0, %arg1) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>}
+        : tensor<1024x11008x1x1xf16>, tensor<1x11008x1x1xf16> -> tensor<1024x11008x1x1xf16>
+    %2 = IE.Swish(%0) {beta_value = 1.000000e+00 : f64}
+    : tensor<1024x11008x1x1xf16> -> tensor<1024x11008x1x1xf16>
+    return %1, %2 : tensor<1024x11008x1x1xf16>, tensor<1024x11008x1x1xf16>
+
+    // CHECK:        [[TRANSPOSE:%.+]] = IE.Transpose([[INPUT0]]) {order_value = [[HCNW]]}
+    // CHECK-SAME:      : tensor<1x11008x1024x1xf16> -> tensor<1024x11008x1x1xf16>
+    // CHECK:        [[MULTIPLY:%.+]] = IE.Multiply([[TRANSPOSE]], [[INPUT1]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>}
+    // CHECK-SAME:      : tensor<1024x11008x1x1xf16>, tensor<1x11008x1x1xf16> -> tensor<1024x11008x1x1xf16>
+
 }
 
 // -----

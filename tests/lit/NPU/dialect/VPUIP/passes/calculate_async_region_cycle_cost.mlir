@@ -1,7 +1,14 @@
 //
-// Copyright (C) 2023 Intel Corporation.
-// SPDX-License-Identifier: Apache 2.0
+// Copyright (C) 2023-2024 Intel Corporation.
 //
+// This software and the related documents are Intel copyrighted materials,
+// and your use of them is governed by the express license under which they
+// were provided to you (License). Unless the License provides otherwise,
+// you may not use, modify, copy, publish, distribute, disclose or transmit
+// this software or the related documents without Intel's prior written permission.
+//
+// This software and the related documents are provided as is, with no express or
+// implied warranties, other than those that are expressly stated in the License.
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch% allow-custom-values=true ppe-version=IntPPE" --calculate-async-region-cycle-cost  %s | FileCheck %s
 // REQUIRES: arch-NPU37XX || arch-NPU40XX
@@ -168,11 +175,11 @@ func.func @main(%arg0: memref<1x112x112x16xf16, @DDR>, %arg1: memref<1x112x112x1
         %5 = VPUIP.ViewOp %3 : !VPUIP.DistributedBuffer<1x1x1x256xui8, {order = #NCHW, strides = [4864, 4864, 4864, 1]}, @CMX_NN, {mode = "DUPLICATED", num_clusters = 2 : i64}> to !VPUIP.DistributedBuffer<16x1x1x4xsi32, #NCHW, @CMX_NN, {mode = "DUPLICATED", num_clusters = 2 : i64}>
         %6 = VPUIP.ViewOp %4 : !VPUIP.DistributedBuffer<1x1x1x4608xui8, {order = #NCHW, strides = [4864, 4864, 4864, 1]}, @CMX_NN, {mode = "DUPLICATED", num_clusters = 2 : i64}> to !VPUIP.DistributedBuffer<16x16x3x3xf16, #NHWC, @CMX_NN, {mode = "DUPLICATED", num_clusters = 2 : i64}>
         %7 = VPUIP.NCEClusterTask {constantsFused = true, kernel_padding = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>, kernel_size = [3, 3], kernel_strides = [1, 1],
-            opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>,minimumHardwareExecutionCost = 23244 : i64, task_type = #VPUIP.nce_task_type<CONV>} input(%arg2 : !Distributed0) weights(%6 : !VPUIP.DistributedBuffer<16x16x3x3xf16, #NHWC, @CMX_NN, {mode = "DUPLICATED", num_clusters = 2 : i64}>) weight_table(%5 : !VPUIP.DistributedBuffer<16x1x1x4xsi32, #NCHW, @CMX_NN, {mode = "DUPLICATED", num_clusters = 2 : i64}>) parent_input(%arg2 : !Distributed0) parent_output(%1 : !Distributed0) outputs(%1 : !Distributed0) -> !Distributed0 variants : {
+            ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64>,minimumHardwareExecutionCost = 23244 : i64, task_type = #VPUIP.nce_task_type<CONV>} input(%arg2 : !Distributed0) weights(%6 : !VPUIP.DistributedBuffer<16x16x3x3xf16, #NHWC, @CMX_NN, {mode = "DUPLICATED", num_clusters = 2 : i64}>) weight_table(%5 : !VPUIP.DistributedBuffer<16x1x1x4xsi32, #NCHW, @CMX_NN, {mode = "DUPLICATED", num_clusters = 2 : i64}>) parent_input(%arg2 : !Distributed0) parent_output(%1 : !Distributed0) outputs(%1 : !Distributed0) -> !Distributed0 variants : {
             DPUTask {cluster_id = 0 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [111, 55, 15], outStart = [0, 0, 0], pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 0 : i64>}
             DPUTask {cluster_id = 1 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [111, 111, 15], outStart = [0, 56, 0], pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 0 : i64, bottom = 1 : i64>}
         } PPE : {
-            PPETask {opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>}
+            PPETask {ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64>}
         }
         async.yield %7 : !Distributed0
     }

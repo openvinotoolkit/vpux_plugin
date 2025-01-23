@@ -60,7 +60,7 @@ func.func @SparseConvWeightsWithCompressCandidate(%arg0: memref<1x32x3x3xf16, #N
     -> memref<1x64x3x3xf16, #NHWC, [@CMX_NN, 0]> variants : {
       DPUTask {cluster_id = 0 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [15, 2, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     } PPE : {
-      PPETask {opaque_ppe = #VPU.PPEStub<>}
+      PPETask {ppe = #VPU.PPEStub<>}
     }
   }
 

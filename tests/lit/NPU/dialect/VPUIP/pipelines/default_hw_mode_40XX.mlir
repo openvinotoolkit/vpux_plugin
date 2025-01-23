@@ -21,8 +21,6 @@
 // CHECK-LABEL: @SoftMax
 module @SoftMax attributes {VPU.arch = #VPU.arch_kind<NPU40XX>, VPU.compilationMode = #VPU.compilation_mode<DefaultHW>} {
     // CHECK-DAG: {{  }}IE.TileResource
-    // CHECK-DAG: {{    }}builtin.module @UsedMemory
-    // CHECK-NEXT: {{      }}IE.MemoryResource {{[0-9]+}} bytes of @CMX_NN
     // CHECK-DAG: {{      }}module @DmaProfilingReservedMemory
     // CHECK-NEXT: {{        }}IE.MemoryResource 1024 bytes of @CMX_NN offset 1473536
 
@@ -62,7 +60,7 @@ module @SoftMax attributes {VPU.arch = #VPU.arch_kind<NPU40XX>, VPU.compilationM
         %7 = VPUIP.Copy inputs(%6 : memref<1x1000xf16>) outputs(%arg1 : memref<1x1000xf16>) -> memref<1x1000xf16>
         return %7 : memref<1x1000xf16>
 
-        // CHECK-DAG:   [[BAR0:%.+]] = VPURT.ConfigureBarrier<0> -> !VPURT.Barrier
+        // CHECK-DAG:   [[BAR0:%.+]] = VPURT.ConfigureBarrier<0> {isStartBarrier} -> !VPURT.Barrier
         // CHECK-DAG:   [[BAR1:%.+]] = VPURT.ConfigureBarrier<1> -> !VPURT.Barrier
         // CHECK-DAG:   [[BAR2:%.+]] = VPURT.ConfigureBarrier<2> -> !VPURT.Barrier
         // CHECK-DAG:   [[BAR3:%.+]] = VPURT.ConfigureBarrier<3> {isFinalBarrier} -> !VPURT.Barrier
@@ -152,8 +150,6 @@ module @SoftMax attributes {VPU.arch = #VPU.arch_kind<NPU40XX>, VPU.compilationM
 // CHECK-LABEL: @TwoFunctions
 module @TwoFunctions attributes {VPU.arch = #VPU.arch_kind<NPU40XX>, VPU.compilationMode = #VPU.compilation_mode<DefaultHW>} {
     // CHECK-DAG: {{  }}IE.TileResource
-    // CHECK-DAG: {{    }}builtin.module @UsedMemory
-    // CHECK-DAG: {{      }}IE.MemoryResource {{[0-9]+}} bytes of @CMX_NN
 
     VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
     module @VPU.SW {
@@ -228,7 +224,7 @@ module @TwoFunctions attributes {VPU.arch = #VPU.arch_kind<NPU40XX>, VPU.compila
             DPUTask {cluster_id = 5 : i64, inEnd = [0, 15, 15], inStart = [0, 0, 0],
             mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [0, 15, 15], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
           } PPE : {
-            PPETask {opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_high = 2147483647 : i64, clamp_low = -2147483648 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_scale = [5.000000e-01]>}
+            PPETask {ppe = #VPU.PPEInt<mode = <NOOP>, clamp_high = 2147483647 : i64, clamp_low = -2147483648 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_scale = [5.000000e-01]>}
           }
         }
 
@@ -345,7 +341,7 @@ module @TwoFunctions attributes {VPU.arch = #VPU.arch_kind<NPU40XX>, VPU.compila
             DPUTask {cluster_id = 5 : i64, inEnd = [5, 5, 15], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [3, 3, 31],
             outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
           } PPE : {
-            PPETask {opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_high = 2147483647 : i64, clamp_low = -2147483648 : i64, fp_prelu_alpha = 1.000000e+00 : f64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64>}
+            PPETask {ppe = #VPU.PPEInt<mode = <NOOP>, clamp_high = 2147483647 : i64, clamp_low = -2147483648 : i64, fp_prelu_alpha = 1.000000e+00 : f64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64>}
           }
         }
         %alloc_3 = memref.alloc() : memref<1x32x4x4xf16>

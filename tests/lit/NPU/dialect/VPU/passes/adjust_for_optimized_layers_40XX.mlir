@@ -72,10 +72,10 @@ func.func @AdjustForSoftmaxMultiShaveOptNHWCwithBatch(%arg0: tensor<2x8x16x16xf1
 // CHECK-LABEL:   @NotAdjustForNCEPermuteDueToSmallNewHeight
 // CHECK-SAME:    [[INPUT:%.+]]: tensor<1x32x3x64xf16>
 func.func @NotAdjustForNCEPermuteDueToSmallNewHeight(%arg0: tensor<1x32x3x64xf16>) -> tensor<1x32x3x64xf16, {order = #NHWC}> {
-    %0 = VPU.NCE.Permute(%arg0) {opaque_ppe = #VPU.PPEStub<>, dstElemType = f16, dstOrder = #NHWC, expandedChannels = 32 : i64} -> tensor<1x32x3x64xf16, {order = #NHWC}>
+    %0 = VPU.NCE.Permute(%arg0) {ppe = #VPU.PPEStub<>, dstElemType = f16, dstOrder = #NHWC, expandedChannels = 32 : i64} -> tensor<1x32x3x64xf16, {order = #NHWC}>
 
     return %0 : tensor<1x32x3x64xf16, {order = #NHWC}>
 
-    // CHECK:        [[NCE_PERMUTE:%.+]] = VPU.NCE.Permute([[INPUT]]) {dstElemType = f16, dstOrder = #NHWC, expandedChannels = 32 : i64, opaque_ppe = #VPU.PPEStub<>} -> tensor<1x32x3x64xf16, {order = #NHWC}>
+    // CHECK:        [[NCE_PERMUTE:%.+]] = VPU.NCE.Permute([[INPUT]]) {dstElemType = f16, dstOrder = #NHWC, expandedChannels = 32 : i64, ppe = #VPU.PPEStub<>} -> tensor<1x32x3x64xf16, {order = #NHWC}>
     // CHECK:        return [[NCE_PERMUTE]]
 }

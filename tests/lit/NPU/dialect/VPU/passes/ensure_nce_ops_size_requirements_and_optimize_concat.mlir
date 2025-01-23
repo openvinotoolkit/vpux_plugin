@@ -19,7 +19,7 @@ func.func @SplitNCEConvWithEltwiseAddOverOC(%input1: tensor<1x128x256x4xf16, {or
     %weightsTable0 = const.Declare tensor<18944x1x1x4xsi32> = dense<2> : tensor<18944x1x1x4xsi32>
     %conv0 = VPU.NCE.Convolution(%input1, %weights0, %weightsTable0) {
         pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-        opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
+        ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
         lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>,
         rawFilterShape = [18944, 128, 1, 1], strides = [1, 1]
     } -> tensor<1x18944x256x4xf16, {order = #NHWC}>
@@ -29,14 +29,14 @@ func.func @SplitNCEConvWithEltwiseAddOverOC(%input1: tensor<1x128x256x4xf16, {or
     %weightsTable1 = const.Declare tensor<18944x1x1x4xsi32> = dense<2> : tensor<18944x1x1x4xsi32>
     %conv1 = VPU.NCE.Convolution(%input2, %weights1, %weightsTable1) {
         pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-        opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
+        ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
         lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>,
         rawFilterShape = [18944, 128, 1, 1], strides = [1, 1]
     } -> tensor<1x18944x256x4xf16, {order = #NHWC}>
 
     %add = VPU.NCE.Eltwise(%conv0, %conv1) {
         op_type = #VPU.eltwise_type<ADD>,
-        opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
+        ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
         lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
         quant_scale = [1.000000e+00], fp_prelu_alpha = 1.000000e+00 : f64>
     } -> tensor<1x18944x256x4xf16, {order = #NHWC}>
@@ -51,62 +51,62 @@ func.func @SplitNCEConvWithEltwiseAddOverOC(%input1: tensor<1x128x256x4xf16, {or
   //CHECK-DAG:    [[CST_4:%.+]] = const.Declare tensor<6320x1x1x4xsi32> = dense<2> : tensor<18944x1x1x4xsi32>, [#const.SubView<[0, 0, 0, 0], [6320, 1, 1, 4]>]
 
   //CHECK:        [[CONV_0:%.+]] = VPU.NCE.Convolution([[INPUT0]], [[CST_3]], [[CST_4]]) {
-  //CHECK-SAME:       opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-  //CHECK-SAME:       lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>,
   //CHECK-SAME:       pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
+  //CHECK-SAME:       ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
+  //CHECK-SAME:       lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>,
   //CHECK-SAME:       rawFilterShape = [6320, 128, 1, 1], strides = [1, 1]
   //CHECK-SAME:   } -> tensor<1x6320x256x4xf16, {order = #NHWC}>
 
   //CHECK:        [[CONV_1:%.+]] = VPU.NCE.Convolution([[INPUT0]], [[CST_2]], [[CST_1]]) {
-  //CHECK-SAME:       opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-  //CHECK-SAME:       lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>,
   //CHECK-SAME:       pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
+  //CHECK-SAME:       ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
+  //CHECK-SAME:       lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>,
   //CHECK-SAME:       rawFilterShape = [6320, 128, 1, 1], strides = [1, 1]
   //CHECK-SAME:   } -> tensor<1x6320x256x4xf16, {order = #NHWC}>
 
   //CHECK:        [[CONV_2:%.+]] = VPU.NCE.Convolution([[INPUT0]], [[CST_0]], [[CST]]) {
-  //CHECK-SAME:       opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-  //CHECK-SAME:       lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>,
   //CHECK-SAME:       pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
+  //CHECK-SAME:       ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
+  //CHECK-SAME:       lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>,
   //CHECK-SAME:       rawFilterShape = [6304, 128, 1, 1], strides = [1, 1]
   //CHECK-SAME:   } -> tensor<1x6304x256x4xf16, {order = #NHWC}>
 
   //CHECK:        [[CONV_3:%.+]] = VPU.NCE.Convolution([[INPUT1]], [[CST_3]], [[CST_4]]) {
-  //CHECK-SAME:       opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-  //CHECK-SAME:       lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>,
   //CHECK-SAME:       pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
+  //CHECK-SAME:       ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
+  //CHECK-SAME:       lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>,
   //CHECK-SAME:       rawFilterShape = [6320, 128, 1, 1], strides = [1, 1]
   //CHECK-SAME:   } -> tensor<1x6320x256x4xf16, {order = #NHWC}>
 
   //CHECK:        [[CONV_4:%.+]] = VPU.NCE.Convolution([[INPUT1]], [[CST_2]], [[CST_1]]) {
-  //CHECK-SAME:       opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-  //CHECK-SAME:       lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>,
   //CHECK-SAME:       pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
+  //CHECK-SAME:       ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
+  //CHECK-SAME:       lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>,
   //CHECK-SAME:       rawFilterShape = [6320, 128, 1, 1], strides = [1, 1]
   //CHECK-SAME:   } -> tensor<1x6320x256x4xf16, {order = #NHWC}>
 
   //CHECK:        [[CONV_5:%.+]] = VPU.NCE.Convolution([[INPUT1]], [[CST_0]], [[CST]]) {
-  //CHECK-SAME:       opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
-  //CHECK-SAME:       lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>,
   //CHECK-SAME:       pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
+  //CHECK-SAME:       ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
+  //CHECK-SAME:       lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>,
   //CHECK-SAME:       rawFilterShape = [6304, 128, 1, 1], strides = [1, 1]
   //CHECK-SAME:   } -> tensor<1x6304x256x4xf16, {order = #NHWC}>
 
   //CHECK:        [[ADD_0:%.+]] = VPU.NCE.Eltwise([[CONV_0]], [[CONV_3]]) {
   //CHECK-SAME:       op_type = #VPU.eltwise_type<ADD>,
-  //CHECK-SAME:       opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
+  //CHECK-SAME:       ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
   //CHECK-SAME:       lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_scale = [1.000000e+00], fp_prelu_alpha = 1.000000e+00 : f64>
   //CHECK-SAME:   } -> tensor<1x6320x256x4xf16, {order = #NHWC}>
 
   //CHECK:        [[ADD_1:%.+]] = VPU.NCE.Eltwise([[CONV_1]], [[CONV_4]]) {
   //CHECK-SAME:       op_type = #VPU.eltwise_type<ADD>,
-  //CHECK-SAME:       opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
+  //CHECK-SAME:       ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
   //CHECK-SAME:       lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_scale = [1.000000e+00], fp_prelu_alpha = 1.000000e+00 : f64>
   //CHECK-SAME:   } -> tensor<1x6320x256x4xf16, {order = #NHWC}>
 
   //CHECK:        [[ADD_2:%.+]] = VPU.NCE.Eltwise([[CONV_2]], [[CONV_5]]) {
   //CHECK-SAME:       op_type = #VPU.eltwise_type<ADD>,
-  //CHECK-SAME:       opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
+  //CHECK-SAME:       ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64,
   //CHECK-SAME:       lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_scale = [1.000000e+00], fp_prelu_alpha = 1.000000e+00 : f64>
   //CHECK-SAME:   } -> tensor<1x6304x256x4xf16, {order = #NHWC}>
 

@@ -90,7 +90,7 @@ TEST_F(MLIR_GetExplicitDistributionInfoAttrTest, SWOp) {
                     shape_calc_mode = <SIZES>>, axes_attr = [2, 3],
                     initial_input_dims_attr = [1, 1, 96, 160],
                     initial_output_dims_attr = [1, 1, 192, 320],
-                    operandSegmentSizes = array<i32: 1, 0, 0, 0>,
+                    operandSegmentSizes = array<i32: 1, 0, 0, 0, 0, 0>,
                     scales_attr = [2.000000e+00, 2.000000e+00],
                     sizes_attr = [192, 320],
                     tile_offset_attr = [0.000000e+00, 0.000000e+00, 0.000000e+00, 0.000000e+00]}
@@ -163,7 +163,7 @@ TEST_F(MLIR_GetExplicitDistributionInfoAttrTest, HWOp) {
             func.func @main(%arg0: tensor<1x32x112x112xf16, {order = #NHWC}>) -> tensor<1x32x112x112xf16, {order = #NHWC}> {
                 %cst_0 = const.Declare tensor<32x1x1x4xsi32> = dense<10> : tensor<32x1x1x4xsi32>
                 %0 = VPU.NCE.MaxPool(%arg0, %cst_0) {
-                        opaque_ppe = #VPU.PPEStub<>,
+                        ppe = #VPU.PPEStub<>,
                         pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
                         strides = [1, 1],
                         kernel_size = [1, 1]
@@ -276,7 +276,7 @@ TEST_F(MLIR_GetExplicitDistributionInfoAttrTest, SparseHWSOKOp) {
                 %wtable = const.Declare tensor<256x1x1x4xsi32> = dense<10> : tensor<256x1x1x4xsi32>
                 %0 = VPU.NCE.Convolution(%arg0, %weights, %wtable) {
                         pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-                        opaque_ppe = #VPU.PPEInt<
+                        ppe = #VPU.PPEInt<
                             mode = <NOOP>,
                             clamp_low = 0 : i64, clamp_high = 255 : i64,
                             lrelu_mult = 1 : i64, lrelu_shift = 0 : i64,
@@ -356,7 +356,7 @@ TEST_F(MLIR_GetExplicitDistributionInfoAttrTest, NCEPermuteOp) {
                     dstElemType = !qElemType,
                     dstOrder = #NHWC,
                     expandedChannels = 4 : i64,
-                    opaque_ppe = #VPU.PPEInt<
+                    ppe = #VPU.PPEInt<
                         mode = <NOOP>,
                         clamp_low = -2147483648 : i64,
                         clamp_high = 2147483647 : i64,

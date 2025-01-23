@@ -51,7 +51,6 @@ TEST_P(DftLayerTestCommon, NPU4000) {
     setDefaultHardwareMode();
     run(Platform::NPU4000);
 }
-
 }  // namespace test
 }  // namespace ov
 

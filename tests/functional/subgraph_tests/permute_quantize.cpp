@@ -1,5 +1,5 @@
 //
-// Copyright (C) Intel Corporation
+// Copyright (C) 2023 - 2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -53,14 +53,14 @@ class PermuteQuantizeTest_NPU4000 : public PermuteQuantizeTestCommon {};
 TEST_P(PermuteQuantizeTest_NPU3720, HW) {
     setDefaultHardwareMode();
     configuration["PERFORMANCE_HINT"] = "LATENCY";
-    configuration["NPU_DPU_GROUPS"] = "2";
+    configuration["NPU_TILES"] = "2";
     run(Platform::NPU3720);
 }
 
 TEST_P(PermuteQuantizeTest_NPU4000, HW) {
     setDefaultHardwareMode();
     configuration["PERFORMANCE_HINT"] = "THROUGHPUT";
-    configuration["NPU_DPU_GROUPS"] = "1";
+    configuration["NPU_TILES"] = "1";
     configuration["NPU_DMA_ENGINES"] = "1";
     run(Platform::NPU4000);
 }

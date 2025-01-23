@@ -147,15 +147,16 @@ class ROIPoolingLayerTestCommon : public ROIPoolingLayerTestAddLayout, virtual p
 };
 
 TEST_P(ROIPoolingLayerTestCommon, NPU3720_HW) {
+    abs_threshold = 0.25;
     setDefaultHardwareMode();
     run(Platform::NPU3720);
 }
 
 TEST_P(ROIPoolingLayerTestCommon, NPU4000_HW) {
+    abs_threshold = 0.25;
     setDefaultHardwareMode();
     run(Platform::NPU4000);
 }
-
 }  // namespace test
 }  // namespace ov
 

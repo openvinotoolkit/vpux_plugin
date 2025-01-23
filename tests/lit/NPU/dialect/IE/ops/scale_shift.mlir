@@ -7,6 +7,7 @@
 // REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 // CHECK-LABEL: @FuseScaleAndBias
+// CHECK-SAME:     ([[ARG0:%.+]]: tensor<1x3x300x300xf32>)
 func.func @FuseScaleAndBias(%arg0: tensor<1x3x300x300xf32>) -> tensor<1x3x300x300xf32> {
     %weights = const.Declare tensor<1x3x1x1xf32> = dense<2.0> : tensor<1x3x1x1xf32>
     %0 = IE.ScaleShift(%arg0, %weights)
@@ -20,16 +21,17 @@ func.func @FuseScaleAndBias(%arg0: tensor<1x3x300x300xf32>) -> tensor<1x3x300x30
 
     return %1 : tensor<1x3x300x300xf32>
 
-    // CHECK-DAG:   %[[WEIGHTS:.*]] = const.Declare tensor<1x3x1x1xf32> = dense<2.000000e+00> : tensor<1x3x1x1xf32>
-    // CHECK-DAG:   %[[BIAS:.*]] = const.Declare tensor<1x3x1x1xf32> = dense<3.000000e+00> : tensor<1x3x1x1xf32>
-    // CHECK:       %[[VAL0:.*]] = IE.ScaleShift(%arg0, %[[WEIGHTS]], %[[BIAS]])
-    // CHECK:       return %[[VAL0]]
+    // CHECK-DAG:   [[WEIGHTS:%.+]] = const.Declare tensor<1x3x1x1xf32> = dense<2.000000e+00> : tensor<1x3x1x1xf32>
+    // CHECK-DAG:   [[BIAS:%.+]] = const.Declare tensor<1x3x1x1xf32> = dense<3.000000e+00> : tensor<1x3x1x1xf32>
+    // CHECK:       [[SCALE_SHIFT:%.+]] = IE.ScaleShift([[ARG0]], [[WEIGHTS]], [[BIAS]])
+    // CHECK:       return [[SCALE_SHIFT]]
 }
 
 // -----
 
 // Fuse ScaleShift and Bias should fail
 // CHECK-LABEL: @FuseScaleAndBias
+// CHECK-SAME:     ([[ARG0:%.+]]: tensor<1x3x300x300xf32>)
 func.func @FuseScaleAndBias(%arg0: tensor<1x3x300x300xf32>) -> tensor<1x3x300x300xf32> {
     %weights = const.Declare tensor<1x3x1x1xf32> = dense<2.0> : tensor<1x3x1x1xf32>
     %bias0 = const.Declare tensor<1x3x1x1xf32> = dense<3.0> : tensor<1x3x1x1xf32>
@@ -44,18 +46,19 @@ func.func @FuseScaleAndBias(%arg0: tensor<1x3x300x300xf32>) -> tensor<1x3x300x30
 
     return %1 : tensor<1x3x300x300xf32>
 
-    // CHECK-DAG:   %[[VAL0:.*]] = const.Declare tensor<1x3x1x1xf32> = dense<2.000000e+00> : tensor<1x3x1x1xf32>
-    // CHECK-DAG:   %[[VAL1:.*]] = const.Declare tensor<1x3x1x1xf32> = dense<3.000000e+00> : tensor<1x3x1x1xf32>
-    // CHECK-DAG:   %[[VAL2:.*]] = const.Declare tensor<1x3x1x1xf32> = dense<4.000000e+00> : tensor<1x3x1x1xf32>
-    // CHECK:       %[[VAL3:.*]] = IE.ScaleShift(%arg0, %[[VAL0]], %[[VAL1]])
-    // CHECK:       %[[VAL4:.*]] = IE.ScaleShift(%[[VAL3]], %[[VAL2]])
-    // CHECK:       return %[[VAL4]]
+    // CHECK-DAG:   [[WEIGHTS:%.+]] = const.Declare tensor<1x3x1x1xf32> = dense<2.000000e+00> : tensor<1x3x1x1xf32>
+    // CHECK-DAG:   [[BIAS_0:%.+]] = const.Declare tensor<1x3x1x1xf32> = dense<3.000000e+00> : tensor<1x3x1x1xf32>
+    // CHECK-DAG:   [[BIAS_1:%.+]] = const.Declare tensor<1x3x1x1xf32> = dense<4.000000e+00> : tensor<1x3x1x1xf32>
+    // CHECK:       [[SCALE_SHIFT_0:%.+]] = IE.ScaleShift([[ARG0]], [[WEIGHTS]], [[BIAS_0]])
+    // CHECK:       [[SCALE_SHIFT_1:%.+]] = IE.ScaleShift([[SCALE_SHIFT_0]], [[BIAS_1]])
+    // CHECK:       return [[SCALE_SHIFT_1]]
 }
 
 // -----
 
 // Fuse Scale and ScaleShift should fail
 // CHECK-LABEL: @FuseScaleAndBias
+// CHECK-SAME:     ([[ARG0:%.+]]: tensor<1x3x300x300xf32>)
 func.func @FuseScaleAndBias(%arg0: tensor<1x3x300x300xf32>) -> tensor<1x3x300x300xf32> {
     %weights = const.Declare tensor<1x3x1x1xf32> = dense<2.0> : tensor<1x3x1x1xf32>
     %0 = IE.ScaleShift(%arg0, %weights)
@@ -70,10 +73,35 @@ func.func @FuseScaleAndBias(%arg0: tensor<1x3x300x300xf32>) -> tensor<1x3x300x30
 
     return %1 : tensor<1x3x300x300xf32>
 
-    // CHECK-DAG:   %[[VAL0:.*]] = const.Declare tensor<1x3x1x1xf32> = dense<2.000000e+00> : tensor<1x3x1x1xf32>
-    // CHECK-DAG:   %[[VAL1:.*]] = const.Declare tensor<1x3x1x1xf32> = dense<3.000000e+00> : tensor<1x3x1x1xf32>
-    // CHECK-DAG:   %[[VAL2:.*]] = const.Declare tensor<1x3x1x1xf32> = dense<4.000000e+00> : tensor<1x3x1x1xf32>
-    // CHECK:       %[[VAL3:.*]] = IE.ScaleShift(%arg0, %[[VAL0]])
-    // CHECK:       %[[VAL4:.*]] = IE.ScaleShift(%[[VAL3]], %[[VAL1]], %[[VAL2]])
-    // CHECK:       return %[[VAL4]]
+    // CHECK-DAG:   [[WEIGHTS_0:%.+]] = const.Declare tensor<1x3x1x1xf32> = dense<2.000000e+00> : tensor<1x3x1x1xf32>
+    // CHECK-DAG:   [[WEIGHTS_1:%.+]] = const.Declare tensor<1x3x1x1xf32> = dense<3.000000e+00> : tensor<1x3x1x1xf32>
+    // CHECK-DAG:   [[BIAS:%.+]] = const.Declare tensor<1x3x1x1xf32> = dense<4.000000e+00> : tensor<1x3x1x1xf32>
+    // CHECK:       [[SCALE_SHIFT_0:%.+]] = IE.ScaleShift([[ARG0]], [[WEIGHTS_0]])
+    // CHECK:       [[SCALE_SHIFT_1:%.+]] = IE.ScaleShift([[SCALE_SHIFT_0]], [[WEIGHTS_1]], [[BIAS]])
+    // CHECK:       return [[SCALE_SHIFT_1]]
+}
+
+// -----
+
+// CHECK-LABEL: @FuseScaleShifts
+// CHECK-SAME:     ([[ARG0:%.+]]: tensor<1x3x300x300xf32>)
+func.func @FuseScaleShifts(%arg0: tensor<1x3x300x300xf32>) -> tensor<1x3x300x300xf32> {
+    %weights_0 = const.Declare tensor<1x3x1x1xf32> = dense<2.0> : tensor<1x3x1x1xf32>
+    %bias_0 = const.Declare tensor<1x3x1x1xf32> = dense<3.0> : tensor<1x3x1x1xf32>
+    %0 = IE.ScaleShift(%arg0, %weights_0, %bias_0)
+        {operandSegmentSizes = array<i32: 1, 1, 1>} :
+        tensor<1x3x300x300xf32>, tensor<1x3x1x1xf32>, tensor<1x3x1x1xf32> -> tensor<1x3x300x300xf32>
+
+    %weights_1 = const.Declare tensor<1x3x1x1xf32> = dense<2.0> : tensor<1x3x1x1xf32>
+    %bias_1 = const.Declare tensor<1x3x1x1xf32> = dense<3.0> : tensor<1x3x1x1xf32>
+    %1 = IE.ScaleShift(%0, %weights_1, %bias_1)
+        {operandSegmentSizes = array<i32: 1, 1, 1>} :
+        tensor<1x3x300x300xf32>, tensor<1x3x1x1xf32>, tensor<1x3x1x1xf32> -> tensor<1x3x300x300xf32>
+
+    return %1 : tensor<1x3x300x300xf32>
+
+    // CHECK-DAG:   [[WEIGHTS:%.+]] = const.Declare tensor<1x3x1x1xf32> = dense<4.000000e+00> : tensor<1x3x1x1xf32>
+    // CHECK-DAG:   [[BIAS:%.+]] = const.Declare tensor<1x3x1x1xf32> = dense<9.000000e+00> : tensor<1x3x1x1xf32>
+    // CHECK:       [[SCALE_SHIFT:%.+]] = IE.ScaleShift([[ARG0]], [[WEIGHTS]], [[BIAS]])
+    // CHECK:       return [[SCALE_SHIFT]]
 }

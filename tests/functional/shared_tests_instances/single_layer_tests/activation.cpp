@@ -46,6 +46,14 @@ TEST_P(ActivationLayerTest_SW_FP32, NPU3720) {
     run(Platform::NPU3720);
 }
 
+using ActivationLayerTest_ShaveCodeGen = ActivationLayerTest_SW_FP16;
+TEST_P(ActivationLayerTest_ShaveCodeGen, NPU3720) {
+    abs_threshold = 0.0056;
+    setShaveCodeGenMode();
+    setMLIRCompilerType();
+    run(Platform::NPU3720);
+}
+
 // HW
 TEST_P(ActivationLayerTest_HW_FP16, NPU3720) {
     abs_threshold = 0.0056;
@@ -77,7 +85,6 @@ TEST_P(ActivationLayerTest_HW_FP32, NPU4000) {
     setDefaultHardwareMode();
     run(Platform::NPU4000);
 }
-
 }  // namespace test
 }  // namespace ov
 
@@ -131,9 +138,16 @@ const std::map<ActivationTypes, std::vector<std::vector<float>>> activationTypes
         {Log, {{1.0f}}},
         {Relu, {{1.0f}}},
         {Exp, {{1.0f}}},
+        {Clamp, {{-1.0f, 1.0f}}},
+};
+
+const std::map<ActivationTypes, std::vector<std::vector<float>>> shaveCodeGenActivationTypes = {
+        {Cos, {{1.0f}}},  // We can insert other layers also
 };
 
 std::map<std::vector<ov::Shape>, std::vector<ov::Shape>> basic = {{{{1, 50, 1, 1}}, {}}, {{{1, 128, 1, 1}}, {}}};
+
+std::map<std::vector<ov::Shape>, std::vector<ov::Shape>> basicCos = {{{{1, 1, 50, 120}}, {}}, {{{1, 20, 50, 150}}, {}}};
 
 std::map<std::vector<ov::Shape>, std::vector<ov::Shape>> preluBasic = {
         {{{1, 50, 1, 1}}, {{50}}},
@@ -169,6 +183,13 @@ const auto basicCases =
                            ::testing::ValuesIn(static_shapes_param_transform(
                                    ov::test::utils::combineParams(basic))),  // Input shapes and input const shape
                            ::testing::Values(DEVICE_NPU));                   // Target device name
+
+const auto basicCosCases = ::testing::Combine(
+        ::testing::ValuesIn(::combineParams(shaveCodeGenActivationTypes)),  // Activation type and constant
+        ::testing::ValuesIn(netPrecisions),                                 // Model type
+        ::testing::ValuesIn(static_shapes_param_transform(
+                ov::test::utils::combineParams(basicCos))),  // Input shapes and input const shape
+        ::testing::Values(DEVICE_NPU));                      // Target device name
 
 const auto basicCasesSWFP32 = ::testing::Combine(
         ::testing::ValuesIn(ov::test::utils::combineParams(activationTypesSWFP32)), ::testing::Values(ov::element::f32),
@@ -213,6 +234,11 @@ INSTANTIATE_TEST_SUITE_P(smoke_precommit_Activation_2D, ActivationLayerTest_SW_F
 
 INSTANTIATE_TEST_SUITE_P(smoke_tiling_Activation, ActivationLayerTest_SW_FP16, basicTilingCases,
                          ActivationLayerTest::getTestCaseName);
+
+// ------ ShaveCodeGen ------
+// [Tracking number E#114522]
+INSTANTIATE_TEST_SUITE_P(DISABLED_TMP_smoke_precommit_Activation_Test_Cos0_ShaveCodeGen,
+                         ActivationLayerTest_ShaveCodeGen, basicCosCases, ActivationLayerTest::getTestCaseName);
 
 // ------ NPU3720 HW FP16 ------
 

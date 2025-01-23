@@ -86,18 +86,19 @@ protected:
     }
 };
 
-class NonZeroWithConcatTest_NPU3720 : public NonZeroWithConcatTest {};
-
-TEST_P(NonZeroWithConcatTest_NPU3720, HW) {
+TEST_P(NonZeroWithConcatTest, NPU3720_HW_TestKindSubgraph) {
     setDefaultHardwareMode();
-    setMLIRCompilerType();
     run(Platform::NPU3720);
 }
 
-TEST_P(NonZeroWithConcatTest_NPU3720, SW) {
+TEST_P(NonZeroWithConcatTest, NPU3720_SW_TestKindSubgraph) {
     setReferenceSoftwareMode();
-    setMLIRCompilerType();
     run(Platform::NPU3720);
+}
+
+TEST_P(NonZeroWithConcatTest, NPU4000_HW_TestKindSubgraph) {
+    setDefaultHardwareMode();
+    run(Platform::NPU4000);
 }
 
 const std::vector<ov::element::Type> inputPrecision = {ov::element::i32};
@@ -110,9 +111,8 @@ const std::vector<size_t> inputsNum = {
         4,
 };
 
-INSTANTIATE_TEST_SUITE_P(smoke_NonZeroWithConcat, NonZeroWithConcatTest_NPU3720,
+INSTANTIATE_TEST_SUITE_P(smoke_NonZeroWithConcat, NonZeroWithConcatTest,
                          ::testing::Combine(::testing::ValuesIn(inShapes), ::testing::ValuesIn(inputPrecision),
                                             ::testing::ValuesIn(inputsNum)),
                          NonZeroWithConcatTest::getTestCaseName);
-
 }  // namespace

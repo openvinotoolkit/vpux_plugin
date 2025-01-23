@@ -48,3 +48,27 @@ func.func @ConvertGroupTransposedConvToGroupConvWithOutputPadding(%arg0: tensor<
     // CHECK:       [[GROUPCONV:%.*]] = IE.GroupConvolution([[UPS]], [[CST_4D]]) {dilations = [1, 1], groups = 64 : i64, pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]} : tensor<1x64x134x134xf16>, tensor<64x1x4x4xf16> -> tensor<1x64x131x131xf16>
     // CHECK:       return [[GROUPCONV]]
 }
+
+// -----
+
+// CHECK-LABEL: @ConvertGroupTransposedConvToGroupConvWithMultiplyAsFilter
+func.func @ConvertGroupTransposedConvToGroupConvWithMultiplyAsFilter(%INPUT: tensor<1x64x64x64xf16>) -> tensor<1x64x130x130xf16> {
+    %FILTERS_INITIAL = const.Declare tensor<64x1x1x4x4xf16> = dense<1.000000e+00> : tensor<64x1x1x4x4xf16>
+    %FACTOR = const.Declare tensor<64x1x1x4x4xf16> = dense<2.000000e+00> : tensor<64x1x1x4x4xf16>
+    %FILTERS = IE.Multiply(%FILTERS_INITIAL, %FACTOR) { auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<64x1x1x4x4xf16>, tensor<64x1x1x4x4xf16> -> tensor<64x1x1x4x4xf16>
+
+    %RESULT = IE.GroupTransposedConvolution(%INPUT, %FILTERS) {dilations = [1, 1], output_padding = [0, 0], pads_begin = [0, 0], pads_end = [0, 0], strides = [2, 2]} : tensor<1x64x64x64xf16>, tensor<64x1x1x4x4xf16> -> tensor<1x64x130x130xf16>
+    return %RESULT : tensor<1x64x130x130xf16>
+
+    // CHECK-DAG:       [[CST:%.+]] = const.Declare tensor<64x1x1x4x4xf16> = dense<1.000000e+00> : tensor<64x1x1x4x4xf16>
+    // CHECK-DAG:       [[CST0:%.+]] = const.Declare tensor<64x1x1x4x4xf16> = dense<2.000000e+00> : tensor<64x1x1x4x4xf16>
+    // CHECK:       [[FILTER:%.+]] = IE.Multiply([[CST]], [[CST0]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<64x1x1x4x4xf16>, tensor<64x1x1x4x4xf16> -> tensor<64x1x1x4x4xf16>
+
+    // CHECK:       [[UPS:%.+]] = IE.Upsampling
+    // CHECK-SAME:      #IE.UpsamplingPad<pads_channel = [0, 0], pads_height = [3, 3], pads_width = [3, 3]>
+    // CHECK-SAME:      upsampling_factor = [2, 2, 1]
+    // CHECK-SAME:      tensor<1x64x64x64xf16> -> tensor<1x64x133x133xf16>
+    // CHECK:       [[CST_4D:%.+]] = IE.Reshape([[FILTER]]) {shape_value = [64, 1, 4, 4]} : tensor<64x1x1x4x4xf16> -> tensor<64x1x4x4xf16>
+    // CHECK:       [[GROUPCONV:%.+]] = IE.GroupConvolution([[UPS]], [[CST_4D]]) {dilations = [1, 1], groups = 64 : i64, pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]} : tensor<1x64x133x133xf16>, tensor<64x1x4x4xf16> -> tensor<1x64x130x130xf16>
+    // CHECK:       return [[GROUPCONV]]
+}

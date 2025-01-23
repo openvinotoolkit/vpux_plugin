@@ -543,7 +543,7 @@ func.func @OmitHaloRegionsForEqualMemView(%arg0: memref<1x3x224x224xf16, @DDR>,
           }
         } PPE : {
           PPETask {
-              opaque_ppe = #VPU.PPEStub<>
+              ppe = #VPU.PPEStub<>
           }
         }
     }
@@ -747,7 +747,7 @@ func.func @UnrollNceOutputOverlappedHaloOverNonadjacentCluster() -> memref<1x784
          DPUTask {cluster_id = 2 : i64, inEnd = [0, 31, 783], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [2, 31, 783], outStart = [2, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
          DPUTask {cluster_id = 3 : i64, inEnd = [0, 31, 783], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [2, 31, 783], outStart = [2, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
       } PPE : {
-      PPETask {opaque_ppe = #VPU.PPEStub<>}
+      PPETask {ppe = #VPU.PPEStub<>}
     }
   }
   VPURT.Task waits(%BAR0 : !VPURT.Barrier) {
@@ -827,7 +827,7 @@ func.func @UnrollNceOutputOverlappedHaloOverNonadjacentCluster() -> memref<1x784
   //CHECK:                 variants : {
   //CHECK:                           DPUTask {cluster_id = 0 : i64, inEnd = [1, 31, 783], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [1, 31, 783], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
   //CHECK:                      PPE : {
-  //CHECK:                           PPETask {opaque_ppe = #VPU.PPEStub<>}
+  //CHECK:                           PPETask {ppe = #VPU.PPEStub<>}
   //CHECK:                      }
   //CHECK:               }
   //CHECK:              VPURT.Task updates([[BAR0]] : !VPURT.Barrier) {
@@ -840,7 +840,7 @@ func.func @UnrollNceOutputOverlappedHaloOverNonadjacentCluster() -> memref<1x784
   //CHECK:                  variants : {
   //CHECK:                           DPUTask {cluster_id = 1 : i64, inEnd = [1, 31, 783], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [2, 31, 783], outStart = [1, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
   //CHECK:                      PPE : {
-  //CHECK:                           PPETask {opaque_ppe = #VPU.PPEStub<>}
+  //CHECK:                           PPETask {ppe = #VPU.PPEStub<>}
   //CHECK:                      }
   //CHECK:               }
   //CHECK:              VPURT.Task updates([[BAR0]] : !VPURT.Barrier) {
@@ -854,7 +854,7 @@ func.func @UnrollNceOutputOverlappedHaloOverNonadjacentCluster() -> memref<1x784
   //CHECK:                     variants : {
   //CHECK:                           DPUTask {cluster_id = 2 : i64, inEnd = [0, 31, 783], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [2, 31, 783], outStart = [2, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
   //CHECK:                      PPE : {
-  //CHECK:                           PPETask {opaque_ppe = #VPU.PPEStub<>}
+  //CHECK:                           PPETask {ppe = #VPU.PPEStub<>}
   //CHECK:                      }
   //CHECK:               }
   //CHECK:              VPURT.Task updates([[BAR0]] : !VPURT.Barrier) {
@@ -867,7 +867,7 @@ func.func @UnrollNceOutputOverlappedHaloOverNonadjacentCluster() -> memref<1x784
   //CHECK:                      variants : {
   //CHECK:                          DPUTask {cluster_id = 3 : i64, inEnd = [0, 31, 783], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [2, 31, 783], outStart = [2, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
   //CHECK:                      PPE : {
-  //CHECK:                           PPETask {opaque_ppe = #VPU.PPEStub<>}
+  //CHECK:                           PPETask {ppe = #VPU.PPEStub<>}
   //CHECK:                      }
   //CHECK:               }
 

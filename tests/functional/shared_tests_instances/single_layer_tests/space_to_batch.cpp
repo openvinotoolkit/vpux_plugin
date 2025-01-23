@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2023 Intel Corporation
+// Copyright (C) 2023-2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -11,29 +11,23 @@
 #include "vpu_ov2_layer_test.hpp"
 
 namespace ov {
-
 namespace test {
 
 class SpaceToBatchLayerTestCommon : public SpaceToBatchLayerTest, virtual public VpuOv2LayerTest {};
-class SpaceToBatchLayerTest_NPU3720 : public SpaceToBatchLayerTestCommon {};
-class SpaceToBatchLayerTest_NPU4000 : public SpaceToBatchLayerTestCommon {};
 
-TEST_P(SpaceToBatchLayerTest_NPU3720, SW) {
+TEST_P(SpaceToBatchLayerTestCommon, NPU3720_SW) {
     setReferenceSoftwareMode();
     run(Platform::NPU3720);
 }
 
-TEST_P(SpaceToBatchLayerTest_NPU4000, SW) {
+TEST_P(SpaceToBatchLayerTestCommon, NPU4000_SW) {
     setReferenceSoftwareMode();
     run(Platform::NPU4000);
 }
-
 }  // namespace test
-
 }  // namespace ov
 
-using ov::test::SpaceToBatchLayerTest_NPU3720;
-using ov::test::SpaceToBatchLayerTest_NPU4000;
+using ov::test::SpaceToBatchLayerTestCommon;
 
 namespace {
 
@@ -59,18 +53,11 @@ const auto precommit_SpaceToBatch_5D = ::testing::Combine(
         ::testing::ValuesIn({ov::test::static_shapes_to_test_representation({shapes[2]})}),
         ::testing::ValuesIn(modelTypes), ::testing::Values(ov::test::utils::DEVICE_NPU));
 
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_SpaceToBatch_3D_NPU3720, SpaceToBatchLayerTest_NPU3720,
-                         precommit_SpaceToBatch_3D, SpaceToBatchLayerTest_NPU3720::getTestCaseName);
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_SpaceToBatch_4D_NPU3720, SpaceToBatchLayerTest_NPU3720,
-                         precommit_SpaceToBatch_4D, SpaceToBatchLayerTest_NPU3720::getTestCaseName);
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_SpaceToBatch_5D_NPU3720, SpaceToBatchLayerTest_NPU3720,
-                         precommit_SpaceToBatch_5D, SpaceToBatchLayerTest_NPU3720::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_SpaceToBatch_3D_NPU4000, SpaceToBatchLayerTest_NPU4000,
-                         precommit_SpaceToBatch_3D, SpaceToBatchLayerTest_NPU4000::getTestCaseName);
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_SpaceToBatch_4D_NPU4000, SpaceToBatchLayerTest_NPU4000,
-                         precommit_SpaceToBatch_4D, SpaceToBatchLayerTest_NPU4000::getTestCaseName);
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_SpaceToBatch_5D_NPU4000, SpaceToBatchLayerTest_NPU4000,
-                         precommit_SpaceToBatch_5D, SpaceToBatchLayerTest_NPU4000::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_SpaceToBatch_3D, SpaceToBatchLayerTestCommon, precommit_SpaceToBatch_3D,
+                         SpaceToBatchLayerTestCommon::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_SpaceToBatch_4D, SpaceToBatchLayerTestCommon, precommit_SpaceToBatch_4D,
+                         SpaceToBatchLayerTestCommon::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_SpaceToBatch_5D, SpaceToBatchLayerTestCommon, precommit_SpaceToBatch_5D,
+                         SpaceToBatchLayerTestCommon::getTestCaseName);
 
 }  // namespace

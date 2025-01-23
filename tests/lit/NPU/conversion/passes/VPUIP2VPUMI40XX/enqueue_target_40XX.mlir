@@ -46,25 +46,25 @@ func.func private @barrier_counters(%arg0: memref<1x32x32x32xf16, #NHWC, @DDR>, 
     VPURT.Task updates(%b0 : !VPURT.Barrier) attributes {isTrailingSWLayer = false} {
         %t0 = VPUIP.NNDMA {port = 0 : i64} inputs(%cst_0 : memref<1x1x1x3088xui8>) outputs(%m0 : memref<1x1x1x3088xui8, [@CMX_NN, 0]>) -> memref<1x1x1x3088xui8, [@CMX_NN, 0]>
     }
-    VPURT.Task waits(%b0 : !VPURT.Barrier) updates(%b1 : !VPURT.Barrier) enqueueTarget(%b1 : !VPURT.Barrier)  attributes {isTrailingSWLayer = false} {
+    VPURT.Task waits(%b0 : !VPURT.Barrier) updates(%b1 : !VPURT.Barrier) attributes {isTrailingSWLayer = false} {
         %t0 = VPUIP.NNDMA {port = 0 : i64} inputs(%cst_0 : memref<1x1x1x3088xui8>) outputs(%m0 : memref<1x1x1x3088xui8, [@CMX_NN, 0]>) -> memref<1x1x1x3088xui8, [@CMX_NN, 0]>
     }
-    VPURT.Task waits(%b1 : !VPURT.Barrier) updates(%b2 : !VPURT.Barrier) enqueueTarget(%b2 : !VPURT.Barrier)  attributes {isTrailingSWLayer = false} {
+    VPURT.Task waits(%b1 : !VPURT.Barrier) updates(%b2 : !VPURT.Barrier) enqueueTarget(%b0 : !VPURT.Barrier)  attributes {isTrailingSWLayer = false} {
         %t0 = VPUIP.NCEClusterTask {kernel_padding = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, kernel_size = [1, 1], kernel_strides = [1, 1], minimumHardwareExecutionCost = 33741 : i64, task_type = #VPUIP.nce_task_type<CONV>} input(%m1 : memref<1x16x112x112x!qElemType, {order = #NHWC}, [@CMX_NN, 0]>) weights(%m3 : memref<96x16x1x1x!qElemType, {order = #NHWC}, [@CMX_NN, 0]>) weight_table(%m4 : memref<96x1x1x4xsi32, {order = #NCHW}, [@CMX_NN, 0]>) parent_input(%m1 : memref<1x16x112x112x!qElemType, {order = #NHWC}, [@CMX_NN, 0]>) parent_output(%m2 : memref<1x96x112x112x!qElemType, {order = #NHWC}, [@CMX_NN, 0]>) outputs(%m2 : memref<1x96x112x112x!qElemType, {order = #NHWC}, [@CMX_NN, 0]>) -> memref<1x96x112x112x!qElemType, {order = #NHWC}, [@CMX_NN, 0]> variants : {
         DPUTask {inStart = [0, 0, 0], inEnd = [15, 15, 15], outEnd = [111, 111, 95], outStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
         } PPE : {
-        PPETask {opaque_ppe = #VPU.PPEStub<>}
+        PPETask {ppe = #VPU.PPEStub<>}
         }
     }
-    VPURT.Task waits(%b2 : !VPURT.Barrier) updates(%b3 : !VPURT.Barrier) enqueueTarget(%b2 : !VPURT.Barrier) attributes {isTrailingSWLayer = false} {
+    VPURT.Task waits(%b2 : !VPURT.Barrier) updates(%b3 : !VPURT.Barrier) enqueueTarget(%b0 : !VPURT.Barrier) attributes {isTrailingSWLayer = false} {
         %t0 = VPUIP.NCEClusterTask {kernel_padding = #VPU.Padding<left = 1 : i64, right = 0 : i64, top = 1 : i64, bottom = 0 : i64>, kernel_size = [3, 3], kernel_strides = [2, 2], minimumHardwareExecutionCost = 27694 : i64, task_type = #VPUIP.nce_task_type<DWCONV>} input(%m2 : memref<1x96x112x112x!qElemType, {order = #NHWC}, [@CMX_NN, 0]>) weights(%m5 : memref<96x16x1x1x!qElemType, #NHWC, [@CMX_NN, 0]>) weight_table(%m6 : memref<96x1x1x4xsi32, [@CMX_NN, 0]>) parent_input(%m2 : memref<1x96x112x112x!qElemType, {order = #NHWC}, [@CMX_NN, 0]>) parent_output(%m8 : memref<1x96x56x56x!qElemType, {order = #NHWC}, [@CMX_NN, 0]>) outputs(%m8 : memref<1x96x56x56x!qElemType, {order = #NHWC}, [@CMX_NN, 0]>) -> memref<1x96x56x56x!qElemType, {order = #NHWC}, [@CMX_NN, 0]> variants : {
         DPUTask {inStart = [0, 0, 0], inEnd = [15, 15, 15], outEnd = [55, 55, 63], outStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, pad = #VPU.Padding<left = 1 : i64, right = 0 : i64, top = 1 : i64, bottom = 0 : i64>}
         DPUTask {inStart = [0, 0, 0], inEnd = [15, 15, 15], outEnd = [55, 55, 95], outStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, pad = #VPU.Padding<left = 1 : i64, right = 0 : i64, top = 1 : i64, bottom = 0 : i64>}
         } PPE : {
-        PPETask {opaque_ppe = #VPU.PPEStub<>}
+        PPETask {ppe = #VPU.PPEStub<>}
         }
     }
-    VPURT.Task waits(%b3 : !VPURT.Barrier) enqueueTarget(%b3 : !VPURT.Barrier)  attributes {isTrailingSWLayer = false} {
+    VPURT.Task waits(%b3 : !VPURT.Barrier) enqueueTarget(%b1 : !VPURT.Barrier)  attributes {isTrailingSWLayer = false} {
       %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_Convert inputs(%m9 as %arg2: memref<1x1000xf16, [@CMX_NN, 0]>) outputs(%m10 as %arg3: memref<1x1000xf32, [@CMX_NN, 0]>) on tile 0 -> memref<1x1000xf32, [@CMX_NN, 0]>{
         VPUIP.SW.Kernel.run(%arg2, %arg3) : memref<1x1000xf16, [@CMX_NN, 0]>, memref<1x1000xf32, [@CMX_NN, 0]>
       }
@@ -84,13 +84,12 @@ func.func private @barrier_counters(%arg0: memref<1x32x32x32xf16, #NHWC, @DDR>, 
 // CHECK: [[D0:%.*]] = VPUMI40XX.NNDMA
 
 // CHECK: [[D1:%.*]] = VPUMI40XX.NNDMA
-// CHECK-SAME: enqueueBarrier([[BAR1]]
 
 // CHECK: [[DPU0:%.*]] = VPUMI40XX.DPUInvariant
-// CHECK-SAME: enqueueBarrier([[BAR2]]
+// CHECK-SAME: enqueueBarrier([[BAR0]]
 
 // CHECK: [[DPU1:%.*]] = VPUMI40XX.DPUInvariant
-// CHECK-SAME: enqueueBarrier([[BAR2]]
+// CHECK-SAME: enqueueBarrier([[BAR0]]
 
 // CHECK: [[SHV0:%.*]] = VPUMI40XX.ActKernelInvocation
-// CHECK-SAME: enqueueBarrier([[BAR3]]
+// CHECK-SAME: enqueueBarrier([[BAR1]]

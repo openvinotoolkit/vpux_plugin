@@ -14,7 +14,7 @@
 #include "common/utils.hpp"
 #include "common_test_utils/common_utils.hpp"
 #include "functional_test_utils/ov_plugin_cache.hpp"
-#include "npu_private_properties.hpp"
+#include "intel_npu/npu_private_properties.hpp"
 
 #include <intel_npu/utils/logger/logger.hpp>
 
@@ -89,18 +89,6 @@ public:
     bool has4000() const {
         return std::any_of(_availableDevices.begin(), _availableDevices.end(), [](const std::string& deviceName) {
             return deviceName.find("4000") != std::string::npos;
-        });
-    }
-
-    bool has5010() const {
-        return std::any_of(_availableDevices.begin(), _availableDevices.end(), [](const std::string& deviceName) {
-            return deviceName.find("5010") != std::string::npos;
-        });
-    }
-
-    bool has6010() const {
-        return std::any_of(_availableDevices.begin(), _availableDevices.end(), [](const std::string& deviceName) {
-            return deviceName.find("6010") != std::string::npos;
         });
     }
 
@@ -488,8 +476,17 @@ std::vector<std::string> disabledTestPatterns() {
         _skipRegistry.addPatterns(backendName.isZero() && devices.has4000(),
                 "Test fails compilation (on both Ubuntu and Windows)", {
                 ".*DetectionOutputLayerTestCommon.NPU4000.*",
-                // [Tracking number : E#144444]
-                ".*smoke_TwoScatterUpdateInDDR.*"
+                // [Tracking number: E#149877]
+                ".*OVInferRequestPerfCountersTest.NotEmptyAfterAsyncInfer.*",
+                ".*OVInferRequestPerfCountersTest.NotEmptyAfterSyncInfer.*",
+                // [Tracking number: E#149879]
+                ".*ProfilingSubgraphTest.ProfilingTest.*",
+        });
+
+        // [Tracking number : E#145347]
+        _skipRegistry.addPatterns(backendName.isZero() && devices.has4000(),
+                "Sporadic failures in CoreThreadingTestsWithIter", {
+                ".*CoreThreadingTestsWithIter.*"
         });
 
 #ifdef WIN32
@@ -497,10 +494,7 @@ std::vector<std::string> disabledTestPatterns() {
         // [Tracking number: E#103391]
         _skipRegistry.addPatterns(backendName.isZero() && (devices.has3720() || devices.has4000()),
                 "IfTest segfaults npuFuncTest on Ubuntu", {
-                ".*smoke_IfTest.*",
-                // [Tracking number: E#144361]
-                ".*Gather8LayerTest_NPU3720.*1548288.*",
-                ".*smoke_TwoScatterUpdateInDDR/TwoScatterUpdateTest_NPU3720.SW.*",
+                ".*smoke_IfTest.*"
         });
 
         // [Tracking number: E#129645]
@@ -508,8 +502,13 @@ std::vector<std::string> disabledTestPatterns() {
                 "Tests fail with: ZE_RESULT_ERROR_UNINITIALIZED, code 0x78000001", {
                 ".*DftLayerTestCommon.NPU4000.*"
         });
+        // [Track number: E#144361]
+        _skipRegistry.addPatterns(backendName.isZero() && devices.has3720(),
+                "[WW43]Driver update failures", {
+                ".*Gather8LayerTest_NPU3720.*1548288.*",
+                ".*smoke_TwoScatterUpdateInDDR/TwoScatterUpdateTest_NPU3720.SW.*",
+        });
 #endif
-
         _skipRegistry.addPatterns(backendName.isIMD(), "IMD/Simics do not support the tests",
                                   {
                                         // [Tracking number: E#81065]
@@ -525,33 +524,6 @@ std::vector<std::string> disabledTestPatterns() {
         _skipRegistry.addPatterns(!backendName.isZero() || !devices.has3720(),
                 "Tests enabled only for L0 NPU3720", {
                 ".*smoke_VariableStateBasic.*"
-        });
-
-        _skipRegistry.addPatterns(devices.has5010() || devices.has6010(),
-                "Accuracy issues", {
-                // [Tracking number E#132343]
-                ".*smoke_precommit_SEP_ConvolutionBackpropData2D_OutputPadding.*",
-                // [Tracking number E#132336]
-                ".*smoke_precommit_BatchToSpace_4D.*",
-                ".*smoke_precommit_BatchToSpace_5D.*"
-        });
-
-        // [Tracking number E#137476]
-        _skipRegistry.addPatterns(devices.has5010(),
-                "Memory tests take too long in SIMICS, application crashes", {
-                ".*VpuDeviceAllocMemSizeSameAfterDestroy.*"
-        });
-
-        // [Tracking number E#137476]
-        _skipRegistry.addPatterns(devices.has5010(),
-                "Unicode paths are known to fain in SIMICS enviroments", {
-                ".*smoke_registerPluginsLibrariesUnicodePath.*"
-        });
-
-        // [Tracking number E#136348]
-        _skipRegistry.addPatterns(devices.has5010(),
-                "Compilation fails with Dynamic Shapes", {
-                ".*NPUInferRequestDynamicTests.*"
         });
 
         // [Track number: E#118999]
@@ -676,12 +648,15 @@ std::vector<std::string> disabledTestPatterns() {
 
         // [Tracking number: E#112064]
         _skipRegistry.addPatterns(backendName.isZero(),
-                "Failing core threading tests", {
-                ".*CoreThreadingTest.smoke_QueryModel.*",
-                ".*CoreThreadingTestsWithIter.smoke_CompileModel.*",
-                ".*CoreThreadingTestsWithIter.smoke_CompileModel_Accuracy_SingleCore.*",
-                ".*CoreThreadingTestsWithIter.smoke_CompileModel_Accuracy_MultipleCores.*",
-                ".*CoreThreadingTestsWithIter.nightly_AsyncInfer_ShareInput.*"
+                "OV func tests still run with RO propery NUM_STREAMS, unskip after PR #25986", {
+                ".*smoke_BehaviorTests_CoreThreadingTest_Streams_NPU/CoreThreadingTestsWithCacheEnabled.*",
+                ".*smoke_BehaviorTests_CoreThreadingTest_Streams_NPU/CoreThreadingTestsWithIter.*"
+        });
+
+        // [Tracking number: E#112064]
+        _skipRegistry.addPatterns(backendName.isZero(),
+                "Failing core threading tests with cache enabled", {
+                ".*smoke_BehaviorTests_CoreThreadingTest_NPU/CoreThreadingTestsWithCacheEnabled.*"
         });
 
         // [Tracking number: E#108600]
@@ -690,12 +665,6 @@ std::vector<std::string> disabledTestPatterns() {
                 ".*OVSpecificDeviceSetConfigTest.GetConfigSpecificDeviceNoThrow.*",
                 // [Tracking number: E#133153]
                 ".*OVPropertiesIncorrectTests.SetPropertiesWithIncorrectKey.*DEVICE_ID.*",
-        });
-
-        // [Tracking number: E#117582]
-        _skipRegistry.addPatterns(backendName.isZero(),
-                "Failing core threading test with cache enabled", {
-                ".*CoreThreadingTest.*CoreThreadingTestsWithCacheEnabled.*"
         });
 
         // [Tracking number: E#118331]
@@ -831,10 +800,9 @@ std::vector<std::string> disabledTestPatterns() {
                  ".*OVCompiledModelPropertiesDefaultSupportedTests.CanCompileWithDefaultValueFromPlugin.*"
         });
 
-        // [Tracking number: C#151466]
-        _skipRegistry.addPatterns(backendName.isZero(),
-                "Failed to parse model info! Incorrect format!", {
-                ".*FuseRMS.*"
+        // get_runtime_model method is not supported on NPU
+        _skipRegistry.addPatterns("get_runtime_model method is not supported on NPU", {
+                ".*OVClassModelOptionalTestP.CompileModelCreateDefaultExecGraphResult.*",
         });
 
         return _skipRegistry;

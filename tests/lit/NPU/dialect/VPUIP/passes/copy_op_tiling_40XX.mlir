@@ -299,7 +299,7 @@ func.func @DoNotSplit5DCopyWithLevel3Striding(
 
     return %0 : memref<1x32x64x64x1xf16, {order = #NCDHW, strides = [2097152, 65536, 512, 2, 1]}>
 
-    // Level 3 striding Copy is supported on NPU40XX and should not be affected by the pass
+    // Level 3 striding Copy is supported on LNL and should not be affected by the pass
 
     // CHECK: [[VAR0:%.*]] = VPUIP.Copy
     // CHECK-SAME:      inputs(%arg0 : memref<1x32x64x64x1xf16, {order = #NCDHW, strides = [2097152, 65536, 512, 2, 1]}>)

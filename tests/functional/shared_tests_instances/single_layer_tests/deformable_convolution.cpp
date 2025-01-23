@@ -25,7 +25,6 @@ TEST_P(DeformableConvolutionLayerTestCommon, NPU4000) {
     setReferenceSoftwareMode();
     run(Platform::NPU4000);
 }
-
 }  // namespace test
 }  // namespace ov
 
@@ -73,7 +72,7 @@ const auto testParamsStrides2x2 =
                                    {{1, 32, 38, 38}, {1, 18, 19, 19}, {32, 32, 3, 3}, {1, 9, 19, 19}})),  // input shape
                            ::testing::Values(DEVICE_NPU));
 
-// ------ NPU3720/4000/5010 ------
+// ------ NPU3720/4000 ------
 
 INSTANTIATE_TEST_SUITE_P(smoke_precomit_DeformableConvolution2DTest_Strides1x1, DeformableConvolutionLayerTestCommon,
                          testParamsStrides1x1, DeformableConvolutionLayerTest::getTestCaseName);

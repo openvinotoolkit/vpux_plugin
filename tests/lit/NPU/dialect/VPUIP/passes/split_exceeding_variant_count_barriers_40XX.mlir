@@ -323,17 +323,19 @@ func.func @ExceedingVariantSumByMultipleWorkloads(%arg0: memref<1x16x8x32xf16, #
     %bar0 = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
     %bar1 = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
 
-    //      0 1 2
+    //      0 1 2 (DMA)
     //        |
     //       bar0
     //        |
-    //        3
+    //        3 (DPU, 2 variants)
     //        |
     //       bar1
     //        |
-    //        4
+    //        4 (DMA)
 
     // multiple active barrier producers
+    // DPU task has 2 variants but only the first variant waits for bar0 hence 
+    // no linearization is needed.
 
     VPURT.Task updates(%bar0: !VPURT.Barrier) {
          VPUIP.NNDMA
@@ -400,15 +402,14 @@ func.func @ExceedingVariantSumByMultipleWorkloads(%arg0: memref<1x16x8x32xf16, #
 
     // CHECK: [[BAR0:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
     // CHECK: [[BAR1:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
-    // CHECK: [[BAR2:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
 
     // CHECK: VPURT.Task updates([[BAR0]] : !VPURT.Barrier)
     // CHECK: VPURT.Task updates([[BAR0]] : !VPURT.Barrier)
-    // CHECK: VPURT.Task updates([[BAR1]] : !VPURT.Barrier)
+    // CHECK: VPURT.Task updates([[BAR0]] : !VPURT.Barrier)
 
     // DPU Conv
-    // CHECK: VPURT.Task waits([[BAR0]], [[BAR1]] : !VPURT.Barrier, !VPURT.Barrier) updates([[BAR2]] : !VPURT.Barrier)
+    // CHECK: VPURT.Task waits([[BAR0]] : !VPURT.Barrier) updates([[BAR1]] : !VPURT.Barrier)
 
     // DMA
-    // CHECK: VPURT.Task waits([[BAR2]] : !VPURT.Barrier)
+    // CHECK: VPURT.Task waits([[BAR1]] : !VPURT.Barrier)
 }

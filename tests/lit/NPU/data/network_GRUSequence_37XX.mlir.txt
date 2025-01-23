@@ -7,21 +7,15 @@
 #loc = loc(unknown)
 #loc1 = loc("profiling_result")
 module @dumpsubgraph attributes {VPU.arch = #VPU.arch_kind<NPU37XX>, VPU.compilationMode = #VPU.compilation_mode<DefaultHW>} {
-  module @UsedMemory {
-    IE.MemoryResource 3072 bytes of @DDR loc(#loc)
-  } loc(#loc)
   VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096] loc(#loc)
   module @VPU.SW {
-    func.func private @cache_flush_invalidate() attributes {VPU.task_type = @CACHE_INVALIDATE} loc(#loc)
+    func.func private @cache_flush_invalidate() attributes {VPU.task_type = @CACHE_FLUSH_INVALIDATE} loc(#loc)
     func.func private @builtin_GRUSequenceLastPart(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, memref<*xf16>, memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, memref<*xf16, [@CMX_NN, 0]>, i64, i64, i64, i64, f64) attributes {VPU.kernel_code = "gru_sequence_last_part.cpp", VPU.kernel_entry = "gru_sequence_last_part", VPU.task_type = @COMPUTE} loc(#loc)
     func.func private @builtin_GRUSequenceFirstPart(memref<*xf16, [@CMX_NN, 0]>, memref<*xf16>, memref<*xf16, [@CMX_NN, 0]>, i64, i64, f64) attributes {VPU.kernel_code = "gru_sequence_first_part.cpp", VPU.kernel_entry = "gru_sequence_first_part", VPU.task_type = @COMPUTE} loc(#loc)
     func.func private @builtin_Convert(memref<*xf32, @CMX_NN>, memref<*xf16, @CMX_NN>) attributes {VPU.kernel_code = "convert.cpp", VPU.kernel_entry = "convert", VPU.task_type = @COMPUTE} loc(#loc)
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"} loc(#loc)
   } loc(#loc)
   IE.TileResource {activity_factor = 0.000000e+00 : f64} 2 of @NCE at 1.300000e+03 MHz {
-    builtin.module @UsedMemory {
-      IE.MemoryResource 17536 bytes of @CMX_NN loc(#loc)
-    } loc(#loc)
     builtin.module @ReservedMemory {
       module @DmaProfilingReservedMemory {
         IE.MemoryResource 512 bytes of @CMX_NN offset 0 loc(#loc)

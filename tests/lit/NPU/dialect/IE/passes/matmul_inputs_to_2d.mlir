@@ -331,3 +331,66 @@ func.func @FuseReshapesAfterMatmulConcat(%arg0: tensor<1x8x4096x40xf32>, %arg1: 
     // CHECK: %[[SOFTMAX:.+]] = IE.SoftMax(%[[RESHAPE]])
     // CHECK: return %[[SOFTMAX]] : tensor<8x4096x4096xf32>
 }
+
+// -----
+
+#CHW = affine_map<(d0, d1, d2) -> (d0, d1, d2)>
+#NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
+
+// CHECK-LABEL: func.func @matmulBroadcastSupport(
+// CHECK-SAME:  [[ARG_0:.+]]: tensor<1x?x512xf32, {bounds = [1, 35, 512], order = #CHW}>) -> tensor<1x2x?x512xf32, {bounds = [1, 2, 35, 512], order = #NCHW}> {
+func.func @matmulBroadcastSupport(%arg0: tensor<1x?x512xf32, {bounds = [1, 35, 512], order = #CHW}>) -> tensor<1x2x?x512xf32, {bounds = [1, 2, 35, 512], order = #NCHW}> {
+    %cst = const.Declare tensor<4xsi32> = dense<[1, 2, -1, 512]> : tensor<4xsi32>
+    %cst_0 = const.Declare tensor<4xsi32> = dense<[1, 2, -9223372036854775808, 512]> : tensor<4xsi64>, [#const.CastElemType<si32>]
+    %cst_1 = const.Declare tensor<1x2x512x512xf32> = dense<0.000000e+00> : tensor<2x512x512xf32>, [#const.Reshape<[1, 2, 512, 512]>]
+    %cst_3 = const.Declare tensor<4xsi32> = dense<[1, 1, -1, 512]> : tensor<4xsi32>
+
+    %0 = IE.DynamicReshape(%arg0, %cst_3) {output_bounds = [1, 1, 35, 512], output_shape = [1, 1, -9223372036854775808, 512]} : tensor<1x?x512xf32, {bounds = [1, 35, 512], order = #CHW}>, tensor<4xsi32> -> tensor<1x1x?x512xf32, {bounds = [1, 1, 35, 512], order = #NCHW}>
+    %1 = IE.DynamicBroadcast(%0, %cst_0) {mode = #IE.broadcast_type<NUMPY>, output_bounds = [1, 1, 35, 512], output_shape = [1, 1, -9223372036854775808, 512]} : tensor<1x1x?x512xf32, {bounds = [1, 1, 35, 512], order = #NCHW}>, tensor<4xsi32> -> tensor<1x1x?x512xf32, {bounds = [1, 1, 35, 512], order = #NCHW}>
+    %2 = IE.DynamicExpand(%1) : tensor<1x1x?x512xf32, {bounds = [1, 1, 35, 512], order = #NCHW}> -> tensor<1x1x35x512xf32>
+    %3 = IE.MatMul(%2, %cst_1) {transpose_b} : tensor<1x1x35x512xf32>, tensor<1x2x512x512xf32> -> tensor<1x2x35x512xf32>
+    %4 = IE.DynamicReshape(%3, %cst) {output_bounds = [1, 2, 35, 512], output_shape = [1, 2, -9223372036854775808, 512]} : tensor<1x2x35x512xf32>, tensor<4xsi32> -> tensor<1x2x?x512xf32, {bounds = [1, 2, 35, 512], order = #NCHW}>
+
+    return %4 : tensor<1x2x?x512xf32, {bounds = [1, 2, 35, 512], order = #NCHW}>
+
+    // CHECK: [[CST:%.+]] = const.Declare tensor<512x512xf32> = dense<0.000000e+00> : tensor<2x512x512xf32>, [#const.SubView<[1, 0, 0], [1, 512, 512]>, #const.Reshape<[512, 512]>]
+    // CHECK: [[CST_0:%.+]] = const.Declare tensor<512x512xf32> = dense<0.000000e+00> : tensor<2x512x512xf32>, [#const.SubView<[0, 0, 0], [1, 512, 512]>, #const.Reshape<[512, 512]>]
+    // CHECK: [[CST_1:%.+]] = const.Declare tensor<4xsi32> = dense<[1, 2, -1, 512]> : tensor<4xsi32>
+    // CHECK: [[CST_2:%.+]] = const.Declare tensor<4xsi32> = dense<[1, 2, -9223372036854775808, 512]> : tensor<4xsi64>, [#const.CastElemType<si32>]
+    // CHECK: [[CST_3:%.+]] = const.Declare tensor<4xsi32> = dense<[1, 1, -1, 512]> : tensor<4xsi32>
+    // CHECK: [[DYN_RESHAPE:%.+]] = IE.DynamicReshape([[ARG_0]], [[CST_3]]) {output_bounds = [1, 1, 35, 512], output_shape = [1, 1, -9223372036854775808, 512]} : tensor<1x?x512xf32, {bounds = [1, 35, 512], order = #CHW}>, tensor<4xsi32> -> tensor<1x1x?x512xf32, {bounds = [1, 1, 35, 512], order = #NCHW}>
+    // CHECK: [[DYN_BROADCAST:%.+]] = IE.DynamicBroadcast([[DYN_RESHAPE]], [[CST_2]]) {mode = #IE.broadcast_type<NUMPY>, output_bounds = [1, 1, 35, 512], output_shape = [1, 1, -9223372036854775808, 512]} : tensor<1x1x?x512xf32, {bounds = [1, 1, 35, 512], order = #NCHW}>, tensor<4xsi32> -> tensor<1x1x?x512xf32, {bounds = [1, 1, 35, 512], order = #NCHW}>
+    // CHECK: [[DYN_EXPAND:%.+]] = IE.DynamicExpand([[DYN_BROADCAST]]) : tensor<1x1x?x512xf32, {bounds = [1, 1, 35, 512], order = #NCHW}> -> tensor<1x1x35x512xf32>
+    // CHECK: [[RESHAPE:%.+]] = IE.AffineReshape([[DYN_EXPAND]])
+    // CHECK: [[MAT_MUL:%.+]] = IE.MatMul([[RESHAPE]], [[CST_0]]) {transpose_b} : tensor<35x512xf32>, tensor<512x512xf32> -> tensor<35x512xf32>
+    // CHECK: [[MAT_MUL_0:%.+]] = IE.MatMul([[RESHAPE]], [[CST]]) {transpose_b} : tensor<35x512xf32>, tensor<512x512xf32> -> tensor<35x512xf32>
+    // CHECK: [[CONCAT:%.+]] = IE.Concat([[MAT_MUL]], [[MAT_MUL_0]]) {per_axis = #IE.Concat<axis = 0 : i64>} : tensor<35x512xf32>, tensor<35x512xf32> -> tensor<70x512xf32>
+    // CHECK: [[RESHAPE_0:%.+]] = IE.AffineReshape([[CONCAT]])
+    // CHECK: [[DYN_RESHAPE_0:%.+]] = IE.DynamicReshape([[RESHAPE_0]], [[CST_1]]) {output_bounds = [1, 2, 35, 512], output_shape = [1, 2, -9223372036854775808, 512]} : tensor<1x2x35x512xf32>, tensor<4xsi32> -> tensor<1x2x?x512xf32, {bounds = [1, 2, 35, 512], order = #NCHW}>
+    // CHECK: return [[DYN_RESHAPE_0]] : tensor<1x2x?x512xf32, {bounds = [1, 2, 35, 512], order = #NCHW}>
+}
+
+// -----
+
+// CHECK-LABEL: func.func @matmulBroadcastSupportReproducer(
+// CHECK-SAME:  [[ARG_0:.+]]: tensor<1x1x4x3xf16>) -> tensor<1x6x4x10xf16> {
+func.func @matmulBroadcastSupportReproducer(%arg0: tensor<1x1x4x3xf16>) -> tensor<1x6x4x10xf16> {
+    %cst = const.Declare tensor<1x6x3x10xf32> = dense<0.000000e+00> : tensor<1x6x3x10xf32>
+    %0 = IE.Convert(%arg0) {dstElemType = f32} : tensor<1x1x4x3xf16> -> tensor<1x1x4x3xf32>
+    %1 = IE.MatMul(%0, %cst) : tensor<1x1x4x3xf32>, tensor<1x6x3x10xf32> -> tensor<1x6x4x10xf32>
+    %2 = IE.Convert(%1) {dstElemType = f16} : tensor<1x6x4x10xf32> -> tensor<1x6x4x10xf16>
+    return %2 : tensor<1x6x4x10xf16>
+
+    // CHECK: [[CONVERT:%.+]] = IE.Convert([[ARG_0]]) {dstElemType = f32} : tensor<1x1x4x3xf16> -> tensor<1x1x4x3xf32>
+    // CHECK: [[RESHAPE:%.+]] = IE.AffineReshape([[CONVERT]])
+    // CHECK: [[MAT_MUL_0:%.+]] = IE.MatMul([[RESHAPE]], {{%.+}}) : tensor<4x3xf32>, tensor<3x10xf32> -> tensor<4x10xf32>
+    // CHECK: [[MAT_MUL_1:%.+]] = IE.MatMul([[RESHAPE]], {{%.+}}) : tensor<4x3xf32>, tensor<3x10xf32> -> tensor<4x10xf32>
+    // CHECK: [[MAT_MUL_2:%.+]] = IE.MatMul([[RESHAPE]], {{%.+}}) : tensor<4x3xf32>, tensor<3x10xf32> -> tensor<4x10xf32>
+    // CHECK: [[MAT_MUL_3:%.+]] = IE.MatMul([[RESHAPE]], {{%.+}}) : tensor<4x3xf32>, tensor<3x10xf32> -> tensor<4x10xf32>
+    // CHECK: [[MAT_MUL_4:%.+]] = IE.MatMul([[RESHAPE]], {{%.+}}) : tensor<4x3xf32>, tensor<3x10xf32> -> tensor<4x10xf32>
+    // CHECK: [[MAT_MUL_5:%.+]] = IE.MatMul([[RESHAPE]], {{%.+}}) : tensor<4x3xf32>, tensor<3x10xf32> -> tensor<4x10xf32>
+    // CHECK: [[CONCAT:%.+]] = IE.Concat([[MAT_MUL_0]], [[MAT_MUL_1]], [[MAT_MUL_2]], [[MAT_MUL_3]], [[MAT_MUL_4]], [[MAT_MUL_5]]) {per_axis = #IE.Concat<axis = 0 : i64>} : tensor<4x10xf32>, tensor<4x10xf32>, tensor<4x10xf32>, tensor<4x10xf32>, tensor<4x10xf32>, tensor<4x10xf32> -> tensor<24x10xf32>
+    // CHECK: [[RESHAPE_1:%.+]] = IE.AffineReshape([[CONCAT]])
+    // CHECK: [[CONVERT_1:%.+]] = IE.Convert([[RESHAPE_1]]) {dstElemType = f16} : tensor<1x6x4x10xf32> -> tensor<1x6x4x10xf16>
+    // CHECK: return [[CONVERT_1]] : tensor<1x6x4x10xf16>
+}

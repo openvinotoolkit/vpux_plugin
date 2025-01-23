@@ -350,7 +350,7 @@ func.func @CannotSwizzledDueToMultiUserWhichCannotSwizzled(%arg0 : memref<1x256x
         {
             PPETask
             {
-                opaque_ppe = #VPU.PPEStub<>
+                ppe = #VPU.PPEStub<>
             }
         }
 
@@ -387,7 +387,7 @@ func.func @CannotSwizzledDueToMultiUserWhichCannotSwizzled(%arg0 : memref<1x256x
         {
             PPETask
             {
-                opaque_ppe = #VPU.PPEStub<>
+                ppe = #VPU.PPEStub<>
             }
         }
 
@@ -419,7 +419,7 @@ func.func @CannotSwizzledDueToMultiUserWhichCannotSwizzled(%arg0 : memref<1x256x
     // CHECK-NEXT:        DPUTask {cluster_id = 0 : i64, inEnd = [79, 2, 255], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [39, 0, 255], outStart = [0, 0, 0], pad = #VPU.Padding<left = 1 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     // CHECK-NEXT:        DPUTask {cluster_id = 1 : i64, inEnd = [79, 2, 255], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [39, 0, 255], outStart = [0, 0, 0], pad = #VPU.Padding<left = 1 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     // CHECK-NEXT:      } PPE : {
-    // CHECK-NEXT:        PPETask {opaque_ppe = #VPU.PPEStub<>}
+    // CHECK-NEXT:        PPETask {ppe = #VPU.PPEStub<>}
     // CHECK-NEXT:      }
     // CHECK:      [[CONV_2:%.+]] = VPUIP.NCEClusterTask {is_superdense, kernel_padding = #VPU.Padding<left = 1 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, kernel_size = [3, 3], kernel_strides = [2, 2], minimumHardwareExecutionCost = 99787 : i64, task_type = #VPUIP.nce_task_type<CONV>}
     // CHECK-SAME:   input([[COPY_IN_2]] : memref<1x256x7x80xf16, #NHWC, @CMX_NN>) weights(%arg4 : memref<256x256x3x3xf16, #NHWC, @CMX_NN>) weight_table(%arg3 : memref<256x1x1x4xsi32, #NHWC, @CMX_NN>)
@@ -428,7 +428,7 @@ func.func @CannotSwizzledDueToMultiUserWhichCannotSwizzled(%arg0 : memref<1x256x
     // CHECK-NEXT:        DPUTask {cluster_id = 0 : i64, inEnd = [79, 4, 255], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [39, 1, 255], outStart = [0, 0, 0], pad = #VPU.Padding<left = 1 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     // CHECK-NEXT:        DPUTask {cluster_id = 1 : i64, inEnd = [79, 2, 255], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [39, 0, 255], outStart = [0, 0, 0], pad = #VPU.Padding<left = 1 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     // CHECK-NEXT:      } PPE : {
-    // CHECK-NEXT:        PPETask {opaque_ppe = #VPU.PPEStub<>}
+    // CHECK-NEXT:        PPETask {ppe = #VPU.PPEStub<>}
     // CHECK-NEXT:      }
     // CHECK:      [[OUT_1:%.+]] = VPUIP.Copy inputs([[CONV_1]] : memref<1x256x2x40xf16, #NHWC, @CMX_NN>) outputs([[OUTPUT_1]] : memref<1x256x2x40xf16, #NHWC, @DDR>) -> memref<1x256x2x40xf16, #NHWC, @DDR>
     // CHECK:      [[OUT_2:%.+]] = VPUIP.Copy inputs([[CONV_2]] : memref<1x256x3x40xf16, #NHWC, @CMX_NN>) outputs([[OUTPUT_2]] : memref<1x256x3x40xf16, #NHWC, @DDR>) -> memref<1x256x3x40xf16, #NHWC, @DDR>
@@ -575,7 +575,7 @@ func.func @DoNotSwizzle5dTensors(
         }
     } PPE : {
         PPETask {
-            opaque_ppe = #VPU.PPEStub<>
+            ppe = #VPU.PPEStub<>
         }
     }
     // CHECK:   [[MATMUL:%.+]] = VPUIP.NCEClusterTask
@@ -588,4 +588,391 @@ func.func @DoNotSwizzle5dTensors(
 
     return %OUT : !OutputBuffer
     // CHECK:   return [[OUT]]
+}
+
+
+// -----
+
+#NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
+!InputDistributed = !VPUIP.DistributedBuffer<
+    1x512x9x9xf16, #NHWC, @CMX_NN, {
+    mode = "DUPLICATED",
+    num_clusters = 4,
+    uniform_distributed_segments,
+    compute_shapes = [[1, 512, 9, 9], [1, 512, 9, 9], [1, 512, 9, 9], [1, 512, 9, 9]],
+    compute_offsets = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]],
+    memory_shapes = [[1, 512, 9, 9], [1, 512, 9, 9], [1, 512, 9, 9], [1, 512, 9, 9]],
+    memory_offsets = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]
+}>
+
+!InputSparsityMapDistributed = !VPUIP.DistributedBuffer<
+    1x512x18x18xi1, #NHWC, @CMX_NN, {
+    mode = "DUPLICATED",
+    num_clusters = 4,
+    alignment = [1, 16, 1, 1],
+    uniform_distributed_segments,
+    compute_shapes = [[1, 512, 18, 18], [1, 512, 18, 18], [1, 512, 18, 18], [1, 512, 18, 18]],
+    compute_offsets = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]],
+    memory_shapes = [[1, 512, 18, 18], [1, 512, 18, 18], [1, 512, 18, 18], [1, 512, 18, 18]],
+    memory_offsets = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]
+}>
+
+!InputStorageElementTableDistributed = !VPUIP.DistributedBuffer<
+    1x1x18x18xi32, #NHWC, @CMX_NN, {
+    mode = "DUPLICATED",
+    num_clusters = 4,
+    alignment = [1, 1, 1, 1],
+    uniform_distributed_segments,
+    compute_shapes = [[1, 1, 18, 18], [1, 1, 18, 18], [1, 1, 18, 18], [1, 1, 18, 18]],
+    compute_offsets = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]],
+    memory_shapes = [[1, 1, 18, 18], [1, 1, 18, 18], [1, 1, 18, 18], [1, 1, 18, 18]],
+    memory_offsets = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]
+}>
+
+!WeightsDistributed = !VPUIP.DistributedBuffer<
+    512x512x1x1xf16, #NHWC, @CMX_NN, {
+    mode = "SEGMENTED",
+    num_tiles = [4, 1, 1, 1],
+    num_clusters = 4,
+    alignment = [16, 1, 1, 1],
+    uniform_distributed_segments,
+    compute_shapes = [[128, 512, 1, 1], [128, 512, 1, 1], [128, 512, 1, 1], [128, 512, 1, 1]],
+    compute_offsets = [[0, 0, 0, 0], [128, 0, 0, 0], [256, 0, 0, 0], [384, 0, 0, 0]],
+    memory_shapes = [[128, 512, 1, 1], [128, 512, 1, 1], [128, 512, 1, 1], [128, 512, 1, 1]],
+    memory_offsets = [[0, 0, 0, 0], [128, 0, 0, 0], [256, 0, 0, 0], [384, 0, 0, 0]]
+}, #VPUIP.SparsityCompressionAttr<axis = 0, numElems = dense<1> : tensor<512xi64>, alignment = 16>
+>
+
+!WeightsSparsityMapDistributed = !VPUIP.DistributedBuffer<
+    512x1x1x512xi1, #NHWC, @CMX_NN, {
+    mode = "SEGMENTED",
+    num_tiles = [4, 1, 1, 1],
+    num_clusters = 4,
+    alignment = [16, 1, 1, 1],
+    uniform_distributed_segments,
+    compute_shapes = [[128, 1, 1, 512], [128, 1, 1, 512], [128, 1, 1, 512], [128, 1, 1, 512]],
+    compute_offsets = [[0, 0, 0, 0], [128, 0, 0, 0], [256, 0, 0, 0], [384, 0, 0, 0]],
+    memory_shapes = [[128, 1, 1, 512], [128, 1, 1, 512], [128, 1, 1, 512], [128, 1, 1, 512]],
+    memory_offsets = [[0, 0, 0, 0], [128, 0, 0, 0], [256, 0, 0, 0], [384, 0, 0, 0]]
+}>
+
+!WeightsTableDistributed = !VPUIP.DistributedBuffer<
+    512x1x1x4xsi32, #NHWC, @CMX_NN, {
+    mode = "SEGMENTED",
+    num_tiles = [4, 1, 1, 1],
+    num_clusters = 4,
+    alignment = [16, 1, 1, 1],
+    uniform_distributed_segments,
+    compute_shapes = [[128, 1, 1, 4], [128, 1, 1, 4], [128, 1, 1, 4], [128, 1, 1, 4]],
+    compute_offsets = [[0, 0, 0, 0], [128, 0, 0, 0], [256, 0, 0, 0], [384, 0, 0, 0]],
+    memory_shapes = [[128, 1, 1, 4], [128, 1, 1, 4], [128, 1, 1, 4], [128, 1, 1, 4]],
+    memory_offsets = [[0, 0, 0, 0], [128, 0, 0, 0], [256, 0, 0, 0], [384, 0, 0, 0]]
+}>
+
+!NCEOutputDistributed = !VPUIP.DistributedBuffer<
+    1x512x18x18xf16, {order = #NHWC, strides = [165888, 1, 9216, 512]}, @CMX_NN, {
+    mode = "DUPLICATED|SEGMENTED",
+    num_tiles = [1, 4, 1, 1],
+    num_clusters = 4,
+    alignment = [1, 16, 1, 1],
+    uniform_distributed_segments,
+    compute_shapes = [[1, 128, 18, 18], [1, 128, 18, 18], [1, 128, 18, 18], [1, 128, 18, 18]],
+    compute_offsets = [[0, 0, 0, 0], [0, 128, 0, 0], [0, 256, 0, 0], [0, 384, 0, 0]],
+    memory_shapes = [[1, 512, 18, 18], [1, 512, 18, 18], [1, 512, 18, 18], [1, 512, 18, 18]],
+    memory_offsets = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]
+}>
+
+!OutputDistributed = !VPUIP.DistributedBuffer<
+    6x512x18x18xf16, #NHWC, @CMX_NN, {
+    mode = "DUPLICATED|SEGMENTED",
+    num_tiles = [1, 4, 1, 1],
+    num_clusters = 4 : i64,
+    alignment = [1, 16, 1, 1],
+    uniform_distributed_segments,
+    compute_shapes = [[6, 512, 18, 18], [6, 512, 18, 18], [6, 512, 18, 18], [6, 512, 18, 18]],
+    compute_offsets = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]],
+    memory_shapes = [[6, 512, 18, 18], [6, 512, 18, 18], [6, 512, 18, 18], [6, 512, 18, 18]],
+    memory_offsets = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]
+}>
+
+func.func @DoNotSwizzleWeightsDueToAlignmentMemCannotFitIntoCMX() -> !OutputDistributed {
+    %WEIGHTS_CST = const.Declare memref<512x512x1x1xf16, #NHWC> = dense<1.0> : memref<512x512x1x1xf16, #NHWC>
+    %WEIGHTS_SM_CST = const.Declare memref<512x1x1x512xi1> = dense<0> : memref<512x1x1x512xi1>
+    %WEIGHTS_TABLE_CST = const.Declare memref<512x1x1x4xsi32> = dense<5> : memref<512x1x1x4xsi32>
+
+    %INPUT_CMX = VPURT.AllocDistributed -> !InputDistributed
+    %INPUT_SM_CMX = VPURT.AllocDistributed -> !InputSparsityMapDistributed
+    %INPUT_SE_TABLE_CMX = VPURT.AllocDistributed -> !InputStorageElementTableDistributed
+    %WEIGHTS_CMX = VPURT.AllocDistributed -> !WeightsDistributed
+    %WEIGHTS_SM_CMX = VPURT.AllocDistributed -> !WeightsSparsityMapDistributed
+    %WEIGHTS_TABLE_CMX = VPURT.AllocDistributed -> !WeightsTableDistributed
+
+    %OUT_CMX_CONCAT = VPURT.AllocDistributed -> !OutputDistributed
+    %OUT_NCE_CMX = VPUIP.SubView %OUT_CMX_CONCAT [0, 0, 0, 0] [1, 512, 18, 18] : !OutputDistributed to !NCEOutputDistributed
+
+    %WEIGHTS_COPY = VPUIP.Copy inputs(%WEIGHTS_CST : memref<512x512x1x1xf16, #NHWC>) outputs(%WEIGHTS_CMX : !WeightsDistributed) -> !WeightsDistributed
+    %WEIGHTS_SM_COPY = VPUIP.Copy inputs(%WEIGHTS_SM_CST : memref<512x1x1x512xi1>) outputs(%WEIGHTS_SM_CMX : !WeightsSparsityMapDistributed) -> !WeightsSparsityMapDistributed
+    %WEIGHTS_TABLE_COPY = VPUIP.Copy inputs(%WEIGHTS_TABLE_CST : memref<512x1x1x4xsi32>) outputs(%WEIGHTS_TABLE_CMX : !WeightsTableDistributed) -> !WeightsTableDistributed
+
+    %NCE = VPUIP.NCEClusterTask {
+        kernel_padding = #VPU.Padding<left = 0, right = 0, top = 0, bottom = 0>,
+        kernel_size = [1, 1],
+        kernel_strides = [1, 1],
+        minimumHardwareExecutionCost = 13896,
+        task_type = #VPUIP.nce_task_type<CONV>
+    }
+        input(%INPUT_CMX : !InputDistributed)
+        input_sparsity_map(%INPUT_SM_CMX : !InputSparsityMapDistributed)
+        input_storage_element_table(%INPUT_SE_TABLE_CMX : !InputStorageElementTableDistributed)
+        weights(%WEIGHTS_COPY : !WeightsDistributed)
+        weights_sparsity_map(%WEIGHTS_SM_COPY : !WeightsSparsityMapDistributed)
+        weight_table(%WEIGHTS_TABLE_COPY : !WeightsTableDistributed)
+        parent_input(%INPUT_CMX : !InputDistributed)
+        parent_input_sparsity_map(%INPUT_SM_CMX : !InputSparsityMapDistributed)
+        parent_input_storage_element_table(%INPUT_SE_TABLE_CMX : !InputStorageElementTableDistributed)
+        parent_output(%OUT_NCE_CMX : !NCEOutputDistributed)
+        outputs(%OUT_NCE_CMX : !NCEOutputDistributed) -> !NCEOutputDistributed
+    variants : {
+        DPUTask {cluster_id = 0, inEnd = [17, 17, 511], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [17, 17, 127], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0, right = 0, top = 0, bottom = 0>}
+        DPUTask {cluster_id = 1, inEnd = [17, 17, 511], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [17, 17, 255], outStart = [0, 0, 128], pad = #VPU.Padding<left = 0, right = 0, top = 0, bottom = 0>}
+        DPUTask {cluster_id = 2, inEnd = [17, 17, 511], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [17, 17, 383], outStart = [0, 0, 256], pad = #VPU.Padding<left = 0, right = 0, top = 0, bottom = 0>}
+        DPUTask {cluster_id = 3, inEnd = [17, 17, 511], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [17, 17, 511], outStart = [0, 0, 384], pad = #VPU.Padding<left = 0, right = 0, top = 0, bottom = 0>}
+    }
+    PPE : {
+        PPETask {ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648, clamp_high = 2147483647, lrelu_mult = 1, lrelu_shift = 0, fp_prelu_alpha = 1.0>}
+    }
+
+    return %OUT_CMX_CONCAT : !OutputDistributed
+
+    // CHECK:       [[WEIGHTS_CMX:%.+]] = VPURT.AllocDistributed -> !VPUIP.DistributedBuffer<512x512x1x1xf16, #NHWC, @CMX_NN, {
+    // CHECK-SAME:          mode = "SEGMENTED", num_tiles = [4, 1, 1, 1], num_clusters = 4 : i64, alignment = [16, 1, 1, 1], uniform_distributed_segments
+    // CHECK:       [[WEIGHTS_SM_CMX:%.+]] = VPURT.AllocDistributed -> !VPUIP.DistributedBuffer<512x1x1x512xi1, #NHWC, @CMX_NN, {
+    // CHECK-SAME:          mode = "SEGMENTED", num_tiles = [4, 1, 1, 1], num_clusters = 4 : i64, alignment = [16, 1, 1, 1], uniform_distributed_segments
+    // CHECK:       [[WEIGHTS_TABLE_CMX:%.+]] = VPURT.AllocDistributed -> !VPUIP.DistributedBuffer<512x1x1x4xsi32, #NHWC, @CMX_NN, {
+    // CHECK-SAME:          mode = "SEGMENTED", num_tiles = [4, 1, 1, 1], num_clusters = 4 : i64, alignment = [16, 1, 1, 1], uniform_distributed_segments
+}
+
+// -----
+
+#NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
+!FusedConstDistributed = !VPUIP.DistributedBuffer<
+    1x1x1x448384xui8, {order = #NCHW, strides = [448384, 448384, 448384, 1]}, @CMX_NN, {
+    mode = "DUPLICATED",
+    num_clusters = 6,
+    uniform_distributed_segments,
+    compute_shapes = [[1, 1, 1, 448384], [1, 1, 1, 448384], [1, 1, 1, 448384], [1, 1, 1, 448384], [1, 1, 1, 448384], [1, 1, 1, 448384]],
+    compute_offsets = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]],
+    memory_shapes = [[1, 1, 1, 448384], [1, 1, 1, 448384], [1, 1, 1, 448384], [1, 1, 1, 448384], [1, 1, 1, 448384], [1, 1, 1, 448384]],
+    memory_offsets = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]
+}>
+
+!FusedConstWeightsTableDistributed= !VPUIP.DistributedBuffer<
+    1x1x1x4096xui8, {order = #NCHW, strides = [448384, 448384, 448384, 1]}, @CMX_NN, {
+    mode = "DUPLICATED",
+    num_clusters = 6,
+    uniform_distributed_segments,
+    compute_shapes = [[1, 1, 1, 4096], [1, 1, 1, 4096], [1, 1, 1, 4096], [1, 1, 1, 4096], [1, 1, 1, 4096], [1, 1, 1, 4096]],
+    compute_offsets = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]],
+    memory_shapes = [[1, 1, 1, 4096], [1, 1, 1, 4096], [1, 1, 1, 4096], [1, 1, 1, 4096], [1, 1, 1, 4096], [1, 1, 1, 4096]],
+    memory_offsets = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]
+}>
+
+!FusedConstWeightsDistributed = !VPUIP.DistributedBuffer<
+    1x1x1x370560xui8, {order = #NCHW, strides = [448384, 448384, 448384, 1]}, @CMX_NN, {
+    mode = "DUPLICATED",
+    num_clusters = 6,
+    uniform_distributed_segments,
+    compute_shapes = [[1, 1, 1, 370560], [1, 1, 1, 370560], [1, 1, 1, 370560], [1, 1, 1, 370560], [1, 1, 1, 370560], [1, 1, 1, 370560]],
+    compute_offsets = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]],
+    memory_shapes = [[1, 1, 1, 370560], [1, 1, 1, 370560], [1, 1, 1, 370560], [1, 1, 1, 370560], [1, 1, 1, 370560], [1, 1, 1, 370560]],
+    memory_offsets = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]
+}>
+
+!FusedConstWeightsSMDistributed = !VPUIP.DistributedBuffer<
+    1x1x1x73728xui8, {order = #NCHW, strides = [448384, 448384, 448384, 1]}, @CMX_NN, {
+    mode = "DUPLICATED",
+    num_clusters = 6,
+    uniform_distributed_segments,
+    compute_shapes = [[1, 1, 1, 73728], [1, 1, 1, 73728], [1, 1, 1, 73728], [1, 1, 1, 73728], [1, 1, 1, 73728], [1, 1, 1, 73728]],
+    compute_offsets = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]],
+    memory_shapes = [[1, 1, 1, 73728], [1, 1, 1, 73728], [1, 1, 1, 73728], [1, 1, 1, 73728], [1, 1, 1, 73728], [1, 1, 1, 73728]],
+    memory_offsets = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]
+}>
+
+!InputDistributed = !VPUIP.DistributedBuffer<
+    1x256x14x14x!quant.uniform<u8:f16, 0.0056737656686820237>, #NHWC, @CMX_NN, {
+    mode = "OVERLAPPED",
+    num_tiles = [1, 1, 6, 1],
+    num_clusters = 6,
+    uniform_distributed_segments,
+    compute_shapes = [[1, 256, 3, 14], [1, 256, 3, 14], [1, 256, 2, 14], [1, 256, 2, 14], [1, 256, 2, 14], [1, 256, 2, 14]],
+    compute_offsets = [[0, 0, 0, 0], [0, 0, 3, 0], [0, 0, 6, 0], [0, 0, 8, 0], [0, 0, 10, 0], [0, 0, 12, 0]],
+    memory_shapes = [[1, 256, 3, 14], [1, 256, 3, 14], [1, 256, 2, 14], [1, 256, 2, 14], [1, 256, 2, 14], [1, 256, 2, 14]],
+    memory_offsets = [[0, 0, 0, 0], [0, 0, 3, 0], [0, 0, 6, 0], [0, 0, 8, 0], [0, 0, 10, 0], [0, 0, 12, 0]]
+}>
+
+!InputSparsityMapDistributed = !VPUIP.DistributedBuffer<
+    1x256x14x14xi1, #NHWC, @CMX_NN, {
+    mode = "OVERLAPPED",
+    num_tiles = [1, 1, 6, 1],
+    num_clusters = 6,
+    uniform_distributed_segments,
+    compute_shapes = [[1, 256, 3, 14], [1, 256, 3, 14], [1, 256, 2, 14], [1, 256, 2, 14], [1, 256, 2, 14], [1, 256, 2, 14]],
+    compute_offsets = [[0, 0, 0, 0], [0, 0, 3, 0], [0, 0, 6, 0], [0, 0, 8, 0], [0, 0, 10, 0], [0, 0, 12, 0]],
+    memory_shapes = [[1, 256, 3, 14], [1, 256, 3, 14], [1, 256, 2, 14], [1, 256, 2, 14], [1, 256, 2, 14], [1, 256, 2, 14]],
+    memory_offsets = [[0, 0, 0, 0], [0, 0, 3, 0], [0, 0, 6, 0], [0, 0, 8, 0], [0, 0, 10, 0], [0, 0, 12, 0]]
+}>
+
+!WeightsDistributed = !VPUIP.DistributedBuffer<
+    256x256x3x3x!quant.uniform<u8:f16, 0.0056737656686820237>, #NHWC, @CMX_NN, {
+    mode = "DUPLICATED",
+    num_clusters = 6,
+    uniform_distributed_segments,
+    compute_shapes = [[256, 256, 3, 3], [256, 256, 3, 3], [256, 256, 3, 3], [256, 256, 3, 3], [256, 256, 3, 3], [256, 256, 3, 3]],
+    compute_offsets = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]],
+    memory_shapes = [[256, 256, 3, 3], [256, 256, 3, 3], [256, 256, 3, 3], [256, 256, 3, 3], [256, 256, 3, 3], [256, 256, 3, 3]],
+    memory_offsets = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]
+}, #VPUIP.SparsityCompressionAttr<axis = 0, numElems = dense_resource<__elided__> : tensor<256xi64>, alignment = 16>
+>
+
+!WeightsSparsityMapDistributed = !VPUIP.DistributedBuffer<
+    256x1x1x2304xi1, #NHWC, @CMX_NN, {
+    mode = "DUPLICATED",
+    num_clusters = 6,
+    uniform_distributed_segments,
+    compute_shapes = [[256, 1, 1, 2304], [256, 1, 1, 2304], [256, 1, 1, 2304], [256, 1, 1, 2304], [256, 1, 1, 2304], [256, 1, 1, 2304]],
+    compute_offsets = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]],
+    memory_shapes = [[256, 1, 1, 2304], [256, 1, 1, 2304], [256, 1, 1, 2304], [256, 1, 1, 2304], [256, 1, 1, 2304], [256, 1, 1, 2304]],
+    memory_offsets = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]
+}>
+
+!WeightsTableDistributed = !VPUIP.DistributedBuffer<
+    256x1x1x4xsi32, #NHWC, @CMX_NN, {
+    mode = "DUPLICATED",
+    num_clusters = 6,
+    uniform_distributed_segments,
+    compute_shapes = [[256, 1, 1, 4], [256, 1, 1, 4], [256, 1, 1, 4], [256, 1, 1, 4], [256, 1, 1, 4], [256, 1, 1, 4]],
+    compute_offsets = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]],
+    memory_shapes = [[256, 1, 1, 4], [256, 1, 1, 4], [256, 1, 1, 4], [256, 1, 1, 4], [256, 1, 1, 4], [256, 1, 1, 4]],
+    memory_offsets = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]
+}>
+
+!OutputDistributed = !VPUIP.DistributedBuffer<
+    1x256x14x14x!quant.uniform<u8:f16, 0.0056737656686820237>, #NHWC, @CMX_NN, {
+    mode = "OVERLAPPED",
+    num_tiles = [1, 1, 6, 1],
+    num_clusters = 6,
+    uniform_distributed_segments,
+    compute_shapes = [[1, 256, 3, 14], [1, 256, 3, 14], [1, 256, 2, 14], [1, 256, 2, 14], [1, 256, 2, 14], [1, 256, 2, 14]],
+    compute_offsets = [[0, 0, 0, 0], [0, 0, 3, 0], [0, 0, 6, 0], [0, 0, 8, 0], [0, 0, 10, 0], [0, 0, 12, 0]],
+    memory_shapes = [[1, 256, 3, 14], [1, 256, 3, 14], [1, 256, 2, 14], [1, 256, 2, 14], [1, 256, 2, 14], [1, 256, 2, 14]],
+    memory_offsets = [[0, 0, 0, 0], [0, 0, 3, 0], [0, 0, 6, 0], [0, 0, 8, 0], [0, 0, 10, 0], [0, 0, 12, 0]]
+}>
+
+!OutputSparsityMapDistributed = !VPUIP.DistributedBuffer<
+    1x256x14x14xi1, #NHWC, @CMX_NN, {
+    mode = "OVERLAPPED",
+    num_tiles = [1, 1, 6, 1],
+    num_clusters = 6,
+    uniform_distributed_segments,
+    compute_shapes = [[1, 256, 3, 14], [1, 256, 3, 14], [1, 256, 2, 14], [1, 256, 2, 14], [1, 256, 2, 14], [1, 256, 2, 14]],
+    compute_offsets = [[0, 0, 0, 0], [0, 0, 3, 0], [0, 0, 6, 0], [0, 0, 8, 0], [0, 0, 10, 0], [0, 0, 12, 0]],
+    memory_shapes = [[1, 256, 3, 14], [1, 256, 3, 14], [1, 256, 2, 14], [1, 256, 2, 14], [1, 256, 2, 14], [1, 256, 2, 14]],
+    memory_offsets = [[0, 0, 0, 0], [0, 0, 3, 0], [0, 0, 6, 0], [0, 0, 8, 0], [0, 0, 10, 0], [0, 0, 12, 0]]
+}>
+
+func.func @SwizzleOutputWithFusedWeightsConstant() -> !OutputDistributed {
+    %FUSED_BUFF = VPURT.AllocDistributed -> !FusedConstDistributed
+
+    %WEIGHTS_TABLE_BUFF = VPUIP.SubView %FUSED_BUFF [0, 0, 0, 0] [1, 1, 1, 4096] : !FusedConstDistributed to !FusedConstWeightsTableDistributed
+    %WEIGHTS_TABLE = VPUIP.ViewOp %WEIGHTS_TABLE_BUFF : !FusedConstWeightsTableDistributed to !WeightsTableDistributed
+
+    %WEIGHTS_BUFF = VPUIP.SubView %FUSED_BUFF [0, 0, 0, 4096] [1, 1, 1, 370560] : !FusedConstDistributed to !FusedConstWeightsDistributed
+    %WEIGHTS = VPUIP.ViewOp %WEIGHTS_BUFF : !FusedConstWeightsDistributed to !WeightsDistributed
+
+    %WEIGHTS_SM_BUFF = VPUIP.SubView %FUSED_BUFF [0, 0, 0, 374656] [1, 1, 1, 73728] : !FusedConstDistributed to !FusedConstWeightsSMDistributed
+    %WEIGHTS_SM = VPUIP.ViewOp %WEIGHTS_SM_BUFF : !FusedConstWeightsSMDistributed to !WeightsSparsityMapDistributed
+
+    %INPUT_CMX = VPURT.AllocDistributed -> !InputDistributed
+    %INPUT_SM_CMX = VPURT.AllocDistributed -> !InputSparsityMapDistributed
+    %OUT_0_CMX = VPURT.AllocDistributed -> !OutputDistributed
+    %OUT_0_SM_CMX = VPURT.AllocDistributed -> !OutputSparsityMapDistributed
+
+    %CONV_0:2 = VPUIP.NCEClusterTask {
+        constantsFused = true,
+        kernel_padding = #VPU.Padding<left = 0, right = 0, top = 0, bottom = 0>,
+        kernel_size = [1, 1],
+        kernel_strides = [1, 1],
+        minimumHardwareExecutionCost = 14570,
+        mpe_engine = #VPU.MPEEngine37XX<mode = <SCL>>,
+        task_type = #VPUIP.nce_task_type<CONV>
+    }
+        input(%INPUT_CMX : !InputDistributed)
+        input_sparsity_map(%INPUT_SM_CMX : !InputSparsityMapDistributed)
+        weights(%WEIGHTS : !WeightsDistributed)
+        weights_sparsity_map(%WEIGHTS_SM : !WeightsSparsityMapDistributed)
+        weight_table(%WEIGHTS_TABLE : !WeightsTableDistributed)
+        parent_input(%INPUT_CMX : !InputDistributed)
+        parent_input_sparsity_map(%INPUT_SM_CMX : !InputSparsityMapDistributed)
+        parent_output(%OUT_0_CMX : !OutputDistributed)
+        parent_output_sparsity_map(%OUT_0_SM_CMX : !OutputSparsityMapDistributed)
+        outputs(%OUT_0_CMX : !OutputDistributed)
+        output_sparsity_map(%OUT_0_SM_CMX : !OutputSparsityMapDistributed) -> !OutputDistributed, !OutputSparsityMapDistributed
+    variants : {
+        DPUTask {cluster_id = 0, inEnd = [13, 3, 255], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [13, 2, 255], outStart = [0, 0, 0], pad = #VPU.Padding<left = 1, right = 1, top = 1, bottom = 0>}
+        DPUTask {cluster_id = 1, inEnd = [13, 4, 255], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [13, 2, 255], outStart = [0, 0, 0], pad = #VPU.Padding<left = 1, right = 1, top = 0, bottom = 0>}
+        DPUTask {cluster_id = 2, inEnd = [13, 3, 255], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [13, 1, 255], outStart = [0, 0, 0], pad = #VPU.Padding<left = 1, right = 1, top = 0, bottom = 0>}
+        DPUTask {cluster_id = 3, inEnd = [13, 3, 255], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [13, 1, 255], outStart = [0, 0, 0], pad = #VPU.Padding<left = 1, right = 1, top = 0, bottom = 0>}
+        DPUTask {cluster_id = 4, inEnd = [13, 3, 255], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [13, 1, 255], outStart = [0, 0, 0], pad = #VPU.Padding<left = 1, right = 1, top = 0, bottom = 0>}
+        DPUTask {cluster_id = 5, inEnd = [13, 2, 255], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [13, 1, 255], outStart = [0, 0, 0], pad = #VPU.Padding<left = 1, right = 1, top = 0, bottom = 1>}
+    }
+    PPE : {
+        PPETask {ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = 0, clamp_high = 255, lrelu_mult = 1, lrelu_shift = 0, fp_prelu_alpha = 1.0>}
+    }
+
+    %OUT_1_CMX = VPURT.AllocDistributed -> !OutputDistributed
+    %OUT_1_SM_CMX = VPURT.AllocDistributed -> !OutputSparsityMapDistributed
+
+    %CONV_1:2 = VPUIP.NCEClusterTask {
+        constantsFused = true,
+        kernel_padding = #VPU.Padding<left = 0, right = 0, top = 0, bottom = 0>,
+        kernel_size = [1, 1],
+        kernel_strides = [1, 1],
+        minimumHardwareExecutionCost = 14570,
+        mpe_engine = #VPU.MPEEngine37XX<mode = <SCL>>,
+        task_type = #VPUIP.nce_task_type<CONV>
+    }
+        input(%CONV_0#0 : !InputDistributed)
+        input_sparsity_map(%CONV_0#1 : !InputSparsityMapDistributed)
+        weights(%WEIGHTS : !WeightsDistributed)
+        weights_sparsity_map(%WEIGHTS_SM : !WeightsSparsityMapDistributed)
+        weight_table(%WEIGHTS_TABLE : !WeightsTableDistributed)
+        parent_input(%CONV_0#0 : !InputDistributed)
+        parent_input_sparsity_map(%CONV_0#1 : !InputSparsityMapDistributed)
+        parent_output(%OUT_1_CMX : !OutputDistributed)
+        parent_output_sparsity_map(%OUT_1_SM_CMX : !OutputSparsityMapDistributed)
+        outputs(%OUT_1_CMX : !OutputDistributed)
+        output_sparsity_map(%OUT_1_SM_CMX : !OutputSparsityMapDistributed) -> !OutputDistributed, !OutputSparsityMapDistributed
+    variants : {
+        DPUTask {cluster_id = 0, inEnd = [13, 3, 255], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [13, 2, 255], outStart = [0, 0, 0], pad = #VPU.Padding<left = 1, right = 1, top = 1, bottom = 0>}
+        DPUTask {cluster_id = 1, inEnd = [13, 4, 255], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [13, 2, 255], outStart = [0, 0, 0], pad = #VPU.Padding<left = 1, right = 1, top = 0, bottom = 0>}
+        DPUTask {cluster_id = 2, inEnd = [13, 3, 255], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [13, 1, 255], outStart = [0, 0, 0], pad = #VPU.Padding<left = 1, right = 1, top = 0, bottom = 0>}
+        DPUTask {cluster_id = 3, inEnd = [13, 3, 255], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [13, 1, 255], outStart = [0, 0, 0], pad = #VPU.Padding<left = 1, right = 1, top = 0, bottom = 0>}
+        DPUTask {cluster_id = 4, inEnd = [13, 3, 255], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [13, 1, 255], outStart = [0, 0, 0], pad = #VPU.Padding<left = 1, right = 1, top = 0, bottom = 0>}
+        DPUTask {cluster_id = 5, inEnd = [13, 2, 255], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [13, 1, 255], outStart = [0, 0, 0], pad = #VPU.Padding<left = 1, right = 1, top = 0, bottom = 1>}
+    }
+    PPE : {
+        PPETask {ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = 0, clamp_high = 255, lrelu_mult = 1, lrelu_shift = 0, fp_prelu_alpha = 1.0>}
+    }
+
+    return %CONV_1 : !OutputDistributed
+
+    // CHECK:       [[OUT_0_CMX:%.+]] = VPURT.AllocDistributed {alignment = 32768 : i64, swizzlingKey = 5 : i64}
+    // CHECK-SAME:          -> !VPUIP.DistributedBuffer<1x256x14x14x!qElemType, {order = #NHWC, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 1024 : i64>}, @CMX_NN
+    // CHECK:       [[OUT_SM_0_CMX:%.+]] = VPURT.AllocDistributed {alignment = 32768 : i64, swizzlingKey = 5 : i64}
+    // CHECK-SAME:          -> !VPUIP.DistributedBuffer<1x256x14x14xi1, {order = #NHWC, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 1024 : i64>}, @CMX_NN
 }

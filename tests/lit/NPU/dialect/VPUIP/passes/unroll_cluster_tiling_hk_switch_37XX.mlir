@@ -258,7 +258,7 @@ func.func @UnrollNCEWithNCHWOutput(%input: !Input_DDR, %output: !Output_DDR) -> 
         DPUTask {cluster_id = 0 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [15, 7, 431], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
         DPUTask {cluster_id = 1 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [15, 15, 431], outStart = [0, 8, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
       } PPE : {
-        PPETask {opaque_ppe = #VPU.PPEStub<>}
+        PPETask {ppe = #VPU.PPEStub<>}
       }
     }
     VPURT.Task waits(%bar_nce : !VPURT.Barrier) {
@@ -309,7 +309,7 @@ func.func @UnrollNCEWithNCHWOutput(%input: !Input_DDR, %output: !Output_DDR) -> 
     // CHECK-SAME:  -> !VPUIP.DistributedBuffer<1x432x8x16xf16, {order = #NCHW, strides = [110592, 256, 16, 1]}, @CMX_NN, {mode = "SEGMENTED|MULTICASTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64, alignment = [1, 16, 1, 1]}> variants : {
     // CHECK:    DPUTask {cluster_id = 0 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [15, 7, 431], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     // CHECK:    } PPE : {
-    // CHECK:      PPETask {opaque_ppe = #VPU.PPEStub<>}
+    // CHECK:      PPETask {ppe = #VPU.PPEStub<>}
 
     // CHECK:  VPURT.Task waits([[BAR_DMA]] : !VPURT.Barrier) updates([[BAR_NCE]] : !VPURT.Barrier) {
     // CHECK:  VPUIP.NCEClusterTask
@@ -322,7 +322,7 @@ func.func @UnrollNCEWithNCHWOutput(%input: !Input_DDR, %output: !Output_DDR) -> 
     // CHECK-SAME:  -> !VPUIP.DistributedBuffer<1x432x8x16xf16, {order = #NCHW, strides = [110592, 256, 16, 1]}, @CMX_NN, {mode = "SEGMENTED|MULTICASTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64, alignment = [1, 16, 1, 1]}> variants : {
     // CHECK:    DPUTask {cluster_id = 1 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [15, 15, 431], outStart = [0, 8, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     // CHECK:    } PPE : {
-    // CHECK:      PPETask {opaque_ppe = #VPU.PPEStub<>}
+    // CHECK:      PPETask {ppe = #VPU.PPEStub<>}
     // CHECK:    }
 
     // CHECK: VPURT.Task waits([[BAR_NCE]] : !VPURT.Barrier) {
@@ -331,4 +331,349 @@ func.func @UnrollNCEWithNCHWOutput(%input: !Input_DDR, %output: !Output_DDR) -> 
     // CHECK:   outputs([[OUT_DDR]] : memref<1x432x16x16xf16, @DDR>) -> memref<1x432x16x16xf16, @DDR>
 
     // CHECK: return %arg1 : memref<1x432x16x16xf16, @DDR>
+}
+
+// -----
+
+#NCWH = affine_map<(d0, d1, d2, d3) -> (d0, d1, d3, d2)>
+
+!inputCmxDistributed = !VPUIP.DistributedBuffer<
+    1x4x512x1xf16, #NCWH, @CMX_NN, {
+    mode = "SEGMENTED",
+    num_tiles = [1, 1, 2, 1],
+    num_clusters = 2
+}>
+
+!outputCmxDistributed = !VPUIP.DistributedBuffer<
+    1x4x512x1xf16, #NCWH, @CMX_NN, {
+    mode = "MULTICASTED|SEGMENTED",
+    num_tiles = [1, 1, 2, 1],
+    num_clusters = 2
+}>
+
+!type_CMX_memref = memref<1x4x512x1xf16, #NCWH, @CMX_NN>
+
+
+!Input_DDR  = memref<1x4x512x1xf16, #NCWH, @DDR>
+!Output_DDR = memref<1x4x512x1xf16, #NCWH, @DDR>
+
+
+VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
+module @VPU.SW {
+    func.func private @builtin_Softmax(%input : memref<*xf16>, %output : memref<*xf16>, %axis : i64)
+        attributes {
+            VPU.kernel_code = "softmax.cpp",
+            VPU.kernel_entry = "softmax"
+        }
+    func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
+}
+
+// CHECK-LABEL: @UnrollSWOpInterfaceMulSeg_NCWH
+func.func @UnrollSWOpInterfaceMulSeg_NCWH(%input0: !Input_DDR, %output: !Output_DDR) -> !Output_DDR {
+
+    %bar0 = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+    %bar1 = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+
+    %395 = VPURT.DeclareBuffer <DDR> <4096> -> !Input_DDR
+    %302 = VPURT.DeclareBuffer <DDR> <0> -> !Output_DDR
+
+    %300 = VPURT.DeclareBuffer <CMX_NN> <0> -> !inputCmxDistributed
+    %301 = VPURT.DeclareBuffer <CMX_NN> <2048> -> !outputCmxDistributed
+
+
+    VPURT.Task updates(%bar0 : !VPURT.Barrier) attributes {isTrailingSWLayer = false} {
+        %399 = VPUIP.NNDMA {port = 0 : i64} inputs(%395 : !Input_DDR) outputs(%300 : !inputCmxDistributed) -> !inputCmxDistributed
+    }
+    VPURT.Task waits(%bar0 : !VPURT.Barrier) updates(%bar1 : !VPURT.Barrier) attributes {isTrailingSWLayer = false} {
+        %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>}
+          @VPU.SW::@builtin_Softmax inputs(%300 as %arg4: !inputCmxDistributed) outputs(%301 as %arg5: !outputCmxDistributed) on tile 0 -> !outputCmxDistributed {
+          VPUIP.SW.Kernel.run {
+            attrs = [false, true, 1.0013580322265625E-5]}(%arg4, %arg5) : !inputCmxDistributed, !outputCmxDistributed
+        }
+    }
+    VPURT.Task waits(%bar1 : !VPURT.Barrier)  attributes {isTrailingSWLayer = false} {
+        %399 = VPUIP.NNDMA {port = 0 : i64} inputs(%301 : !outputCmxDistributed) outputs(%302 : !Output_DDR) -> !Output_DDR
+    }
+
+
+    return %output: !Output_DDR
+
+    //CHECK:        [[BAR0:%.+]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+    //CHECK:        [[BAR1:%.+]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+
+    //CHECK:    [[IN1_DDR:%.+]] = VPURT.DeclareBuffer <DDR> <4096> -> memref<1x4x256x1xf16, {order = #NCWH, strides = [2048, 512, 1, 512]}, @DDR>
+    //CHECK:    [[IN2_DDR:%.+]] = VPURT.DeclareBuffer <DDR> <4608> -> memref<1x4x256x1xf16, {order = #NCWH, strides = [2048, 512, 1, 512]}, @DDR>
+    //CHECK:    [[OUT1_DDR:%.+]] = VPURT.DeclareBuffer <DDR> <0> -> memref<1x4x512x1xf16, #NCWH, @DDR>
+
+    //CHECK:    [[IN1_CMX:%.+]] = VPURT.DeclareBuffer <CMX_NN> [0] <0> -> memref<1x4x256x1xf16, #NCWH, [@CMX_NN, 0]>
+    //CHECK:    [[IN2_CMX:%.+]] = VPURT.DeclareBuffer <CMX_NN> [1] <0> -> memref<1x4x256x1xf16, #NCWH, [@CMX_NN, 1]>
+    //CHECK:    [[IN1_CMX_COPY:%.+]] = VPURT.DeclareBuffer <CMX_NN> [0] <0> -> memref<1x4x256x1xf16, #NCWH, [@CMX_NN, 0]>
+    //CHECK:    [[IN2_CMX_COPY:%.+]] = VPURT.DeclareBuffer <CMX_NN> [1] <0> -> memref<1x4x256x1xf16, #NCWH, [@CMX_NN, 1]>
+
+    //CHECK:    [[OUT1_CMX_COPY:%.+]] = VPURT.DeclareBuffer <CMX_NN> [0] <2048> -> memref<1x4x512x1xf16, #NCWH, [@CMX_NN, 0]>
+    //CHECK:    [[OUT1_CMX:%.+]] = VPURT.DeclareBuffer <CMX_NN> [0, 1] <2048> -> !VPUIP.DistributedBuffer<1x4x256x1xf16, {order = #NCWH, strides = [2048, 512, 1, 512]}, @CMX_NN, {mode = "DUPLICATED", num_clusters = 2 : i64}>
+    //CHECK:    [[OUT2_CMX:%.+]] = VPURT.DeclareBuffer <CMX_NN> [0, 1] <2560> -> !VPUIP.DistributedBuffer<1x4x256x1xf16, {order = #NCWH, strides = [2048, 512, 1, 512]}, @CMX_NN, {mode = "DUPLICATED", num_clusters = 2 : i64}>
+
+    // Upload 1st part of input
+    //CHECK:        VPURT.Task updates([[BAR0]] : !VPURT.Barrier) {
+    //CHECK:          VPUIP.NNDMA
+    //CHECK-SAME:       inputs([[IN1_DDR]] : memref<1x4x256x1xf16, {order = #NCWH, strides = [2048, 512, 1, 512]}, @DDR>
+    //CHECK-SAME:       outputs([[IN1_CMX_COPY]] : memref<1x4x256x1xf16, #NCWH, [@CMX_NN, 0]>)
+    //CHECK:        }
+
+    // Upload 2nd part of input
+    //CHECK:        VPURT.Task updates([[BAR0]] : !VPURT.Barrier) {
+    //CHECK:          VPUIP.NNDMA {port = 1 : i64}
+    //CHECK-SAME:       inputs([[IN2_DDR]] : memref<1x4x256x1xf16, {order = #NCWH, strides = [2048, 512, 1, 512]}, @DDR>
+    //CHECK-SAME:       outputs([[IN2_CMX_COPY]] : memref<1x4x256x1xf16, #NCWH, [@CMX_NN, 1]>)
+    //CHECK:        }
+
+    // sw tasks
+    //CHECK:        VPURT.Task waits([[BAR0]] : !VPURT.Barrier) updates([[BAR1]] : !VPURT.Barrier) {
+    //CHECK:          VPUIP.SW.Kernel
+    //CHECK-SAME:       inputs([[IN1_CMX]] as {{[^:]+}}: memref<1x4x256x1xf16, #NCWH, [@CMX_NN, 0]>)
+    //CHECK-SAME:       outputs([[OUT1_CMX]] as {{[^:]+}}: !VPUIP.DistributedBuffer<1x4x256x1xf16, {order = #NCWH, strides = [2048, 512, 1, 512]}, @CMX_NN, {mode = "DUPLICATED", num_clusters = 2 : i64}>
+    //CHECK:        }
+
+    //CHECK:        VPURT.Task waits([[BAR0]] : !VPURT.Barrier) updates([[BAR1]] : !VPURT.Barrier) {
+    //CHECK:          VPUIP.SW.Kernel
+    //CHECK-SAME:       inputs([[IN2_CMX]] as {{[^:]+}}: memref<1x4x256x1xf16, #NCWH, [@CMX_NN, 1]>)
+    //CHECK-SAME:       outputs([[OUT2_CMX]] as {{[^:]+}}: !VPUIP.DistributedBuffer<1x4x256x1xf16, {order = #NCWH, strides = [2048, 512, 1, 512]}, @CMX_NN, {mode = "DUPLICATED", num_clusters = 2 : i64}>
+    //CHECK:        }
+
+    //CHECK:        VPURT.Task waits([[BAR1]] : !VPURT.Barrier) {
+    //CHECK:          VPUIP.NNDMA
+    //CHECK-SAME:       inputs([[OUT1_CMX_COPY]] : memref<1x4x512x1xf16, #NCWH, [@CMX_NN, 0]>)
+    //CHECK-SAME:       outputs([[OUT1_DDR]] : memref<1x4x512x1xf16, #NCWH, @DDR>)
+    //CHECK:        }
+}
+
+// -----
+
+#NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
+
+!inputCmxDistributed = !VPUIP.DistributedBuffer<
+    1x4x512x1xf16, #NCHW, @CMX_NN, {
+    mode = "SEGMENTED",
+    num_tiles = [1, 1, 2, 1],
+    num_clusters = 2
+}>
+
+!outputCmxDistributed = !VPUIP.DistributedBuffer<
+    1x4x512x1xf16, #NCHW, @CMX_NN, {
+    mode = "MULTICASTED|SEGMENTED",
+    num_tiles = [1, 1, 2, 1],
+    num_clusters = 2
+}>
+
+!type_CMX_memref = memref<1x4x512x1xf16, #NCHW, @CMX_NN>
+
+
+!Input_DDR  = memref<1x4x512x1xf16, #NCHW, @DDR>
+!Output_DDR = memref<1x4x512x1xf16, #NCHW, @DDR>
+
+
+VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
+module @VPU.SW {
+    func.func private @builtin_Softmax(%input : memref<*xf16>, %output : memref<*xf16>, %axis : i64)
+        attributes {
+            VPU.kernel_code = "softmax.cpp",
+            VPU.kernel_entry = "softmax"
+        }
+    func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
+}
+
+// CHECK-LABEL: @UnrollSWOpInterfaceMulSeg_NCHW
+func.func @UnrollSWOpInterfaceMulSeg_NCHW(%input0: !Input_DDR, %output: !Output_DDR) -> !Output_DDR {
+
+    %bar0 = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+    %bar1 = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+
+    %395 = VPURT.DeclareBuffer <DDR> <4096> -> !Input_DDR
+    %302 = VPURT.DeclareBuffer <DDR> <0> -> !Output_DDR
+
+    %300 = VPURT.DeclareBuffer <CMX_NN> <0> -> !inputCmxDistributed
+    %301 = VPURT.DeclareBuffer <CMX_NN> <2048> -> !outputCmxDistributed
+
+
+    VPURT.Task updates(%bar0 : !VPURT.Barrier) attributes {isTrailingSWLayer = false} {
+        %399 = VPUIP.NNDMA {port = 0 : i64} inputs(%395 : !Input_DDR) outputs(%300 : !inputCmxDistributed) -> !inputCmxDistributed
+    }
+    VPURT.Task waits(%bar0 : !VPURT.Barrier) updates(%bar1 : !VPURT.Barrier) attributes {isTrailingSWLayer = false} {
+        %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>}
+          @VPU.SW::@builtin_Softmax inputs(%300 as %arg4: !inputCmxDistributed) outputs(%301 as %arg5: !outputCmxDistributed) on tile 0 -> !outputCmxDistributed {
+          VPUIP.SW.Kernel.run {
+            attrs = [false, true, 1.0013580322265625E-5]}(%arg4, %arg5) : !inputCmxDistributed, !outputCmxDistributed
+        }
+    }
+    VPURT.Task waits(%bar1 : !VPURT.Barrier)  attributes {isTrailingSWLayer = false} {
+        %399 = VPUIP.NNDMA {port = 0 : i64} inputs(%301 : !outputCmxDistributed) outputs(%302 : !Output_DDR) -> !Output_DDR
+    }
+
+
+    return %output: !Output_DDR
+
+    //CHECK:        [[BAR0:%.+]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+    //CHECK:        [[BAR1:%.+]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+
+    //CHECK:    [[IN1_DDR:%.+]] = VPURT.DeclareBuffer <DDR> <4096> -> memref<1x4x256x1xf16, {order = #NCHW, strides = [2048, 512, 1, 1]}, @DDR>
+    //CHECK:    [[IN2_DDR:%.+]] = VPURT.DeclareBuffer <DDR> <4608> -> memref<1x4x256x1xf16, {order = #NCHW, strides = [2048, 512, 1, 1]}, @DDR>
+    //CHECK:    [[OUT1_DDR:%.+]] = VPURT.DeclareBuffer <DDR> <0> -> memref<1x4x512x1xf16, @DDR>
+
+    //CHECK:    [[IN1_CMX:%.+]] = VPURT.DeclareBuffer <CMX_NN> [0] <0> -> memref<1x4x256x1xf16, [@CMX_NN, 0]>
+    //CHECK:    [[IN2_CMX:%.+]] = VPURT.DeclareBuffer <CMX_NN> [1] <0> -> memref<1x4x256x1xf16, [@CMX_NN, 1]>
+    //CHECK:    [[IN1_CMX_COPY:%.+]] = VPURT.DeclareBuffer <CMX_NN> [0] <0> -> memref<1x4x256x1xf16, [@CMX_NN, 0]>
+    //CHECK:    [[IN2_CMX_COPY:%.+]] = VPURT.DeclareBuffer <CMX_NN> [1] <0> -> memref<1x4x256x1xf16, [@CMX_NN, 1]>
+
+    //CHECK:    [[OUT1_CMX_COPY:%.+]] = VPURT.DeclareBuffer <CMX_NN> [0] <2048> -> memref<1x4x512x1xf16, [@CMX_NN, 0]>
+    //CHECK:    [[OUT1_CMX:%.+]] = VPURT.DeclareBuffer <CMX_NN> [0, 1] <2048> -> !VPUIP.DistributedBuffer<1x4x256x1xf16, {order = #NCHW, strides = [2048, 512, 1, 1]}, @CMX_NN, {mode = "DUPLICATED", num_clusters = 2 : i64}>
+    //CHECK:    [[OUT2_CMX:%.+]] = VPURT.DeclareBuffer <CMX_NN> [0, 1] <2560> -> !VPUIP.DistributedBuffer<1x4x256x1xf16, {order = #NCHW, strides = [2048, 512, 1, 1]}, @CMX_NN, {mode = "DUPLICATED", num_clusters = 2 : i64}>
+
+    // Upload 1st part of input
+    //CHECK:        VPURT.Task updates([[BAR0]] : !VPURT.Barrier) {
+    //CHECK:          VPUIP.NNDMA
+    //CHECK-SAME:       inputs([[IN1_DDR]] : memref<1x4x256x1xf16, {order = #NCHW, strides = [2048, 512, 1, 1]}, @DDR>
+    //CHECK-SAME:       outputs([[IN1_CMX_COPY]] : memref<1x4x256x1xf16, [@CMX_NN, 0]>)
+    //CHECK:        }
+
+    // Upload 2nd part of input
+    //CHECK:        VPURT.Task updates([[BAR0]] : !VPURT.Barrier) {
+    //CHECK:          VPUIP.NNDMA {port = 1 : i64}
+    //CHECK-SAME:       inputs([[IN2_DDR]] : memref<1x4x256x1xf16, {order = #NCHW, strides = [2048, 512, 1, 1]}, @DDR>
+    //CHECK-SAME:       outputs([[IN2_CMX_COPY]] : memref<1x4x256x1xf16, [@CMX_NN, 1]>)
+    //CHECK:        }
+
+    // sw tasks
+    //CHECK:        VPURT.Task waits([[BAR0]] : !VPURT.Barrier) updates([[BAR1]] : !VPURT.Barrier) {
+    //CHECK:          VPUIP.SW.Kernel
+    //CHECK-SAME:       inputs([[IN1_CMX]] as {{[^:]+}}: memref<1x4x256x1xf16, [@CMX_NN, 0]>)
+    //CHECK-SAME:       outputs([[OUT1_CMX]] as {{[^:]+}}: !VPUIP.DistributedBuffer<1x4x256x1xf16, {order = #NCHW, strides = [2048, 512, 1, 1]}, @CMX_NN, {mode = "DUPLICATED", num_clusters = 2 : i64}>
+    //CHECK:        }
+
+    //CHECK:        VPURT.Task waits([[BAR0]] : !VPURT.Barrier) updates([[BAR1]] : !VPURT.Barrier) {
+    //CHECK:          VPUIP.SW.Kernel
+    //CHECK-SAME:       inputs([[IN2_CMX]] as {{[^:]+}}: memref<1x4x256x1xf16, [@CMX_NN, 1]>)
+    //CHECK-SAME:       outputs([[OUT2_CMX]] as {{[^:]+}}: !VPUIP.DistributedBuffer<1x4x256x1xf16, {order = #NCHW, strides = [2048, 512, 1, 1]}, @CMX_NN, {mode = "DUPLICATED", num_clusters = 2 : i64}>
+    //CHECK:        }
+
+    //CHECK:        VPURT.Task waits([[BAR1]] : !VPURT.Barrier) {
+    //CHECK:          VPUIP.NNDMA
+    //CHECK-SAME:       inputs([[OUT1_CMX_COPY]] : memref<1x4x512x1xf16, [@CMX_NN, 0]>)
+    //CHECK-SAME:       outputs([[OUT1_DDR]] : memref<1x4x512x1xf16, @DDR>)
+    //CHECK:        }
+}
+
+// -----
+
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
+!inputCmxDistributed = !VPUIP.DistributedBuffer<
+    1x4x512x1xf16, #NHWC, @CMX_NN, {
+    mode = "SEGMENTED",
+    num_tiles = [1, 1, 2, 1],
+    num_clusters = 2
+}>
+
+!outputCmxDistributed = !VPUIP.DistributedBuffer<
+    1x4x512x1xf16, #NHWC, @CMX_NN, {
+    mode = "MULTICASTED|SEGMENTED",
+    num_tiles = [1, 1, 2, 1],
+    num_clusters = 2
+}>
+
+!type_CMX_memref = memref<1x4x512x1xf16, #NHWC, @CMX_NN>
+
+
+!Input_DDR  = memref<1x4x512x1xf16, #NHWC, @DDR>
+!Output_DDR = memref<1x4x512x1xf16, #NHWC, @DDR>
+
+
+VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
+module @VPU.SW {
+    func.func private @builtin_Softmax(%input : memref<*xf16>, %output : memref<*xf16>, %axis : i64)
+        attributes {
+            VPU.kernel_code = "softmax.cpp",
+            VPU.kernel_entry = "softmax"
+        }
+    func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
+}
+
+// CHECK-LABEL: @UnrollSWOpInterfaceMulSeg_NHWC
+func.func @UnrollSWOpInterfaceMulSeg_NHWC(%input0: !Input_DDR, %output: !Output_DDR) -> !Output_DDR {
+
+    %bar0 = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+    %bar1 = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+
+    %395 = VPURT.DeclareBuffer <DDR> <4096> -> !Input_DDR
+    %302 = VPURT.DeclareBuffer <DDR> <0> -> !Output_DDR
+
+    %300 = VPURT.DeclareBuffer <CMX_NN> <0> -> !inputCmxDistributed
+    %301 = VPURT.DeclareBuffer <CMX_NN> <2048> -> !outputCmxDistributed
+
+
+    VPURT.Task updates(%bar0 : !VPURT.Barrier) attributes {isTrailingSWLayer = false} {
+        %399 = VPUIP.NNDMA {port = 0 : i64} inputs(%395 : !Input_DDR) outputs(%300 : !inputCmxDistributed) -> !inputCmxDistributed
+    }
+    VPURT.Task waits(%bar0 : !VPURT.Barrier) updates(%bar1 : !VPURT.Barrier) attributes {isTrailingSWLayer = false} {
+        %results = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>}
+          @VPU.SW::@builtin_Softmax inputs(%300 as %arg4: !inputCmxDistributed) outputs(%301 as %arg5: !outputCmxDistributed) on tile 0 -> !outputCmxDistributed {
+          VPUIP.SW.Kernel.run {
+            attrs = [false, true, 1.0013580322265625E-5]}(%arg4, %arg5) : !inputCmxDistributed, !outputCmxDistributed
+        }
+    }
+    VPURT.Task waits(%bar1 : !VPURT.Barrier)  attributes {isTrailingSWLayer = false} {
+        %399 = VPUIP.NNDMA {port = 0 : i64} inputs(%301 : !outputCmxDistributed) outputs(%302 : !Output_DDR) -> !Output_DDR
+    }
+
+
+    return %output: !Output_DDR
+
+    //CHECK:        [[BAR0:%.+]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+    //CHECK:        [[BAR1:%.+]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+
+    //CHECK:    [[IN1_DDR:%.+]] = VPURT.DeclareBuffer <DDR> <4096> -> memref<1x4x256x1xf16, #NHWC, @DDR>
+    //CHECK:    [[IN2_DDR:%.+]] = VPURT.DeclareBuffer <DDR> <6144> -> memref<1x4x256x1xf16, #NHWC, @DDR>
+    //CHECK:    [[OUT1_DDR:%.+]] = VPURT.DeclareBuffer <DDR> <0> -> memref<1x4x512x1xf16, #NHWC, @DDR>
+
+    //CHECK:    [[IN1_CMX:%.+]] = VPURT.DeclareBuffer <CMX_NN> [0] <0> -> memref<1x4x256x1xf16, #NHWC, [@CMX_NN, 0]>
+    //CHECK:    [[IN2_CMX:%.+]] = VPURT.DeclareBuffer <CMX_NN> [1] <0> -> memref<1x4x256x1xf16, #NHWC, [@CMX_NN, 1]>
+    //CHECK:    [[IN1_CMX_COPY:%.+]] = VPURT.DeclareBuffer <CMX_NN> [0] <0> -> memref<1x4x256x1xf16, #NHWC, [@CMX_NN, 0]>
+    //CHECK:    [[IN2_CMX_COPY:%.+]] = VPURT.DeclareBuffer <CMX_NN> [1] <0> -> memref<1x4x256x1xf16, #NHWC, [@CMX_NN, 1]>
+
+    //CHECK:    [[OUT1_CMX_COPY:%.+]] = VPURT.DeclareBuffer <CMX_NN> [0] <2048> -> memref<1x4x512x1xf16, #NHWC, [@CMX_NN, 0]>
+    //CHECK:    [[OUT1_CMX:%.+]] = VPURT.DeclareBuffer <CMX_NN> [0, 1] <2048> -> !VPUIP.DistributedBuffer<1x4x256x1xf16, {order = #NHWC, strides = [2048, 1, 4, 4]}, @CMX_NN, {mode = "DUPLICATED", num_clusters = 2 : i64}>
+    //CHECK:    [[OUT2_CMX:%.+]] = VPURT.DeclareBuffer <CMX_NN> [0, 1] <4096> -> !VPUIP.DistributedBuffer<1x4x256x1xf16, {order = #NHWC, strides = [2048, 1, 4, 4]}, @CMX_NN, {mode = "DUPLICATED", num_clusters = 2 : i64}>
+
+    // Upload 1st part of input
+    //CHECK:        VPURT.Task updates([[BAR0]] : !VPURT.Barrier) {
+    //CHECK:          VPUIP.NNDMA
+    //CHECK-SAME:       inputs([[IN1_DDR]] : memref<1x4x256x1xf16, #NHWC, @DDR>
+    //CHECK-SAME:       outputs([[IN1_CMX_COPY]] : memref<1x4x256x1xf16, #NHWC, [@CMX_NN, 0]>)
+    //CHECK:        }
+
+    // Upload 2nd part of input
+    //CHECK:        VPURT.Task updates([[BAR0]] : !VPURT.Barrier) {
+    //CHECK:          VPUIP.NNDMA {port = 1 : i64}
+    //CHECK-SAME:       inputs([[IN2_DDR]] : memref<1x4x256x1xf16, #NHWC, @DDR>
+    //CHECK-SAME:       outputs([[IN2_CMX_COPY]] : memref<1x4x256x1xf16, #NHWC, [@CMX_NN, 1]>)
+    //CHECK:        }
+
+    // sw tasks
+    //CHECK:        VPURT.Task waits([[BAR0]] : !VPURT.Barrier) updates([[BAR1]] : !VPURT.Barrier) {
+    //CHECK:          VPUIP.SW.Kernel
+    //CHECK-SAME:       inputs([[IN1_CMX]] as {{[^:]+}}: memref<1x4x256x1xf16, #NHWC, [@CMX_NN, 0]>)
+    //CHECK-SAME:       outputs([[OUT1_CMX]] as {{[^:]+}}: !VPUIP.DistributedBuffer<1x4x256x1xf16, {order = #NHWC, strides = [2048, 1, 4, 4]}, @CMX_NN, {mode = "DUPLICATED", num_clusters = 2 : i64}>
+    //CHECK:        }
+
+    //CHECK:        VPURT.Task waits([[BAR0]] : !VPURT.Barrier) updates([[BAR1]] : !VPURT.Barrier) {
+    //CHECK:          VPUIP.SW.Kernel
+    //CHECK-SAME:       inputs([[IN2_CMX]] as {{[^:]+}}: memref<1x4x256x1xf16, #NHWC, [@CMX_NN, 1]>)
+    //CHECK-SAME:       outputs([[OUT2_CMX]] as {{[^:]+}}: !VPUIP.DistributedBuffer<1x4x256x1xf16, {order = #NHWC, strides = [2048, 1, 4, 4]}, @CMX_NN, {mode = "DUPLICATED", num_clusters = 2 : i64}>
+    //CHECK:        }
+
+    //CHECK:        VPURT.Task waits([[BAR1]] : !VPURT.Barrier) {
+    //CHECK:          VPUIP.NNDMA
+    //CHECK-SAME:       inputs([[OUT1_CMX_COPY]] : memref<1x4x512x1xf16, #NHWC, [@CMX_NN, 0]>)
+    //CHECK-SAME:       outputs([[OUT1_DDR]] : memref<1x4x512x1xf16, #NHWC, @DDR>)
+    //CHECK:        }
 }

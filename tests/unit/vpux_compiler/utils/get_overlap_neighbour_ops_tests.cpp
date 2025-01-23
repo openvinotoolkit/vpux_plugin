@@ -265,20 +265,20 @@ llvm::StringLiteral twoConvConsumers = R"(
 
             %0 = VPU.NCE.AveragePool(%arg0) {
                 kernel_size = [1, 1],
-                opaque_ppe = #VPU.PPEStub<>,
+                ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
                 strides = [1, 1]}
                     -> tensor<1x144x28x27xf16, {order = #NHWC}>
 
             %1 = VPU.NCE.Convolution(%0, %w0, %weightsTable) {
-                    opaque_ppe = #VPU.PPEStub<>,
+                    ppe = #VPU.PPEStub<>,
                     pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
                     rawFilterShape = [144, 144, 3, 3],
                     strides = [1, 1]}
                         -> tensor<1x144x28x27xf16, {order = #NHWC}>
 
             %2 = VPU.NCE.Convolution(%0, %w1, %weightsTable) {
-                    opaque_ppe = #VPU.PPEStub<>,
+                    ppe = #VPU.PPEStub<>,
                     pad = #VPU.Padding<left = 2 : i64, right = 2 : i64, top = 2 : i64, bottom = 2 : i64>,
                     rawFilterShape = [144, 144, 5, 5],
                     strides = [1, 1]}
@@ -320,13 +320,13 @@ llvm::StringLiteral nceInterpAndConvConsumers = R"(
 
             %0 = VPU.NCE.AveragePool(%arg0) {
                 kernel_size = [1, 1],
-                opaque_ppe = #VPU.PPEStub<>,
+                ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
                 strides = [1, 1]}
                     -> tensor<1x144x28x27xf16, {order = #NHWC}>
 
             %1 = VPU.NCE.Convolution(%0, %w0, %weightsTable) {
-                    opaque_ppe = #VPU.PPEStub<>,
+                    ppe = #VPU.PPEStub<>,
                     pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
                     rawFilterShape = [144, 144, 3, 3],
                     strides = [1, 1]}
@@ -344,7 +344,7 @@ llvm::StringLiteral nceInterpAndConvConsumers = R"(
                                               scale = [1.0, 1.0, 2.0, 2.0]>>
 
             %2 = VPU.NCE.Interpolate(%interpIn, %w3, %weightsTable) {
-                opaque_ppe = #VPU.PPEStub<>,
+                ppe = #VPU.PPEStub<>,
                 rawFilterShape = [144, 144, 2, 2],
                 strides = [1, 1],
                 mode = #VPU.nce_interpolate_mode<BILINEAR>,
@@ -377,20 +377,20 @@ llvm::StringLiteral threeClusteredConsumers = R"(
 
             %0 = VPU.NCE.AveragePool(%arg0) {
                 kernel_size = [1, 1],
-                opaque_ppe = #VPU.PPEStub<>,
+                ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
                 strides = [1, 1]}
                     -> tensor<1x144x28x27xf16, {order = #NHWC}>
 
             %1 = VPU.NCE.Convolution(%0, %w0, %weightsTable) {
-                    opaque_ppe = #VPU.PPEStub<>,
+                    ppe = #VPU.PPEStub<>,
                     pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
                     rawFilterShape = [144, 144, 3, 3],
                     strides = [1, 1]}
                         -> tensor<1x144x28x27xf16, {order = #NHWC}>
 
             %2 = VPU.NCE.Convolution(%0, %w1, %weightsTable) {
-                    opaque_ppe = #VPU.PPEStub<>,
+                    ppe = #VPU.PPEStub<>,
                     pad = #VPU.Padding<left = 2 : i64, right = 2 : i64, top = 2 : i64, bottom = 2 : i64>,
                     rawFilterShape = [144, 144, 5, 5],
                     strides = [1, 1]}
@@ -423,13 +423,13 @@ llvm::StringLiteral oneConsumerNotClustered = R"(
 
             %0 = VPU.NCE.AveragePool(%arg0) {
                 kernel_size = [1, 1],
-                opaque_ppe = #VPU.PPEStub<>,
+                ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
                 strides = [1, 1]}
                     -> tensor<1x144x28x27xf16, {order = #NHWC}>
 
             %1 = VPU.NCE.Convolution(%0, %w0, %weightsTable) {
-                    opaque_ppe = #VPU.PPEStub<>,
+                    ppe = #VPU.PPEStub<>,
                     pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
                     rawFilterShape = [144, 144, 3, 3],
                     strides = [1, 1]}
@@ -520,7 +520,7 @@ llvm::StringLiteral quantizeCastDirectConsumer = R"(
 
             %0 = VPU.NCE.AveragePool(%arg0) {
                 kernel_size = [1, 1],
-                opaque_ppe = #VPU.PPEStub<>,
+                ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
                 strides = [1, 1]}
                     -> tensor<1x32x28x27x!qElemType, {order = #NHWC}>
@@ -529,7 +529,7 @@ llvm::StringLiteral quantizeCastDirectConsumer = R"(
                 : tensor<1x32x28x27x!qElemType, {order = #NHWC}> -> tensor<1x32x28x27x!qElemType2, {order = #NHWC}>
 
             %2 = VPU.NCE.Convolution(%1, %weights0, %weightsTable) {
-                    opaque_ppe = #VPU.PPEStub<>,
+                    ppe = #VPU.PPEStub<>,
                     pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
                     rawFilterShape = [32, 32, 1, 1],
                     strides = [2, 2]}
@@ -539,7 +539,7 @@ llvm::StringLiteral quantizeCastDirectConsumer = R"(
                 : tensor<1x32x28x27x!qElemType, {order = #NHWC}> -> tensor<1x32x28x27x!qElemType3, {order = #NHWC}>
 
             %4 = VPU.NCE.Convolution(%3, %weights1, %weightsTable) {
-                    opaque_ppe = #VPU.PPEStub<>,
+                    ppe = #VPU.PPEStub<>,
                     pad = #VPU.Padding<left = 2 : i64, right = 2 : i64, top = 2 : i64, bottom = 2 : i64>,
                     rawFilterShape = [32, 32, 5, 5],
                     strides = [1, 1]}
@@ -575,7 +575,7 @@ llvm::StringLiteral multipleConsumersOfQuantizeCast = R"(
 
             %0 = VPU.NCE.AveragePool(%arg0) {
                 kernel_size = [1, 1],
-                opaque_ppe = #VPU.PPEStub<>,
+                ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
                 strides = [1, 1]}
                     -> tensor<1x32x28x27x!qElemType, {order = #NHWC}>
@@ -584,21 +584,21 @@ llvm::StringLiteral multipleConsumersOfQuantizeCast = R"(
                 : tensor<1x32x28x27x!qElemType, {order = #NHWC}> -> tensor<1x32x28x27x!qElemType2, {order = #NHWC}>
 
             %2 = VPU.NCE.Convolution(%1, %weights0, %weightsTable) {
-                    opaque_ppe = #VPU.PPEStub<>,
+                    ppe = #VPU.PPEStub<>,
                     pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
                     rawFilterShape = [32, 32, 1, 1],
                     strides = [2, 2]}
                         -> tensor<1x32x14x14x!qElemType2, {order = #NHWC}>
 
             %4 = VPU.NCE.Convolution(%1, %weights1, %weightsTable) {
-                    opaque_ppe = #VPU.PPEStub<>,
+                    ppe = #VPU.PPEStub<>,
                     pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
                     rawFilterShape = [32, 32, 3, 3],
                     strides = [1, 1]}
                         -> tensor<1x32x28x27x!qElemType3, {order = #NHWC}>
 
             %5 = VPU.NCE.Convolution(%0, %weights0, %weightsTable) {
-                    opaque_ppe = #VPU.PPEStub<>,
+                    ppe = #VPU.PPEStub<>,
                     pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
                     rawFilterShape = [32, 32, 1, 1],
                     strides = [1, 1]}
@@ -679,20 +679,20 @@ llvm::StringLiteral eltwiseResidualBlock = R"(
 
             %0 = VPU.NCE.AveragePool(%arg0) {
                 kernel_size = [1, 1],
-                opaque_ppe = #VPU.PPEStub<>,
+                ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
                 strides = [1, 1]}
                     -> tensor<1x16x8x8xf16, {order = #NHWC}>
 
             %1 = VPU.NCE.Convolution(%0, %w0, %weightsTable) {
-                    opaque_ppe = #VPU.PPEStub<>,
+                    ppe = #VPU.PPEStub<>,
                     pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
                     rawFilterShape = [16, 16, 3, 3],
                     strides = [1, 1]}
                         -> tensor<1x16x8x8xf16, {order = #NHWC}>
 
             %2 = VPU.NCE.Convolution(%0, %w1, %weightsTable) {
-                    opaque_ppe = #VPU.PPEStub<>,
+                    ppe = #VPU.PPEStub<>,
                     pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
                     rawFilterShape = [16, 16, 1, 1],
                     strides = [2, 2]}
@@ -700,7 +700,7 @@ llvm::StringLiteral eltwiseResidualBlock = R"(
 
             %3 = VPU.NCE.Eltwise(%0, %1) {
                     op_type = #VPU.eltwise_type<ADD>,
-                    opaque_ppe = #VPU.PPEStub<>}
+                    ppe = #VPU.PPEStub<>}
                         -> tensor<1x16x8x8xf16, {order = #NHWC}>
 
             return %2, %3 : tensor<1x16x4x4xf16, {order = #NHWC}>, tensor<1x16x8x8xf16, {order = #NHWC}>
@@ -731,13 +731,13 @@ llvm::StringLiteral eltwiseWithParentsInDiffSubgraphs = R"(
 
             %0 = VPU.NCE.AveragePool(%arg0) {
                 kernel_size = [1, 1],
-                opaque_ppe = #VPU.PPEStub<>,
+                ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
                 strides = [1, 1]}
                     -> tensor<1x16x8x8xf16, {order = #NHWC}>
 
             %1 = VPU.NCE.Convolution(%0, %w0, %weightsTable) {
-                opaque_ppe = #VPU.PPEStub<>,
+                ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
                 rawFilterShape = [16, 16, 3, 3],
                 strides = [1, 1]}
@@ -745,13 +745,13 @@ llvm::StringLiteral eltwiseWithParentsInDiffSubgraphs = R"(
 
             %2 = VPU.NCE.AveragePool(%arg0) {
                 kernel_size = [2, 2],
-                opaque_ppe = #VPU.PPEStub<>,
+                ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 1 : i64, right = 0 : i64, top = 1 : i64, bottom = 0 : i64>,
                 strides = [1, 1]}
                     -> tensor<1x16x8x8xf16, {order = #NHWC}>
 
             %3 = VPU.NCE.Convolution(%2, %w1, %weightsTable) {
-                    opaque_ppe = #VPU.PPEStub<>,
+                    ppe = #VPU.PPEStub<>,
                     pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
                     rawFilterShape = [16, 16, 1, 1],
                     strides = [1, 1]}
@@ -759,7 +759,7 @@ llvm::StringLiteral eltwiseWithParentsInDiffSubgraphs = R"(
 
             %4 = VPU.NCE.Eltwise(%0, %2) {
                     op_type = #VPU.eltwise_type<ADD>,
-                    opaque_ppe = #VPU.PPEStub<>}
+                    ppe = #VPU.PPEStub<>}
                         -> tensor<1x16x8x8xf16, {order = #NHWC}>
 
             return %1, %3, %4 : tensor<1x16x8x8xf16, {order = #NHWC}>, tensor<1x16x8x8xf16, {order = #NHWC}>, tensor<1x16x8x8xf16, {order = #NHWC}>
@@ -823,14 +823,14 @@ llvm::StringLiteral eltwiseInPlaceSubgraph = R"(
             %0 = VPU.NCE.AveragePool(%arg0) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
                 kernel_size = [1, 1],
-                opaque_ppe = #VPU.PPEStub<>,
+                ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
                 strides = [1, 1]}
                     -> tensor<1x16x8x8xf16, {order = #NHWC}>
 
             %1 = VPU.NCE.Convolution(%0, %w0, %weightsTable) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
-                opaque_ppe = #VPU.PPEStub<>,
+                ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
                 rawFilterShape = [16, 16, 3, 3],
                 strides = [1, 1]}
@@ -838,7 +838,7 @@ llvm::StringLiteral eltwiseInPlaceSubgraph = R"(
 
             %2 = VPU.NCE.Convolution(%0, %w1, %weightsTable) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
-                opaque_ppe = #VPU.PPEStub<>,
+                ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
                 rawFilterShape = [16, 16, 1, 1],
                 strides = [2, 2]}
@@ -847,12 +847,12 @@ llvm::StringLiteral eltwiseInPlaceSubgraph = R"(
             %3 = VPU.NCE.Eltwise(%0, %1) {
                 is_inplace = true,
                 op_type = #VPU.eltwise_type<ADD>,
-                opaque_ppe = #VPU.PPEStub<>}
+                ppe = #VPU.PPEStub<>}
                     -> tensor<1x16x8x8xf16, {order = #NHWC}>
 
             %4 = VPU.NCE.Convolution(%3, %w2, %weightsTable) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
-                opaque_ppe = #VPU.PPEStub<>,
+                ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 2 : i64, right = 2 : i64, top = 2 : i64, bottom = 2 : i64>,
                 rawFilterShape = [16, 16, 5, 5],
                 strides = [1, 1]}
@@ -889,14 +889,14 @@ llvm::StringLiteral eltwiseInPlaceWithParentsInDiffSubgraphs = R"(
             %0 = VPU.NCE.AveragePool(%arg0) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
                 kernel_size = [1, 1],
-                opaque_ppe = #VPU.PPEStub<>,
+                ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
                 strides = [1, 1]}
                     -> tensor<1x16x8x8xf16, {order = #NHWC}>
 
             %1 = VPU.NCE.Convolution(%0, %w0, %weightsTable) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
-                opaque_ppe = #VPU.PPEStub<>,
+                ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
                 rawFilterShape = [16, 16, 3, 3],
                 strides = [1, 1]}
@@ -905,14 +905,14 @@ llvm::StringLiteral eltwiseInPlaceWithParentsInDiffSubgraphs = R"(
             %2 = VPU.NCE.AveragePool(%arg0) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
                 kernel_size = [2, 2],
-                opaque_ppe = #VPU.PPEStub<>,
+                ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 1 : i64, right = 0 : i64, top = 1 : i64, bottom = 0 : i64>,
                 strides = [1, 1]}
                     -> tensor<1x16x8x8xf16, {order = #NHWC}>
 
             %3 = VPU.NCE.Convolution(%2, %w1, %weightsTable) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
-                opaque_ppe = #VPU.PPEStub<>,
+                ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
                 rawFilterShape = [16, 16, 1, 1],
                 strides = [1, 1]}
@@ -921,12 +921,12 @@ llvm::StringLiteral eltwiseInPlaceWithParentsInDiffSubgraphs = R"(
             %4 = VPU.NCE.Eltwise(%0, %2) {
                 is_inplace = true,
                 op_type = #VPU.eltwise_type<ADD>,
-                opaque_ppe = #VPU.PPEStub<>}
+                ppe = #VPU.PPEStub<>}
                     -> tensor<1x16x8x8xf16, {order = #NHWC}>
 
             %5 = VPU.NCE.Convolution(%4, %w2, %weightsTable) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
-                opaque_ppe = #VPU.PPEStub<>,
+                ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 2 : i64, right = 2 : i64, top = 2 : i64, bottom = 2 : i64>,
                 rawFilterShape = [16, 16, 5, 5],
                 strides = [1, 1]}
@@ -999,14 +999,14 @@ llvm::StringLiteral concatSubgraph = R"(
             %0 = VPU.NCE.AveragePool(%arg0) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
                 kernel_size = [1, 1],
-                opaque_ppe = #VPU.PPEStub<>,
+                ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
                 strides = [1, 1]}
                     -> tensor<1x16x8x8xf16, {order = #NHWC}>
 
             %1 = VPU.NCE.Convolution(%0, %w0, %weightsTable) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
-                opaque_ppe = #VPU.PPEStub<>,
+                ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
                 rawFilterShape = [16, 16, 3, 3],
                 strides = [1, 1]}
@@ -1014,7 +1014,7 @@ llvm::StringLiteral concatSubgraph = R"(
 
             %2 = VPU.NCE.Convolution(%0, %w1, %weightsTable) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
-                opaque_ppe = #VPU.PPEStub<>,
+                ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
                 rawFilterShape = [16, 16, 1, 1],
                 strides = [2, 2]}
@@ -1026,7 +1026,7 @@ llvm::StringLiteral concatSubgraph = R"(
 
             %4 = VPU.NCE.Convolution(%3, %w2, %weightsTable) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
-                opaque_ppe = #VPU.PPEStub<>,
+                ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 2 : i64, right = 2 : i64, top = 2 : i64, bottom = 2 : i64>,
                 rawFilterShape = [16, 32, 5, 5],
                 strides = [1, 1]}
@@ -1059,7 +1059,7 @@ llvm::StringLiteral notSOHCompatibleConcatSubgraph = R"(
             %0 = VPU.NCE.AveragePool(%arg0) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
                 kernel_size = [1, 1],
-                opaque_ppe = #VPU.PPEStub<>,
+                ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
                 strides = [1, 1]}
                     -> tensor<1x16x8x8xf16, {order = #NHWC}>
@@ -1067,14 +1067,14 @@ llvm::StringLiteral notSOHCompatibleConcatSubgraph = R"(
             %1 = VPU.NCE.MaxPool(%arg0) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
                 kernel_size = [1, 1],
-                opaque_ppe = #VPU.PPEStub<>,
+                ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
                 strides = [1, 1]}
                     -> tensor<1x16x8x8xf16, {order = #NHWC}>
 
             %2 = VPU.NCE.Convolution(%0, %w0, %weightsTable) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
-                opaque_ppe = #VPU.PPEStub<>,
+                ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
                 rawFilterShape = [16, 16, 3, 3],
                 strides = [1, 1]}
@@ -1082,7 +1082,7 @@ llvm::StringLiteral notSOHCompatibleConcatSubgraph = R"(
 
             %3 = VPU.NCE.Convolution(%0, %w1, %weightsTable) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
-                opaque_ppe = #VPU.PPEStub<>,
+                ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
                 rawFilterShape = [16, 16, 1, 1],
                 strides = [2, 2]}
@@ -1095,7 +1095,7 @@ llvm::StringLiteral notSOHCompatibleConcatSubgraph = R"(
             %5 = VPU.NCE.MaxPool(%4) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
                 kernel_size = [5, 5],
-                opaque_ppe = #VPU.PPEStub<>,
+                ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 2 : i64, right = 2 : i64, top = 2 : i64, bottom = 2 : i64>,
                 strides = [1, 1]}
                     -> tensor<1x16x16x8xf16, {order = #NHWC}>
@@ -1131,14 +1131,14 @@ llvm::StringLiteral concatWithParentsInDiffSubgraphs = R"(
             %0 = VPU.NCE.AveragePool(%arg0) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
                 kernel_size = [1, 1],
-                opaque_ppe = #VPU.PPEStub<>,
+                ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
                 strides = [1, 1]}
                     -> tensor<1x16x8x8xf16, {order = #NHWC}>
 
             %1 = VPU.NCE.Convolution(%0, %w0, %weightsTable) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
-                opaque_ppe = #VPU.PPEStub<>,
+                ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
                 rawFilterShape = [16, 16, 3, 3],
                 strides = [1, 1]}
@@ -1147,14 +1147,14 @@ llvm::StringLiteral concatWithParentsInDiffSubgraphs = R"(
             %2 = VPU.NCE.AveragePool(%arg0) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
                 kernel_size = [2, 2],
-                opaque_ppe = #VPU.PPEStub<>,
+                ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 1 : i64, right = 0 : i64, top = 1 : i64, bottom = 0 : i64>,
                 strides = [1, 1]}
                     -> tensor<1x16x8x8xf16, {order = #NHWC}>
 
             %3 = VPU.NCE.Convolution(%2, %w1, %weightsTable) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
-                opaque_ppe = #VPU.PPEStub<>,
+                ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
                 rawFilterShape = [16, 16, 1, 1],
                 strides = [1, 1]}
@@ -1166,7 +1166,7 @@ llvm::StringLiteral concatWithParentsInDiffSubgraphs = R"(
 
             %5 = VPU.NCE.Convolution(%4, %w2, %weightsTable) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
-                opaque_ppe = #VPU.PPEStub<>,
+                ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 2 : i64, right = 2 : i64, top = 2 : i64, bottom = 2 : i64>,
                 rawFilterShape = [16, 32, 5, 5],
                 strides = [1, 1]}
@@ -1250,7 +1250,7 @@ llvm::StringLiteral mixedSubgraph0 = R"(
             %0 = VPU.NCE.AveragePool(%arg0) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
                 kernel_size = [1, 1],
-                opaque_ppe = #VPU.PPEStub<>,
+                ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
                 strides = [1, 1]}
                     -> tensor<1x16x8x8xf16, {order = #NHWC}>
@@ -1258,14 +1258,14 @@ llvm::StringLiteral mixedSubgraph0 = R"(
             %1 = VPU.NCE.AveragePool(%arg0) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
                 kernel_size = [2, 2],
-                opaque_ppe = #VPU.PPEStub<>,
+                ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 1 : i64, right = 0 : i64, top = 1 : i64, bottom = 0 : i64>,
                 strides = [1, 1]}
                     -> tensor<1x16x8x8xf16, {order = #NHWC}>
 
             %2 = VPU.NCE.Convolution(%1, %w0, %weightsTable) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
-                opaque_ppe = #VPU.PPEStub<>,
+                ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
                 rawFilterShape = [16, 16, 3, 3],
                 strides = [1, 1]}
@@ -1278,14 +1278,14 @@ llvm::StringLiteral mixedSubgraph0 = R"(
             %4 = VPU.NCE.AveragePool(%arg1) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
                 kernel_size = [1, 1],
-                opaque_ppe = #VPU.PPEStub<>,
+                ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
                 strides = [1, 1]}
                     -> tensor<1x32x8x8xf16, {order = #NHWC}>
 
             %5 = VPU.NCE.Convolution(%4, %w1, %weightsTable) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
-                opaque_ppe = #VPU.PPEStub<>,
+                ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 2 : i64, right = 2 : i64, top = 2 : i64, bottom = 2 : i64>,
                 rawFilterShape = [16, 32, 5, 5],
                 strides = [1, 1]}
@@ -1294,7 +1294,7 @@ llvm::StringLiteral mixedSubgraph0 = R"(
             %6 = VPU.NCE.Eltwise(%3, %4) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
                 op_type = #VPU.eltwise_type<ADD>,
-                opaque_ppe = #VPU.PPEStub<>}
+                ppe = #VPU.PPEStub<>}
                     -> tensor<1x32x8x8xf16, {order = #NHWC}>
 
             return %2, %5, %6 : tensor<1x16x8x8xf16, {order = #NHWC}>, tensor<1x16x8x8xf16, {order = #NHWC}>, tensor<1x32x8x8xf16, {order = #NHWC}>
@@ -1335,7 +1335,7 @@ llvm::StringLiteral mixedSubgraph1 = R"(
             %0 = VPU.NCE.AveragePool(%arg0) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
                 kernel_size = [1, 1],
-                opaque_ppe = #VPU.PPEStub<>,
+                ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
                 strides = [1, 1]}
                     -> tensor<1x16x8x8x!qElemType, {order = #NHWC}>
@@ -1343,14 +1343,14 @@ llvm::StringLiteral mixedSubgraph1 = R"(
             %1 = VPU.NCE.AveragePool(%arg1) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
                 kernel_size = [1, 1],
-                opaque_ppe = #VPU.PPEStub<>,
+                ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
                 strides = [1, 1]}
                     -> tensor<1x16x8x8x!qElemType2, {order = #NHWC}>
 
             %2 = VPU.NCE.Convolution(%0, %w0, %weightsTable) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
-                opaque_ppe = #VPU.PPEStub<>,
+                ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
                 rawFilterShape = [16, 16, 3, 3],
                 strides = [1, 1]}
@@ -1361,7 +1361,7 @@ llvm::StringLiteral mixedSubgraph1 = R"(
 
             %4 = VPU.NCE.Convolution(%3, %w0, %weightsTable) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
-                opaque_ppe = #VPU.PPEStub<>,
+                ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
                 rawFilterShape = [16, 16, 3, 3],
                 strides = [1, 1]}
@@ -1370,7 +1370,7 @@ llvm::StringLiteral mixedSubgraph1 = R"(
             %5 = VPU.NCE.Eltwise(%1, %3) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
                 op_type = #VPU.eltwise_type<ADD>,
-                opaque_ppe = #VPU.PPEStub<>}
+                ppe = #VPU.PPEStub<>}
                     -> tensor<1x16x8x8x!qElemType2, {order = #NHWC}>
 
             %6 = VPU.Concat(%1, %2) {static_offsets = [[0, 0, 0, 0], [0, 16, 0, 0]]}:
@@ -1379,7 +1379,7 @@ llvm::StringLiteral mixedSubgraph1 = R"(
 
             %7 = VPU.NCE.Convolution(%6, %w1, %weightsTable) {
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
-                opaque_ppe = #VPU.PPEStub<>,
+                ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 2 : i64, right = 2 : i64, top = 2 : i64, bottom = 2 : i64>,
                 rawFilterShape = [16, 32, 5, 5],
                 strides = [1, 1]}

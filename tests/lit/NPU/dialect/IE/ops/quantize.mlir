@@ -32,7 +32,7 @@ func.func @ConstFold() -> tensor<1x8x4x4x!qElemType> {
 
     // CHECK:       [[VAL0:%.*]] = const.Declare tensor<1x8x4x4x!qElemType> =
     // CHECK-SAME:       dense<5.000000e+00> : tensor<1x8x4x4xf32>,
-    // CHECK-SAME:       [#const.CastElemType<ui8>, #const.CastElemType<!qElemType>]
+    // CHECK-SAME:       [#const.CastElemType<!qElemType>]
     // CHECK-NOT:   IE.Quantize
     // CHECK:       return [[VAL0]]
 }
@@ -109,4 +109,56 @@ func.func @DifferentQuantizationParams(%arg0: tensor<1x2x4x4x!qElemType>) -> ten
     // CHECK-DAG:   IE.Dequantize
     // CHECK-DAG:   IE.Quantize
     // CHECK:   return %1 : tensor<1x2x4x4x!qElemType1>
+}
+
+// -----
+
+!qElemType = !quant.uniform<u8:f16, 0.015704019396912818:153>
+!qElemType1 = !quant.uniform<u8:f16, 0.015704022669324687:153>
+
+// CHECK-LABEL:  func.func @FuseReshapeQuantizationParamsDifferent
+// CHECK-SAME:     ([[INPUT:%.+]]: tensor<1x12x512x8xf16>)
+func.func @FuseReshapeQuantizationParamsDifferent(%input: tensor<1x12x512x8xf16>) -> tensor<1x12288x4x1xf16> {
+    %0 = IE.Quantize(%input) {dstElemType = !qElemType} : tensor<1x12x512x8xf16> -> tensor<1x12x512x8x!qElemType>
+    %1 = IE.Dequantize(%0) {dstElemType = f16} : tensor<1x12x512x8x!qElemType> -> tensor<1x12x512x8xf16>
+    %2 = IE.Reshape(%1) {shape_value = [1, 12288, 4, 1]} : tensor<1x12x512x8xf16> -> tensor<1x12288x4x1xf16>
+    %3 = IE.Quantize(%2) {dstElemType = !qElemType1} : tensor<1x12288x4x1xf16> -> tensor<1x12288x4x1x!qElemType1>
+    %4 = IE.Dequantize(%3) {dstElemType = f16} : tensor<1x12288x4x1x!qElemType1> -> tensor<1x12288x4x1xf16>
+    return %4 : tensor<1x12288x4x1xf16>
+
+    // CHECK: [[QUANTIZE:%.+]] = IE.Quantize([[INPUT]])
+    // CHECK-SAME:   {dstElemType = !qElemType} : tensor<1x12x512x8xf16> -> tensor<1x12x512x8x!qElemType>
+    // CHECK-NOT:   IE.Dequantize
+    // CHECK:      [[RESHAPE:%.+]] = IE.Reshape([[QUANTIZE]])
+    // CHECK-SAME:   {shape_value = [1, 12288, 4, 1]} : tensor<1x12x512x8x!qElemType> -> tensor<1x12288x4x1x!qElemType>
+    // CHECK-NOT:   IE.Quantize
+    // CHECK: [[DEQUANTIZE:%.+]] = IE.Dequantize([[RESHAPE]])
+    // CHECK-SAME:   {dstElemType = f16} : tensor<1x12288x4x1x!qElemType> -> tensor<1x12288x4x1xf16>
+    // CHECK: return [[DEQUANTIZE]]
+}
+
+// -----
+
+!qElemType = !quant.uniform<u8:f16, 0.015704019396912818:153>
+!qElemType1 = !quant.uniform<u8:f16, 0.015704022669324687:153>
+
+// CHECK-LABEL:  func.func @FuseAffineReshapeQuantizationParamsDifferent
+// CHECK-SAME:     ([[INPUT:%.+]]: tensor<1x12x512x8xf16>)
+func.func @FuseAffineReshapeQuantizationParamsDifferent(%input: tensor<1x12x512x8xf16>) -> tensor<1x12288x4x1xf16> {
+    %0 = IE.Quantize(%input) {dstElemType = !qElemType} : tensor<1x12x512x8xf16> -> tensor<1x12x512x8x!qElemType>
+    %1 = IE.Dequantize(%0) {dstElemType = f16} : tensor<1x12x512x8x!qElemType> -> tensor<1x12x512x8xf16>
+    %2 = IE.AffineReshape(%1) {shape_value = [1, 12288, 4, 1], dim_mapping = [[0], [1], [2], [3]]} : tensor<1x12x512x8xf16> -> tensor<1x12288x4x1xf16>
+    %3 = IE.Quantize(%2) {dstElemType = !qElemType1} : tensor<1x12288x4x1xf16> -> tensor<1x12288x4x1x!qElemType1>
+    %4 = IE.Dequantize(%3) {dstElemType = f16} : tensor<1x12288x4x1x!qElemType1> -> tensor<1x12288x4x1xf16>
+    return %4 : tensor<1x12288x4x1xf16>
+
+    // CHECK: [[QUANTIZE:%.+]] = IE.Quantize([[INPUT]])
+    // CHECK-SAME:   {dstElemType = !qElemType} : tensor<1x12x512x8xf16> -> tensor<1x12x512x8x!qElemType>
+    // CHECK-NOT:   IE.Dequantize
+    // CHECK:      [[AFFINERESHAPE:%.+]] = IE.AffineReshape([[QUANTIZE]])
+    // CHECK-SAME{LITERAL}:   {dim_mapping = [[0], [1], [2], [3]], shape_value = [1, 12288, 4, 1]} : tensor<1x12x512x8x!qElemType> -> tensor<1x12288x4x1x!qElemType>
+    // CHECK-NOT:   IE.Quantize
+    // CHECK: [[DEQUANTIZE:%.+]] = IE.Dequantize([[AFFINERESHAPE]])
+    // CHECK-SAME:   {dstElemType = f16} : tensor<1x12288x4x1x!qElemType> -> tensor<1x12288x4x1xf16>
+    // CHECK: return [[DEQUANTIZE]]
 }

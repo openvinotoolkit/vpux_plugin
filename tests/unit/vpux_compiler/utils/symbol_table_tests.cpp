@@ -85,7 +85,7 @@ TEST_F(MLIR_SymbolTable, ReplaceAllSymbolUses) {
         VPUASM.DeclareTaskBuffer @DeclareTaskBuffer_DMA_0 idx(!VPURegMapped.Index<0:0:0>) <DMA>
         VPUASM.DeclareBuffer @DeclareBuffer0 !VPUASM.Buffer<"NetworkInput" [0] <0> : memref<1x2x3x4xf16, @DDR> :  swizzling(0)>
         VPUASM.DeclareBuffer @DeclareBuffer1 !VPUASM.Buffer<"NetworkOutput" [0] <0> : memref<1x2x3x4xf16, @DDR> :  swizzling(0)>
-        VPUASM.NNDMA @DMA_0_0_0 idx(!VPURegMapped.Index<0:0:0>) taskLocation(@DeclareTaskBuffer_DMA_0) input(@DeclareBuffer0) outputs([@DeclareBuffer1]) waits([]) updates([]) start_after(0) clean_after(0) descriptor(#VPUIP.DMADescriptorAttr<numPlanes = 0 : i4, len = 0 : i4, srcWidth = 0 : i4, srcStride = 0 : i4, srcPlaneStride = 0 : i4, dstWidth = 0 : i4, dstStride = 0 : i4, dstPlaneStride = 0 : i4>) acceleration_mode(<DISABLE>)
+        VPUASM.NNDMA @DMA_0_0_0 idx(!VPURegMapped.Index<0:0:0>) taskLocation(@DeclareTaskBuffer_DMA_0) input(@DeclareBuffer0) outputs([@DeclareBuffer1]) waits([]) updates([]) start_after(0) clean_after(0) dma_descriptor(#VPUIP.DMADescriptorAttr<numPlanes = 0 : i4, len = 0 : i4, srcWidth = 0 : i4, srcStride = 0 : i4, srcPlaneStride = 0 : i4, dstWidth = 0 : i4, dstStride = 0 : i4, dstPlaneStride = 0 : i4>) acceleration_mode(<DISABLE>)
 
         }
         }

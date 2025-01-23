@@ -23,17 +23,14 @@ class GRUCellLayerTest_NPU3720 : public GRUCellLayerTestCommon {
 class GRUCellLayerTest_NPU4000 : public GRUCellLayerTestCommon {};
 
 TEST_P(GRUCellLayerTest_NPU3720, HW) {
-    rel_threshold = 0.06;
     setDefaultHardwareMode();
     run(Platform::NPU3720);
 }
 
 TEST_P(GRUCellLayerTest_NPU4000, SW) {
-    rel_threshold = 0.06;
     setReferenceSoftwareMode();
     run(Platform::NPU4000);
 }
-
 }  // namespace test
 }  // namespace ov
 
@@ -43,8 +40,8 @@ namespace {
 
 const std::vector<bool> shouldDecompose{false};
 const std::vector<size_t> batch{2};
-const std::vector<size_t> hiddenSize{4};
-const std::vector<size_t> inputSize{3};
+const std::vector<size_t> hiddenSize{128};
+const std::vector<size_t> inputSize{128};
 const std::vector<std::vector<std::string>> activations = {{"sigmoid", "tanh"}};
 const std::vector<float> clip{0.f};
 const std::vector<bool> shouldLinearBeforeReset{true, false};
@@ -62,5 +59,4 @@ INSTANTIATE_TEST_SUITE_P(smoke_GRUCell, GRUCellLayerTest_NPU3720, gruCellParams,
 
 INSTANTIATE_TEST_SUITE_P(smoke_precommit_GRUCell, GRUCellLayerTest_NPU4000, gruCellParams,
                          GRUCellTest::getTestCaseName);
-
 }  // namespace

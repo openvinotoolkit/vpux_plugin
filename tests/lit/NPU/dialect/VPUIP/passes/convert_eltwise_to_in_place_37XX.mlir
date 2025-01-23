@@ -34,7 +34,7 @@ func.func @InplaceEltwiseSameType(%in: memref<1x32x96x96xf16, #NHWC>, %out: memr
                 DPUTask { outEnd = [32, 96, 96], mpe_mode = #VPU.mpe_mode<VECTOR_FP16>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, outStart = [0, 0, 0] }
             }
             PPE : {
-                PPETask {opaque_ppe = #VPU.PPEStub<>}
+                PPETask {ppe = #VPU.PPEStub<>}
             }
 
     %3 = VPUIP.Copy inputs(%2 : memref<1x32x96x96xf16, #NHWC, @CMX_NN>) outputs(%out : memref<1x32x96x96xf16, #NHWC>) -> memref<1x32x96x96xf16, #NHWC>
@@ -111,7 +111,7 @@ func.func @InplaceEltwiseFpClusterTiling(%in: memref<1x256x56x56xf16, #NHWC>, %o
             DPUTask {cluster_id = 0 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [55, 27, 255], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
             DPUTask {cluster_id = 1 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [55, 55, 255], outStart = [0, 28, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
             } PPE : {
-            PPETask {opaque_ppe = #VPU.PPEStub<>}
+            PPETask {ppe = #VPU.PPEStub<>}
             }
     }
 
@@ -196,7 +196,7 @@ func.func @InplaceEltwiseQuantizedView(%in: !qType0, %in2: !qType1, %out: !qType
                 DPUTask {cluster_id = 0 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [55, 27, 255], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
                 DPUTask {cluster_id = 1 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [55, 55, 255], outStart = [0, 28, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
         } PPE : {
-                PPETask {opaque_ppe = #VPU.PPEStub<>}
+                PPETask {ppe = #VPU.PPEStub<>}
         }
 
     %3 = VPUIP.Copy inputs(%2 : !qType2CMX) outputs(%out : !qType2) -> !qType2
@@ -270,7 +270,7 @@ func.func @InplaceEltwiseNeedsCast(%input : memref<1x512x28x28xf16, #NHWC>, %out
                 DPUTask {cluster_id = 0 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [27, 27, 511], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
                 DPUTask {cluster_id = 1 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [27, 27, 511], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
             } PPE : {
-                PPETask {opaque_ppe = #VPU.PPEStub<>}
+                PPETask {ppe = #VPU.PPEStub<>}
             }
         }
 
@@ -382,7 +382,7 @@ func.func @InplaceEltwiseFirstInputHas2Consumers(%in: memref<1x256x56x56xf16, #N
             DPUTask {cluster_id = 0 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [55, 27, 255], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
             DPUTask {cluster_id = 1 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [55, 55, 255], outStart = [0, 28, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
             } PPE : {
-            PPETask {opaque_ppe = #VPU.PPEStub<>}
+            PPETask {ppe = #VPU.PPEStub<>}
             }
     }
 
@@ -418,7 +418,7 @@ func.func @InplaceEltwiseFirstInputHas2Consumers(%in: memref<1x256x56x56xf16, #N
             DPUTask {cluster_id = 0 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [55, 27, 255], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
             DPUTask {cluster_id = 1 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [55, 55, 255], outStart = [0, 28, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
             } PPE : {
-            PPETask {opaque_ppe = #VPU.PPEStub<>}
+            PPETask {ppe = #VPU.PPEStub<>}
             }
     }
 
@@ -546,7 +546,7 @@ func.func @InplaceEltwiseFirstInput2ConsumersSecondInputFromNCEPermute(%in: memr
             DPUTask {cluster_id = 0 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [55, 27, 255], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
             DPUTask {cluster_id = 1 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [55, 55, 255], outStart = [0, 28, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
             } PPE : {
-            PPETask {opaque_ppe = #VPU.PPEStub<>}
+            PPETask {ppe = #VPU.PPEStub<>}
             }
     }
 
@@ -572,7 +572,7 @@ func.func @InplaceEltwiseFirstInput2ConsumersSecondInputFromNCEPermute(%in: memr
                 DPUTask {cluster_id = 0 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [27, 255, 55], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
                 DPUTask {cluster_id = 1 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [27, 255, 55], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
             } PPE : {
-              PPETask {opaque_ppe = #VPU.PPEStub<>}
+              PPETask {ppe = #VPU.PPEStub<>}
             }
     }
 
@@ -603,7 +603,7 @@ func.func @InplaceEltwiseFirstInput2ConsumersSecondInputFromNCEPermute(%in: memr
             DPUTask {cluster_id = 0 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [55, 27, 255], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
             DPUTask {cluster_id = 1 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [55, 55, 255], outStart = [0, 28, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
             } PPE : {
-            PPETask {opaque_ppe = #VPU.PPEStub<>}
+            PPETask {ppe = #VPU.PPEStub<>}
             }
     }
 
@@ -787,7 +787,7 @@ func.func @InplaceEltwiseSubViewInterp(%in1: memref<1x128x104x104xf16, #NHWC>, %
             DPUTask {cluster_id = 0 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [103, 51, 127], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
             DPUTask {cluster_id = 1 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [103, 103, 127], outStart = [0, 52, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
             } PPE : {
-            PPETask {opaque_ppe = #VPU.PPEStub<>}
+            PPETask {ppe = #VPU.PPEStub<>}
             }
     }
     return %4, %10, %14 : !DistributedType2, !DistributedType2, !DistributedType1
@@ -933,7 +933,7 @@ func.func @InplaceEltwisePermQuantSubView(%in1: memref<1x64x52x52x!qElemType1>, 
             DPUTask {cluster_id = 0 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [63, 12, 25], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
             DPUTask {cluster_id = 1 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [63, 12, 25], outStart = [0, 13, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
             } PPE : {
-            PPETask {opaque_ppe = #VPU.PPEStub<>}
+            PPETask {ppe = #VPU.PPEStub<>}
             }
     }
 
@@ -972,7 +972,7 @@ func.func @InplaceEltwisePermQuantSubView(%in1: memref<1x64x52x52x!qElemType1>, 
             DPUTask {cluster_id = 0 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [63, 12, 25], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
             DPUTask {cluster_id = 1 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [63, 12, 25], outStart = [0, 13, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
             } PPE : {
-            PPETask {opaque_ppe = #VPU.PPEStub<>}
+            PPETask {ppe = #VPU.PPEStub<>}
             }
     }
 
@@ -1008,7 +1008,7 @@ func.func @InplaceEltwisePermQuantSubView(%in1: memref<1x64x52x52x!qElemType1>, 
             DPUTask {cluster_id = 0 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [103, 51, 127], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
             DPUTask {cluster_id = 1 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [103, 103, 127], outStart = [0, 52, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
             } PPE : {
-            PPETask {opaque_ppe = #VPU.PPEStub<>}
+            PPETask {ppe = #VPU.PPEStub<>}
             }
     }
 

@@ -84,5 +84,4 @@ TEST_F(Conv2dInMixedModeIncorrectZeroPoint, NPU4000_TestKindSubgraph) {
     configuration["NPU_COMPILATION_MODE_PARAMS"] = "enable-convolution-mixed-precision-decomposition=true";
     run(Platform::NPU4000);
 }
-
 }  // namespace ov::test::subgraph

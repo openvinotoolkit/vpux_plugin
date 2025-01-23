@@ -10,11 +10,25 @@
 #include <tuple>
 #include <vector>
 
+#include <vpux/utils/core/error.hpp>
 #include "common_test_utils/test_enums.hpp"
 #include "vpu_ov2_layer_test.hpp"
 
 namespace ov {
 namespace test {
+
+enum class LowFpType { NF4, Undefined };
+
+inline std::string lowFpType2String(LowFpType lowFpType) {
+    switch (lowFpType) {
+    case LowFpType::NF4:
+        return "NF4";
+    case LowFpType::Undefined:
+        return "Undefined";
+    default:
+        VPUX_THROW("unknown low fp type!");
+    }
+}
 
 typedef std::tuple<std::vector<size_t>,                      // kernel
                    std::vector<size_t>,                      // stride
@@ -22,6 +36,7 @@ typedef std::tuple<std::vector<size_t>,                      // kernel
                    std::vector<ptrdiff_t>,                   // pad end
                    std::vector<size_t>,                      // dilation
                    size_t,                                   // output channels
+                   LowFpType,                                // low fp type
                    size_t,                                   // quant levels (to lower to I8 or I4)
                    ov::test::utils::QuantizationGranularity  // quant granularity (per tensor/channel)
                    >

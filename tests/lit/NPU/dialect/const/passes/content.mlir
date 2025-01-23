@@ -57,16 +57,6 @@ func.func @ParsePrintDenseConstWithInvalidBroadcast() -> tensor<3xf16> {
 
 // -----
 
-// Note: the resources have to appear *before* their use in order for the blob data to be valid
-{-#
-  dialect_resources: {
-    // Note: first 4 bytes in the dense_resource blob specify alignment
-    builtin: {
-      blob: "0x04000000010000000200000003000000"
-    }
-  }
-#-}
-
 func.func @ParsePrintDenseResource() -> tensor<1x3x1x1xf32> {
     %cst = const.Declare tensor<1x3x1x1xf32> = dense_resource<blob> : tensor<1x3x1x1xf32>
 
@@ -78,7 +68,23 @@ func.func @ParsePrintDenseResource() -> tensor<1x3x1x1xf32> {
     // CHECK:       return [[CST]]
 }
 
+{-#
+  dialect_resources: {
+    // Note: first 4 bytes in the dense_resource blob specify alignment
+    builtin: {
+      blob: "0x04000000010000000200000003000000"
+    }
+  }
+#-}
+
 // -----
+
+func.func @ParsePrintDenseResourceNoAlignment() -> tensor<1x3x1x1xf32> {
+    // expected-error@+1 {{Size of dense resource buffer '8' in 'baseContent' doesn't match its type 'tensor<1x3x1x1xf32>'}}
+    %cst = const.Declare tensor<1x3x1x1xf32> = dense_resource<no_alignment_blob> : tensor<1x3x1x1xf32>
+
+    return %cst : tensor<1x3x1x1xf32>
+}
 
 {-#
   dialect_resources: {
@@ -88,14 +94,14 @@ func.func @ParsePrintDenseResource() -> tensor<1x3x1x1xf32> {
   }
 #-}
 
-func.func @ParsePrintDenseResourceNoAlignment() -> tensor<1x3x1x1xf32> {
-    // expected-error@+1 {{custom op 'const.Declare' Size of dense resource buffer '8' in 'baseContent' doesn't match its type 'tensor<1x3x1x1xf32>'}}
-    %cst = const.Declare tensor<1x3x1x1xf32> = dense_resource<no_alignment_blob> : tensor<1x3x1x1xf32>
-
-    return %cst : tensor<1x3x1x1xf32>
-}
-
 // -----
+
+func.func @ParsePrintDenseResourceWrongDataSize() -> tensor<1x3x1x1xf16> {
+    // expected-error@+1 {{Size of dense resource buffer '16' in 'baseContent' doesn't match its type 'tensor<1x3x1x1xf32>'}}
+    %cst = const.Declare tensor<1x3x1x1xf16> = dense_resource<too_big_blob> : tensor<1x3x1x1xf32>, [#const.CastElemType<f16>]
+
+    return %cst : tensor<1x3x1x1xf16>
+}
 
 {-#
   dialect_resources: {
@@ -105,22 +111,7 @@ func.func @ParsePrintDenseResourceNoAlignment() -> tensor<1x3x1x1xf32> {
   }
 #-}
 
-func.func @ParsePrintDenseResourceWrongDataSize() -> tensor<1x3x1x1xf16> {
-    // expected-error@+1 {{custom op 'const.Declare' Size of dense resource buffer '16' in 'baseContent' doesn't match its type 'tensor<1x3x1x1xf32>'}}
-    %cst = const.Declare tensor<1x3x1x1xf16> = dense_resource<too_big_blob> : tensor<1x3x1x1xf32>, [#const.CastElemType<f16>]
-
-    return %cst : tensor<1x3x1x1xf16>
-}
-
 // -----
-
-{-#
-  dialect_resources: {
-    builtin: {
-      splat_blob: "0x0400000001000000"
-    }
-  }
-#-}
 
 func.func @ParsePrintDenseResourceSplat() -> tensor<2x3x1x1xf32> {
     %cst = const.Declare tensor<2x3x1x1xf32> = dense_resource<splat_blob> : tensor<2x3x1x1xf32>
@@ -132,6 +123,14 @@ func.func @ParsePrintDenseResourceSplat() -> tensor<2x3x1x1xf32> {
 
     // CHECK:       return [[CST]]
 }
+
+{-#
+  dialect_resources: {
+    builtin: {
+      splat_blob: "0x0400000001000000"
+    }
+  }
+#-}
 
 // -----
 
@@ -152,3 +151,39 @@ func.func @ParsePrintDenseConstRelocateWeightsTableLong() -> memref<16x1x1x4xsi3
 
     // CHECK{LITERAL}:  #const.RelocateWeightsTable<weightsPtr=[65536], sparsityPtr=16777215 : i64, offsets=[0], weightsTableSize=0 : i64, weightsElemBitSize=16 : i64>
 }
+
+// -----
+
+func.func @ParsePrintSubByte() -> tensor<1x1x3x3xui4> {
+  %cst = const.Declare tensor<1x1x3x3xui4> = dense_resource<subbyte> : tensor<1x1x3x3xsi4>, [#const.ConvertElemType<si8>, #const.CastElemType<si4>]
+  return %cst : tensor<1x1x3x3xui4>
+
+  // CHECK: [[CST:%.+]] = const.Declare tensor<1x1x3x3xui4>
+  // CHECK: return [[CST]]
+}
+
+{-#
+  dialect_resources: {
+    // Note: first 4 bytes in the dense_resource blob specify alignment
+    builtin: {
+      subbyte: "0x040000001234567890"
+    }
+  }
+#-}
+
+// -----
+
+func.func @ParsePrintInvalidSubByte() -> tensor<1x1x3x3xui4> {
+  // expected-error@+1 {{Size of dense resource buffer '4' in 'baseContent' doesn't match its type 'tensor<1x1x3x3xsi4>'}}
+  %cst = const.Declare tensor<1x1x3x3xui4> = dense_resource<subbyte> : tensor<1x1x3x3xsi4>, [#const.ConvertElemType<si8>, #const.CastElemType<si4>]
+  return %cst : tensor<1x1x3x3xui4>
+}
+
+{-#
+  dialect_resources: {
+    // Note: first 4 bytes in the dense_resource blob specify alignment
+    builtin: {
+      subbyte: "0x0400000012345678"
+    }
+  }
+#-}

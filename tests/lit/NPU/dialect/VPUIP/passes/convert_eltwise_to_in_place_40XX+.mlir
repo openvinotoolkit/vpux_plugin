@@ -58,7 +58,7 @@ func.func @InplaceEltwiseUnequalTensorSize(%activation: memref<1x64x128x128x!qEl
               DPUTask {cluster_id = 0 : i64, inEnd = [127, 64, 63], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [127, 63, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 0 : i64>}
               DPUTask {cluster_id = 1 : i64, inEnd = [127, 64, 63], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [127, 63, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 0 : i64, bottom = 1 : i64>}
           } PPE : {
-            PPETask {opaque_ppe = #VPU.PPEStub<>}
+            PPETask {ppe = #VPU.PPEStub<>}
           }
     }
 
@@ -95,7 +95,7 @@ func.func @InplaceEltwiseUnequalTensorSize(%activation: memref<1x64x128x128x!qEl
               DPUTask {cluster_id = 0 : i64, inEnd = [127, 63, 63], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [127, 63, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
               DPUTask {cluster_id = 1 : i64, inEnd = [127, 64, 63], inStart = [0, 1, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [127, 63, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
           } PPE : {
-            PPETask {opaque_ppe = #VPU.PPEStub<>}
+            PPETask {ppe = #VPU.PPEStub<>}
           }
     }
 
@@ -139,7 +139,7 @@ func.func @InplaceEltwiseUnequalTensorSize(%activation: memref<1x64x128x128x!qEl
     // CHECK:                 DPUTask {cluster_id = 0 : i64, inEnd = [127, 64, 63], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [127, 63, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 0 : i64>}
     // CHECK:                 DPUTask {cluster_id = 1 : i64, inEnd = [127, 64, 63], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [127, 63, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 0 : i64, bottom = 1 : i64>}
     // CHECK:               } PPE : {
-    // CHECK:                 PPETask {opaque_ppe = #VPU.PPEStub<>}
+    // CHECK:                 PPETask {ppe = #VPU.PPEStub<>}
     // CHECK:               }
     // CHECK:             }
 
@@ -215,7 +215,7 @@ func.func @InplaceEltwiseUnequalTensorSize(%activation: memref<1x64x128x128x!qEl
     // CHECK:                 DPUTask {cluster_id = 0 : i64, inEnd = [127, 63, 63], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [127, 63, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     // CHECK:                 DPUTask {cluster_id = 1 : i64, inEnd = [127, 64, 63], inStart = [0, 1, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [127, 63, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     // CHECK:                 } PPE : {
-    // CHECK:                   PPETask {opaque_ppe = #VPU.PPEStub<>}
+    // CHECK:                   PPETask {ppe = #VPU.PPEStub<>}
     // CHECK:                 }
     // CHECK:             }
 

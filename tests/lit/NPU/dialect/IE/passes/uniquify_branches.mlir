@@ -439,6 +439,73 @@ func.func @MovePermuteCastBeforeMultipleSlices(%arg0: tensor<3x80x4x4xf16>) -> t
 // -----
 
 #NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
+// CHECK-LABEL: @MovePermuteCastBeforeMultipleSlicesOffsetChange
+// CHECK-SAME:  [[INPUT:%.+]]: tensor<1x96x8x4xf16, {order = #NHWC}>
+func.func @MovePermuteCastBeforeMultipleSlicesOffsetChange(%arg0: tensor<1x96x8x4xf16, {order = #NHWC}>) -> tensor<1x8x4x96xf16> {
+    %0 = IE.Slice %arg0 [0, 0, 0, 0] [1, 32, 8, 4] : tensor<1x96x8x4xf16, {order = #NHWC}> to tensor<1x32x8x4xf16, {order = #NHWC}>
+    %1 = IE.Slice %arg0 [0, 32, 0, 0] [1, 32, 8, 4] : tensor<1x96x8x4xf16, {order = #NHWC}> to tensor<1x32x8x4xf16, {order = #NHWC}>
+    %2 = IE.Slice %arg0 [0, 64, 0, 0] [1, 32, 8, 4] : tensor<1x96x8x4xf16, {order = #NHWC}> to tensor<1x32x8x4xf16, {order = #NHWC}>
+
+    %3 = IE.PermuteCast(%0) {dst_order = #NCHW, mem_perm = #NCHW} : tensor<1x32x8x4xf16, {order = #NHWC}> -> tensor<1x8x4x32xf16>
+    %4 = IE.PermuteCast(%1) {dst_order = #NCHW, mem_perm = #NCHW} : tensor<1x32x8x4xf16, {order = #NHWC}> -> tensor<1x8x4x32xf16>
+    %5 = IE.PermuteCast(%2) {dst_order = #NCHW, mem_perm = #NCHW} : tensor<1x32x8x4xf16, {order = #NHWC}> -> tensor<1x8x4x32xf16>
+
+    %6 = IE.Concat(%3, %4, %5) {static_offsets = [[0, 0, 0, 0], [0, 0, 0, 32], [0, 0, 0, 64]]} : tensor<1x8x4x32xf16>, tensor<1x8x4x32xf16>, tensor<1x8x4x32xf16> -> tensor<1x8x4x96xf16>
+
+    return %6: tensor<1x8x4x96xf16>
+
+    // CHECK: [[PERMUTECAST:%.+]] = IE.PermuteCast([[INPUT]]) {dst_order = #NCHW, mem_perm = #NCHW} : tensor<1x96x8x4xf16, {order = #NHWC}> -> tensor<1x8x4x96xf16>
+
+    // CHECK: [[SLICE0:%.+]] = IE.Slice [[PERMUTECAST]] [0, 0, 0, 64] [1, 8, 4, 32] : tensor<1x8x4x96xf16> to tensor<1x8x4x32xf16>
+    // CHECK: [[SLICE1:%.+]] = IE.Slice [[PERMUTECAST]] [0, 0, 0, 32] [1, 8, 4, 32] : tensor<1x8x4x96xf16> to tensor<1x8x4x32xf16>
+    // CHECK: [[SLICE2:%.+]] = IE.Slice [[PERMUTECAST]] [0, 0, 0, 0] [1, 8, 4, 32] : tensor<1x8x4x96xf16> to tensor<1x8x4x32xf16>
+
+    // CHECK: [[CONCAT0:%.+]] = IE.Concat([[SLICE2]], [[SLICE1]], [[SLICE0]])
+    // CHECK-SAME{LITERAL}: {static_offsets = [[0, 0, 0, 0], [0, 0, 0, 32], [0, 0, 0, 64]]} : tensor<1x8x4x32xf16>, tensor<1x8x4x32xf16>, tensor<1x8x4x32xf16> -> tensor<1x8x4x96xf16>
+
+    // CHECK: return [[CONCAT0]] : tensor<1x8x4x96xf16>
+}
+
+// -----
+
+#NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
+// CHECK-LABEL: @MovePermuteCastBeforeMultipleSlicesMultiOffsetChange
+// CHECK-SAME:  [[INPUT:%.+]]: tensor<1x64x1x32xf16, {order = #NHWC}>
+func.func @MovePermuteCastBeforeMultipleSlicesMultiOffsetChange(%arg0: tensor<1x64x1x32xf16, {order = #NHWC}>) -> tensor<1x1x32x64xf16> {
+    %0 = IE.Slice %arg0 [0, 0, 0, 0] [1, 32, 1, 16] : tensor<1x64x1x32xf16, {order = #NHWC}> to tensor<1x32x1x16xf16, {order = #NHWC}>
+    %1 = IE.Slice %arg0 [0, 0, 0, 16] [1, 32, 1, 16] : tensor<1x64x1x32xf16, {order = #NHWC}> to tensor<1x32x1x16xf16, {order = #NHWC}>
+    %2 = IE.Slice %arg0 [0, 32, 0, 0] [1, 32, 1, 16] : tensor<1x64x1x32xf16, {order = #NHWC}> to tensor<1x32x1x16xf16, {order = #NHWC}>
+    %3 = IE.Slice %arg0 [0, 32, 0, 16] [1, 32, 1, 16] : tensor<1x64x1x32xf16, {order = #NHWC}> to tensor<1x32x1x16xf16, {order = #NHWC}>
+
+    %4 = IE.PermuteCast(%0) {dst_order = #NCHW, mem_perm = #NCHW} : tensor<1x32x1x16xf16, {order = #NHWC}> -> tensor<1x1x16x32xf16>
+    %5 = IE.PermuteCast(%1) {dst_order = #NCHW, mem_perm = #NCHW} : tensor<1x32x1x16xf16, {order = #NHWC}> -> tensor<1x1x16x32xf16>
+    %6 = IE.PermuteCast(%2) {dst_order = #NCHW, mem_perm = #NCHW} : tensor<1x32x1x16xf16, {order = #NHWC}> -> tensor<1x1x16x32xf16>
+    %7 = IE.PermuteCast(%3) {dst_order = #NCHW, mem_perm = #NCHW} : tensor<1x32x1x16xf16, {order = #NHWC}> -> tensor<1x1x16x32xf16>
+
+    %8 = IE.Concat(%4, %5, %6, %7) {static_offsets = [[0, 0, 0, 0], [0, 0, 0, 32], [0, 0, 16, 0], [0, 0, 16, 32]]} : tensor<1x1x16x32xf16>, tensor<1x1x16x32xf16>, tensor<1x1x16x32xf16>, tensor<1x1x16x32xf16> -> tensor<1x1x32x64xf16>
+
+    return %8: tensor<1x1x32x64xf16>
+
+    // CHECK: [[PERMUTECAST:%.+]] = IE.PermuteCast([[INPUT]]) {dst_order = #NCHW, mem_perm = #NCHW} : tensor<1x64x1x32xf16, {order = #NHWC}> -> tensor<1x1x32x64xf16>
+
+    // CHECK: [[SLICE0:%.+]] = IE.Slice [[PERMUTECAST]] [0, 0, 16, 32] [1, 1, 16, 32] : tensor<1x1x32x64xf16> to tensor<1x1x16x32xf16>
+    // CHECK: [[SLICE1:%.+]] = IE.Slice [[PERMUTECAST]] [0, 0, 0, 32] [1, 1, 16, 32] : tensor<1x1x32x64xf16> to tensor<1x1x16x32xf16>
+    // CHECK: [[SLICE2:%.+]] = IE.Slice [[PERMUTECAST]] [0, 0, 16, 0] [1, 1, 16, 32] : tensor<1x1x32x64xf16> to tensor<1x1x16x32xf16>
+    // CHECK: [[SLICE3:%.+]] = IE.Slice [[PERMUTECAST]] [0, 0, 0, 0] [1, 1, 16, 32] : tensor<1x1x32x64xf16> to tensor<1x1x16x32xf16>
+
+    // CHECK: [[CONCAT0:%.+]] = IE.Concat([[SLICE3]], [[SLICE2]], [[SLICE1]], [[SLICE0]])
+    // CHECK-SAME{LITERAL}: {static_offsets = [[0, 0, 0, 0], [0, 0, 0, 32], [0, 0, 16, 0], [0, 0, 16, 32]]} : tensor<1x1x16x32xf16>, tensor<1x1x16x32xf16>, tensor<1x1x16x32xf16>, tensor<1x1x16x32xf16> -> tensor<1x1x32x64xf16>
+
+    // CHECK: return [[CONCAT0]] : tensor<1x1x32x64xf16>
+}
+
+// -----
+
+#NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
 #NCWH = affine_map<(d0, d1, d2, d3) -> (d0, d1, d3, d2)>
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 

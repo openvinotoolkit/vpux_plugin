@@ -7,6 +7,7 @@
 
 #include "vpux/compiler/dialect/const/utils/constant_folding_cache.hpp"
 #include "vpux/compiler/dialect/const/utils/constant_folding_in_background.hpp"
+#include "vpux/compiler/dialect/const/utils/utils.hpp"
 
 #include "common/utils.hpp"
 #include "vpux/compiler/init.hpp"
@@ -29,8 +30,8 @@ std::pair<Const::ContentAttr, SmallVector<float>> createContentAttrSameTransform
     const size_t numElements = 100;
     const float baseValue = 1.0f;
     const auto baseType = mlir::RankedTensorType::get({numElements}, mlir::Float32Type::get(ctx));
-    const auto baseAttr = mlir::DenseElementsAttr::get(baseType, baseValue);
-    auto contentAttrSetup = Const::ContentAttr::transform(baseAttr);
+    const auto baseAttr = Const::createConstContent(baseType, ArrayRef(baseValue));
+    Const::ContentSetup contentAttrSetup(baseType);
 
     const size_t numTransformations = 5;
     for (size_t i = 0; i < numTransformations; ++i) {
@@ -40,21 +41,17 @@ std::pair<Const::ContentAttr, SmallVector<float>> createContentAttrSameTransform
     const float expectedValue = baseValue + numTransformations;
     SmallVector<float> expectedFoldedResults(numElements, expectedValue);
 
-    auto contentAttr = contentAttrSetup.get();
-    return std::make_pair(contentAttr, expectedFoldedResults);
+    return std::make_pair(Const::ContentAttr::get(baseAttr, std::move(contentAttrSetup)), expectedFoldedResults);
 }
 
 std::pair<Const::ContentAttr, SmallVector<float>> createContentAttrMixedTransformations(mlir::MLIRContext* ctx) {
     const size_t numElements = 100;
     const float baseValue = 0.0f;
     const auto baseType = mlir::RankedTensorType::get({numElements}, mlir::Float32Type::get(ctx));
-    const auto baseAttr = mlir::DenseElementsAttr::get(baseType, baseValue);
-    auto contentAttr = Const::ContentAttr::transform(baseAttr)
-                               .padWithZero({10}, {10})
-                               .add(1.0)
-                               .rescale(3.0)
-                               .subview({0}, {numElements})
-                               .get();
+    const auto baseAttr = Const::createConstContent(baseType, ArrayRef(baseValue));
+    auto contentAttr = Const::ContentAttr::get(
+            baseAttr,
+            Const::ContentSetup(baseType).padWithZero({10}, {10}).add(1.0).rescale(3.0).subview({0}, {numElements}));
 
     const float expectedValue = 3.0f;
     SmallVector<float> expectedFoldedResults(numElements, expectedValue);
@@ -176,7 +173,7 @@ TEST_F(ConstantFoldingInBackgroundUnit, EquivalenceRequest) {
     const size_t numElements = 100;
     const float baseValue = 1.0f;
     const auto baseType = mlir::RankedTensorType::get({numElements}, mlir::Float32Type::get(&ctx));
-    const auto baseAttr = mlir::DenseElementsAttr::get(baseType, baseValue);
+    const auto baseAttr = Const::createConstContent(baseType, ArrayRef(baseValue));
     auto contentAttr = Const::ContentAttr::get(baseAttr);
 
     // `subview` sends folding requests to the background threads

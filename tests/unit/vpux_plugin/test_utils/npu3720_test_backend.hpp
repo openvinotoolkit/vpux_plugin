@@ -5,7 +5,7 @@
 
 #pragma once
 
-#include <npu.hpp>
+#include <intel_npu/common/npu.hpp>
 
 namespace vpux {
 

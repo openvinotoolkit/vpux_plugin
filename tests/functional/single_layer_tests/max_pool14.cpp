@@ -1,4 +1,4 @@
-// Copyright (C) Intel Corporation
+// Copyright (C) 2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 #include <openvino/opsets/opset3.hpp>
@@ -50,5 +50,4 @@ TEST_F(MaxPoolV14LayerTestCommon, NPU4000_SW) {
     setReferenceSoftwareMode();
     run(Platform::NPU4000);
 }
-
 }  // namespace ov::test

@@ -8,14 +8,6 @@
 
 // CHECK-LABEL: ParseAndPrintSimple
 
-{-#
-  dialect_resources: {
-    builtin: {
-      blob: "0x04000000010000000200000003000000"
-    }
-  }
-#-}
-
 const.Data @ParseAndPrintSimple {
     const.Rodata @weights_0 dense<1.000000e+00> : tensor<4x4xf32>
     const.Rodata @weights_1 dense_resource<blob> : tensor<2x2xf32>
@@ -29,6 +21,14 @@ func.func @ParseAndPrintSimpleFunc() -> tensor<2x2xf32> {
 // CHECK: const.Rodata @weights_0 dense<1.000000e+00> : tensor<4x4xf32>
 // CHECK: const.Rodata @weights_1 dense_resource<blob> : tensor<2x2xf32>
 // CHECK: }
+
+{-#
+  dialect_resources: {
+    builtin: {
+      blob: "0x04000000010000000200000003000000"
+    }
+  }
+#-}
 
 // -----
 

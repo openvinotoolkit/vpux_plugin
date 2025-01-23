@@ -99,7 +99,7 @@ module @Depth2SpaceToTransConv {
 
         // CHECK:       [[WEIGHTS:%.+]] = const.Declare tensor<128x512x2x2x!qElemType, {order = #NHWC}> =
         // CHECK-SAME:      dense_resource<__elided__> : tensor<128x512x2x2xui8, {order = #NHWC}>,
-        // CHECK-SAME:      [#const.CastElemType<f16>, #const.Reorder<#NCHW>, #const.CastElemType<ui8>, #const.CastElemType<!qElemType>, #const.Reorder<#NHWC>]
+        // CHECK-SAME:      [#const.CastElemType<f16>, #const.Reorder<#NCHW>, #const.CastElemType<!qElemType>, #const.Reorder<#NHWC>]
 
         // CHECK:       [[PERMQUANT:%.+]] = IE.PermuteQuantize([[INPUT]]) {
         // CHECK-SAME:      dstElemType = f16,
@@ -256,9 +256,9 @@ module @MatMulWithGroupQuant {
     // CHECK-SAME: [[ARG:%.+]]: tensor<16x3072xf32>
     func.func @main(%arg0: tensor<16x3072xf32>) -> tensor<16x4096xf32> {
         %WEIGHTS = const.Declare tensor<3x1024x4096xf32> = dense<1.0> : tensor<3x1024x4096xf32>
-        // CHECK-DAG:   [[WEIGHTS_0:%.*]] = const.Declare tensor<4096x1024x1x1x[[Q_TYPE]], {order = #NHWC}> = dense<1.000000e+00> : tensor<3x1024x4096xf32>, [#const.SubView<[0, 0, 0], [1, 1024, 4096]>, #const.Reshape<[1, 1024, 1, 4096]>, #const.CastElemType<f16>, #const.CastElemType<ui4>, #const.CastElemType<[[Q_TYPE1]]>, #const.Transpose<#NWHC>, #const.Reshape<[4096, 1024, 1, 1]>, #const.CastElemType<ui4>, #const.CastElemType<ui32>, #const.Add<-8.000000e+00 : f64>, #const.CastElemType<si4>, #const.CastElemType<[[Q_TYPE]]>, #const.Reorder<#NHWC>]
-        // CHECK-DAG:   [[WEIGHTS_1:%.*]] = const.Declare tensor<4096x1024x1x1x!qElemType, {order = #NHWC}> = dense<1.000000e+00> : tensor<3x1024x4096xf32>, [#const.SubView<[1, 0, 0], [1, 1024, 4096]>, #const.Reshape<[1, 1024, 1, 4096]>, #const.CastElemType<f16>, #const.CastElemType<ui4>, #const.CastElemType<[[Q_TYPE1]]>, #const.Transpose<#NWHC>, #const.Reshape<[4096, 1024, 1, 1]>, #const.CastElemType<ui4>, #const.CastElemType<ui32>, #const.Add<-8.000000e+00 : f64>, #const.CastElemType<si4>, #const.CastElemType<[[Q_TYPE]]>, #const.Reorder<#NHWC>]
-        // CHECK-DAG:   [[WEIGHTS_2:%.*]] = const.Declare tensor<4096x1024x1x1x!qElemType, {order = #NHWC}> = dense<1.000000e+00> : tensor<3x1024x4096xf32>, [#const.SubView<[2, 0, 0], [1, 1024, 4096]>, #const.Reshape<[1, 1024, 1, 4096]>, #const.CastElemType<f16>, #const.CastElemType<ui4>, #const.CastElemType<[[Q_TYPE1]]>, #const.Transpose<#NWHC>, #const.Reshape<[4096, 1024, 1, 1]>, #const.CastElemType<ui4>, #const.CastElemType<ui32>, #const.Add<-8.000000e+00 : f64>, #const.CastElemType<si4>, #const.CastElemType<[[Q_TYPE]]>, #const.Reorder<#NHWC>]
+        // CHECK-DAG:   [[WEIGHTS_0:%.*]] = const.Declare tensor<4096x1024x1x1x[[Q_TYPE]], {order = #NHWC}> = dense<1.000000e+00> : tensor<3x1024x4096xf32>, [#const.SubView<[0, 0, 0], [1, 1024, 4096]>, #const.Reshape<[1, 1024, 1, 4096]>, #const.CastElemType<[[Q_TYPE1]]>, #const.Transpose<#NWHC>, #const.Reshape<[4096, 1024, 1, 1]>, #const.ConvertElemType<[[Q_TYPE]]>, #const.Reorder<#NHWC>]
+        // CHECK-DAG:   [[WEIGHTS_1:%.*]] = const.Declare tensor<4096x1024x1x1x!qElemType, {order = #NHWC}> = dense<1.000000e+00> : tensor<3x1024x4096xf32>, [#const.SubView<[1, 0, 0], [1, 1024, 4096]>, #const.Reshape<[1, 1024, 1, 4096]>, #const.CastElemType<[[Q_TYPE1]]>, #const.Transpose<#NWHC>, #const.Reshape<[4096, 1024, 1, 1]>, #const.ConvertElemType<[[Q_TYPE]]>, #const.Reorder<#NHWC>]
+        // CHECK-DAG:   [[WEIGHTS_2:%.*]] = const.Declare tensor<4096x1024x1x1x!qElemType, {order = #NHWC}> = dense<1.000000e+00> : tensor<3x1024x4096xf32>, [#const.SubView<[2, 0, 0], [1, 1024, 4096]>, #const.Reshape<[1, 1024, 1, 4096]>, #const.CastElemType<[[Q_TYPE1]]>, #const.Transpose<#NWHC>, #const.Reshape<[4096, 1024, 1, 1]>, #const.ConvertElemType<[[Q_TYPE]]>, #const.Reorder<#NHWC>]
 
         // CHECK:   [[RESHAPE_LHS:%.*]] = IE.AffineReshape([[ARG]]) {
         // CHECK-SAME:      shape_value = [1, 1, 16, 3072]
@@ -377,4 +377,36 @@ module @MatMulWithGroupQuant {
         return %GEMM : tensor<16x4096xf32>
         // CHECK:   return [[RESHAPE_OUT]] : tensor<16x4096xf32>
     }
+}
+
+// -----
+
+// CHECK-LABEL: @RMSProcessingWith2DRMS
+module @RMSProcessingWith2DRMS {
+    IE.CNNNetwork entryPoint : @main
+    inputsInfo : {
+        DataInfo "input" : tensor<1x768xf32>
+    } outputsInfo : {
+        DataInfo "output" : tensor<1x768xf32>
+    }
+
+    // CHECK: func.func @main([[ARG0:%.+]]: tensor<1x768xf32>) -> tensor<1x768xf32> {
+    func.func @main(%arg0: tensor<1x768xf32>) -> tensor<1x768xf32> {
+        
+        %weight = const.Declare tensor<1x768xf32> = dense<1.0> : tensor<1x768xf32>
+        %cst = IE.Reshape(%weight) {shape_value = [768]} : tensor<1x768xf32> -> tensor<768xf32>
+        %out = IE.RMS(%arg0, %cst) {epsilon = 1.0013580322265625E-5 : f64} : tensor<1x768xf32>, tensor<768xf32> -> tensor<1x768xf32>
+
+        return %out : tensor<1x768xf32>
+
+        // CHECK:       [[CST:%.+]] = const.Declare tensor<1x1x1x768xf16> = dense<1.000000e+00> : tensor<1x768xf32>, [#const.Reshape<[1, 1, 1, 768]>, #const.CastElemType<f16>]
+        // CHECK:       [[AFFINE_RESHAPE_0:%.+]] = IE.AffineReshape(%arg0) 
+        // CHECK-LITERAL:   {dim_mapping = [[0, 1, 2], [3]], shape_value = [1, 1, 1, 768]} : tensor<1x768xf32> -> tensor<1x1x1x768xf32>
+        // CHECK:       [[CONVERT_0:%.+]] = IE.Convert([[AFFINE_RESHAPE_0]]) {dstElemType = f16} : tensor<1x1x1x768xf32> -> tensor<1x1x1x768xf16>
+        // CHECK:       [[RMS:%.+]] = IE.RMS([[CONVERT_0]], [[CST]]) {epsilon = 1.0013580322265625E-5 : f64} : tensor<1x1x1x768xf16>, tensor<1x1x1x768xf16> -> tensor<1x1x1x768xf16>
+        // CHECK:       [[CONVERT_1:%.+]] = IE.Convert([[RMS]]) {dstElemType = f32} : tensor<1x1x1x768xf16> -> tensor<1x1x1x768xf32>
+        // CHECK:       [[AFFINE_RESHAPE_1:%.+]] = IE.AffineReshape([[CONVERT_1]]) 
+        // CHECK-LITERAL:   {dim_mapping = [[0], [0], [0], [1]], shape_value = [1, 768]} : tensor<1x1x1x768xf32> -> tensor<1x768xf32>
+        // CHECK:       return [[AFFINE_RESHAPE_1]] : tensor<1x768xf32>
+}
 }

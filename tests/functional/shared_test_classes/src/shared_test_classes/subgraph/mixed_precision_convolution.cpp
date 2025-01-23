@@ -25,10 +25,11 @@ std::string MixedPrecisionConvSubGraphTest::getTestCaseName(
     std::vector<size_t> kernel, stride, dilation;
     std::vector<ptrdiff_t> padBegin, padEnd;
     size_t convOutChannels;
+    LowFpType lowFpType;
     size_t quantLevels;
     QuantizationGranularity quantGranularity;
 
-    std::tie(kernel, stride, padBegin, padEnd, dilation, convOutChannels, quantLevels, quantGranularity) =
+    std::tie(kernel, stride, padBegin, padEnd, dilation, convOutChannels, lowFpType, quantLevels, quantGranularity) =
             mixedPrecisionConvParams;
 
     const std::string sep = "_";
@@ -46,6 +47,7 @@ std::string MixedPrecisionConvSubGraphTest::getTestCaseName(
     result << "D=" << vec2str(dilation) << sep;
     result << "O=" << convOutChannels << sep;
     result << "AP=" << padType << sep;
+    result << "LowFpType=" << lowFpType2String(lowFpType) << sep;
     result << "Levels=" << quantLevels << sep;
     result << "QG=" << quantGranularity << sep;
     result << "netPRC=" << modelType << sep;
@@ -67,10 +69,11 @@ void MixedPrecisionConvSubGraphTest::SetUp() {
     std::vector<size_t> kernel, stride, dilation;
     std::vector<ptrdiff_t> padBegin, padEnd;
     size_t convOutChannels;
+    LowFpType lowFpType;
     size_t quantLevels;
     QuantizationGranularity quantGranularity;
 
-    std::tie(kernel, stride, padBegin, padEnd, dilation, convOutChannels, quantLevels, quantGranularity) =
+    std::tie(kernel, stride, padBegin, padEnd, dilation, convOutChannels, lowFpType, quantLevels, quantGranularity) =
             mixedPrecisionConvParams;
 
     init_input_shapes(static_shapes_to_test_representation({inputShape}));
@@ -82,20 +85,41 @@ void MixedPrecisionConvSubGraphTest::SetUp() {
     std::mt19937 intMersenneEngine(0);
     std::uniform_int_distribution<> int8Dist(-127, 127);
     std::uniform_int_distribution<> int4Dist(-7, 7);
-    auto intGen = [&int8Dist, &int4Dist, &intMersenneEngine, &quantLevels]() {
-        if (quantLevels == 16) {
-            return (int8_t)std::round(int4Dist(intMersenneEngine));
+    std::uniform_int_distribution<> nf4Dist(0, 15);
+    auto intGen = [&int8Dist, &int4Dist, &nf4Dist, &intMersenneEngine, &lowFpType, &quantLevels]() {
+        if (lowFpType != LowFpType::Undefined) {
+            switch (lowFpType) {
+            case LowFpType::NF4:
+                return static_cast<int8_t>(std::round(nf4Dist(intMersenneEngine)));
+            default:
+                VPUX_THROW("unknown low fp type!");
+            }
         } else {
-            return (int8_t)std::round(int8Dist(intMersenneEngine));
+            if (quantLevels == 16) {
+                return static_cast<int8_t>(std::round(int4Dist(intMersenneEngine)));
+            } else {
+                return static_cast<int8_t>(std::round(int8Dist(intMersenneEngine)));
+            }
         }
     };
 
     std::vector<int8_t> weightsData(ov::shape_size(weightsShapes));
     std::generate(weightsData.begin(), weightsData.end(), intGen);
-    auto weightsConst = quantLevels != 16
-                                ? std::make_shared<ov::op::v0::Constant>(ov::element::i8, weightsShapes, weightsData)
-                                : std::make_shared<ov::op::v0::Constant>(ov::element::i4, weightsShapes, weightsData);
 
+    std::shared_ptr<ov::op::v0::Constant> weightsConst;
+    if (lowFpType != LowFpType::Undefined) {
+        switch (lowFpType) {
+        case LowFpType::NF4:
+            weightsConst = std::make_shared<ov::op::v0::Constant>(ov::element::Type_t::nf4, weightsShapes, weightsData);
+            break;
+        default:
+            VPUX_THROW("unknown low fp type!");
+        }
+    } else {
+        weightsConst = quantLevels != 16
+                               ? std::make_shared<ov::op::v0::Constant>(ov::element::i8, weightsShapes, weightsData)
+                               : std::make_shared<ov::op::v0::Constant>(ov::element::i4, weightsShapes, weightsData);
+    }
     const auto weightsConvert = std::make_shared<ov::op::v0::Convert>(weightsConst, ov::element::f16);
 
     std::vector<double> multiplyData(weightsShapes[0], 0.078740157480314959);

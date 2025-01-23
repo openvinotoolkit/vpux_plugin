@@ -15,7 +15,7 @@ func.func @DontTileD2SDMA(%arg0: tensor<1x64x128x128x!qElemType, {order = #NHWC}
     %avgpool = VPU.NCE.AveragePool(%arg0) {
         kernel_size = [1, 1], multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
         pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-        opaque_ppe = #VPU.PPEStub<>, strides = [1, 1]}
+        ppe = #VPU.PPEStub<>, strides = [1, 1]}
             -> tensor<1x64x128x128x!qElemType, {order = #NHWC}>
     %d2s = VPU.DepthToSpace(%avgpool) {
         block_size = 2 : i64, mode = #IE.depth_to_space_mode<BLOCKS_FIRST>,
@@ -23,7 +23,7 @@ func.func @DontTileD2SDMA(%arg0: tensor<1x64x128x128x!qElemType, {order = #NHWC}
         tilingStrategy = [1, 1, 2, 1]} : tensor<1x64x128x128x!qElemType, {order = #NHWC}>
             -> tensor<1x16x256x256x!qElemType, {order = #NHWC}>
     %eltwise = VPU.NCE.Eltwise(%d2s, %d2s) {
-        multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>, op_type = #VPU.eltwise_type<ADD>, opaque_ppe = #VPU.PPEStub<>,
+        multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>, op_type = #VPU.eltwise_type<ADD>, ppe = #VPU.PPEStub<>,
         tilingStrategy = [1, 1, 2, 1]}
             -> tensor<1x16x256x256x!qElemType, {order = #NHWC}>
     return %eltwise : tensor<1x16x256x256x!qElemType, {order = #NHWC}>
@@ -47,7 +47,7 @@ func.func @DontTileD2SDMAWithSlice(%arg0: tensor<1x64x128x129x!qElemType, {order
     %avgpool = VPU.NCE.AveragePool(%arg0) {
         kernel_size = [1, 1], multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
         pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-        opaque_ppe = #VPU.PPEStub<>, strides = [1, 1]}
+        ppe = #VPU.PPEStub<>, strides = [1, 1]}
             -> tensor<1x64x128x129x!qElemType, {order = #NHWC}>
     %slice = VPU.Slice %avgpool [0, 0, 0, 0] [1, 64, 128, 128] : tensor<1x64x128x129x!qElemType, {order = #NHWC}> to tensor<1x64x128x128x!qElemType, {order = #NHWC}>
     %d2s = VPU.DepthToSpace(%slice) {
@@ -56,7 +56,7 @@ func.func @DontTileD2SDMAWithSlice(%arg0: tensor<1x64x128x129x!qElemType, {order
         tilingStrategy = [1, 1, 2, 1]} : tensor<1x64x128x128x!qElemType, {order = #NHWC}>
             -> tensor<1x16x256x256x!qElemType, {order = #NHWC}>
     %eltwise = VPU.NCE.Eltwise(%d2s, %d2s) {
-        multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>, op_type = #VPU.eltwise_type<ADD>, opaque_ppe = #VPU.PPEStub<>,
+        multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>, op_type = #VPU.eltwise_type<ADD>, ppe = #VPU.PPEStub<>,
         tilingStrategy = [1, 1, 2, 1]}
             -> tensor<1x16x256x256x!qElemType, {order = #NHWC}>
     return %eltwise : tensor<1x16x256x256x!qElemType, {order = #NHWC}>

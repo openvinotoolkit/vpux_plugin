@@ -22,7 +22,7 @@ func.func @IncreaseNumTilesForNCEConv(%input: tensor<1x32x1088x480xf16, {order =
     %conv = VPU.NCE.Convolution(%input, %filter, %weightsTBL) {
         multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
         pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
-        opaque_ppe = #VPU.PPEStub<>,
+        ppe = #VPU.PPEStub<>,
         rawFilterShape = [32, 32, 3, 3],
         strides = [1, 1],
         tilingStrategy = [1, 1, 46, 1]
@@ -64,14 +64,14 @@ func.func @NotChangeTilingStrategyForVF(%input: tensor<1x32x135x240xf16, {order 
         %conv0 = VPU.NCE.Convolution(%arg1, %arg2, %arg3) {
             multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
             pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
-            opaque_ppe = #VPU.PPEStub<>,
+            ppe = #VPU.PPEStub<>,
             rawFilterShape = [128, 32, 3, 3],
             strides = [1, 1]
             } -> tensor<1x128x135x240xf16, {order = #NHWC}>
         %conv1 = VPU.NCE.Convolution(%conv0, %arg4, %arg5) {
             multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
             pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
-            opaque_ppe = #VPU.PPEStub<>,
+            ppe = #VPU.PPEStub<>,
             rawFilterShape = [32, 128, 3, 3],
             strides = [1, 1]
             } -> tensor<1x32x135x240xf16, {order = #NHWC}>
@@ -79,7 +79,7 @@ func.func @NotChangeTilingStrategyForVF(%input: tensor<1x32x135x240xf16, {order 
             is_inplace = true,
             multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
             op_type = #VPU.eltwise_type<ADD>,
-            opaque_ppe = #VPU.PPEStub<>
+            ppe = #VPU.PPEStub<>
         } -> tensor<1x32x135x240xf16, {order = #NHWC}>
 
         VPU.Yield %add
@@ -115,7 +115,7 @@ func.func @AvoidExcessiveTiling(%input: tensor<1x256x184x240x!qElemType, {order 
     %conv = VPU.NCE.Convolution(%input, %weights, %weightsTBL) {
         multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
         pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
-        opaque_ppe = #VPU.PPEStub<>,
+        ppe = #VPU.PPEStub<>,
         rawFilterShape = [128, 256, 3, 3],
         strides = [1, 1],
         tilingStrategy = [1, 1, 13, 1]

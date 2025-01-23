@@ -427,3 +427,386 @@ module @FuncArgHasNoUses {
         //CHECK: return [[ARG1]] : memref<1x4x5x5xf16, @DDR>
     }
 }
+
+// -----
+
+// CHECK-LABEL: @NestedFunctionsNetworkInputOutput
+module @NestedFunctionsNetworkInputOutput {
+    IE.CNNNetwork entryPoint : @main
+    inputsInfo : {
+        DataInfo "input" : tensor<1x3x64x64xf16>
+    } outputsInfo : {
+        DataInfo "output" : tensor<1x3x64x64xf16>
+    }
+
+    // CHECK: func.func private @foo2([[ARG0:%.+]]: memref<1x3x64x64xf16, @DDR>, [[ARG1:%.+]]: memref<1x3x64x64xf16, @DDR>)
+    func.func private @foo2(%arg0: memref<1x3x64x64xf16, @DDR>, %arg1: memref<1x3x64x64xf16, @DDR>) -> memref<1x3x64x64xf16, @DDR> {
+        // tmp buffer
+        %0 = VPURT.DeclareBuffer <CMX_NN> [0] <0> -> memref<1x3x64x64xf16, [@CMX_NN, 0]>
+
+        %1 = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+        VPURT.Task updates(%1 : !VPURT.Barrier) {
+            %2 = VPUIP.NNDMA {port = 0 : i64} inputs(%arg0 : memref<1x3x64x64xf16, @DDR>) outputs(%0 : memref<1x3x64x64xf16, [@CMX_NN, 0]>) -> memref<1x3x64x64xf16, [@CMX_NN, 0]>
+        }
+        VPURT.Task waits(%1 : !VPURT.Barrier) {
+            %2 = VPUIP.NNDMA {port = 1 : i64} inputs(%0 : memref<1x3x64x64xf16, [@CMX_NN, 0]>) outputs(%arg1 : memref<1x3x64x64xf16, @DDR>) -> memref<1x3x64x64xf16, @DDR>
+        }
+        return %arg1 : memref<1x3x64x64xf16, @DDR>
+
+        // buffers allocated by main func
+        // CHECK-DAG: [[IN:%.+]] = VPURT.DeclareBuffer <NetworkInput> [0] <0> -> memref<1x3x64x64xf16, @DDR>
+        // CHECK-DAG: [[OUT:%.+]] = VPURT.DeclareBuffer <NetworkOutput> [0] <0> -> memref<1x3x64x64xf16, @DDR>
+        
+        // CHECK-DAG: [[TMP:%.+]] = VPURT.DeclareBuffer <CMX_NN> [0] <0> -> memref<1x3x64x64xf16, [@CMX_NN, 0]>
+        // CHECK-DAG: [[BAR:%.+]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+
+        // CHECK: VPURT.Task updates([[BAR]] : !VPURT.Barrier) {
+        // CHECK:   VPUIP.NNDMA {port = 0 : i64} inputs([[IN]] : memref<1x3x64x64xf16, @DDR>) outputs([[TMP]] : memref<1x3x64x64xf16, [@CMX_NN, 0]>)
+
+        // CHECK: VPURT.Task waits([[BAR]] : !VPURT.Barrier) {
+        // CHECK:   VPUIP.NNDMA {port = 1 : i64} inputs([[TMP]] : memref<1x3x64x64xf16, [@CMX_NN, 0]>) outputs([[OUT]] : memref<1x3x64x64xf16, @DDR>)
+
+        // CHECK: return [[ARG1]] : memref<1x3x64x64xf16, @DDR>
+    }
+
+    // CHECK: func.func private @foo1([[ARG0:%.+]]: memref<1x3x64x64xf16, @DDR>, [[ARG1:%.+]]: memref<1x3x64x64xf16, @DDR>)
+    func.func private @foo1(%arg0: memref<1x3x64x64xf16, @DDR>, %arg1: memref<1x3x64x64xf16, @DDR>) -> memref<1x3x64x64xf16, @DDR> {
+        VPURT.Task {
+            %0 = func.call @foo2(%arg0, %arg1) : (memref<1x3x64x64xf16, @DDR>, memref<1x3x64x64xf16, @DDR>) -> memref<1x3x64x64xf16, @DDR>
+        }
+        return %arg1 : memref<1x3x64x64xf16, @DDR>
+
+        // buffers allocated by parent func - main
+        // CHECK-DAG: [[IN:%.+]] = VPURT.DeclareBuffer <NetworkInput> [0] <0> -> memref<1x3x64x64xf16, @DDR>
+        // CHECK-DAG: [[OUT:%.+]] = VPURT.DeclareBuffer <NetworkOutput> [0] <0> -> memref<1x3x64x64xf16, @DDR>
+
+        // CHECK: VPURT.Task {
+        // CHECK:   func.call @foo2([[IN]], [[OUT]]) : (memref<1x3x64x64xf16, @DDR>, memref<1x3x64x64xf16, @DDR>) -> memref<1x3x64x64xf16, @DDR>
+
+        // CHECK: return [[ARG1]] : memref<1x3x64x64xf16, @DDR>
+    }
+
+    // CHECK: func.func @main([[ARG0:%.+]]: memref<1x3x64x64xf16, @DDR>, [[ARG1:%.+]]: memref<1x3x64x64xf16, @DDR>)
+    func.func @main(%arg0: memref<1x3x64x64xf16, @DDR>, %arg1: memref<1x3x64x64xf16, @DDR>) -> memref<1x3x64x64xf16, @DDR> {
+        VPURT.Task {
+            %0 = func.call @foo1(%arg0, %arg1) : (memref<1x3x64x64xf16, @DDR>, memref<1x3x64x64xf16, @DDR>) -> memref<1x3x64x64xf16, @DDR>
+        }
+        return %arg1 : memref<1x3x64x64xf16, @DDR>
+
+        // CHECK-DAG: [[IN:%.+]] = VPURT.DeclareBuffer <NetworkInput> [0] <0> -> memref<1x3x64x64xf16, @DDR>
+        // CHECK-DAG: [[OUT:%.+]] = VPURT.DeclareBuffer <NetworkOutput> [0] <0> -> memref<1x3x64x64xf16, @DDR>
+
+        // CHECK: VPURT.Task {
+        // CHECK:   func.call @foo1([[IN]], [[OUT]]) : (memref<1x3x64x64xf16, @DDR>, memref<1x3x64x64xf16, @DDR>) -> memref<1x3x64x64xf16, @DDR>
+
+        // CHECK: return [[ARG1]] : memref<1x3x64x64xf16, @DDR>
+    }
+}
+
+// -----
+
+// CHECK-LABEL: @NestedFunctionsDDR
+module @NestedFunctionsDDR {
+    IE.CNNNetwork entryPoint : @main
+    inputsInfo : {
+        DataInfo "input" : tensor<1x3x64x64xf16>
+    } outputsInfo : {
+        DataInfo "output" : tensor<1x3x64x64xf16>
+    }
+
+    // CHECK: func.func private @foo2([[ARG0:%.+]]: memref<1x3x64x64xf16, @DDR>, [[ARG1:%.+]]: memref<1x3x64x64xf16, @DDR>)
+    func.func private @foo2(%arg0: memref<1x3x64x64xf16, @DDR>, %arg1: memref<1x3x64x64xf16, @DDR>) -> memref<1x3x64x64xf16, @DDR> {
+        // tmp buffer
+        %0 = VPURT.DeclareBuffer <CMX_NN> [0] <0> -> memref<1x3x64x64xf16, [@CMX_NN, 0]>
+
+        %1 = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+        VPURT.Task updates(%1 : !VPURT.Barrier) {
+            %2 = VPUIP.NNDMA {port = 0 : i64} inputs(%arg0 : memref<1x3x64x64xf16, @DDR>) outputs(%0 : memref<1x3x64x64xf16, [@CMX_NN, 0]>) -> memref<1x3x64x64xf16, [@CMX_NN, 0]>
+        }
+        VPURT.Task waits(%1 : !VPURT.Barrier) {
+            %2 = VPUIP.NNDMA {port = 1 : i64} inputs(%0 : memref<1x3x64x64xf16, [@CMX_NN, 0]>) outputs(%arg1 : memref<1x3x64x64xf16, @DDR>) -> memref<1x3x64x64xf16, @DDR>
+        }
+        return %arg1 : memref<1x3x64x64xf16, @DDR>
+
+        // buffers allocated by main func
+        // CHECK-DAG: [[IN:%.+]] = VPURT.DeclareBuffer <DDR> <24576> -> memref<1x3x64x64xf16, @DDR>
+        // CHECK-DAG: [[OUT:%.+]] = VPURT.DeclareBuffer <DDR> <49152> -> memref<1x3x64x64xf16, @DDR>
+        
+        // CHECK-DAG: [[TMP:%.+]] = VPURT.DeclareBuffer <CMX_NN> [0] <0> -> memref<1x3x64x64xf16, [@CMX_NN, 0]>
+        // CHECK-DAG: [[BAR:%.+]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+
+        // CHECK: VPURT.Task updates([[BAR]] : !VPURT.Barrier) {
+        // CHECK:   VPUIP.NNDMA {port = 0 : i64} inputs([[IN]] : memref<1x3x64x64xf16, @DDR>) outputs([[TMP]] : memref<1x3x64x64xf16, [@CMX_NN, 0]>)
+
+        // CHECK: VPURT.Task waits([[BAR]] : !VPURT.Barrier) {
+        // CHECK:   VPUIP.NNDMA {port = 1 : i64} inputs([[TMP]] : memref<1x3x64x64xf16, [@CMX_NN, 0]>) outputs([[OUT]] : memref<1x3x64x64xf16, @DDR>)
+
+        // CHECK: return [[ARG1]] : memref<1x3x64x64xf16, @DDR>
+    }
+
+    // CHECK: func.func private @foo1([[ARG0:%.+]]: memref<1x3x64x64xf16, @DDR>, [[ARG1:%.+]]: memref<1x3x64x64xf16, @DDR>)
+    func.func private @foo1(%arg0: memref<1x3x64x64xf16, @DDR>, %arg1: memref<1x3x64x64xf16, @DDR>) -> memref<1x3x64x64xf16, @DDR> {
+        VPURT.Task {
+            %0 = func.call @foo2(%arg0, %arg1) : (memref<1x3x64x64xf16, @DDR>, memref<1x3x64x64xf16, @DDR>) -> memref<1x3x64x64xf16, @DDR>
+        }
+        return %arg1 : memref<1x3x64x64xf16, @DDR>
+
+        // buffers allocated by parent func - main
+        // CHECK-DAG: [[IN:%.+]] = VPURT.DeclareBuffer <DDR> <24576> -> memref<1x3x64x64xf16, @DDR>
+        // CHECK-DAG: [[OUT:%.+]] = VPURT.DeclareBuffer <DDR> <49152> -> memref<1x3x64x64xf16, @DDR>
+
+        // CHECK: VPURT.Task {
+        // CHECK:   func.call @foo2([[IN]], [[OUT]]) : (memref<1x3x64x64xf16, @DDR>, memref<1x3x64x64xf16, @DDR>) -> memref<1x3x64x64xf16, @DDR>
+
+        // CHECK: return [[ARG1]] : memref<1x3x64x64xf16, @DDR>
+    }
+
+    // CHECK: func.func @main([[ARG0:%.+]]: memref<1x3x64x64xf16, @DDR>, [[ARG1:%.+]]: memref<1x3x64x64xf16, @DDR>)
+    func.func @main(%arg0: memref<1x3x64x64xf16, @DDR>, %arg1: memref<1x3x64x64xf16, @DDR>) -> memref<1x3x64x64xf16, @DDR> {
+        %0 = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+        %1 = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+        %2 = VPURT.DeclareBuffer <DDR> <24576> -> memref<1x3x64x64xf16, @DDR>
+        %3 = VPURT.DeclareBuffer <DDR> <49152> -> memref<1x3x64x64xf16, @DDR>
+
+        VPURT.Task updates(%0 : !VPURT.Barrier) {
+            %4 = VPUIP.NNDMA {port = 0 : i64} inputs(%arg0 : memref<1x3x64x64xf16, @DDR>) outputs(%2 : memref<1x3x64x64xf16, @DDR>) -> memref<1x3x64x64xf16, @DDR>
+        }
+        VPURT.Task waits(%0 : !VPURT.Barrier) updates(%1 : !VPURT.Barrier) {
+            %4 = func.call @foo1(%2, %3) : (memref<1x3x64x64xf16, @DDR>, memref<1x3x64x64xf16, @DDR>) -> memref<1x3x64x64xf16, @DDR>
+        }
+        VPURT.Task waits(%1 : !VPURT.Barrier) {
+            %4 = VPUIP.NNDMA {port = 0 : i64} inputs(%3 : memref<1x3x64x64xf16, @DDR>) outputs(%arg1 : memref<1x3x64x64xf16, @DDR>) -> memref<1x3x64x64xf16, @DDR>
+        }
+        return %arg1 : memref<1x3x64x64xf16, @DDR>
+
+        // CHECK-DAG: [[IN:%.+]] = VPURT.DeclareBuffer <NetworkInput> [0] <0> -> memref<1x3x64x64xf16, @DDR>
+        // CHECK-DAG: [[OUT:%.+]] = VPURT.DeclareBuffer <NetworkOutput> [0] <0> -> memref<1x3x64x64xf16, @DDR>
+        // CHECK-DAG: [[BAR0:%.+]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+        // CHECK-DAG: [[BAR1:%.+]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+        // CHECK-DAG: [[TMP0:%.+]] = VPURT.DeclareBuffer <DDR> <24576> -> memref<1x3x64x64xf16, @DDR>
+        // CHECK-DAG: [[TMP1:%.+]] = VPURT.DeclareBuffer <DDR> <49152> -> memref<1x3x64x64xf16, @DDR>
+
+        // CHECK: VPURT.Task updates([[BAR0]] : !VPURT.Barrier) {
+        // CHECK:   VPUIP.NNDMA {port = 0 : i64} inputs([[IN]] : memref<1x3x64x64xf16, @DDR>) outputs([[TMP0]] : memref<1x3x64x64xf16, @DDR>)
+
+        // CHECK: VPURT.Task waits([[BAR0]] : !VPURT.Barrier) updates([[BAR1]] : !VPURT.Barrier) {
+        // CHECK:   func.call @foo1([[TMP0]], [[TMP1]]) : (memref<1x3x64x64xf16, @DDR>, memref<1x3x64x64xf16, @DDR>) -> memref<1x3x64x64xf16, @DDR>
+
+        // CHECK: VPURT.Task waits([[BAR1]] : !VPURT.Barrier) {
+        // CHECK:   VPUIP.NNDMA {port = 0 : i64} inputs([[TMP1]] : memref<1x3x64x64xf16, @DDR>) outputs([[OUT]] : memref<1x3x64x64xf16, @DDR>)
+
+        // CHECK: return [[ARG1]] : memref<1x3x64x64xf16, @DDR>
+    }
+}
+
+// -----
+
+// CHECK-LABEL: @NestedFunctionsMiddleAllocateBuffers
+module @NestedFunctionsMiddleAllocateBuffers {
+    IE.CNNNetwork entryPoint : @main
+    inputsInfo : {
+        DataInfo "input" : tensor<1x3x64x64xf16>
+    } outputsInfo : {
+        DataInfo "output" : tensor<1x3x64x64xf16>
+    }
+
+    // CHECK: func.func private @foo2([[ARG0:%.+]]: memref<1x3x64x64xf16, @DDR>, [[ARG1:%.+]]: memref<1x3x64x64xf16, @DDR>)
+    func.func private @foo2(%arg0: memref<1x3x64x64xf16, @DDR>, %arg1: memref<1x3x64x64xf16, @DDR>) -> memref<1x3x64x64xf16, @DDR> {
+        // tmp buffer
+        %0 = VPURT.DeclareBuffer <CMX_NN> [0] <0> -> memref<1x3x64x64xf16, [@CMX_NN, 0]>
+
+        %1 = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+        VPURT.Task updates(%1 : !VPURT.Barrier) {
+            %2 = VPUIP.NNDMA {port = 0 : i64} inputs(%arg0 : memref<1x3x64x64xf16, @DDR>) outputs(%0 : memref<1x3x64x64xf16, [@CMX_NN, 0]>) -> memref<1x3x64x64xf16, [@CMX_NN, 0]>
+        }
+        VPURT.Task waits(%1 : !VPURT.Barrier) {
+            %2 = VPUIP.NNDMA {port = 1 : i64} inputs(%0 : memref<1x3x64x64xf16, [@CMX_NN, 0]>) outputs(%arg1 : memref<1x3x64x64xf16, @DDR>) -> memref<1x3x64x64xf16, @DDR>
+        }
+        return %arg1 : memref<1x3x64x64xf16, @DDR>
+
+        // buffers allocated by parent func - foo1
+        // CHECK-DAG: [[IN:%.+]] = VPURT.DeclareBuffer <DDR> <73728> -> memref<1x3x64x64xf16, @DDR>
+        // CHECK-DAG: [[OUT:%.+]] = VPURT.DeclareBuffer <DDR> <98304> -> memref<1x3x64x64xf16, @DDR>
+        
+        // CHECK-DAG: [[TMP:%.+]] = VPURT.DeclareBuffer <CMX_NN> [0] <0> -> memref<1x3x64x64xf16, [@CMX_NN, 0]>
+        // CHECK-DAG: [[BAR:%.+]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+
+        // CHECK: VPURT.Task updates([[BAR]] : !VPURT.Barrier) {
+        // CHECK:   VPUIP.NNDMA {port = 0 : i64} inputs([[IN]] : memref<1x3x64x64xf16, @DDR>) outputs([[TMP]] : memref<1x3x64x64xf16, [@CMX_NN, 0]>)
+
+        // CHECK: VPURT.Task waits([[BAR]] : !VPURT.Barrier) {
+        // CHECK:   VPUIP.NNDMA {port = 1 : i64} inputs([[TMP]] : memref<1x3x64x64xf16, [@CMX_NN, 0]>) outputs([[OUT]] : memref<1x3x64x64xf16, @DDR>)
+
+        // CHECK: return [[ARG1]] : memref<1x3x64x64xf16, @DDR>
+    }
+
+    // CHECK: func.func private @foo1([[ARG0:%.+]]: memref<1x3x64x64xf16, @DDR>, [[ARG1:%.+]]: memref<1x3x64x64xf16, @DDR>)
+    func.func private @foo1(%arg0: memref<1x3x64x64xf16, @DDR>, %arg1: memref<1x3x64x64xf16, @DDR>) -> memref<1x3x64x64xf16, @DDR> {
+        %0 = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+        %1 = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+        %2 = VPURT.DeclareBuffer <DDR> <73728> -> memref<1x3x64x64xf16, @DDR>
+        %3 = VPURT.DeclareBuffer <DDR> <98304> -> memref<1x3x64x64xf16, @DDR>
+
+        VPURT.Task updates(%0 : !VPURT.Barrier) {
+            %4 = VPUIP.NNDMA {port = 0 : i64} inputs(%arg0 : memref<1x3x64x64xf16, @DDR>) outputs(%2 : memref<1x3x64x64xf16, @DDR>) -> memref<1x3x64x64xf16, @DDR>
+        }
+        VPURT.Task waits(%0 : !VPURT.Barrier) updates(%1 : !VPURT.Barrier) {
+            %4 = func.call @foo2(%2, %3) : (memref<1x3x64x64xf16, @DDR>, memref<1x3x64x64xf16, @DDR>) -> memref<1x3x64x64xf16, @DDR>
+        }
+        VPURT.Task waits(%1 : !VPURT.Barrier) {
+            %4 = VPUIP.NNDMA {port = 1 : i64} inputs(%3 : memref<1x3x64x64xf16, @DDR>) outputs(%arg1 : memref<1x3x64x64xf16, @DDR>) -> memref<1x3x64x64xf16, @DDR>
+        }
+        return %arg1 : memref<1x3x64x64xf16, @DDR>
+
+        // buffers allocated by parent func - main
+        // CHECK-DAG: [[IN:%.+]] = VPURT.DeclareBuffer <DDR> <24576> -> memref<1x3x64x64xf16, @DDR>
+        // CHECK-DAG: [[OUT:%.+]] = VPURT.DeclareBuffer <DDR> <49152> -> memref<1x3x64x64xf16, @DDR>
+        // CHECK-DAG: [[BAR0:%.+]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+        // CHECK-DAG: [[BAR1:%.+]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+        // CHECK-DAG: [[TMP0:%.+]] = VPURT.DeclareBuffer <DDR> <73728> -> memref<1x3x64x64xf16, @DDR>
+        // CHECK-DAG: [[TMP1:%.+]] = VPURT.DeclareBuffer <DDR> <98304> -> memref<1x3x64x64xf16, @DDR>
+
+        // CHECK: VPURT.Task updates([[BAR0]] : !VPURT.Barrier) {
+        // CHECK:   VPUIP.NNDMA {port = 0 : i64} inputs([[IN]] : memref<1x3x64x64xf16, @DDR>) outputs([[TMP0]] : memref<1x3x64x64xf16, @DDR>)
+
+        // CHECK: VPURT.Task waits([[BAR0]] : !VPURT.Barrier) updates([[BAR1]] : !VPURT.Barrier) {
+        // CHECK:   func.call @foo2([[TMP0]], [[TMP1]]) : (memref<1x3x64x64xf16, @DDR>, memref<1x3x64x64xf16, @DDR>) -> memref<1x3x64x64xf16, @DDR>
+
+        // CHECK: VPURT.Task waits([[BAR1]] : !VPURT.Barrier) {
+        // CHECK:   VPUIP.NNDMA {port = 1 : i64} inputs([[TMP1]] : memref<1x3x64x64xf16, @DDR>) outputs([[OUT]] : memref<1x3x64x64xf16, @DDR>)
+
+        // CHECK: return [[ARG1]] : memref<1x3x64x64xf16, @DDR>
+    }
+
+    // CHECK: func.func @main([[ARG0:%.+]]: memref<1x3x64x64xf16, @DDR>, [[ARG1:%.+]]: memref<1x3x64x64xf16, @DDR>)
+    func.func @main(%arg0: memref<1x3x64x64xf16, @DDR>, %arg1: memref<1x3x64x64xf16, @DDR>) -> memref<1x3x64x64xf16, @DDR> {
+        %0 = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+        %1 = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+        %2 = VPURT.DeclareBuffer <DDR> <24576> -> memref<1x3x64x64xf16, @DDR>
+        %3 = VPURT.DeclareBuffer <DDR> <49152> -> memref<1x3x64x64xf16, @DDR>
+
+        VPURT.Task updates(%0 : !VPURT.Barrier) {
+            %4 = VPUIP.NNDMA {port = 0 : i64} inputs(%arg0 : memref<1x3x64x64xf16, @DDR>) outputs(%2 : memref<1x3x64x64xf16, @DDR>) -> memref<1x3x64x64xf16, @DDR>
+        }
+        VPURT.Task waits(%0 : !VPURT.Barrier) updates(%1 : !VPURT.Barrier) {
+            %4 = func.call @foo1(%2, %3) : (memref<1x3x64x64xf16, @DDR>, memref<1x3x64x64xf16, @DDR>) -> memref<1x3x64x64xf16, @DDR>
+        }
+        VPURT.Task waits(%1 : !VPURT.Barrier) {
+            %4 = VPUIP.NNDMA {port = 0 : i64} inputs(%3 : memref<1x3x64x64xf16, @DDR>) outputs(%arg1 : memref<1x3x64x64xf16, @DDR>) -> memref<1x3x64x64xf16, @DDR>
+        }
+        return %arg1 : memref<1x3x64x64xf16, @DDR>
+
+        // CHECK-DAG: [[IN:%.+]] = VPURT.DeclareBuffer <NetworkInput> [0] <0> -> memref<1x3x64x64xf16, @DDR>
+        // CHECK-DAG: [[OUT:%.+]] = VPURT.DeclareBuffer <NetworkOutput> [0] <0> -> memref<1x3x64x64xf16, @DDR>
+        // CHECK-DAG: [[BAR0:%.+]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+        // CHECK-DAG: [[BAR1:%.+]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+        // CHECK-DAG: [[TMP0:%.+]] = VPURT.DeclareBuffer <DDR> <24576> -> memref<1x3x64x64xf16, @DDR>
+        // CHECK-DAG: [[TMP1:%.+]] = VPURT.DeclareBuffer <DDR> <49152> -> memref<1x3x64x64xf16, @DDR>
+
+        // CHECK: VPURT.Task updates([[BAR0]] : !VPURT.Barrier) {
+        // CHECK:   VPUIP.NNDMA {port = 0 : i64} inputs([[IN]] : memref<1x3x64x64xf16, @DDR>) outputs([[TMP0]] : memref<1x3x64x64xf16, @DDR>)
+
+        // CHECK: VPURT.Task waits([[BAR0]] : !VPURT.Barrier) updates([[BAR1]] : !VPURT.Barrier) {
+        // CHECK:   func.call @foo1([[TMP0]], [[TMP1]]) : (memref<1x3x64x64xf16, @DDR>, memref<1x3x64x64xf16, @DDR>) -> memref<1x3x64x64xf16, @DDR>
+
+        // CHECK: VPURT.Task waits([[BAR1]] : !VPURT.Barrier) {
+        // CHECK:   VPUIP.NNDMA {port = 0 : i64} inputs([[TMP1]] : memref<1x3x64x64xf16, @DDR>) outputs([[OUT]] : memref<1x3x64x64xf16, @DDR>)
+
+        // CHECK: return [[ARG1]] : memref<1x3x64x64xf16, @DDR>
+    }
+}
+
+// -----
+
+#NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
+
+// CHECK-LABEL: @NestedFunctionsWithViewOps
+module @NestedFunctionsWithViewOps {
+    IE.CNNNetwork entryPoint : @main
+    inputsInfo : {
+        DataInfo "input" : tensor<1x4x64x64xf16>
+    } outputsInfo : {
+        DataInfo "output" : tensor<1x8x32x64xf16>
+    }
+
+    // CHECK: func.func private @foo2([[ARG0:%.+]]: memref<1x2x64x64xf16, {order = #NCHW, strides = [16384, 4096, 64, 1]}, @DDR>, [[ARG1:%.+]]: memref<1x2x64x64xf16, {order = #NCHW, strides = [16384, 4096, 64, 1]}, @DDR>)
+    func.func private @foo2(%arg0: memref<1x2x64x64xf16, {order = #NCHW, strides = [16384, 4096, 64, 1]}, @DDR>, %arg1: memref<1x2x64x64xf16, {order = #NCHW, strides = [16384, 4096, 64, 1]}, @DDR>) -> memref<1x2x64x64xf16, {order = #NCHW, strides = [16384, 4096, 64, 1]}, @DDR> {
+        // tmp buffer
+        %0 = VPURT.DeclareBuffer <CMX_NN> [0] <0> -> memref<1x2x64x64xf16, {order = #NCHW, strides = [16384, 4096, 64, 1]}, [@CMX_NN, 0]>
+
+        %1 = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+        VPURT.Task updates(%1 : !VPURT.Barrier) {
+            %3 = VPUIP.NNDMA {port = 0 : i64} inputs(%arg0 : memref<1x2x64x64xf16, {order = #NCHW, strides = [16384, 4096, 64, 1]}, @DDR>) outputs(%0 : memref<1x2x64x64xf16, {order = #NCHW, strides = [16384, 4096, 64, 1]}, [@CMX_NN, 0]>) -> memref<1x2x64x64xf16, {order = #NCHW, strides = [16384, 4096, 64, 1]}, [@CMX_NN, 0]>
+        }
+        VPURT.Task waits(%1 : !VPURT.Barrier) {
+            %3 = VPUIP.NNDMA {port = 1 : i64} inputs(%0 : memref<1x2x64x64xf16, {order = #NCHW, strides = [16384, 4096, 64, 1]}, [@CMX_NN, 0]>) outputs(%arg1 : memref<1x2x64x64xf16, {order = #NCHW, strides = [16384, 4096, 64, 1]}, @DDR>) -> memref<1x2x64x64xf16, {order = #NCHW, strides = [16384, 4096, 64, 1]}, @DDR>
+        }
+        
+        return %arg1 : memref<1x2x64x64xf16, {order = #NCHW, strides = [16384, 4096, 64, 1]}, @DDR>
+
+        // buffers allocated by parent func - foo1
+        // CHECK-DAG: [[IN:%.+]] = VPURT.DeclareBuffer <NetworkInput> [0] <0> -> memref<1x4x64x64xf16, @DDR>
+        // CHECK-DAG: [[OUT:%.+]] = VPURT.DeclareBuffer <NetworkOutput> [0] <0> -> memref<1x8x32x64xf16, @DDR>
+        
+        // CHECK-DAG: [[TMP:%.+]] = VPURT.DeclareBuffer <CMX_NN> [0] <0> -> memref<1x2x64x64xf16, {order = #NCHW, strides = [16384, 4096, 64, 1]}, [@CMX_NN, 0]>
+        // CHECK-DAG: [[BAR:%.+]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+
+        // Note: Duplicated view ops
+        // CHECK:     [[SV_IN:%.+]] = VPUIP.SubView [[IN]] [0, 1, 0, 0] [1, 2, 64, 64] : memref<1x4x64x64xf16, @DDR> to memref<1x2x64x64xf16, {order = #NCHW, strides = [16384, 4096, 64, 1]}, @DDR>
+        // CHECK:     [[RESHAPE:%.+]] = VPUIP.GenericReshape inputs([[OUT]] : memref<1x8x32x64xf16, @DDR>) -> memref<1x4x64x64xf16, @DDR>
+        // CHECK:     [[SV_OUT:%.+]] = VPUIP.SubView [[RESHAPE]] [0, 0, 0, 0] [1, 2, 64, 64] : memref<1x4x64x64xf16, @DDR> to memref<1x2x64x64xf16, {order = #NCHW, strides = [16384, 4096, 64, 1]}, @DDR>
+
+        // CHECK: VPURT.Task updates([[BAR]] : !VPURT.Barrier) {
+        // CHECK:   VPUIP.NNDMA {port = 0 : i64} inputs([[SV_IN]] : memref<1x2x64x64xf16, {order = #NCHW, strides = [16384, 4096, 64, 1]}, @DDR>) outputs([[TMP]] : memref<1x2x64x64xf16, {order = #NCHW, strides = [16384, 4096, 64, 1]}, [@CMX_NN, 0]>)
+
+        // CHECK: VPURT.Task waits([[BAR]] : !VPURT.Barrier) {
+        // CHECK:   VPUIP.NNDMA {port = 1 : i64} inputs([[TMP]] : memref<1x2x64x64xf16, {order = #NCHW, strides = [16384, 4096, 64, 1]}, [@CMX_NN, 0]>) outputs([[SV_OUT]] : memref<1x2x64x64xf16, {order = #NCHW, strides = [16384, 4096, 64, 1]}, @DDR>)
+
+        // CHECK: return [[ARG1]] : memref<1x2x64x64xf16, {order = #NCHW, strides = [16384, 4096, 64, 1]}, @DDR>
+    }
+
+    // CHECK: func.func private @foo1([[ARG0:%.+]]: memref<1x3x64x64xf16, {order = #NCHW, strides = [16384, 4096, 64, 1]}, @DDR>, [[ARG1:%.+]]: memref<1x8x32x64xf16, @DDR>)
+    func.func private @foo1(%arg0: memref<1x3x64x64xf16, {order = #NCHW, strides = [16384, 4096, 64, 1]}, @DDR>, %arg1: memref<1x8x32x64xf16, @DDR>) -> memref<1x8x32x64xf16, @DDR> {       
+        %0 = VPUIP.SubView %arg0 [0, 0, 0, 0] [1, 2, 64, 64] : memref<1x3x64x64xf16, {order = #NCHW, strides = [16384, 4096, 64, 1]}, @DDR> to memref<1x2x64x64xf16, {order = #NCHW, strides = [16384, 4096, 64, 1]}, @DDR>
+        %1 = VPUIP.GenericReshape inputs(%arg1 : memref<1x8x32x64xf16, @DDR>) -> memref<1x4x64x64xf16, @DDR>
+        %2 = VPUIP.SubView %1 [0, 0, 0, 0] [1, 2, 64, 64] : memref<1x4x64x64xf16, @DDR> to memref<1x2x64x64xf16, {order = #NCHW, strides = [16384, 4096, 64, 1]}, @DDR>
+
+        VPURT.Task {
+            %3 = func.call @foo2(%0, %2) : (memref<1x2x64x64xf16, {order = #NCHW, strides = [16384, 4096, 64, 1]}, @DDR>, memref<1x2x64x64xf16, {order = #NCHW, strides = [16384, 4096, 64, 1]}, @DDR>) -> memref<1x2x64x64xf16, {order = #NCHW, strides = [16384, 4096, 64, 1]}, @DDR>
+        }
+        return %arg1 : memref<1x8x32x64xf16, @DDR>
+
+        // buffers allocated by parent func - main
+        // CHECK-DAG: [[IN:%.+]] = VPURT.DeclareBuffer <NetworkInput> [0] <0> -> memref<1x4x64x64xf16, @DDR>
+        // CHECK-DAG: [[OUT:%.+]] = VPURT.DeclareBuffer <NetworkOutput> [0] <0> -> memref<1x8x32x64xf16, @DDR>
+
+        // CHECK:     [[SV_IN:%.+]] = VPUIP.SubView [[IN]] [0, 1, 0, 0] [1, 2, 64, 64] : memref<1x4x64x64xf16, @DDR> to memref<1x2x64x64xf16, {order = #NCHW, strides = [16384, 4096, 64, 1]}, @DDR>
+        // CHECK:     [[RESHAPE:%.+]] = VPUIP.GenericReshape inputs([[OUT]] : memref<1x8x32x64xf16, @DDR>) -> memref<1x4x64x64xf16, @DDR>
+        // CHECK:     [[SV_OUT:%.+]] = VPUIP.SubView [[RESHAPE]] [0, 0, 0, 0] [1, 2, 64, 64] : memref<1x4x64x64xf16, @DDR> to memref<1x2x64x64xf16, {order = #NCHW, strides = [16384, 4096, 64, 1]}, @DDR>
+
+        // CHECK: VPURT.Task {
+        // CHECK:   func.call @foo2([[SV_IN]], [[SV_OUT]]) : (memref<1x2x64x64xf16, {order = #NCHW, strides = [16384, 4096, 64, 1]}, @DDR>, memref<1x2x64x64xf16, {order = #NCHW, strides = [16384, 4096, 64, 1]}, @DDR>) -> memref<1x2x64x64xf16, {order = #NCHW, strides = [16384, 4096, 64, 1]}, @DDR>
+
+        // CHECK: return [[ARG1]] : memref<1x8x32x64xf16, @DDR>
+    }
+
+    // CHECK: func.func @main([[ARG0:%.+]]: memref<1x4x64x64xf16, @DDR>, [[ARG1:%.+]]: memref<1x8x32x64xf16, @DDR>)
+    func.func @main(%arg0: memref<1x4x64x64xf16, @DDR>, %arg1: memref<1x8x32x64xf16, @DDR>) -> memref<1x8x32x64xf16, @DDR> {
+        %0 = VPUIP.SubView %arg0 [0, 1, 0, 0] [1, 3, 64, 64] : memref<1x4x64x64xf16, @DDR> to memref<1x3x64x64xf16, {order = #NCHW, strides = [16384, 4096, 64, 1]}, @DDR>
+
+        VPURT.Task {
+            %1 = func.call @foo1(%0, %arg1) : (memref<1x3x64x64xf16, {order = #NCHW, strides = [16384, 4096, 64, 1]}, @DDR>, memref<1x8x32x64xf16, @DDR>) -> memref<1x8x32x64xf16, @DDR>
+        }
+        return %arg1 : memref<1x8x32x64xf16, @DDR>
+
+        // CHECK-DAG: [[IN:%.+]] = VPURT.DeclareBuffer <NetworkInput> [0] <0> -> memref<1x4x64x64xf16, @DDR>
+        // CHECK-DAG: [[OUT:%.+]] = VPURT.DeclareBuffer <NetworkOutput> [0] <0> -> memref<1x8x32x64xf16, @DDR>
+
+        // CHECK:     [[SV:%.+]] = VPUIP.SubView [[IN]] [0, 1, 0, 0] [1, 3, 64, 64] : memref<1x4x64x64xf16, @DDR> to memref<1x3x64x64xf16, {order = #NCHW, strides = [16384, 4096, 64, 1]}, @DDR>
+
+        // CHECK: VPURT.Task {
+        // CHECK:   func.call @foo1([[SV]], [[OUT]]) : (memref<1x3x64x64xf16, {order = #NCHW, strides = [16384, 4096, 64, 1]}, @DDR>, memref<1x8x32x64xf16, @DDR>) -> memref<1x8x32x64xf16, @DDR>
+
+        // CHECK: return [[ARG1]] : memref<1x8x32x64xf16, @DDR>
+    }
+}

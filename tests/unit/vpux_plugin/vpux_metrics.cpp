@@ -7,8 +7,8 @@
 
 #include <gmock/gmock-matchers.h>
 
-#include "intel_npu/al/config/common.hpp"
-#include "intel_npu/al/config/runtime.hpp"
+#include "intel_npu/config/common.hpp"
+#include "intel_npu/config/runtime.hpp"
 #include "vpux_metrics.hpp"
 
 #include "test_utils/npu_backends_test.hpp"

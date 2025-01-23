@@ -1,0 +1,74 @@
+<?xml version="1.0"?>
+<net name="Model0" version="11">
+	<layers>
+		<layer id="0" name="param_node_0" type="Parameter" version="opset1">
+			<data shape="1..32" element_type="f32" />
+			<output>
+				<port id="0" precision="FP32" names="param_node_0">
+					<dim>-1</dim>
+				</port>
+			</output>
+		</layer>
+		<layer id="1" name="Constant_2" type="Const" version="opset1">
+			<data element_type="i64" shape="1" offset="0" size="8" />
+			<output>
+				<port id="0" precision="I64">
+					<dim>1</dim>
+				</port>
+			</output>
+		</layer>
+		<layer id="2" name="Constant_3" type="Const" version="opset1">
+			<data element_type="i64" shape="1" offset="8" size="8" />
+			<output>
+				<port id="0" precision="I64">
+					<dim>1</dim>
+				</port>
+			</output>
+		</layer>
+		<layer id="3" name="Constant_4" type="Const" version="opset1">
+			<data element_type="i64" shape="1" offset="0" size="8" />
+			<output>
+				<port id="0" precision="I64">
+					<dim>1</dim>
+				</port>
+			</output>
+		</layer>
+		<layer id="4" name="StridedSlice_5" type="StridedSlice" version="opset1">
+			<data begin_mask="0" end_mask="0" new_axis_mask="" shrink_axis_mask="0" ellipsis_mask="" />
+			<input>
+				<port id="0" precision="FP32">
+					<dim>-1</dim>
+				</port>
+				<port id="1" precision="I64">
+					<dim>1</dim>
+				</port>
+				<port id="2" precision="I64">
+					<dim>1</dim>
+				</port>
+				<port id="3" precision="I64">
+					<dim>1</dim>
+				</port>
+			</input>
+			<output>
+				<port id="4" precision="FP32">
+					<dim>-1</dim>
+				</port>
+			</output>
+		</layer>
+		<layer id="5" name="Result_6" type="Result" version="opset1">
+			<input>
+				<port id="0" precision="FP32">
+					<dim>-1</dim>
+				</port>
+			</input>
+		</layer>
+	</layers>
+	<edges>
+		<edge from-layer="0" from-port="0" to-layer="4" to-port="0" />
+		<edge from-layer="1" from-port="0" to-layer="4" to-port="1" />
+		<edge from-layer="2" from-port="0" to-layer="4" to-port="2" />
+		<edge from-layer="3" from-port="0" to-layer="4" to-port="3" />
+		<edge from-layer="4" from-port="4" to-layer="5" to-port="0" />
+	</edges>
+	<rt_info />
+</net>

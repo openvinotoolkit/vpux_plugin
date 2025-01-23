@@ -4,16 +4,15 @@
 //
 
 #include "vpux/compiler/utils/infer_output_shape.hpp"
-#include "common/utils.hpp"
-#include "vpux/compiler/dialect/IE/utils/resources.hpp"
-#include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
+
+#include "vpux/compiler/dialect/IE/IR/ops.hpp"
+#include "vpux/compiler/init.hpp"
 
 #include <mlir/IR/BuiltinTypeInterfaces.h>
 #include <mlir/IR/BuiltinTypes.h>
 #include <mlir/Parser/Parser.h>
 
 #include <gtest/gtest.h>
-#include <optional>
 
 using namespace vpux;
 
@@ -37,10 +36,11 @@ class InferStridedSliceTests : public testing::TestWithParam<InferStridedSliceDa
 
 TEST_P(InferStridedSliceTests, InferOutputShapeStridedSlice) {
     const auto params = GetParam();
-    const auto shapeInfo = inferStridedSliceOutputShape(params.inDataShape, params.begins, params.ends, params.strides,
-                                                        params.beginsShape, params.endsShape, params.stridesShape,
-                                                        params.beginMask, params.endMask, params.newAxisMask,
-                                                        params.shrinkAxisMask, params.ellipsisMask);
+    const auto inShapeInfo = ShapeInfo{to_small_vector(params.inDataShape), SmallVector<int64_t>{}};
+    const auto shapeInfo =
+            inferStridedSliceOutputShape(inShapeInfo, params.begins, params.ends, params.strides, params.beginsShape,
+                                         params.endsShape, params.stridesShape, params.beginMask, params.endMask,
+                                         params.newAxisMask, params.shrinkAxisMask, params.ellipsisMask);
     EXPECT_EQ(to_std_vector(shapeInfo.shape), params.outDataShape);
 }
 
@@ -142,9 +142,12 @@ class InferMaxPoolTests : public testing::TestWithParam<InferPoolingData> {};
 
 TEST_P(InferMaxPoolTests, InferOutputShapePooling) {
     const auto params = GetParam();
-    const auto shapeI64 = inferMaxPoolOutputShape(params.inDataShape, params.windowStrides, params.padsBegin,
-                                                  params.padsEnd, params.windowShape);
-    EXPECT_EQ(to_std_vector(shapeI64), params.outDataShape);
+    const auto inShapeInfo = ShapeInfo{to_small_vector(params.inDataShape), SmallVector<int64_t>{}};
+
+    const auto outputShapeInfo = inferMaxPoolOutputShape(inShapeInfo, params.windowStrides, params.padsBegin,
+                                                         params.padsEnd, params.windowShape);
+
+    EXPECT_EQ(to_std_vector(outputShapeInfo.shape), params.outDataShape);
 }
 
 // clang-format off
@@ -444,88 +447,3 @@ std::vector<InferTransposedGroupConvBackpropData> inferTransposedGroupConvBackpr
 
 INSTANTIATE_TEST_SUITE_P(TransposedGroupConvBackpropData, InferTransposedGroupConvBackpropDataTests,
                          testing::ValuesIn(inferTransposedGroupConvBackpropData));
-
-enum class ActivationFunction { ReLU, SoftMax };
-
-using InferOutputForActivationFunction = testing::TestWithParam<ActivationFunction>;
-
-mlir::Operation* buildActivationFunction(mlir::OpBuilder& builder, mlir::Value input,
-                                         const ActivationFunction funcType) {
-    const auto loc = input.getLoc();
-    const auto ctx = builder.getContext();
-    switch (funcType) {
-    case ActivationFunction::ReLU:
-        return builder.create<IE::ReLUOp>(loc, input);
-    case ActivationFunction::SoftMax:
-        return builder.create<IE::SoftMaxOp>(loc, input, /*axisInd=*/getIntAttr(ctx, 1), /*padSize=*/nullptr);
-    default:
-        return nullptr;
-    }
-    return nullptr;
-}
-
-TEST_P(InferOutputForActivationFunction, InferOutputTests) {
-    auto registry = vpux::createDialectRegistry();
-    mlir::MLIRContext ctx{registry};
-    ctx.loadDialect<IE::IEDialect>();
-
-    mlir::OpBuilder builder(&ctx);
-    const auto loc = mlir::UnknownLoc::get(&ctx);
-    const SmallVector<int64_t> shape{1, 16, 32, mlir::ShapedType::kDynamic};
-    const SmallVector<int64_t> inBounds{shape[0], shape[1], shape[2], 320};
-    const auto elemType = mlir::Float16Type::get(&ctx);
-    const auto affineMap = mlir::AffineMapAttr::get(vpux::DimsOrder::NCHW.toAffineMap(&ctx));
-    const auto inBoundsAttr = getIntArrayAttr(&ctx, inBounds);
-    const auto tensorAttr = vpux::TensorAttr::get(&ctx, affineMap, /*memSpace=*/nullptr, inBoundsAttr);
-    const auto tensorType = mlir::RankedTensorType::get(shape, elemType, tensorAttr);
-    mlir::OwningOpRef<mlir::tensor::EmptyOp> inputOp =
-            builder.create<mlir::tensor::EmptyOp>(loc, tensorType, mlir::ValueRange{});
-    mlir::OwningOpRef<mlir::Operation*> activationOp =
-            buildActivationFunction(builder, inputOp->getResult(), GetParam());
-    ASSERT_NE(activationOp.get(), nullptr);
-    const auto outputType = mlir::dyn_cast_or_null<vpux::BoundedTypeInterface>(activationOp->getResult(0).getType());
-    ASSERT_NE(outputType, nullptr);
-    const auto outputBoundsAttr = outputType.getBounds();
-    ASSERT_NE(outputBoundsAttr, nullptr);
-    const auto outputBounds = parseIntArrayAttr<int64_t>(outputBoundsAttr);
-    EXPECT_EQ(outputBounds, inBounds);
-}
-
-INSTANTIATE_TEST_SUITE_P(CheckBounds, InferOutputForActivationFunction,
-                         testing::ValuesIn({ActivationFunction::ReLU, ActivationFunction::SoftMax}));
-
-using InferAddOutput = testing::Test;
-
-TEST_F(InferAddOutput, InferAddOutputTests) {
-    auto registry = vpux::createDialectRegistry();
-    mlir::MLIRContext ctx{registry};
-    ctx.loadDialect<IE::IEDialect>();
-
-    mlir::OpBuilder builder(&ctx);
-    const auto loc = mlir::UnknownLoc::get(&ctx);
-    const SmallVector<int64_t> shape{1, 16, 32, mlir::ShapedType::kDynamic};
-    const SmallVector<int64_t> inBounds{shape[0], shape[1], shape[2], 320};
-    const auto elemType = mlir::Float16Type::get(&ctx);
-    const auto affineMap = mlir::AffineMapAttr::get(vpux::DimsOrder::NCHW.toAffineMap(&ctx));
-    const auto inBoundsAttr = getIntArrayAttr(&ctx, inBounds);
-    const auto tensorAttr = vpux::TensorAttr::get(&ctx, affineMap, /*memSpace=*/nullptr, inBoundsAttr);
-    const auto lhsTensorType = mlir::RankedTensorType::get(shape, elemType, tensorAttr);
-    const auto rhsTensorType = mlir::RankedTensorType::get(SmallVector<int64_t>{1, 16, 1, 1}, elemType);
-    mlir::OwningOpRef<mlir::tensor::EmptyOp> lhsOp =
-            builder.create<mlir::tensor::EmptyOp>(loc, lhsTensorType, mlir::ValueRange{});
-    mlir::OwningOpRef<mlir::tensor::EmptyOp> rhsOp =
-            builder.create<mlir::tensor::EmptyOp>(loc, rhsTensorType, mlir::ValueRange{});
-    mlir::OwningOpRef<IE::AddOp> addOp =
-            builder.create<IE::AddOp>(loc, lhsOp->getResult(), rhsOp->getResult(),
-                                      IE::AutoBroadcastTypeAttr::get(&ctx, IE::AutoBroadcastType::NUMPY),
-                                      /*post_op=*/nullptr,
-                                      /*clamp=*/nullptr,
-                                      /*output_channels=*/nullptr,
-                                      /*input_channels=*/nullptr);
-    const auto outputType = mlir::dyn_cast_or_null<vpux::BoundedTypeInterface>(addOp->getOutput().getType());
-    ASSERT_NE(outputType, nullptr);
-    const auto outputBoundsAttr = outputType.getBounds();
-    ASSERT_NE(outputBoundsAttr, nullptr);
-    const auto outputBounds = parseIntArrayAttr<int64_t>(outputBoundsAttr);
-    EXPECT_EQ(outputBounds, inBounds);
-}

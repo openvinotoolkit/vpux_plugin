@@ -17,7 +17,7 @@ func.func @DoNotFuseNCEPermute(%arg0: tensor<1x3x1568x32xf16>) -> tensor<1x4x156
         dstElemType = !qElemType,
         dstOrder = #NHWC,
         expandedChannels = 4 : i64,
-        opaque_ppe = #VPU.PPEStub<>
+        ppe = #VPU.PPEStub<>
     } -> tensor<1x4x1568x32x!qElemType, {order = #NHWC}>
 
     %sparsify1 = VPU.Sparsify(%nce_permute) : tensor<1x4x1568x32x!qElemType, {order = #NHWC}>

@@ -60,9 +60,14 @@ protected:
 
 TEST_P(DynamicUnsqueezeLayerTest, NPU3720_HW) {
     abs_threshold = 0.0f;
-    setMLIRCompilerType();
     setDefaultHardwareMode();
     run(Platform::NPU3720);
+}
+
+TEST_P(DynamicUnsqueezeLayerTest, NPU4000_HW) {
+    abs_threshold = 0.0f;
+    setDefaultHardwareMode();
+    run(Platform::NPU4000);
 }
 
 const std::vector<BoundedShape> inShapes = {boundedShape(1, 1, 10)};

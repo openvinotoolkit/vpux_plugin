@@ -75,7 +75,6 @@ TEST_P(GridSampleLayerTestCommon, NPU4000_HW) {
     VpuOv2LayerTest::setDefaultHardwareMode();
     VpuOv2LayerTest::run(Platform::NPU4000);
 }
-
 }  // namespace test
 }  // namespace ov
 
@@ -128,7 +127,6 @@ INSTANTIATE_TEST_SUITE_P(smoke_precommit_GridSample, GridSampleLayerTestCommon, 
 INSTANTIATE_TEST_SUITE_P(smoke_precommit_GridSample_Tiling, GridSampleLayerTestCommon, paramsTiling,
                          GridSampleLayerTest::getTestCaseName);
 
-// E#128241 Tiling handled separately for 5010 and 6010
 INSTANTIATE_TEST_SUITE_P(smoke_precommit_GridSample, GridSampleLayerTest_no_Tiling, params,
                          GridSampleLayerTest::getTestCaseName);
 

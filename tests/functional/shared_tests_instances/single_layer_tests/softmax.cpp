@@ -4,17 +4,36 @@
 //
 
 #include "shared_test_classes/single_op/softmax.hpp"
-#include <algorithm>
+#include <sstream>
 #include <vector>
+#include "pretty_test_arguments.hpp"
+#include "shared_test_classes/base/ov_subgraph.hpp"
 #include "vpu_ov2_layer_test.hpp"
 
-namespace ov {
-
-namespace test {
+namespace ov::test {
 
 class SoftMaxLayerTestCommon : public subgraph::SoftMaxLayerTest, virtual public VpuOv2LayerTest {};
 
+struct SkipDynamicShapes {
+    SkipDynamicShapes(SoftMaxLayerTestCommon::ParamType params): params(std::move(params)) {
+    }
+
+    inline void operator()(std::stringstream& skip) const {
+        const auto inputShapes = std::get<3>(params);
+        const auto partialShape = inputShapes.first;
+        if (partialShape.is_dynamic()) {
+            skip << "Dynamic shapes are not supported";
+        }
+    }
+
+    SoftMaxLayerTestCommon::ParamType params;
+};
+
+// SW pipeline tests are needed to test different axis
+// HW pipeline adds reorder to put axis dimension last
 TEST_P(SoftMaxLayerTestCommon, NPU3720_SW) {
+    setSkipCompilationCallback(SkipDynamicShapes(GetParam()));
+
     abs_threshold = 0.01;
     setReferenceSoftwareMode();
     run(Platform::NPU3720);
@@ -27,6 +46,8 @@ TEST_P(SoftMaxLayerTestCommon, NPU3720_HW) {
 }
 
 TEST_P(SoftMaxLayerTestCommon, NPU4000_SW) {
+    setSkipCompilationCallback(SkipDynamicShapes(GetParam()));
+
     abs_threshold = 1e-3;
     setReferenceSoftwareMode();
     run(Platform::NPU4000);
@@ -37,10 +58,7 @@ TEST_P(SoftMaxLayerTestCommon, NPU4000_HW) {
     setDefaultHardwareMode();
     run(Platform::NPU4000);
 }
-
-}  // namespace test
-
-}  // namespace ov
+}  // namespace ov::test
 
 using ov::test::SoftMaxLayerTestCommon;
 
@@ -119,7 +137,7 @@ INSTANTIATE_TEST_SUITE_P(smoke_precommit_SoftMax4D, SoftMaxLayerTestCommon, prec
 //
 
 const std::vector<ov::Shape> inShapes = {{1, 20, 64, 512}};
-const std::vector<size_t> axis = {1};
+const std::vector<size_t> axis = {2};
 
 const auto paramsTilingCases = testing::Combine(
         testing::ValuesIn(modelTypes), testing::ValuesIn(inputTypes), testing::ValuesIn(outputTypes),
@@ -127,6 +145,60 @@ const auto paramsTilingCases = testing::Combine(
         testing::Values(ov::test::utils::DEVICE_NPU), testing::Values(ov::test::Config{}));
 
 INSTANTIATE_TEST_SUITE_P(smoke_TilingSoftMax, SoftMaxLayerTestCommon, paramsTilingCases,
+                         SoftMaxLayerTestCommon::getTestCaseName);
+
+//
+// Dynamic shape use cases
+//
+
+const std::vector<ov::test::InputShape> inShapesDynUseCase0 = {
+        generateShapes(32_Dyn, 1, 548),
+};
+
+const std::vector<size_t> axisDynUseCase0 = {2};
+
+const auto paramsDynUseCase0 =
+        testing::Combine(testing::ValuesIn(modelTypes), testing::ValuesIn(inputTypes), testing::ValuesIn(outputTypes),
+                         testing::ValuesIn(inShapesDynUseCase0), testing::ValuesIn(axisDynUseCase0),
+                         testing::Values(ov::test::utils::DEVICE_NPU), testing::Values(ov::test::Config{}));
+
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_SoftMax_DynUseCase0, SoftMaxLayerTestCommon, paramsDynUseCase0,
+                         SoftMaxLayerTestCommon::getTestCaseName);
+
+//
+// Dynamic shapes smoke
+//
+
+INSTANTIATE_TEST_SUITE_P(smoke_SoftMax_3D_DynSmoke_Axis2, SoftMaxLayerTestCommon,
+                         testing::Combine(testing::Values(ov::element::f16),                    // Model type
+                                          testing::Values(ov::element::f16),                    // In type
+                                          testing::Values(ov::element::f16),                    // Out type
+                                          testing::Values(generateShapes(32_Dyn, 32_Dyn, 64)),  // Shape
+                                          testing::Values(2),                                   // Axis
+                                          testing::Values(ov::test::utils::DEVICE_NPU),
+                                          testing::Values(ov::test::Config{})),
+                         SoftMaxLayerTestCommon::getTestCaseName);
+
+// Hangs: E#145670
+INSTANTIATE_TEST_SUITE_P(DISABLED_smoke_SoftMax_3D_DynSmoke_Axis1, SoftMaxLayerTestCommon,
+                         testing::Combine(testing::Values(ov::element::f16),                    // Model type
+                                          testing::Values(ov::element::f16),                    // In type
+                                          testing::Values(ov::element::f16),                    // Out type
+                                          testing::Values(generateShapes(32_Dyn, 32, 64_Dyn)),  // Shape
+                                          testing::Values(1),                                   // Axis
+                                          testing::Values(ov::test::utils::DEVICE_NPU),
+                                          testing::Values(ov::test::Config{})),
+                         SoftMaxLayerTestCommon::getTestCaseName);
+
+// Hangs: E#145670
+INSTANTIATE_TEST_SUITE_P(DISABLED_smoke_SoftMax_3D_DynSmoke_Axis0, SoftMaxLayerTestCommon,
+                         testing::Combine(testing::Values(ov::element::f16),                    // Model type
+                                          testing::Values(ov::element::f16),                    // In type
+                                          testing::Values(ov::element::f16),                    // Out type
+                                          testing::Values(generateShapes(32, 32_Dyn, 64_Dyn)),  // Shape
+                                          testing::Values(0),                                   // Axis
+                                          testing::Values(ov::test::utils::DEVICE_NPU),
+                                          testing::Values(ov::test::Config{})),
                          SoftMaxLayerTestCommon::getTestCaseName);
 
 }  // namespace

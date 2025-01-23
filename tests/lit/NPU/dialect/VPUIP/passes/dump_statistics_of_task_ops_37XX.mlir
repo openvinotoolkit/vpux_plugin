@@ -328,6 +328,8 @@ func.func @main(%1: memref<1x4x512x1xf16, {order = #NCWH}>,
 // CHECK:    VPUIP.SW.Kernel - 3 ops
 // CHECK:      builtin_clamp - 1 ops
 // CHECK:      builtin_mvn - 2 ops
+// CHECK:  Barrier statistics:
+// CHECK:    VPURT.ConfigureBarrierOp - 4 ops
 // CHECK:  Weights statistics
 // CHECK:    Total weights - count: 0, size: 0 bytes (no compression)
 // CHECK:  Const swizzling statistics:

@@ -1,4 +1,4 @@
-// Copyright (C) Intel Corporation
+// Copyright (C) 2023 - 2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -127,7 +127,6 @@ TEST_P(RangeLayerTestCommon, NPU4000_HW) {
     VpuOv2LayerTest::setDefaultHardwareMode();
     VpuOv2LayerTest::run(Platform::NPU4000);
 }
-
 }  // namespace test
 
 }  // namespace ov
@@ -158,10 +157,11 @@ INSTANTIATE_TEST_SUITE_P(smoke_precommit_Range, RangeLayerTestCommon, testRangeP
 INSTANTIATE_TEST_SUITE_P(smoke_negative_Range, RangeLayerTestCommon, testRangeNegativeStepParams,
                          RangeLayerTestCommon::getTestCaseName);
 // dynamic shapes
-INSTANTIATE_TEST_SUITE_P(DISABLED_TMP_smoke_precommit_Range, RangeLayerTestDynamic, testRangePositiveStepParams,
+// Tracked by E-148203.
+INSTANTIATE_TEST_SUITE_P(DISABLED_smoke_precommit_Range, RangeLayerTestDynamic, testRangePositiveStepParams,
                          RangeLayerTestDynamic::getTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(DISABLED_TMP_smoke_negative_Range, RangeLayerTestDynamic, testRangeNegativeStepParams,
+INSTANTIATE_TEST_SUITE_P(DISABLED_negative_Range, RangeLayerTestDynamic, testRangeNegativeStepParams,
                          RangeLayerTestDynamic::getTestCaseName);
 
 }  // namespace

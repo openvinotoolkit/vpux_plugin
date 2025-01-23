@@ -41,7 +41,6 @@ TEST_P(GroupConvolutionLayerTest_SW, NPU4000) {
     setReferenceSoftwareMode();
     run(Platform::NPU4000);
 }
-
 }  // namespace test
 }  // namespace ov
 

@@ -43,23 +43,32 @@ func.func @single_hswish() {
 
 //CHECK: func.func @single_hswish
 
-//CHECK: VPUASM.DeclareTaskBuffer @[[TBRANGE:.*]] idx(!VPURegMapped.Index<0:0:0>) <ActKernelRange>
+//CHECK: ELF.CreateLogicalSection @[[SECMETA:.*]] aligned
+//CHECK-NEXT: VPUASM.DeclareTaskBuffer @[[TBRANGE:.*]] idx(!VPURegMapped.Index<0:0:0>) <ActKernelRange>
 //CHECK: VPUASM.DeclareTaskBuffer @[[TBINVO:.*]] idx(!VPURegMapped.Index<0:0:0>) <ActKernelInvocation>
 
-//CHECK: VPUASM.DeclareBuffer @[[SYMBUFF0:.*]] !VPUASM.Buffer
-//CHECK: VPUASM.DeclareBuffer @[[SYMBUFF1:.*]] !VPUASM.Buffer
-//CHECK: VPUASM.DeclareBuffer @[[SYMBUFF2:.*]] !VPUASM.Buffer
+//CHECK: ELF.CreateLogicalSection @[[SECIN0:.*]] aligned
+//CHECK-NEXT: VPUASM.DeclareBuffer @[[SYMBUFF0:.*]] !VPUASM.Buffer
+//CHECK: ELF.CreateLogicalSection @[[SECOUT0:.*]] aligned
+//CHECK-NEXT: VPUASM.DeclareBuffer @[[SYMBUFF1:.*]] !VPUASM.Buffer
+//CHECK: ELF.CreateLogicalSection @[[SECCMX0:.*]] aligned
+//CHECK-NEXT: VPUASM.DeclareBuffer @[[SYMBUFF2:.*]] !VPUASM.Buffer
 //CHECK: VPUASM.DeclareBuffer @[[SYMBUFF3:.*]] !VPUASM.Buffer
 
-//CHECK: VPUASM.DeclareKernelText @[[SYMTEXT0:.*]] : "activation_hswish"
+//CHECK: ELF.CreateSection @[[SECSHVTEXT:.*]] aligned
+//CHECK-NEXT: VPUASM.DeclareKernelText @[[SYMTEXT0:.*]] : "activation_hswish"
 //CHECK: VPUASM.DeclareKernelEntry @[[SYMENTRY0:.*]] : "activation_hswish"
-//CHECK: VPUASM.DeclareKernelData @[[SYMDATA0:.*]] : "activation_hswish"
-//CHECK: VPUASM.KernelParams @[[SYMPARAMS0:.*]] inputs([@[[SYMBUFF2]]]) outputs([@[[SYMBUFF3]]]) kernel_type("activation_hswish")
+//CHECK: ELF.CreateSection @[[SECSHVDATA:.*]] aligned
+//CHECK-NEXT: VPUASM.DeclareKernelData @[[SYMDATA0:.*]] : "activation_hswish"
+//CHECK: ELF.CreateSection @[[SECSHVPARAMS:.*]] aligned
+//CHECK-NEXT: VPUASM.KernelParams @[[SYMPARAMS0:.*]] inputs([@[[SECCMX0]]::@[[SYMBUFF2]]]) outputs([@[[SECCMX0]]::@[[SYMBUFF3]]]) dynamicInputShapes([]) dynamicOutputShapes([]) kernel_type("activation_hswish")
 
-//CHECK: VPUASM.ActKernelRange @[[SYMACTRANGE0:.*]] idx(!VPURegMapped.Index<0:0:0>) taskLocation(@[[TBRANGE]])
-    //CHECK-SAME: calls @[[SYMTEXT0]] : @[[SYMENTRY0]]
+//CHECK: ELF.CreateSection @[[SECSHVRANGE:.*]] aligned
+//CHECK-NEXT: VPUASM.ActKernelRange @[[SYMACTRANGE0:.*]] idx(!VPURegMapped.Index<0:0:0>) taskLocation(@[[SECMETA]]::@[[TBRANGE]])
+    //CHECK-SAME: calls @[[SECSHVTEXT]]::@[[SYMTEXT0]] : @[[SYMENTRY0]]
 
-//CHECK: VPUASM.ActKernelInvocation @[[SYMACTINVO0:.*]] idx(!VPURegMapped.Index<0:0:0>) taskLocation(@[[TBINVO]])
-    //CHECK-SAME: -> @[[SYMACTRANGE0]](kernel_data : @[[SYMDATA0]], kernel_params : @[[SYMPARAMS0]]) waits([]) updates([])
+//CHECK: ELF.CreateSection @[[SECSHVINVOCATION:.*]] aligned
+//CHECK: VPUASM.ActKernelInvocation @[[SYMACTINVO0:.*]] idx(!VPURegMapped.Index<0:0:0>) taskLocation(@[[SECMETA]]::@[[TBINVO]])
+    //CHECK-SAME: -> @[[SECSHVRANGE]]::@[[SYMACTRANGE0]](kernel_data : @[[SECSHVDATA]]::@[[SYMDATA0]], kernel_params : @[[SECSHVPARAMS]]::@[[SYMPARAMS0]]) waits([]) updates([])
 
-//CHECK: VPUASM.MappedInference_37XX @MappedInference : actKernelRanges(@[[SYMACTRANGE0]]) actKernelInvocations(@[[SYMACTINVO0]]) dmaCount([0, 0]) invariantCount(0) variantCount(0) actKernelRangesCount(1) actKernelInvocationsCount(1) barrierCount(0)
+//CHECK: VPUASM.MappedInference_37XX @MappedInference : actKernelRanges(@[[SECSHVRANGE]]::@[[SYMACTRANGE0]]) actKernelInvocations(@[[SECSHVINVOCATION]]::@[[SYMACTINVO0]]) dmaCount([0, 0]) invariantCount(0) variantCount(0) actKernelRangesCount(1) actKernelInvocationsCount(1) barrierCount(0)

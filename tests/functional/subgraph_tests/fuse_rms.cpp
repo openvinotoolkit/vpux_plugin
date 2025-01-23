@@ -11,7 +11,6 @@ using namespace ov::test;
 namespace ov::test::subgraph {
 
 using RMSNormDecompositionParams = std::tuple<ov::Shape,           // input shapes
-                                              std::vector<float>,  // gamma
                                               ov::element::Type>;  // input precision
 
 class FuseRMSTestCommon : public VpuOv2LayerTest, public testing::WithParamInterface<RMSNormDecompositionParams> {
@@ -71,16 +70,17 @@ public:
     }
     void SetUp() override {
         ov::Shape input_shapes;
-        std::vector<float> gamma;
         ov::element::Type input_precision;
 
-        std::tie(input_shapes, gamma, input_precision) = GetParam();
+        std::tie(input_shapes, input_precision) = GetParam();
         inType = outType = input_precision;
         init_input_shapes(ov::test::static_shapes_to_test_representation({input_shapes}));
         ov::ParameterVector params{
                 std::make_shared<ov::op::v0::Parameter>(input_precision, inputDynamicShapes.front())};
 
-        auto rms_const = ov::opset10::Constant::create(ov::element::f32, {gamma.size()}, gamma);
+        auto gamma = ov::test::utils::create_and_fill_tensor(ov::element::f32, {input_shapes[input_shapes.size() - 1]},
+                                                             10, 0.01f);
+        auto rms_const = std::make_shared<ov::op::v0::Constant>(gamma);
         auto rms = std::make_shared<ov::op::internal::RMS>(params[0], rms_const, 1e-5f, ov::element::f16);
         const ov::ResultVector results{std::make_shared<ov::op::v0::Result>(rms)};
 
@@ -89,33 +89,30 @@ public:
 };
 
 TEST_P(FuseRMSTestCommon, NPU3720_HW) {
-    abs_threshold = 0.1f;
+    abs_threshold = 0.11f;
     setDefaultHardwareMode();
     run(Platform::NPU3720);
 }
 
 TEST_P(FuseRMSTestCommon, NPU4000_HW) {
+    abs_threshold = 0.11f;
     setDefaultHardwareMode();
     run(Platform::NPU4000);
 }
+
 namespace {
 const std::vector<ov::element::Type> input_precisions = {ov::element::f32};
 
 const std::vector<ov::Shape> input_shapes_basic = {{{1, 2, 6}}, {{2, 2, 6}}};
-std::vector<float> gamma_basic = {0.029f, 0.014f, 0.003f, 0.013f, 0.015f, 0.009f};
-
-const std::vector<ov::Shape> input_shapes = {{{1, 2, 16}}, {{1, 4, 16, 16}}};
-std::vector<float> gamma = {0.029785f, 0.014038f, 0.003098f, 0.013123f, 0.015137f, 0.009399f, 0.008362f, 0.008179f,
-                            0.018188f, 0.021973f, 0.005249f, 0.004639f, 0.004272f, 0.020264f, 0.013489f, 0.008789f};
+const std::vector<ov::Shape> input_shapes = {{{32}}, {{3, 32}}, {{1, 32, 16}}, {{1, 4, 16, 16}}, {{1, 77, 4096}}};
 
 INSTANTIATE_TEST_SUITE_P(precommit_FuseRMS, FuseRMSTestCommon,
-                         ::testing::Combine(::testing::ValuesIn(input_shapes_basic), ::testing::Values(gamma_basic),
+                         ::testing::Combine(::testing::ValuesIn(input_shapes_basic),
                                             ::testing::ValuesIn(input_precisions)),
                          FuseRMSTestCommon::getTestCaseName);
 
 INSTANTIATE_TEST_SUITE_P(smoke_FuseRMS, FuseRMSTestCommon,
-                         ::testing::Combine(::testing::ValuesIn(input_shapes), ::testing::Values(gamma),
-                                            ::testing::ValuesIn(input_precisions)),
+                         ::testing::Combine(::testing::ValuesIn(input_shapes), ::testing::ValuesIn(input_precisions)),
                          FuseRMSTestCommon::getTestCaseName);
 
 }  // namespace

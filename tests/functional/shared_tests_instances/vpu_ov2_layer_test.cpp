@@ -12,7 +12,7 @@
 #include <openvino/runtime/core.hpp>
 #include <openvino/runtime/make_tensor.hpp>
 
-#include <npu_private_properties.hpp>
+#include <intel_npu/npu_private_properties.hpp>
 
 #include <vpux/utils/IE/config.hpp>
 #include <vpux/utils/core/error.hpp>
@@ -180,6 +180,7 @@ VpuOv2LayerTest::ErrorMessage VpuOv2LayerTest::runTest() {
         printNetworkConfig();
 
         if (skipCompilationImpl()) {
+            GTEST_MESSAGE_("Skip", ::testing::TestPartResult::kSkip);
             return std::nullopt;
         }
 
@@ -375,6 +376,10 @@ void VpuOv2LayerTest::setSingleClusterMode() {
 
 void VpuOv2LayerTest::setPerformanceHintLatency() {
     configuration[ov::hint::performance_mode.name()] = "LATENCY";
+}
+
+void VpuOv2LayerTest::setShaveCodeGenMode() {
+    configuration[ov::intel_npu::compilation_mode.name()] = "ShaveCodeGen";
 }
 
 std::vector<std::vector<ov::Shape>> cartesianProduct(const std::vector<std::vector<ov::Shape>>& inputs) {

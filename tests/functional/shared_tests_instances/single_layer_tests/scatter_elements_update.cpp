@@ -1,4 +1,4 @@
-// Copyright (C) Intel Corporation
+// Copyright (C) 2023 - 2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -8,22 +8,19 @@
 #include "vpu_ov2_layer_test.hpp"
 
 namespace ov {
-
 namespace test {
 
 class ScatterElementsUpdateLayerTestCommon : public ScatterElementsUpdateLayerTest, virtual public VpuOv2LayerTest {};
 class ScatterElementsUpdate12LayerTestCommon :
         public ScatterElementsUpdate12LayerTest,
         virtual public VpuOv2LayerTest {};
-class ScatterElementsUpdateLayerTest_NPU3720 : public ScatterElementsUpdateLayerTestCommon {};
-class ScatterElementsUpdateLayerTest_NPU4000 : public ScatterElementsUpdateLayerTestCommon {};
 
-TEST_P(ScatterElementsUpdateLayerTest_NPU3720, HW) {
+TEST_P(ScatterElementsUpdateLayerTestCommon, NPU3720_HW) {
     setDefaultHardwareMode();
     run(Platform::NPU3720);
 }
 
-TEST_P(ScatterElementsUpdateLayerTest_NPU4000, HW) {
+TEST_P(ScatterElementsUpdateLayerTestCommon, NPU4000_HW) {
     setDefaultHardwareMode();
     run(Platform::NPU4000);
 }
@@ -37,14 +34,11 @@ TEST_P(ScatterElementsUpdate12LayerTestCommon, NPU4000_HW) {
     setDefaultHardwareMode();
     run(Platform::NPU4000);
 }
-
 }  // namespace test
-
 }  // namespace ov
 
 using ov::test::ScatterElementsUpdate12LayerTestCommon;
-using ov::test::ScatterElementsUpdateLayerTest_NPU3720;
-using ov::test::ScatterElementsUpdateLayerTest_NPU4000;
+using ov::test::ScatterElementsUpdateLayerTestCommon;
 
 namespace {
 
@@ -67,19 +61,12 @@ std::vector<ov::test::axisShapeInShape> combineShapes(
     return res_vec;
 }
 
-INSTANTIATE_TEST_SUITE_P(smoke_ScatterElementsUpdate, ScatterElementsUpdateLayerTest_NPU3720,
+INSTANTIATE_TEST_SUITE_P(smoke_ScatterElementsUpdate, ScatterElementsUpdateLayerTestCommon,
                          testing::Combine(testing::ValuesIn(combineShapes(axesShapeInShape)),
                                           testing::ValuesIn(indicesValue), testing::Values(ov::element::f16),
                                           testing::Values(ov::element::i32),
                                           testing::Values(ov::test::utils::DEVICE_NPU)),
-                         ScatterElementsUpdateLayerTest_NPU3720::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_ScatterElementsUpdate, ScatterElementsUpdateLayerTest_NPU4000,
-                         testing::Combine(testing::ValuesIn(combineShapes(axesShapeInShape)),
-                                          testing::ValuesIn(indicesValue), testing::Values(ov::element::f16),
-                                          testing::Values(ov::element::i32),
-                                          testing::Values(ov::test::utils::DEVICE_NPU)),
-                         ScatterElementsUpdateLayerTest_NPU4000::getTestCaseName);
+                         ScatterElementsUpdateLayerTestCommon::getTestCaseName);
 
 }  // namespace
 

@@ -510,7 +510,7 @@ func.func @DoNotRemoveSyncTaskBarVariantLimit() -> memref<1x64x32x32xf16, #NHWC,
         DPUTask {cluster_id = 0 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [31, 31, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0, right = 0, top = 0, bottom = 0>}
         DPUTask {cluster_id = 0 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [31, 31, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0, right = 0, top = 0, bottom = 0>}
       } PPE : {
-        PPETask {opaque_ppe = #VPU.PPEStub<>}
+        PPETask {ppe = #VPU.PPEStub<>}
       }
     }
 
@@ -554,19 +554,17 @@ func.func @DoNotRemoveSyncTaskBarVariantLimit() -> memref<1x64x32x32xf16, #NHWC,
         DPUTask {cluster_id = 0 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [31, 31, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0, right = 0, top = 0, bottom = 0>}
         DPUTask {cluster_id = 0 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [31, 31, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0, right = 0, top = 0, bottom = 0>}
       } PPE : {
-        PPETask {opaque_ppe = #VPU.PPEStub<>}
+        PPETask {ppe = #VPU.PPEStub<>}
       }
     }
 
     return %buf1 :!CmxType
 
     // CHECK: [[BAR0:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
-    // CHECK: [[BAR1:%.*]] = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+    // CHECK-NOT: VPURT.DeclareVirtual
 
     // CHECK: VPURT.Task updates([[BAR0]] : !VPURT.Barrier)
     // CHECK-NEXT: VPUIP.NCEClusterTask
-    // CHECK: VPURT.Task waits([[BAR0]] : !VPURT.Barrier) updates([[BAR1]] : !VPURT.Barrier)
-    // CHECK-NEXT: VPUIP.SyncDMA
-    // CHECK: VPURT.Task waits([[BAR1]] : !VPURT.Barrier)
+    // CHECK: VPURT.Task waits([[BAR0]] : !VPURT.Barrier)
     // CHECK-NEXT: VPUIP.NCEClusterTask
 }

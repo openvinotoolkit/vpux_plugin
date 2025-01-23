@@ -1,4 +1,4 @@
-// Copyright (C) Intel Corporation
+// Copyright (C) 2023 - 2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -39,7 +39,7 @@ class ConvConcatReshape_D2S_NPU3720 : public VpuOv2LayerTest {
         const auto D2S = std::make_shared<ov::op::v0::DepthToSpace>(conv, "blocks_first", 2UL);
         const auto addOp = std::make_shared<ov::op::v1::Add>(D2S, params[0]);
         const ov::ResultVector results{std::make_shared<ov::op::v0::Result>(addOp)};
-        function = std::make_shared<ov::Model>(results, params, "ConvConcatReshape_D2S_VPU3720");
+        function = std::make_shared<ov::Model>(results, params, "ConvConcatReshape_D2S_NPU3720");
         rel_threshold = 1.0f;
     }
 };

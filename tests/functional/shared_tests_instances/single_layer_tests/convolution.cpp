@@ -1,4 +1,4 @@
-// Copyright (C) Intel Corporation
+// Copyright (C) 2020 - 2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -96,7 +96,6 @@ TEST_P(ConvolutionLayerTest_MULTI_BATCH_HW, NPU4000_HW) {
     setDefaultHardwareMode();
     run(Platform::NPU4000);
 }
-
 }  // namespace test
 }  // namespace ov
 
@@ -126,7 +125,6 @@ INSTANTIATE_TEST_SUITE_P(smoke_Convolution1D, ConvolutionLayerTest_NPU3720_SW, c
 
 INSTANTIATE_TEST_SUITE_P(smoke_Convolution1D, ConvolutionLayerTest_NPU4000_SW, conv1D,
                          ConvolutionLayerTest::getTestCaseName);
-
 /* ============= 1D Convolution / LargeKernel ============= */
 const auto conv1DParams_LargeKernel =
         ::testing::Combine(::testing::ValuesIn<std::vector<size_t>>({{512}}),   // kernels
@@ -174,7 +172,6 @@ INSTANTIATE_TEST_SUITE_P(smoke_Convolution2D_AutoPadValid, ConvolutionLayerTest_
 
 INSTANTIATE_TEST_SUITE_P(smoke_Convolution2D_AutoPadValid, ConvolutionLayerTest_NPU4000_SW, conv2D_AutoPadValid,
                          ConvolutionLayerTest::getTestCaseName);
-
 /* ============= 2D Convolution / CMajorCompatible ============= */
 
 const auto conv2DParams_CMajorCompatible =
@@ -198,7 +195,6 @@ INSTANTIATE_TEST_SUITE_P(smoke_Convolution2D_CMajorCompatible, ConvolutionLayerT
 
 INSTANTIATE_TEST_SUITE_P(smoke_Convolution2D_CMajorCompatible, ConvolutionLayerTest_NPU4000_SW, conv2D_CMajorCompatible,
                          ConvolutionLayerTest::getTestCaseName);
-
 /* ============= 3D Convolution / 3x2x2 Kernel ============= */
 
 const auto conv3DParams_3x2x2_Kernel =
@@ -339,7 +335,6 @@ INSTANTIATE_TEST_SUITE_P(smoke_Convolution2D_AsymmetricPadding, ConvolutionLayer
 
 INSTANTIATE_TEST_SUITE_P(smoke_precommit_Convolution2D_AsymmetricPadding, ConvolutionLayerTest_NPU4000_SW,
                          conv2D_AsymmetricPadding, ConvolutionLayerTest::getTestCaseName);
-
 /* ============= 2D Convolution / AsymmetricKernel ============= */
 
 const auto conv2DParams_AsymmetricKernel =
@@ -363,7 +358,6 @@ INSTANTIATE_TEST_SUITE_P(smoke_Convolution2D_AsymmetricKernel, ConvolutionLayerT
 
 INSTANTIATE_TEST_SUITE_P(smoke_Convolution2D_AsymmetricKernel, ConvolutionLayerTest_NPU4000_SW, conv2D_AsymmetricKernel,
                          ConvolutionLayerTest::getTestCaseName);
-
 /* ============= 2D Convolution / AsymmetricStrides ============= */
 
 const auto conv2DParams_AsymmetricStrides =
@@ -468,7 +462,6 @@ INSTANTIATE_TEST_SUITE_P(smoke_Convolution2D_Dilated, ConvolutionLayerTest_NPU37
 
 INSTANTIATE_TEST_SUITE_P(smoke_Convolution2D_Dilated, ConvolutionLayerTest_NPU4000_SW, conv2D_Dilated,
                          ConvolutionLayerTest::getTestCaseName);
-
 /* ============= 2D Convolution / LargeSize ============= */
 
 const auto conv2DParams_LargeSize1 =

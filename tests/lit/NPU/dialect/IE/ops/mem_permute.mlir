@@ -24,14 +24,32 @@ func.func @FoldMemPermute(%arg0: tensor<1x16x2x3xf32>) -> tensor<1x16x2x3xf32> {
 #NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
 #NWCH = affine_map<(d0, d1, d2, d3) -> (d0, d3, d1, d2)>
 
-// CHECK-LABEL: @ConstFold
-func.func @ConstFold() -> tensor<1x2x3x4xf32> {
+// CHECK-LABEL: @ConstFoldAndFuse
+func.func @ConstFoldAndFuse() -> tensor<1x2x3x4xf32> {
     %0 = const.Declare tensor<1x2x3x4xf32, {order = #NHWC}> = dense<5.0> : tensor<1x2x3x4xf32>, [#const.Reorder<#NHWC>]
     %1 = IE.MemPermute(%0) {dst_order = #NCHW, mem_perm = #NWCH} : tensor<1x2x3x4xf32, {order = #NHWC}> -> tensor<1x2x3x4xf32>
     return %1 : tensor<1x2x3x4xf32>
 
-    // CHECK:       [[CST:%.*]] = const.Declare tensor<1x2x3x4xf32> = dense<5.000000e+00> : tensor<1x2x3x4xf32>,
-    // CHECK-SAME:        [#const.Reorder<#NHWC>, #const.MemPermute<#NCHW, #NWCH>]
+    // CHECK:       [[CST:%.*]] = const.Declare tensor<1x2x3x4xf32> = dense<5.000000e+00> : tensor<1x2x3x4xf32>
+    // CHECK-NOT:   #const.Reorder
+    // CHECK-NOT:   #const.MemPermute
+
+    // CHECK-NOT:   IE.MemPermute
+    // CHECK:       return [[CST]]
+}
+
+// -----
+
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
+// CHECK-LABEL: @ConstFold
+func.func @ConstFold() -> tensor<1x2x3x4xf32, {order = #NHWC}> {
+    %0 = const.Declare tensor<1x2x3x4xf32> = dense<5.0> : tensor<1x2x3x4xf32>
+    %1 = IE.MemPermute(%0) {dst_order = #NHWC, mem_perm = #NHWC} : tensor<1x2x3x4xf32> -> tensor<1x2x3x4xf32, {order = #NHWC}>
+    return %1 : tensor<1x2x3x4xf32, {order = #NHWC}>
+
+    // CHECK:       [[CST:%.*]] = const.Declare tensor<1x2x3x4xf32, {order = #NHWC}> = dense<5.000000e+00> : tensor<1x2x3x4xf32>,
+    // CHECK-SAME:        [#const.MemPermute<#NHWC, #NHWC>]
     // CHECK-NOT:   IE.MemPermute
     // CHECK:       return [[CST]]
 }

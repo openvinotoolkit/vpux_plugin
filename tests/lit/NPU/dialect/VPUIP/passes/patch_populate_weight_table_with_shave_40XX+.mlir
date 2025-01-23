@@ -184,7 +184,7 @@ func.func @PatchSWKernelModeSegmented(%arg0: memref<1x1x4096xf32, @DDR>, %scale:
               DPUTask {cluster_id = 3 : i64, inEnd = [0, 0, 4095], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 1023], outStart = [0, 0, 768],
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
       } PPE : {
-        PPETask {opaque_ppe = #VPU.PPEStub<>}
+        PPETask {ppe = #VPU.PPEStub<>}
       }
       async.yield %22 : !ConvOutputDistributed
     }
@@ -477,7 +477,7 @@ func.func @PatchSWKernelClusteredWithDMASpill(%arg0: memref<1x1x4096xf32, @DDR>,
               DPUTask {cluster_id = 3 : i64, inEnd = [0, 0, 4095], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 1023], outStart = [0, 0, 768],
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
       } PPE : {
-        PPETask {opaque_ppe = #VPU.PPEStub<>}
+        PPETask {ppe = #VPU.PPEStub<>}
       }
       async.yield %22 : !ConvOutputDistributed
     }

@@ -80,18 +80,14 @@ func.func private @multiple_clusters_dpu_soh_f16_f16_f16(%arg0: memref<1x32x32x3
 //CHECK-NEXT: %[[CST_0:.*]] = const.Declare [[TYPE_CST0:.*]] = dense
 //CHECK-NEXT: %[[VAL2:.*]] = VPURT.DeclareBuffer <NetworkInput> [0] <0> -> [[TYPE2:.*]]
 //CHECK-NEXT: %[[VAL3:.*]] = VPURT.DeclareBuffer <NetworkInput> [0] <32768> -> [[TYPE3:.*]]
-//CHECK-NEXT: %[[VAL4:.*]] = VPURT.DeclareBuffer <CMX_NN> [0, 1] <0> -> !VPUIP.DistributedBuffer<64x32x1x1xf16, {order = #NHWC, strides = [32, 1, 32, 32]}, @CMX_NN, {mode = "DUPLICATED", num_clusters = 2 : i64, uniform_distributed_segments}>
 //CHECK-NEXT: %[[VAL5:.*]] = VPURT.DeclareBuffer <CMX_NN> [0] <0> -> [[TYPE5:.*]]
 //CHECK-NEXT: %[[VAL6:.*]] = VPURT.DeclareBuffer <CMX_NN> [1] <0> -> [[TYPE6:.*]]
-//CHECK-NEXT: %[[VAL7:.*]] = VPURT.DeclareBuffer <CMX_NN> [0, 1] <4096> -> [[TYPE7:.*]]
 //CHECK-NEXT: %[[VAL8:.*]] = VPURT.DeclareBuffer <CMX_NN> [0] <4096> -> [[TYPE8:.*]]
 //CHECK-NEXT: %[[VAL9:.*]] = VPURT.DeclareBuffer <CMX_NN> [1] <4096> -> [[TYPE9:.*]]
-//CHECK-NEXT: %[[VAL10:.*]] = VPURT.DeclareBuffer <CMX_NN> [0, 1] <69632> -> [[TYPE10:.*]]
 //CHECK-NEXT: %[[VAL11:.*]] = VPURT.DeclareBuffer <CMX_NN> [0] <69632> -> [[TYPE11:.*]]
 //CHECK-NEXT: %[[VAL12:.*]] = VPURT.DeclareBuffer <CMX_NN> [1] <69632> -> [[TYPE12:.*]]
 //CHECK-NEXT: %[[VAL13:.*]] = VPURT.DeclareBuffer <CMX_NN> [0] <102400> -> [[TYPE13:.*]]
 //CHECK-NEXT: %[[VAL14:.*]] = VPURT.DeclareBuffer <CMX_NN> [1] <102400> -> [[TYPE14:.*]]
-//CHECK-NEXT: %[[VAL15:.*]] = VPURT.DeclareBuffer <CMX_NN> [0, 1] <102400> -> [[TYPE15:.*]]
 //CHECK-NEXT: %[[VAL16:.*]] = VPURT.DeclareBuffer <CMX_NN> [0] <0> -> [[TYPE16:.*]]
 //CHECK-NEXT: %[[VAL17:.*]] = VPURT.DeclareBuffer <CMX_NN> [1] <0> -> [[TYPE17:.*]]
 //CHECK-NOT: VPURT.Task
@@ -197,13 +193,8 @@ module @mainModule {
 //CHECK-NEXT: %[[VALCST0:.*]] = const.Declare [[TYPECST0:.*]] = dense
 //CHECK-NEXT: %[[VALCST1:.*]] = const.Declare [[TYPECST1:.*]] = dense
 //CHECK-NEXT: %[[VALCST2:.*]] = const.Declare [[TYPECST2:.*]] = dense
-//CHECK-NEXT: %[[VAL1:.*]] = VPURT.DeclareBuffer <CMX_NN> [0, 1] <0> -> [[TYPE1:.*]]
 //CHECK-NEXT: %[[VAL2:.*]] = VPURT.DeclareBuffer <CMX_NN> [0] <0> -> [[TYPE2:.*]]
 //CHECK-NEXT: %[[VAL3:.*]] = VPURT.DeclareBuffer <CMX_NN> [1] <0> -> [[TYPE3:.*]]
-//CHECK-NEXT: %[[VAL4:.*]] = VPURT.DeclareBuffer <CMX_NN> [0, 1] <2048> -> [[TYPE4:.*]]
-//CHECK-NEXT: %[[VAL5:.*]] = VPURT.DeclareBuffer <CMX_NN> [0, 1] <2048> -> [[TYPE5:.*]]
-//CHECK-NEXT: %[[VAL6:.*]] = VPURT.DeclareBuffer <CMX_NN> [0, 1] <2048> -> [[TYPE6:.*]]
-//CHECK-NEXT: %[[VAL7:.*]] = VPURT.DeclareBuffer <CMX_NN> [0, 1] <34816> -> [[TYPE7:.*]]
 //CHECK-NEXT: %[[VAL8:.*]] = VPURT.DeclareBuffer <CMX_NN> [0] <34816> -> [[TYPE8:.*]]
 //CHECK-NEXT: %[[VAL9:.*]] = VPURT.DeclareBuffer <CMX_NN> [1] <34816> -> [[TYPE9:.*]]
 //CHECK-NEXT: %[[VAL10:.*]] = VPURT.DeclareBuffer <CMX_NN> [0] <51200> -> [[TYPE10:.*]]
@@ -337,3 +328,155 @@ module @mainModule {
 //CHECK-SAME: input_storage_element_table(%[[VALSET]] : memref<1x1x16x16xi32
 //CHECK: VPUMI40XX.DPUVariant
 //CHECK-NOT: lut_read
+
+// -----
+
+#NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+#NWCH = affine_map<(d0, d1, d2, d3) -> (d0, d3, d1, d2)>
+IE.CNNNetwork entryPoint : @singleDPUITIBuffer inputsInfo : {
+  DataInfo "dummy_input" : tensor<1x50x1x1xf16>
+} outputsInfo : {
+  DataInfo "dummy_output" : tensor<1x50x1x1xf16>
+}
+func.func @singleDPUITIBuffer() {
+    %49 = VPURT.DeclareBuffer <CMX_NN> [0] <443392> -> memref<1x16x17x62xf16, #NHWC, [@CMX_NN, 0]>
+    // CHECK: %[[INPUT:.+]] = VPURT.DeclareBuffer
+    // CHECK-SAME: -> [[INPUT_TYPE:.+]]
+    %268 = VPURT.DeclareBuffer <CMX_NN> [0] <768> -> memref<48x16x3x3xf16, {order = #NHWC, sparsityCompression = #VPUIP.SparsityCompressionAttr<axis = 0 : i64, numElems = dense<27> : tensor<48xi64>, alignment = 16 : i64>}, [@CMX_NN, 0]>
+    // CHECK: %[[WEIGHTS:.+]] = VPURT.DeclareBuffer
+    // CHECK-SAME: -> [[WEIGHTS_TYPE:.+]]
+    %272 = VPURT.DeclareBuffer <CMX_NN> [0] <3840> -> memref<48x1x1x256xi1, [@CMX_NN, 0]>
+    // CHECK: %[[SPARSITY_MAP:.+]] = VPURT.DeclareBuffer
+    // CHECK-SAME: -> [[SPARSITY_MAP_TYPE:.+]]
+    %264 = VPURT.DeclareBuffer <CMX_NN> [0] <0> -> memref<48x1x1x4xsi32, [@CMX_NN, 0]>
+    // CHECK: %[[WEIGHTS_TABLE:.+]] = VPURT.DeclareBuffer
+    // CHECK-SAME: -> [[WEIGHTS_TABLE_TYPE:.+]]
+    %61 = VPURT.DeclareBuffer <CMX_NN> [0] <229376> {swizzlingKey = 5 : i64} -> !VPUIP.ITIBuffer<
+        1x48x17x60xf16, {order = #NHWC, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 388096 : i64>}, [@CMX_NN, 0],
+        inwardHaloRegions = [
+            #VPUIP.HaloRegionAttr<shape = [1, 48, 2, 60], offset = [0, 0, 15, 0], cluster_id = 0 : i64>
+        ]>
+
+    %1 = VPURT.ConfigureBarrier<0> -> !VPURT.Barrier
+    // CHECK-NOT: VPURT.ConfigureBarrier
+    // CHECK: %[[BAR0:.+]] = VPUMI40XX.ConfigureBarrier
+    // CHECK-SAME: consumer_count = 1
+    // CHECK-SAME: producer_count = 0
+    // CHECK-SAME: <0, -1>
+    // CHECK-SAME: -> !VPURegMapped.Index<0:0:0>
+
+    %2 = VPURT.ConfigureBarrier<1> -> !VPURT.Barrier
+    // CHECK-NOT: VPURT.ConfigureBarrier
+    // CHECK: %[[BAR1:.+]] = VPUMI40XX.ConfigureBarrier
+    // CHECK-SAME: consumer_count = 0
+    // CHECK-SAME: producer_count = 1
+    // CHECK-SAME: <1, -1>
+    // CHECK-SAME: -> !VPURegMapped.Index<0:0:1>
+
+    // CHECK: %[[OUTPUT:.+]] = VPURT.DeclareBuffer
+    // CHECK-NOT: !VPUIP.ITIBuffer
+    // CHECK-SAME: -> [[OUTPUT_TYPE:.+]]
+
+    VPURT.Task waits(%1 : !VPURT.Barrier) updates(%2 : !VPURT.Barrier) {
+      %364 = VPUIP.NCEClusterTask {kernel_padding = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, kernel_size = [3, 3], kernel_strides = [1, 1], task_type = #VPUIP.nce_task_type<CONV>} input(%49 : memref<1x16x17x62xf16, #NHWC, [@CMX_NN, 0]>) weights(%268 : memref<48x16x3x3xf16, {order = #NHWC, sparsityCompression = #VPUIP.SparsityCompressionAttr<axis = 0 : i64, numElems = dense<27> : tensor<48xi64>, alignment = 16 : i64>}, [@CMX_NN, 0]>) weights_sparsity_map(%272 : memref<48x1x1x256xi1, [@CMX_NN, 0]>) weight_table(%264 : memref<48x1x1x4xsi32, [@CMX_NN, 0]>) parent_input(%49 : memref<1x16x17x62xf16, #NHWC, [@CMX_NN, 0]>) parent_output(%61 : !VPUIP.ITIBuffer<
+          1x48x17x60xf16, {order = #NHWC, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 388096 : i64>}, [@CMX_NN, 0],
+          inwardHaloRegions = [
+              #VPUIP.HaloRegionAttr<shape = [1, 48, 2, 60], offset = [0, 0, 15, 0], cluster_id = 0 : i64>
+          ]>) outputs(%61 : !VPUIP.ITIBuffer<
+          1x48x17x60xf16, {order = #NHWC, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 388096 : i64>}, [@CMX_NN, 0],
+          inwardHaloRegions = [
+              #VPUIP.HaloRegionAttr<shape = [1, 48, 2, 60], offset = [0, 0, 15, 0], cluster_id = 0 : i64>
+          ]>) -> !VPUIP.ITIBuffer<
+          1x48x17x60xf16, {order = #NHWC, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 388096 : i64>}, [@CMX_NN, 0],
+          inwardHaloRegions = [
+              #VPUIP.HaloRegionAttr<shape = [1, 48, 2, 60], offset = [0, 0, 15, 0], cluster_id = 0 : i64>
+          ]> variants : {
+        DPUTask {cluster_id = 0 : i64, haloRegions = [], inEnd = [61, 16, 15], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [59, 14, 47], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
+      } PPE : {
+        PPETask {ppe = #VPU.PPEInt<mode = <LRELU>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>}
+      }
+    }
+    // CHECK-NOT: VPURT.Task
+    // CHECK-NOT: VPUIP.NCEClusterTask
+    // CHECK-NOT: DPUTask
+    // CHECK: %[[INVARIANT:.+]] = VPUMI40XX.DPUInvariant
+    // CHECK-SAME: clean_after = 0
+    // CHECK-SAME: kernel_padding = #VPU.Padding<
+    // CHECK-SAME:   left = 0
+    // CHECK-SAME:   right = 0
+    // CHECK-SAME:   top = 0
+    // CHECK-SAME:   bottom = 0
+    // CHECK-SAME: >
+    // CHECK-SAME: kernel_size = [3, 3]
+    // CHECK-SAME: kernel_strides = [1, 1]
+    // CHECK-SAME: mpe_frequent_mode = #VPU.mpe_mode<CUBOID_16x16>
+    // CHECK-SAME: nce_task_type = #VPUIP.nce_task_type<CONV>
+    // CHECK-SAME: start_after = 0
+    // CHECK-SAME: input(%[[INPUT]] : [[INPUT_TYPE]])
+    // CHECK-SAME: weights(%[[WEIGHTS]] : [[WEIGHTS_TYPE]])
+    // CHECK-SAME: weights_sparsity_map(%[[SPARSITY_MAP]] : [[SPARSITY_MAP_TYPE]])
+    // CHECK-SAME: weight_table(%[[WEIGHTS_TABLE]] : [[WEIGHTS_TABLE_TYPE]])
+    // CHECK-SAME: outputs(%[[OUTPUT]] : [[OUTPUT_TYPE]])
+    // CHECK-SAME: waits(%[[BAR0]] : !VPURegMapped.Index<0:0:0>)
+    // CHECK-SAME: updates(%[[BAR1]] : !VPURegMapped.Index<0:0:1>)
+    // CHECK-SAME: -> <0:0:0>
+
+    // CHECK: VPUMI40XX.PPETask
+    // CHECK-SAME: mode = <LRELU>
+    // CHECK-SAME: clamp_low = -2147483648
+    // CHECK-SAME: clamp_high = 2147483647
+    // CHECK-SAME: lrelu_mult = 1
+    // CHECK-SAME: lrelu_shift = 0
+    // CHECK-SAME: fp_prelu_alpha = 1.000000e+00
+
+    // CHECK: VPUMI40XX.DPUVariant
+    // CHECK-SAME: calls(%[[INVARIANT]] : <0:0:0>)
+    // CHECK-SAME: weights(%[[WEIGHTS]] : [[WEIGHTS_TYPE]])
+    // CHECK-SAME: weight_table(%[[WEIGHTS_TABLE]] : [[WEIGHTS_TABLE_TYPE]])
+    // CHECK-SAME: end = [59, 14, 47]
+    // CHECK-SAME: haloRegions = []
+    // CHECK-SAME: inEnd = [61, 16, 15]
+    // CHECK-SAME: inStart = [0, 0, 0]
+    // CHECK-SAME: mpe_mode = #VPU.mpe_mode<CUBOID_16x16>
+    // CHECK-SAME: nce_task_type = #VPUIP.nce_task_type<CONV>
+    // CHECK-SAME: pad = #VPU.Padding<
+    // CHECK-SAME:   left = 0
+    // CHECK-SAME:   right = 0
+    // CHECK-SAME:   top = 0
+    // CHECK-SAME:   bottom = 0
+    // CHECK-SAME: >
+    // CHECK-SAME: start = [0, 0, 0]
+    // CHECK-SAME: -> <0:0:0>
+    return
+}
+
+// -----
+
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+module @mainModule {
+
+  IE.CNNNetwork entryPoint : @conv_wt_reuse inputsInfo : {
+    DataInfo "input_0" : tensor<1x32x16x16xf16>
+  } outputsInfo : {
+    DataInfo "output_0" : tensor<1x32x16x16xf16>
+  }
+
+  func.func private @conv_wt_reuse(%arg0: memref<1x32x16x16xf16, #NHWC, @DDR>, %arg1: memref<1x32x16x16xf16, #NHWC, @DDR>) -> memref<1x32x16x16xf16, #NHWC, @DDR> {
+    %0 = VPURT.DeclareBuffer <CMX_NN> [0] <0> -> memref<32x32x1x1xf16, #NHWC, [@CMX_NN, 0]>
+    %1 = VPURT.DeclareBuffer <CMX_NN> [0] <18432> -> memref<1x32x16x16xf16, #NHWC, [@CMX_NN, 0]>
+    %2 = VPURT.DeclareBuffer <CMX_NN> [0] <36352> -> memref<1x32x16x16xi1, [@CMX_NN, 0]>
+    %3 = VPURT.DeclareBuffer <CMX_NN> [0] <35328> -> memref<1x1x16x16xi32, #NHWC, [@CMX_NN, 0]>
+    %4 = VPURT.DeclareBuffer <CMX_NN> [0] <34816> -> memref<32x1x1x4xsi32, #NHWC, [@CMX_NN, 0]>
+    %5 = VPURT.DeclareBuffer <CMX_NN> [0] <2048> -> memref<1x32x16x16xf16, #NHWC, [@CMX_NN, 0]>
+    VPURT.Task {
+      %6 = VPUIP.NCEClusterTask {is_zero_offset_weights_table, kernel_padding = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, kernel_size = [1, 1], kernel_strides = [1, 1], task_type = #VPUIP.nce_task_type<CONV>} input(%1 : memref<1x32x16x16xf16, #NHWC, [@CMX_NN, 0]>) input_sparsity_map(%2 : memref<1x32x16x16xi1, [@CMX_NN, 0]>) input_storage_element_table(%3 : memref<1x1x16x16xi32, #NHWC, [@CMX_NN, 0]>) weights(%0 : memref<32x32x1x1xf16, #NHWC, [@CMX_NN, 0]>) weight_table(%4 : memref<32x1x1x4xsi32, #NHWC, [@CMX_NN, 0]>) parent_input(%1 : memref<1x32x16x16xf16, #NHWC, [@CMX_NN, 0]>) parent_input_sparsity_map(%2 : memref<1x32x16x16xi1, [@CMX_NN, 0]>) parent_input_storage_element_table(%3 : memref<1x1x16x16xi32, #NHWC, [@CMX_NN, 0]>) parent_output(%5 : memref<1x32x16x16xf16, #NHWC, [@CMX_NN, 0]>) outputs(%5 : memref<1x32x16x16xf16, #NHWC, [@CMX_NN, 0]>) -> memref<1x32x16x16xf16, #NHWC, [@CMX_NN, 0]> variants : {
+        DPUTask {inEnd = [15, 15, 31], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [15, 15, 31], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
+      } PPE : {
+      }
+    }
+    return %arg1 : memref<1x32x16x16xf16, #NHWC, @DDR>
+
+    // CHECK:       VPUMI40XX.DPUInvariant {clean_after = 0 : ui64, is_zero_offset_weights_table,
+  }
+}

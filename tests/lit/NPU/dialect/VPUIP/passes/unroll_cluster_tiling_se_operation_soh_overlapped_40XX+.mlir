@@ -128,7 +128,6 @@ func.func @UnrollNceSoHSEPInterpolateOverlappedTwoClusters() -> !Output_DDR {
 
     %parent_input_cmx = VPURT.DeclareBuffer <CMX_NN> <0> -> !InputDistributed
     %parent_input_sparsity_map = VPURT.DeclareBuffer <CMX_NN> <31264> -> !InputSparseMapDistributed
-    %parent_input_se_table = VPURT.DeclareBuffer <CMX_NN> <33442> -> !InputSETableDistributed
     %weights = VPURT.DeclareBuffer <CMX_NN> [0, 1] <26400> -> !WeightsDistributed
     %weights_table = VPURT.DeclareBuffer <CMX_NN> [0, 1] <31008> -> !WeightsTableDistributed
     %parent_out_cmx = VPURT.DeclareBuffer <CMX_NN> <13728> -> !OutputDistributed
@@ -142,12 +141,12 @@ func.func @UnrollNceSoHSEPInterpolateOverlappedTwoClusters() -> !Output_DDR {
                     task_type = #VPUIP.nce_task_type<CONV>
             }   input(%parent_input_cmx : !InputDistributed)
                 input_sparsity_map(%parent_input_sparsity_map : !InputSparseMapDistributed)
-                input_storage_element_table(%parent_input_se_table : !InputSETableDistributed)
+                input_storage_element_table(%seTable_CMX: !InputSETableDistributed)
                 weights(%weights : !WeightsDistributed)
                 weight_table(%weights_table : !WeightsTableDistributed)
                 parent_input(%parent_input_cmx : !InputDistributed)
                 parent_input_sparsity_map(%parent_input_sparsity_map : !InputSparseMapDistributed)
-                parent_input_storage_element_table(%parent_input_se_table : !InputSETableDistributed)
+                parent_input_storage_element_table(%seTable_CMX: !InputSETableDistributed)
                 parent_output(%parent_out_cmx : !OutputDistributed)
                 parent_output_sparsity_map(%parent_out_sparsity_map : !OutputDistributed)
                 outputs(%parent_out_cmx : !OutputDistributed)
@@ -337,7 +336,6 @@ func.func @UnrollNceSoHSEPInterpolateOverlappedTwoClustersAndTwoUsers() -> (!Out
 
     %parent_input_cmx_0 = VPURT.DeclareBuffer <CMX_NN> <0> -> !InputDistributed
     %parent_input_sparsity_map_0 = VPURT.DeclareBuffer <CMX_NN> <31264> -> !InputSparseMapDistributed
-    %parent_input_se_table_0 = VPURT.DeclareBuffer <CMX_NN> <33442> -> !InputSETableDistributed
     %weights_0 = VPURT.DeclareBuffer <CMX_NN> [0, 1] <26400> -> !WeightsDistributed
     %weights_table_0 = VPURT.DeclareBuffer <CMX_NN> [0, 1] <31008> -> !WeightsTableDistributed
     %parent_out_cmx_0 = VPURT.DeclareBuffer <CMX_NN> <13728> -> !OutputDistributed
@@ -351,12 +349,12 @@ func.func @UnrollNceSoHSEPInterpolateOverlappedTwoClustersAndTwoUsers() -> (!Out
                     task_type = #VPUIP.nce_task_type<CONV>
             }   input(%parent_input_cmx_0 : !InputDistributed)
                 input_sparsity_map(%parent_input_sparsity_map_0 : !InputSparseMapDistributed)
-                input_storage_element_table(%parent_input_se_table_0 : !InputSETableDistributed)
+                input_storage_element_table(%seTable_CMX_0: !InputSETableDistributed)
                 weights(%weights_0 : !WeightsDistributed)
                 weight_table(%weights_table_0 : !WeightsTableDistributed)
                 parent_input(%parent_input_cmx_0 : !InputDistributed)
                 parent_input_sparsity_map(%parent_input_sparsity_map_0 : !InputSparseMapDistributed)
-                parent_input_storage_element_table(%parent_input_se_table_0 : !InputSETableDistributed)
+                parent_input_storage_element_table(%seTable_CMX_0: !InputSETableDistributed)
                 parent_output(%parent_out_cmx_0 : !OutputDistributed)
                 parent_output_sparsity_map(%parent_out_sparsity_map_0 : !OutputDistributed)
                 outputs(%parent_out_cmx_0 : !OutputDistributed)
@@ -408,12 +406,12 @@ func.func @UnrollNceSoHSEPInterpolateOverlappedTwoClustersAndTwoUsers() -> (!Out
                     task_type = #VPUIP.nce_task_type<CONV>
             }   input(%parent_input_cmx_1 : !InputDistributed)
                 input_sparsity_map(%parent_input_sparsity_map_1 : !InputSparseMapDistributed)
-                input_storage_element_table(%parent_input_se_table_1 : !InputSETableDistributed)
+                input_storage_element_table(%seTable_CMX_1 : !InputSETableDistributed)
                 weights(%weights_1 : !WeightsDistributed)
                 weight_table(%weights_table_1 : !WeightsTableDistributed)
                 parent_input(%parent_input_cmx_1 : !InputDistributed)
                 parent_input_sparsity_map(%parent_input_sparsity_map_1 : !InputSparseMapDistributed)
-                parent_input_storage_element_table(%parent_input_se_table_1 : !InputSETableDistributed)
+                parent_input_storage_element_table(%seTable_CMX_1: !InputSETableDistributed)
                 parent_output(%parent_out_cmx_1 : !OutputDistributed)
                 parent_output_sparsity_map(%parent_out_sparsity_map_1 : !OutputDistributed)
                 outputs(%parent_out_cmx_1 : !OutputDistributed)

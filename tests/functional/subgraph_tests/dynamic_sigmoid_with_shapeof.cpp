@@ -71,7 +71,6 @@ public:
 
 TEST_P(NPUDynamicSigmoidWithShapeOfTest, NPU3720_HW_TestKindSubgraph) {
     setDefaultHardwareMode();
-    setMLIRCompilerType();
     run(Platform::NPU3720);
 }
 

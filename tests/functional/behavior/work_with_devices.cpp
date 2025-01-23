@@ -1,10 +1,10 @@
-// Copyright (C) Intel Corporation
+// Copyright (C) 2023 - 2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
 #include "behavior/work_with_devices.hpp"
 #include "common/utils.hpp"
-#include "intel_npu/al/config/common.hpp"
+#include "intel_npu/config/common.hpp"
 
 namespace {
 

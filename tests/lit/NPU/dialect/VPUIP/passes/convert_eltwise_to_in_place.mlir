@@ -40,7 +40,7 @@ func.func @InplaceEltwiseToEltwise(%in1: !qTypeDDR, %in2: !qTypeDDR, %in3: !qTyp
           DPUTask {cluster_id = 0 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [511, 51, 31], outStart = [0, 0, 0], pad = #VPU.Padding<bottom = 0 : i64, left = 0 : i64, right = 0 : i64, top = 0 : i64>}
           DPUTask {cluster_id = 1 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [511, 102, 31], outStart = [0, 52, 0], pad = #VPU.Padding<bottom = 0 : i64, left = 0 : i64, right = 0 : i64, top = 0 : i64>}
         } PPE : {
-          PPETask {opaque_ppe = #VPU.PPEStub<>}
+          PPETask {ppe = #VPU.PPEStub<>}
         }
     }
 
@@ -56,7 +56,7 @@ func.func @InplaceEltwiseToEltwise(%in1: !qTypeDDR, %in2: !qTypeDDR, %in3: !qTyp
           DPUTask {cluster_id = 0 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [511, 51, 31], outStart = [0, 0, 0], pad = #VPU.Padding<bottom = 0 : i64, left = 0 : i64, right = 0 : i64, top = 0 : i64>}
           DPUTask {cluster_id = 1 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [511, 102, 31], outStart = [0, 52, 0], pad = #VPU.Padding<bottom = 0 : i64, left = 0 : i64, right = 0 : i64, top = 0 : i64>}
         } PPE : {
-          PPETask {opaque_ppe = #VPU.PPEStub<>}
+          PPETask {ppe = #VPU.PPEStub<>}
        }
     }
 
@@ -148,7 +148,7 @@ func.func @InPlaceEltwiseWithSiblingsOnBothInputs(
             pad = #VPU.Padding<bottom = 0 : i64, left = 0 : i64, right = 0 : i64, top = 0 : i64>}
         } PPE : {
           PPETask {
-            opaque_ppe = #VPU.PPEStub<>
+            ppe = #VPU.PPEStub<>
             }
         }
     }
@@ -194,7 +194,7 @@ func.func @InPlaceEltwiseWithSiblingsOnBothInputs(
         }
       } PPE : {
         PPETask {
-          opaque_ppe = #VPU.PPEStub<>
+          ppe = #VPU.PPEStub<>
         }
       }
     }
@@ -234,7 +234,7 @@ func.func @InPlaceEltwiseWithSiblingsOnBothInputs(
         }
       } PPE : {
         PPETask {
-          opaque_ppe = #VPU.PPEStub<>
+          ppe = #VPU.PPEStub<>
         }
       }
     }
@@ -378,7 +378,7 @@ func.func @CreateShapeCastOpBeforeDistributedCastOp (%in1 : !DistributedType3, %
               pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
           } PPE : {
             PPETask {
-              opaque_ppe = #VPU.PPEStub<>
+              ppe = #VPU.PPEStub<>
               }
           }
     }
@@ -481,7 +481,7 @@ func.func @NotCreateShapeCastOpWithLayoutChange () -> (!DistributedType1) {
               pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
           } PPE : {
             PPETask {
-              opaque_ppe = #VPU.PPEStub<>
+              ppe = #VPU.PPEStub<>
               }
           }
     }
@@ -555,7 +555,7 @@ func.func @CreateShapeCastOpSingleClusterCase (%in1 : memref<1x1x207360x1xf16, #
               pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
           } PPE : {
             PPETask {
-              opaque_ppe = #VPU.PPEStub<>
+              ppe = #VPU.PPEStub<>
               }
           }
 
@@ -652,7 +652,7 @@ func.func @IllegalInPlaceEltwise(
             pad = #VPU.Padding<bottom = 0 : i64, left = 0 : i64, right = 0 : i64, top = 0 : i64>}
         } PPE : {
           PPETask {
-            opaque_ppe = #VPU.PPEStub<>
+            ppe = #VPU.PPEStub<>
             }
         }
     }

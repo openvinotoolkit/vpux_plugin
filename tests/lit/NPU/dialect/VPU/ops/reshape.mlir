@@ -30,11 +30,27 @@ func.func @NotConvertToShapeCastWithNotIdentityLayout(%arg0 : tensor<1x2x3x4xf16
 
 // -----
 
-// CHECK-LABEL: @NotConvertToShapeCastWithDifferentRank
-func.func @NotConvertToShapeCastWithDifferentRank(%arg0 : tensor<1x2x3x4xf16>) -> tensor<1x6x4xf16> {
+// CHECK-LABEL: @ConvertToAffineReshapeWithDifferentRank
+// CHECK-SAME:    [[INPUT:%.+]]: tensor<1x2x3x4xf16>
+func.func @ConvertToAffineReshapeWithDifferentRank(%arg0 : tensor<1x2x3x4xf16>) -> tensor<1x6x4xf16> {
     %0 = VPU.Reshape(%arg0) {shape_value = [1, 6, 4]} : tensor<1x2x3x4xf16> -> tensor<1x6x4xf16>
     return %0 : tensor<1x6x4xf16>
 
-    // CHECK:    [[RESHAPE:%.*]] = VPU.Reshape(%arg0) {shape_value = [1, 6, 4]} : tensor<1x2x3x4xf16> -> tensor<1x6x4xf16>
-    // CHECK:    return [[RESHAPE]]
+    // CHECK:    [[AFFINERESHAPE:%.+]] = VPU.AffineReshape([[INPUT]])
+    // CHECK-SAME{LITERAL}:    {dim_mapping = [[0], [1], [1], [2]], shape_value = [1, 6, 4]} : tensor<1x2x3x4xf16> -> tensor<1x6x4xf16>
+    // CHECK:    return [[AFFINERESHAPE]]
+}
+
+// -----
+
+// CHECK-LABEL: @FuseReshapes
+// CHECK-SAME:    [[INPUT:%.+]]: tensor<1x1x1x8xsi32>
+func.func @FuseReshapes(%arg0: tensor<1x1x1x8xsi32>) -> tensor<4x2xsi32> {
+    %0 = VPU.AffineReshape(%arg0) {dim_mapping = [[0], [0], [0], [0]], shape_value = [8]} : tensor<1x1x1x8xsi32> -> tensor<8xsi32>
+    %1 = VPU.Reshape(%0) {shape_value = [4, 2]} : tensor<8xsi32> -> tensor<4x2xsi32>
+
+    return %1 : tensor<4x2xsi32>
+
+    // CHECK:    [[RESHAPE:%.+]] = VPU.Reshape([[INPUT]]) {shape_value = [4, 2]} : tensor<1x1x1x8xsi32> -> tensor<4x2xsi32>
+    // CHECK:    return [[RESHAPE]] : tensor<4x2xsi32>
 }

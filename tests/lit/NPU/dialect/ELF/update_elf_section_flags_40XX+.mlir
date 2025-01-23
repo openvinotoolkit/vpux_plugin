@@ -62,8 +62,8 @@ func.func @main() {
     // CHECK:   ELF.CreateSection @shave.params aligned(1024)
     // CHECK-SAME:    secFlags("SHF_ALLOC|VPU_SHF_PROC_SHAVE")
     ELF.CreateSection @shave.params aligned(1024) secType(SHT_PROGBITS) secFlags(SHF_ALLOC) {
-      VPUASM.KernelParams @KernelParams_0_0 inputs([@io.NetworkInput0::@DeclareBuffer1, @buffer.Constant.0.constant::@Declare0]) outputs([@io.NetworkOutput0::@DeclareBuffer3]) kernel_type("eltwise_min") kernel_params(dense_resource<__elided__> : vector<108xui8>)
-      VPUASM.KernelParams @KernelParams_0_1 inputs([]) outputs([]) kernel_type("cache_op_flush_invalidate") kernel_params(dense<255> : vector<1xui8>)
+      VPUASM.KernelParams @KernelParams_0_0 inputs([@io.NetworkInput0::@DeclareBuffer1, @buffer.Constant.0.constant::@Declare0]) outputs([@io.NetworkOutput0::@DeclareBuffer3]) dynamicInputShapes([]) dynamicOutputShapes([]) kernel_type("eltwise_min") kernel_params(dense_resource<__elided__> : vector<108xui8>)
+      VPUASM.KernelParams @KernelParams_0_1 inputs([]) outputs([]) dynamicInputShapes([]) dynamicOutputShapes([]) kernel_type("cache_op_flush_invalidate") kernel_params(dense<255> : vector<1xui8>)
     }
     // CHECK:   ELF.CreateSection @program.barrier
     // CHECK-SAME:    secFlags("SHF_ALLOC|SHF_EXECINSTR")
@@ -75,10 +75,16 @@ func.func @main() {
     ELF.CreateSection @shave.runtime aligned(1024) secType(SHT_PROGBITS) secFlags(SHF_ALLOC) {
       VPUASM.ActShaveRt @ActShaveRt kernel("nnActEntry")
     }
+
+    // CHECK:   ELF.CreateSection @note.MappedInferenceVersion
+    // CHECK-SAME:    secFlags("SHF_NONE")
+    ELF.CreateSection @note.MappedInferenceVersion aligned(4) secType(SHT_NOTE) secFlags("SHF_NONE") {
+        VPUASM.MappedInferenceVersion @MappedInferenceVersion_0_0(11 _ 4 _ 10)
+    }
     // CHECK:   ELF.CreateSection @program.mapped_inference
     // CHECK-SAME:    secFlags("SHF_ALLOC|SHF_EXECINSTR")
     ELF.CreateSection @program.mapped_inference aligned(64) secType(SHT_PROGBITS) secFlags(SHF_ALLOC) {
-      VPUASM.MappedInference @MappedInference : dmas([]) actKernelRanges([@ActKernelRange_0_0]) actKernelInvocations([@ActKernelInvocation_0_0]) barriers(@program.barrier::@ConfigureBarrier_0_0) actShaveRt(@shave.runtime::@ActShaveRt) dmaCount([[0, 0], [0, 0]]) invariantCount([0, 0]) variantCount([0, 0]) actKernelRangesCount([2, 0]) actKernelInvocationsCount([2, 0]) mediaCount(0) barrierCount(3)
+      VPUASM.MappedInference @MappedInference : dmas([]) actKernelRanges([@ActKernelRange_0_0]) actKernelInvocations([@ActKernelInvocation_0_0]) barriers(@program.barrier::@ConfigureBarrier_0_0) actShaveRt(@shave.runtime::@ActShaveRt) dmaCount([[0, 0], [0, 0]]) invariantCount([0, 0]) variantCount([0, 0]) actKernelRangesCount([2, 0]) actKernelInvocationsCount([2, 0]) mediaCount(0) barrierCount(3) mappedInferenceVersion(@note.MappedInferenceVersion::@MappedInferenceVersion_0_0)
     }
     ELF.CreateSection @note.LoaderABIVersion aligned(4) secType(SHT_NOTE) secFlags("SHF_NONE") {
       ELF.ABIVersion(1 _ 0 _ 0) {sym_name = "LoaderABIVersion"}

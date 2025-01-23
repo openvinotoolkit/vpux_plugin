@@ -22,8 +22,12 @@ func.func @oneDma() {
 }
 
 // CHECK: func.func @oneDma()
-// CHECK: VPUASM.DeclareTaskBuffer @[[TB0:.*]] idx(!VPURegMapped.Index<0:0:0>) <DMA>
-// CHECK: VPUASM.DeclareBuffer @[[SYMBUF0:.*]] !VPUASM.Buffer< "NetworkInput"[0] <0>
-// CHECK: VPUASM.DeclareBuffer @[[SYMBUF1:.*]] !VPUASM.Buffer< "NetworkOutput"[0] <0>
-// CHECK: VPUASM.NNDMA @[[SYMDMA0:.*]] idx(!VPURegMapped.Index<0:0:0>) taskLocation(@[[TB0]]) input(@[[SYMBUF0]]) outputs([@[[SYMBUF1]]])
-// CHECK: VPUASM.MappedInference_37XX @MappedInference : dmas([@[[SYMDMA0]]]) dmaCount([1, 0]) invariantCount(0) variantCount(0) actKernelRangesCount(0) actKernelInvocationsCount(0) barrierCount(0)
+// CHECK: ELF.CreateLogicalSection @[[SECMETA:.*]] aligned
+// CHECK-NEXT: VPUASM.DeclareTaskBuffer @[[TB0:.*]] idx(!VPURegMapped.Index<0:0:0>) <DMA>
+// CHECK: ELF.CreateLogicalSection @[[SECIN0:.*]] aligned
+// CHECK-NEXT: VPUASM.DeclareBuffer @[[SYMBUF0:.*]] !VPUASM.Buffer< "NetworkInput"[0] <0>
+// CHECK: ELF.CreateLogicalSection @[[SECOUT0:.*]] aligned
+// CHECK-NEXT: VPUASM.DeclareBuffer @[[SYMBUF1:.*]] !VPUASM.Buffer< "NetworkOutput"[0] <0>
+// CHECK: ELF.CreateSection @[[SECDMA00:.*]] aligned
+// CHECK-NEXT: VPUASM.NNDMA @[[SYMDMA0:.*]] idx(!VPURegMapped.Index<0:0:0>) taskLocation(@[[SECMETA]]::@[[TB0]]) input(@[[SECIN0]]::@[[SYMBUF0]]) outputs([@[[SECOUT0]]::@[[SYMBUF1]]])
+// CHECK: VPUASM.MappedInference_37XX @MappedInference : dmas([@[[SECDMA00]]::@[[SYMDMA0]]]) dmaCount([1, 0]) invariantCount(0) variantCount(0) actKernelRangesCount(0) actKernelInvocationsCount(0) barrierCount(0)

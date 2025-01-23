@@ -1,4 +1,4 @@
-// Copyright (C) Intel Corporation
+// Copyright (C) 2021 - 2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -6,13 +6,13 @@
 
 #include <base/ov_behavior_test_utils.hpp>
 #include <cstring>
-#include <intel_npu/al/config/compiler.hpp>
+#include <intel_npu/config/compiler.hpp>
 #include <string>
 #include <vector>
 #include "common/functions.h"
 #include "common/npu_test_env_cfg.hpp"
-#include "intel_npu/al/config/common.hpp"
-#include "npu_private_properties.hpp"
+#include "intel_npu/config/common.hpp"
+#include "intel_npu/npu_private_properties.hpp"
 
 using CompilerType = ov::intel_npu::CompilerType;
 
@@ -54,7 +54,7 @@ TEST_P(TestCompiledModelNPU, samePlatformProduceTheSameBlob) {
     SKIP_IF_CURRENT_TEST_IS_DISABLED() {
         std::string platform = LayerTestsUtils::getTestsPlatformFromEnvironmentOr("3720");
 
-        configuration[ov::intel_npu::create_executor.name()] = "0";
+        configuration[ov::intel_npu::defer_weights_load.name()] = true;
         auto configuration1 = configuration;
         configuration1[ov::intel_npu::platform.name()] = platform;
         const auto& ov_model1 = buildSingleLayerSoftMaxNetwork();
@@ -106,8 +106,7 @@ TEST_P(TestCompileModelWithoutDeviceNPU, NoThrowIfNoDeviceAndButPlatformPassed) 
 
 const std::map<std::string_view, std::array<std::string_view, 2>> wrongDevice = {
         // {orig, {wrong for MLIR}}
-        {"VPU4000", {"VPU0000"}},
-};
+        {"VPU4000", {"VPU0000"}}};
 
 std::string getWrongDevice(const std::string_view platform, const CompilerType&) {
     // here we mix up devices in order to test the check on the runtime side
@@ -121,8 +120,7 @@ std::string getWrongDevice(const std::string_view platform, const CompilerType&)
 
 const std::map<std::string_view, std::array<std::string_view, 2>> validDevice = {
         // {orig, {valid for MLIR}}
-        {"VPU4000", {"VPU4000"}},
-};
+        {"VPU4000", {"VPU4000"}}};
 
 std::string getValidDevice(const std::string_view platform, const CompilerType&) {
     auto device = validDevice.find(platform);

@@ -15,7 +15,7 @@ struct GroupQuantShapes {
     const std::vector<int64_t> _rhsShape;
     const bool _transposeB;
 };
-using GroupQuantParams = std::tuple<GroupQuantShapes, ov::element::Type>;
+using GroupQuantParams = std::tuple<GroupQuantShapes, ov::element::Type, bool>;
 }  // namespace
 
 namespace ov::test::subgraph {
@@ -54,7 +54,7 @@ public:
     void SetUp() override {
         // Create a subgraph that will be lowered into a FakeQuantize with two axes
         // FQ (3x32x64 * 3x1x64) -> Reshape (3x32x64 to 96x64) -> MatMul (16x96 * 96x64)
-        const auto& [shapes, weigthsType] = GetParam();
+        const auto& [shapes, weigthsType, hasOutputScaleShiftU16Fq] = GetParam();
         const std::vector<ov::Shape> inferenceShapes = {shapes._lhsShape};
         const ov::test::InputShape dataShape = {shapes._lhsShape, inferenceShapes};
         init_input_shapes({dataShape});
@@ -102,7 +102,26 @@ public:
         const auto matmul =
                 std::make_shared<ov::opset1::MatMul>(param->output(0), reshape->output(0), false, shapes._transposeB);
 
-        const auto results = ov::ResultVector{std::make_shared<ov::opset1::Result>(matmul->output(0))};
+        auto output = matmul->output(0);
+        if (hasOutputScaleShiftU16Fq) {
+            float inLow = -128.f;
+            float inHigh = 127.f;
+            float scale = 2.f;
+            float bias = 5.f;
+            float outLow = inLow * scale + bias;
+            float outHigh = inHigh * scale + bias;
+            const auto u16FqInLow = ov::opset1::Constant::create(ov::element::f32, ov::Shape{1}, {inLow});
+            const auto u16FqInHigh = ov::opset1::Constant::create(ov::element::f32, ov::Shape{1}, {inHigh});
+            const auto u16FqOutLow = ov::opset1::Constant::create(ov::element::f32, ov::Shape{1}, {outLow});
+            const auto u16FqOutHigh = ov::opset1::Constant::create(ov::element::f32, ov::Shape{1}, {outHigh});
+            constexpr size_t u16FqLevels = 65536;
+            const auto u16Fq = std::make_shared<ov::opset1::FakeQuantize>(
+                    matmul->output(0), u16FqInLow->output(0), u16FqInHigh->output(0), u16FqOutLow->output(0),
+                    u16FqOutHigh->output(0), u16FqLevels, ov::op::AutoBroadcastSpec(ov::op::AutoBroadcastType::NUMPY));
+            output = u16Fq->output(0);
+        }
+
+        const auto results = ov::ResultVector{std::make_shared<ov::opset1::Result>(output)};
         function = std::make_shared<ov::Model>(results, ov::ParameterVector{param}, "MatMulWithFQ");
     }
 
@@ -111,10 +130,11 @@ public:
         std::ostringstream result;
         result << "TestKind" << ov::test::utils::testKind(__FILE__) << sep;
         result << "TestIdx=" << obj.index << sep;
-        const auto& [shapes, dataType] = obj.param;
+        const auto& [shapes, dataType, hasOutputScaleShiftU16Fq] = obj.param;
         result << "DataType=" << dataType << sep;
         result << "DataShape=" << shapes._lhsShape << sep;
-        result << "WeightShape=" << shapes._weightShape;
+        result << "WeightShape=" << shapes._weightShape << sep;
+        result << "hasOutputScaleShiftU16Fq=" << hasOutputScaleShiftU16Fq;
         return result.str();
     };
 };
@@ -129,6 +149,18 @@ TEST_P(MatMulWithFQTestCommon, NPU3720_TestKindSubgraph) {
 }
 
 TEST_P(MatMulWithFQTestCommon, NPU4000_TestKindSubgraph) {
+    setDefaultHardwareMode();
+    run(Platform::NPU4000);
+}
+
+class MatMulWithFQTestEnableU16FqScaleShiftConversion : public MatMulWithFQTestCommon {
+    void configure_model() override {
+        configuration[ov::intel_npu::compilation_mode_params.name()] =
+                "enable-u16-fake-quantize-to-scale-shift-conversion=true";
+    }
+};
+
+TEST_P(MatMulWithFQTestEnableU16FqScaleShiftConversion, NPU4000_TestKindSubgraph) {
     setDefaultHardwareMode();
     run(Platform::NPU4000);
 }
@@ -153,7 +185,13 @@ const std::vector<GroupQuantShapes> shapes = {
 const std::vector<ov::element::Type> elementTypes = {ov::element::i8, ov::element::i4, ov::element::u4};
 
 INSTANTIATE_TEST_SUITE_P(MatMulWithFQ, MatMulWithFQTestCommon,
-                         ::testing::Combine(::testing::ValuesIn(shapes), ::testing::ValuesIn(elementTypes)),
+                         ::testing::Combine(::testing::ValuesIn(shapes), ::testing::ValuesIn(elementTypes),
+                                            ::testing::Values(false)),
                          MatMulWithFQTestCommon::getTestCaseName);
+
+INSTANTIATE_TEST_SUITE_P(MatMulWithFQ, MatMulWithFQTestEnableU16FqScaleShiftConversion,
+                         ::testing::Combine(::testing::ValuesIn(shapes), ::testing::ValuesIn(elementTypes),
+                                            ::testing::Values(true)),
+                         MatMulWithFQTestEnableU16FqScaleShiftConversion::getTestCaseName);
 
 }  // namespace ov::test::subgraph

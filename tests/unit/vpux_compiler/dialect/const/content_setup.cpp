@@ -8,8 +8,10 @@
 #include "vpux/compiler/dialect/const/ops.hpp"
 #include "vpux/compiler/dialect/const/utils/utils.hpp"
 #include "vpux/compiler/utils/swizzling_utils.hpp"
+#include "vpux/compiler/utils/types.hpp"
 
 #include <llvm/Support/raw_ostream.h>
+#include <mlir/IR/BuiltinAttributes.h>
 #include <mlir/Parser/Parser.h>
 
 #include <gmock/gmock-matchers.h>
@@ -27,31 +29,16 @@ public:
 
     mlir::MLIRContext ctx;
 
-    template <typename ValType>
-    Const::ContentSetup getContentSetup(ArrayRef<int64_t> shape, mlir::Type type,
-                                        FuncRef<SmallVector<ValType>(mlir::RankedTensorType)> getValues = nullptr) {
+    Const::ContentSetup getContentSetup(ArrayRef<int64_t> shape, mlir::Type type) {
         const auto baseType = mlir::RankedTensorType::get(shape, type);
-
-        if (!getValues) {
-            getValues = [](mlir::RankedTensorType baseType) -> SmallVector<ValType> {
-                auto vals = SmallVector<ValType>(baseType.getNumElements());
-                for (auto index : irange(vals.size())) {
-                    vals[index] = index;
-                }
-
-                return vals;
-            };
-        }
-
-        const auto baseAttr = mlir::DenseElementsAttr::get(baseType, ArrayRef<ValType>(getValues(baseType)));
-        return Const::ContentAttr::transform(baseAttr);
+        return Const::ContentSetup(baseType);
     }
 
-    template <typename ValType>
-    Const::ContentSetup getContentSetup(ArrayRef<int64_t> shape, mlir::Type type, ArrayRef<ValType> values) {
-        const auto baseType = mlir::RankedTensorType::get(shape, type);
-        const auto baseAttr = mlir::DenseElementsAttr::get(baseType, values);
-        return Const::ContentAttr::transform(baseAttr);
+    template <typename T>
+    Const::ContentAttr getContentAttr(ArrayRef<int64_t> shape, mlir::Type elemType, ArrayRef<T> data) {
+        auto rankedType = mlir::RankedTensorType::get(shape, elemType);
+        auto baseAttr = Const::createConstContent(rankedType, data);
+        return Const::ContentAttr::get(baseAttr);
     }
 
     void checkSubViewAttr(Const::TransformAttrInterface actualTransformation, ArrayRef<int64_t> expectedOffset,
@@ -130,6 +117,18 @@ public:
             return DimsOrder::fromAffineMap(attr.getOrder().getValue());
         };
         checkSingleValueAttr<Const::TransposeAttr, DimsOrder>(actualTransformation, expectedValue, getValue);
+    }
+
+    void checkMemPermuteAttr(Const::TransformAttrInterface actualTransformation, DimsOrder expectedOrder,
+                             DimsOrder expectedMemPerm) {
+        auto memPermAttr = mlir::dyn_cast<Const::MemPermuteAttr>(actualTransformation);
+        ASSERT_TRUE(memPermAttr != nullptr);
+
+        auto actualOrder = DimsOrder::fromAffineMap(memPermAttr.getDstOrder().getValue());
+        EXPECT_THAT(actualOrder, expectedOrder);
+
+        auto actualMemPerm = DimsOrder::fromAffineMap(memPermAttr.getMemPerm().getValue());
+        EXPECT_THAT(actualMemPerm, expectedMemPerm);
     }
 
     void checkCastElemTypeAttr(Const::TransformAttrInterface actualTransformation, mlir::Type expectedValue) {
@@ -688,16 +687,25 @@ public:
 }  // namespace
 
 TEST_F(MLIR_ContentSetupTest, Invalidated) {
-    auto setup = getContentSetup<uint8_t>(ArrayRef<int64_t>{4}, getInt8Type(&ctx), SmallVector<uint8_t>{1, 7, 10, 15});
+    const auto baseType = mlir::RankedTensorType::get(ArrayRef<int64_t>{4}, getInt8Type(&ctx));
+    SmallVector<int8_t> data{1, 7, 10, 15};
+    const auto baseAttr = Const::createConstContent(baseType, ArrayRef(data));
+    const auto contentAttr = Const::ContentAttr::get(baseAttr);
+    auto setup = contentAttr.transform();
 
+    std::ignore = setup.getContext();
     // move and reassign - setup is valid
     setup = setup.add(1.0);
+    // getTransformations() does not invalidate setup
+    std::ignore = setup.getTransformations();
     // get() does not invalidate setup
     std::ignore = setup.get();
     // a transformation does invalidate setup
     std::ignore = setup.add(2.0);
 
+    EXPECT_THROW(std::ignore = setup.getContext(), std::exception);
     EXPECT_THROW(std::ignore = setup.addTransformation(nullptr), std::exception);
+    EXPECT_THROW(std::ignore = setup.getTransformations(), std::exception);
     EXPECT_THROW(std::ignore = setup.get(), std::exception);
 }
 
@@ -714,7 +722,7 @@ TEST_F(MLIR_ContentSetupTest, FuseSubView) {
     const int64_t IH = 7;
     const int64_t IW = 5;
 
-    auto baseContentAttrSetup = getContentSetup<uint8_t>(ArrayRef<int64_t>{IC, IH, IW}, getInt8Type(&ctx));
+    auto baseContentAttrSetup = getContentSetup(ArrayRef<int64_t>{IC, IH, IW}, getInt8Type(&ctx));
 
     // first SubView
     SmallVector<int64_t> offset1 = {0, 1, 2};
@@ -743,7 +751,7 @@ TEST_F(MLIR_ContentSetupTest, FuseAdd) {
     const int64_t IH = 7;
     const int64_t IW = 5;
 
-    auto baseContentAttrSetup = getContentSetup<uint8_t>(ArrayRef<int64_t>{IC, IH, IW}, getInt8Type(&ctx));
+    auto baseContentAttrSetup = getContentSetup(ArrayRef<int64_t>{IC, IH, IW}, getInt8Type(&ctx));
 
     // first add
     auto contentAttrSetup = baseContentAttrSetup.add(1);
@@ -763,7 +771,7 @@ TEST_F(MLIR_ContentSetupTest, FuseRescale) {
     const int64_t IH = 7;
     const int64_t IW = 5;
 
-    auto baseContentAttrSetup = getContentSetup<uint8_t>(ArrayRef<int64_t>{IC, IH, IW}, getInt8Type(&ctx));
+    auto baseContentAttrSetup = getContentSetup(ArrayRef<int64_t>{IC, IH, IW}, getInt8Type(&ctx));
 
     // first rescale
     auto contentAttrSetup = baseContentAttrSetup.rescale(2);
@@ -783,7 +791,7 @@ TEST_F(MLIR_ContentSetupTest, FuseReshape) {
     const int64_t IH = 8;
     const int64_t IW = 3;
 
-    auto baseContentAttrSetup = getContentSetup<uint8_t>(ArrayRef<int64_t>{IC, IH, IW}, getInt8Type(&ctx));
+    auto baseContentAttrSetup = getContentSetup(ArrayRef<int64_t>{IC, IH, IW}, getInt8Type(&ctx));
 
     // first reshape
     auto contentAttrSetup = baseContentAttrSetup.reshape({IC, IH * IW});
@@ -804,7 +812,7 @@ TEST_F(MLIR_ContentSetupTest, FuseReorder) {
     const int64_t IH = 8;
     const int64_t IW = 3;
 
-    auto baseContentAttrSetup = getContentSetup<uint8_t>(ArrayRef<int64_t>{IC, IH, IW}, getInt8Type(&ctx));
+    auto baseContentAttrSetup = getContentSetup(ArrayRef<int64_t>{IC, IH, IW}, getInt8Type(&ctx));
 
     // first reorder
     auto contentAttrSetup = baseContentAttrSetup.reorder(DimsOrder::WHC);
@@ -819,6 +827,27 @@ TEST_F(MLIR_ContentSetupTest, FuseReorder) {
     checkReorderAttr(actualTransformations[0], DimsOrder::HCW);
 }
 
+TEST_F(MLIR_ContentSetupTest, FuseCastElemType) {
+    const int64_t IC = 4;
+    const int64_t IH = 8;
+    const int64_t IW = 3;
+
+    auto baseContentAttrSetup = getContentSetup(ArrayRef<int64_t>{IC, IH, IW}, getInt8Type(&ctx));
+
+    // first cast
+    auto contentAttrSetup = baseContentAttrSetup.castElemType(mlir::Float16Type::get(&ctx));
+
+    // second cast
+    const auto expectedType = getUInt8Type(&ctx);
+    contentAttrSetup = contentAttrSetup.castElemType(expectedType);
+
+    // check final cast
+    auto actualTransformations = contentAttrSetup.getTransformations();
+    EXPECT_EQ(actualTransformations.size(), 1);
+
+    checkCastElemTypeAttr(actualTransformations[0], expectedType);
+}
+
 //
 // MoveSubViewBefore
 //
@@ -828,7 +857,7 @@ TEST_F(MLIR_ContentSetupTest, SwapAddAndSubView) {
     const int64_t IH = 8;
     const int64_t IW = 3;
 
-    auto baseContentAttrSetup = getContentSetup<uint8_t>(ArrayRef<int64_t>{IC, IH, IW}, getInt8Type(&ctx));
+    auto baseContentAttrSetup = getContentSetup(ArrayRef<int64_t>{IC, IH, IW}, getInt8Type(&ctx));
 
     // first Add
     auto contentAttrSetup = baseContentAttrSetup.add(1);
@@ -852,7 +881,7 @@ TEST_F(MLIR_ContentSetupTest, SwapReorderAndSubView) {
     const int64_t IH = 8;
     const int64_t IW = 3;
 
-    auto baseContentAttrSetup = getContentSetup<uint8_t>(ArrayRef<int64_t>{IC, IH, IW}, getInt8Type(&ctx));
+    auto baseContentAttrSetup = getContentSetup(ArrayRef<int64_t>{IC, IH, IW}, getInt8Type(&ctx));
 
     // first Reorder
     auto contentAttrSetup = baseContentAttrSetup.reorder(DimsOrder::WHC);
@@ -876,7 +905,7 @@ TEST_F(MLIR_ContentSetupTest, SwapTransposeAndSubView) {
     const int64_t IH = 8;
     const int64_t IW = 3;
 
-    auto baseContentAttrSetup = getContentSetup<uint8_t>(ArrayRef<int64_t>{IC, IH, IW}, getInt8Type(&ctx));
+    auto baseContentAttrSetup = getContentSetup(ArrayRef<int64_t>{IC, IH, IW}, getInt8Type(&ctx));
 
     // first Transpose
     auto contentAttrSetup = baseContentAttrSetup.transpose(DimsOrder::WHC);
@@ -905,7 +934,7 @@ TEST_F(MLIR_ContentSetupTest, SwapRescaleAndSubView) {
     const int64_t IH = 8;
     const int64_t IW = 3;
 
-    auto baseContentAttrSetup = getContentSetup<uint8_t>(ArrayRef<int64_t>{IC, IH, IW}, getInt8Type(&ctx));
+    auto baseContentAttrSetup = getContentSetup(ArrayRef<int64_t>{IC, IH, IW}, getInt8Type(&ctx));
 
     // first Rescale
     auto contentAttrSetup = baseContentAttrSetup.rescale(3);
@@ -929,7 +958,7 @@ TEST_F(MLIR_ContentSetupTest, DontSwapSubviewWithRangeIntoPadAfterRegion) {
     const int64_t IH = 1;
     const int64_t IW = 256;
 
-    auto baseContentAttrSetup = getContentSetup<uint8_t>(ArrayRef<int64_t>{IC, IH, IW}, getInt8Type(&ctx));
+    auto baseContentAttrSetup = getContentSetup(ArrayRef<int64_t>{IC, IH, IW}, getInt8Type(&ctx));
 
     // first PadWithZero
     SmallVector<int64_t> expectedPadBegin = {0, 0, 0};
@@ -956,7 +985,7 @@ TEST_F(MLIR_ContentSetupTest, DontSwapSubviewWithRangeIntoPadBeforeRegion) {
     const int64_t IH = 1;
     const int64_t IW = 256;
 
-    auto baseContentAttrSetup = getContentSetup<uint8_t>(ArrayRef<int64_t>{IC, IH, IW}, getInt8Type(&ctx));
+    auto baseContentAttrSetup = getContentSetup(ArrayRef<int64_t>{IC, IH, IW}, getInt8Type(&ctx));
 
     // first PadWithZero
     SmallVector<int64_t> expectedPadBegin = {0, 0, 256};
@@ -983,7 +1012,7 @@ TEST_F(MLIR_ContentSetupTest, SwapSubviewCoveringOriginalConstantAndPaddedRegion
     const int64_t IH = 8;
     const int64_t IW = 256;
 
-    auto baseContentAttrSetup = getContentSetup<uint8_t>(ArrayRef<int64_t>{IC, IH, IW}, getInt8Type(&ctx));
+    auto baseContentAttrSetup = getContentSetup(ArrayRef<int64_t>{IC, IH, IW}, getInt8Type(&ctx));
 
     // first PadWithZero
     SmallVector<int64_t> padBegin = {0, 0, 128};
@@ -1015,7 +1044,7 @@ TEST_F(MLIR_ContentSetupTest, SwapSubviewCoveringOnlyPartOfOriginalConstantWithP
     const int64_t IH = 8;
     const int64_t IW = 256;
 
-    auto baseContentAttrSetup = getContentSetup<uint8_t>(ArrayRef<int64_t>{IC, IH, IW}, getInt8Type(&ctx));
+    auto baseContentAttrSetup = getContentSetup(ArrayRef<int64_t>{IC, IH, IW}, getInt8Type(&ctx));
 
     // first PadWithZero
     SmallVector<int64_t> padBegin = {0, 0, 128};
@@ -1043,7 +1072,7 @@ TEST_F(MLIR_ContentSetupTest, SwapAndFoldSubViewWithPadWithZero) {
     const int64_t IH = 8;
     const int64_t IW = 256;
 
-    auto baseContentAttrSetup = getContentSetup<uint8_t>(ArrayRef<int64_t>{IC, IH, IW}, getInt8Type(&ctx));
+    auto baseContentAttrSetup = getContentSetup(ArrayRef<int64_t>{IC, IH, IW}, getInt8Type(&ctx));
 
     // first PadWithZero
     SmallVector<int64_t> padBegin = {0, 0, 0};
@@ -1068,7 +1097,7 @@ TEST_F(MLIR_ContentSetupTest, SwapMemPermAndSubViewMultipleInstances) {
     const int64_t IH = 1;
     const int64_t IW = 1;
 
-    auto baseContentAttrSetup = getContentSetup<uint8_t>(ArrayRef<int64_t>{IN, IC, IH, IW}, getInt8Type(&ctx));
+    auto baseContentAttrSetup = getContentSetup(ArrayRef<int64_t>{IN, IC, IH, IW}, getInt8Type(&ctx));
 
     // 1st Transpose
     auto contentAttrSetup = baseContentAttrSetup.transpose(DimsOrder::HCNW);
@@ -1105,7 +1134,7 @@ TEST_F(MLIR_ContentSetupTest, SwapCastElemTypeAndSubView) {
     const int64_t IH = 8;
     const int64_t IW = 3;
 
-    auto baseContentAttrSetup = getContentSetup<float>(ArrayRef<int64_t>{IC, IH, IW}, mlir::Float32Type::get(&ctx));
+    auto baseContentAttrSetup = getContentSetup(ArrayRef<int64_t>{IC, IH, IW}, mlir::Float32Type::get(&ctx));
 
     // first CastElemType
     auto expectedType = mlir::Float16Type::get(&ctx);
@@ -1130,7 +1159,7 @@ TEST_F(MLIR_ContentSetupTest, SwapConvertElemTypeAndSubView) {
     const int64_t IH = 8;
     const int64_t IW = 3;
 
-    auto baseContentAttrSetup = getContentSetup<float>(ArrayRef<int64_t>{IC, IH, IW}, mlir::Float32Type::get(&ctx));
+    auto baseContentAttrSetup = getContentSetup(ArrayRef<int64_t>{IC, IH, IW}, mlir::Float32Type::get(&ctx));
 
     // first ConvertElemType
     auto expectedType = mlir::Float16Type::get(&ctx);
@@ -1150,7 +1179,82 @@ TEST_F(MLIR_ContentSetupTest, SwapConvertElemTypeAndSubView) {
     checkConvertElemTypeAttr(actualTransformations[1], expectedType);
 }
 
-TEST_F(MLIR_ContentSetupTest, SwapQuantizeAndSubView) {
+TEST_F(MLIR_ContentSetupTest, SwapConvertElemTypeAndSubView_Subbyte) {
+    const int64_t IC = 4;
+    const int64_t IH = 8;
+    const int64_t IW = 3;
+
+    auto baseContentAttrSetup = getContentSetup(ArrayRef<int64_t>{IC, IH, IW}, getUInt4Type(&ctx));
+
+    // first ConvertElemType
+    auto expectedType = getUInt8Type(&ctx);
+    auto contentAttrSetup = baseContentAttrSetup.convertElemType(expectedType);
+
+    // second SubView
+    SmallVector<int64_t> expectedOffset = {0, 1, 1};
+    SmallVector<int64_t> expectedShape = {1, 2, 1};
+
+    contentAttrSetup = contentAttrSetup.subview(ShapeRef(expectedOffset), ShapeRef(expectedShape));
+
+    // check
+    auto actualTransformations = contentAttrSetup.getTransformations();
+    EXPECT_EQ(actualTransformations.size(), 2);
+
+    // Note: subview supports sub-byte types, so swapping is legal - see
+    // TEST_F(MLIR_SubByteTest, SubViewI4_General)
+    checkSubViewAttr(actualTransformations[0], expectedOffset, expectedShape);
+    checkConvertElemTypeAttr(actualTransformations[1], expectedType);
+}
+
+TEST_F(MLIR_ContentSetupTest, SwapConvertElemTypeAndSubView_Quantized) {
+    const int64_t IC = 2;
+    const int64_t IH = 8;
+    const int64_t IW = 3;
+
+    ctx.loadDialect<mlir::quant::QuantizationDialect>();
+    auto perTensorQType = mlir::quant::UniformQuantizedType::get(0, getUInt8Type(&ctx), mlir::Float32Type::get(&ctx),
+                                                                 0.078, 128, 0, 255);
+    auto perTensorQType2 =
+            mlir::quant::UniformQuantizedType::get(mlir::quant::QuantizationFlags::Signed, getInt8Type(&ctx),
+                                                   mlir::Float32Type::get(&ctx), 0.078, 0, -128, 127);
+
+    auto perAxisQType = mlir::quant::UniformQuantizedPerAxisType::get(
+            0, getUInt8Type(&ctx), mlir::Float32Type::get(&ctx), {2, 0.5}, {127, 127}, 0, 0, 255);
+    auto perAxisQType2 =
+            mlir::quant::UniformQuantizedPerAxisType::get(mlir::quant::QuantizationFlags::Signed, getInt8Type(&ctx),
+                                                          mlir::Float32Type::get(&ctx), {2, 0.5}, {0, 0}, 0, -128, 127);
+    auto expectedPerAxisQType =
+            mlir::quant::UniformQuantizedPerAxisType::get(mlir::quant::QuantizationFlags::Signed, getInt8Type(&ctx),
+                                                          mlir::Float32Type::get(&ctx), {2}, {0}, 0, -128, 127);
+
+    SmallVector<std::tuple<mlir::quant::QuantizedType, mlir::quant::QuantizedType, mlir::quant::QuantizedType>> qTypes{
+            {perTensorQType, perTensorQType2, perTensorQType2},
+            {perAxisQType, perAxisQType2, expectedPerAxisQType}};
+
+    for (auto [qTypeIn, qTypeOut, qTypeExpected] : qTypes) {
+        auto baseContentAttrSetup = getContentSetup(ArrayRef<int64_t>{IC, IH, IW}, getUInt8Type(&ctx));
+
+        // first cast to quantized (required by convert to succeed)
+        auto contentAttrSetup = baseContentAttrSetup.castElemType(qTypeIn);
+
+        // convert from one quantized to another
+        contentAttrSetup = contentAttrSetup.convertElemType(qTypeOut);
+
+        // then add subview
+        SmallVector<int64_t> expectedOffset = {0, 1, 1};
+        SmallVector<int64_t> expectedShape = {1, 2, 1};
+        contentAttrSetup = contentAttrSetup.subview(ShapeRef(expectedOffset), ShapeRef(expectedShape));
+
+        // check
+        auto actualTransformations = contentAttrSetup.getTransformations();
+        EXPECT_EQ(actualTransformations.size(), 3);
+
+        checkSubViewAttr(actualTransformations[0], expectedOffset, expectedShape);
+        checkConvertElemTypeAttr(actualTransformations[2], qTypeExpected);
+    }
+}
+
+TEST_F(MLIR_ContentSetupTest, SwapCastElemTypeAndSubView_Quantized) {
     const int64_t IC = 2;
     const int64_t IH = 8;
     const int64_t IW = 3;
@@ -1169,10 +1273,10 @@ TEST_F(MLIR_ContentSetupTest, SwapQuantizeAndSubView) {
             {perAxisQType, expectedPerAxisQType}};
 
     for (auto& qType : qTypes) {
-        auto baseContentAttrSetup = getContentSetup<uint8_t>(ArrayRef<int64_t>{IC, IH, IW}, getInt8Type(&ctx));
+        auto baseContentAttrSetup = getContentSetup(ArrayRef<int64_t>{IC, IH, IW}, getUInt8Type(&ctx));
 
         // first QuantCast
-        auto contentAttrSetup = baseContentAttrSetup.quantCast(qType.first);
+        auto contentAttrSetup = baseContentAttrSetup.castElemType(qType.first);
 
         // second SubView
         SmallVector<int64_t> expectedOffset = {0, 1, 1};
@@ -1190,7 +1294,7 @@ TEST_F(MLIR_ContentSetupTest, SwapQuantizeAndSubView) {
 }
 
 TEST_P(MLIR_ContentSetupTest_SwapReshapeAndSubView, SwapReshapeAndSubView) {
-    auto baseContentAttrSetup = getContentSetup<uint8_t>(ArrayRef<int64_t>{_baseContentShape}, getInt8Type(&ctx));
+    auto baseContentAttrSetup = getContentSetup(ArrayRef<int64_t>{_baseContentShape}, getInt8Type(&ctx));
 
     // first Reshape
     auto contentAttrSetup = baseContentAttrSetup.reshape(ShapeRef(_inputParams.reshape));
@@ -1224,7 +1328,7 @@ INSTANTIATE_TEST_SUITE_P(smoke_SwapReshapeAndSubView, MLIR_ContentSetupTest_Swap
                          MLIR_ContentSetupTest_SwapReshapeAndSubView::getTestCaseName);
 
 TEST_P(MLIR_ContentSetupTest_DoNotSwapReshapeAndSubView, DoNotSwapReshapeAndSubView) {
-    auto baseContentAttrSetup = getContentSetup<uint8_t>(ArrayRef<int64_t>{_baseContentShape}, getInt8Type(&ctx));
+    auto baseContentAttrSetup = getContentSetup(ArrayRef<int64_t>{_baseContentShape}, getInt8Type(&ctx));
 
     // first Reshape
     auto contentAttrSetup = baseContentAttrSetup.reshape(ShapeRef(_inputParams.reshape));
@@ -1249,10 +1353,10 @@ INSTANTIATE_TEST_SUITE_P(smoke_DoNotSwapReshapeAndSubView, MLIR_ContentSetupTest
                          MLIR_ContentSetupTest_DoNotSwapReshapeAndSubView::getTestCaseName);
 
 TEST_P(MLIR_ContentSetupTest_SwapChangeShapeAndElemTypeAndSubView, SwapChangeShapeAndElemTypeAndSubView) {
-    auto baseContentAttrSetup = getContentSetup<uint8_t>(ArrayRef(_baseContentShape), getUInt8Type(&ctx));
+    auto baseContentAttrSetup = getContentSetup(ArrayRef(_baseContentShape), getUInt8Type(&ctx));
 
     // first QuantCast
-    auto contentAttrSetup = baseContentAttrSetup.quantCast(_inQuantCastType);
+    auto contentAttrSetup = baseContentAttrSetup.castElemType(_inQuantCastType);
 
     // second ChangeShapeAndElemType
     contentAttrSetup = contentAttrSetup.changeShapeAndElemType(ShapeRef(_inChangeShapeAndElemTypeShape),
@@ -1305,10 +1409,10 @@ INSTANTIATE_TEST_SUITE_P(smoke_SwapChangeShapeAndElemTypeAndSubView,
                          MLIR_ContentSetupTest_SwapChangeShapeAndElemTypeAndSubView::getTestCaseName);
 
 TEST_P(MLIR_ContentSetupTest_DoNotSwapChangeShapeAndElemTypeAndSubView, DoNotSwapChangeShapeAndElemTypeAndSubView) {
-    auto baseContentAttrSetup = getContentSetup<uint8_t>(ArrayRef(_baseContentShape), getUInt8Type(&ctx));
+    auto baseContentAttrSetup = getContentSetup(ArrayRef(_baseContentShape), getUInt8Type(&ctx));
 
     // first QuantCast
-    auto contentAttrSetup = baseContentAttrSetup.quantCast(_inQuantCastType);
+    auto contentAttrSetup = baseContentAttrSetup.castElemType(_inQuantCastType);
 
     // second ChangeShapeAndElemType
     contentAttrSetup = contentAttrSetup.changeShapeAndElemType(ShapeRef(_inChangeShapeAndElemTypeShape),
@@ -1330,7 +1434,7 @@ TEST_P(MLIR_ContentSetupTest_DoNotSwapChangeShapeAndElemTypeAndSubView, DoNotSwa
 SmallVector<DoNotSwapChangeShapeAndElemTypeAndSubViewParams, 5> doNotSwapChangeShapeAndElemTypeAndSubViewParams = {
         DoNotSwapChangeShapeAndElemTypeAndSubViewParams{
                 SmallVector<int64_t>{1, 4, 1, 2},
-                QuantCastChangeShapeAndElemTypeAndSubView{{1, 4}, {{8, 1}, 0, 2}, {{0, 0}, {4, 1}}}},
+                QuantCastChangeShapeAndElemTypeAndSubView{{1, 4}, {{8, 1}, 0, 8}, {{0, 0}, {4, 1}}}},
         DoNotSwapChangeShapeAndElemTypeAndSubViewParams{
                 SmallVector<int64_t>{1, 8, 8, 2},
                 QuantCastChangeShapeAndElemTypeAndSubView{{1, 8}, {{1, 8, 4, 4}, 1, 8}, {{0, 0, 3, 0}, {1, 8, 1, 4}}}}};
@@ -1342,7 +1446,7 @@ INSTANTIATE_TEST_SUITE_P(smoke_DoNotSwapChangeShapeAndElemTypeAndSubView,
 
 TEST_F(MLIR_ContentSetupTest, SwapMultipleTransformationsAndSubView) {
     SmallVector<int64_t> baseContentShape = {4, 8, 3};
-    auto baseContentAttrSetup = getContentSetup<float>(ArrayRef(baseContentShape), mlir::Float32Type::get(&ctx));
+    auto baseContentAttrSetup = getContentSetup(ArrayRef(baseContentShape), mlir::Float32Type::get(&ctx));
 
     size_t numOfAddRescalePairs = 10;
     for (size_t i = 0; i < numOfAddRescalePairs; i++) {
@@ -1378,7 +1482,7 @@ TEST_F(MLIR_ContentSetupTest, SwapAddAndReshape) {
     const int64_t IH = 8;
     const int64_t IW = 3;
 
-    auto baseContentAttrSetup = getContentSetup<uint8_t>(ArrayRef<int64_t>{IC, IH, IW}, getInt8Type(&ctx));
+    auto baseContentAttrSetup = getContentSetup(ArrayRef<int64_t>{IC, IH, IW}, getInt8Type(&ctx));
 
     // first Add
     auto contentAttrSetup = baseContentAttrSetup.add(1);
@@ -1400,7 +1504,7 @@ TEST_F(MLIR_ContentSetupTest, SwapRescaleAndReshape) {
     const int64_t IH = 8;
     const int64_t IW = 3;
 
-    auto baseContentAttrSetup = getContentSetup<uint8_t>(ArrayRef<int64_t>{IC, IH, IW}, getInt8Type(&ctx));
+    auto baseContentAttrSetup = getContentSetup(ArrayRef<int64_t>{IC, IH, IW}, getInt8Type(&ctx));
 
     // first Rescale
     auto contentAttrSetup = baseContentAttrSetup.rescale(3);
@@ -1422,7 +1526,7 @@ TEST_F(MLIR_ContentSetupTest, SwapCastElemTypeAndReshape) {
     const int64_t IH = 8;
     const int64_t IW = 3;
 
-    auto baseContentAttrSetup = getContentSetup<float>(ArrayRef<int64_t>{IC, IH, IW}, mlir::Float32Type::get(&ctx));
+    auto baseContentAttrSetup = getContentSetup(ArrayRef<int64_t>{IC, IH, IW}, mlir::Float32Type::get(&ctx));
 
     // first CastElemType
     auto expectedType = mlir::Float16Type::get(&ctx);
@@ -1441,10 +1545,10 @@ TEST_F(MLIR_ContentSetupTest, SwapCastElemTypeAndReshape) {
 }
 
 TEST_P(MLIR_ContentSetupTest_SwapQuantizeTransformationsAndReshape, SwapQuantizeTransformationsAndReshape) {
-    auto baseContentAttrSetup = getContentSetup<uint8_t>(ArrayRef(_baseContentShape), getUInt8Type(&ctx));
+    auto baseContentAttrSetup = getContentSetup(ArrayRef(_baseContentShape), getUInt8Type(&ctx));
 
     // first QuantCast
-    auto contentAttrSetup = baseContentAttrSetup.quantCast(_inQuantCastType);
+    auto contentAttrSetup = baseContentAttrSetup.castElemType(_inQuantCastType);
 
     // second Dequantize
     contentAttrSetup = contentAttrSetup.dequantize();
@@ -1473,13 +1577,13 @@ INSTANTIATE_TEST_SUITE_P(smoke_SwapQuantizeTransformationsAndReshape,
 
 TEST_F(MLIR_ContentSetupTest, SwapPerTensorQuantizeTransformationsAndReshape) {
     SmallVector<int64_t> baseContentShape = {16, 32, 1, 1};
-    auto baseContentAttrSetup = getContentSetup<uint8_t>(ArrayRef(baseContentShape), getUInt8Type(&ctx));
+    auto baseContentAttrSetup = getContentSetup(ArrayRef(baseContentShape), getUInt8Type(&ctx));
 
     ctx.loadDialect<mlir::quant::QuantizationDialect>();
     auto perTensorQType = mlir::quant::UniformQuantizedType::get(0, getUInt8Type(&ctx), mlir::Float32Type::get(&ctx),
                                                                  0.078, 128, 0, 255);
     // first QuantCast
-    auto contentAttrSetup = baseContentAttrSetup.quantCast(perTensorQType);
+    auto contentAttrSetup = baseContentAttrSetup.castElemType(perTensorQType);
 
     // second Dequantize
     contentAttrSetup = contentAttrSetup.dequantize();
@@ -1498,7 +1602,7 @@ TEST_F(MLIR_ContentSetupTest, SwapPerTensorQuantizeTransformationsAndReshape) {
 }
 
 TEST_P(MLIR_ContentSetupTest_SwapRelocateWeightsTableAndSubView, SwapRelocateWeightsTableAndSubView) {
-    auto baseContentAttrSetup = getContentSetup<int32_t>(ArrayRef(_baseContentShape), getSInt32Type(&ctx));
+    auto baseContentAttrSetup = getContentSetup(ArrayRef(_baseContentShape), getSInt32Type(&ctx));
 
     auto contentAttrSetup = baseContentAttrSetup.relocateWeightsTablePointers(
             _relocateWeightsTableParams.weightsPtr, _relocateWeightsTableParams.sparsityPtr,
@@ -1528,11 +1632,11 @@ SmallVector<SwapRelocateWeightsTableAndSubViewParams, 5> swapRelocateWeightsTabl
         SwapRelocateWeightsTableAndSubViewParams{{4, 1, 1, 4},
                                                  {{2, 0, 0, 0}, {2, 1, 1, 4}},
                                                  {{100}, 200, {0}, 64, 0, WeightsCompressionParams{{1, 2, 3, 4}}},
-                                                 {{100}, 200, {0}, 32, 2, WeightsCompressionParams{{3, 4}}}},
+                                                 {{100}, 200, {0}, 32, 2, WeightsCompressionParams{{1, 2, 3, 4}}}},
         SwapRelocateWeightsTableAndSubViewParams{{4, 1, 1, 4},
                                                  {{2, 0, 0, 0}, {2, 1, 1, 4}},
                                                  {{100}, 200, {0}, 64, 2, WeightsCompressionParams{{1, 2, 3, 4}}},
-                                                 {{100}, 200, {0}, 32, 4, WeightsCompressionParams{{3, 4}}}},
+                                                 {{100}, 200, {0}, 32, 4, WeightsCompressionParams{{1, 2, 3, 4}}}},
         SwapRelocateWeightsTableAndSubViewParams{{8, 1, 1, 4},
                                                  {{4, 0, 0, 0}, {2, 1, 1, 4}},
                                                  {{100, 200, 300, 400}, 16777215, {0, 2, 4, 6}, 128, 0, std::nullopt},
@@ -1550,7 +1654,7 @@ INSTANTIATE_TEST_SUITE_P(smoke_SwapRelocateWeightsTableAndSubView,
 
 TEST_F(MLIR_ContentSetupTest, DoNotSwapRelocateWeightsTableAndSubView) {
     SmallVector<int64_t> baseContentShape = {8, 1, 1, 4};
-    auto baseContentAttrSetup = getContentSetup<int32_t>(ArrayRef(baseContentShape), getSInt32Type(&ctx));
+    auto baseContentAttrSetup = getContentSetup(ArrayRef(baseContentShape), getSInt32Type(&ctx));
 
     SmallVector<uint32_t> weightsPtr = {100, 200, 300, 400};
     auto sparsityPtr = 16777215;
@@ -1587,7 +1691,7 @@ TEST_F(MLIR_ContentSetupTest, DoNotSwapRelocateWeightsTableAndSubView) {
 
 TEST_F(MLIR_ContentSetupTest, MoveSubViewReshapeBeforeAdd) {
     SmallVector<int64_t> baseContentShape = {4, 8, 3};
-    auto baseContentAttrSetup = getContentSetup<uint8_t>(ArrayRef(baseContentShape), getInt8Type(&ctx));
+    auto baseContentAttrSetup = getContentSetup(ArrayRef(baseContentShape), getInt8Type(&ctx));
 
     // Add
     auto contentAttrSetup = baseContentAttrSetup.add(1);
@@ -1618,13 +1722,14 @@ TEST_F(MLIR_ContentSetupTest, MoveRelocateWeightsTableIntoFuse) {
     auto tensorType = getInt8Type(&ctx);
     auto fusedType = mlir::RankedTensorType::get({4}, tensorType);
 
-    auto baseContentAttrSetup =
-            getContentSetup<uint8_t>(ArrayRef<int64_t>{4}, tensorType, SmallVector<uint8_t>{1, 7, 10, 15});
+    auto baseContentAttrSetup = getContentSetup(ArrayRef<int64_t>{4}, tensorType);
 
     // Fuse
-    auto weights = getContentSetup<uint8_t>(ArrayRef<int64_t>{4}, tensorType, SmallVector<uint8_t>{1, 1, 1, 1}).get();
-    auto weightsTable =
-            getContentSetup<uint8_t>(ArrayRef<int64_t>{4}, tensorType, SmallVector<uint8_t>{1, 1, 1, 1}).get();
+    SmallVector<uint8_t> data = {1, 1, 1, 1};
+    auto weightsType = mlir::RankedTensorType::get(ArrayRef<int64_t>{4}, tensorType);
+    auto weightsAttr = Const::createConstContent(weightsType, ArrayRef(data));
+    auto weights = Const::ContentAttr::get(weightsAttr);
+    auto weightsTable = Const::ContentAttr::get(weightsAttr);
     auto contentAttrSetup = baseContentAttrSetup.fuse(fusedType, weightsTable, weights, Const::ContentAttr{}, {});
 
     SmallVector<uint32_t> weightsPtr = {100, 200, 300, 400};
@@ -1662,13 +1767,12 @@ TEST_F(MLIR_ContentSetupTest, MoveRelocateWeightsTableIntoFuse) {
 TEST_F(MLIR_ContentSetupTest, MoveSubViewIntoFuseSplitInHalf) {
     auto tensorType = getInt8Type(&ctx);
 
-    auto baseContentAttrSetup = getContentSetup<uint8_t>(ArrayRef<int64_t>{1}, tensorType, SmallVector<uint8_t>{1});
+    auto baseContentAttrSetup = getContentSetup(ArrayRef<int64_t>{1}, tensorType);
 
     auto weightsTable =
-            getContentSetup<uint8_t>(ArrayRef<int64_t>{4, 1, 1, 1}, tensorType, SmallVector<uint8_t>{1, 1, 1, 1}).get();
-    auto weights = getContentSetup<uint8_t>(ArrayRef<int64_t>{4, 2, 1, 1}, tensorType,
-                                            SmallVector<uint8_t>{1, 1, 1, 1, 1, 1, 1, 1})
-                           .get();
+            getContentAttr<uint8_t>(ArrayRef<int64_t>{4, 1, 1, 1}, tensorType, SmallVector<uint8_t>{1, 1, 1, 1});
+    auto weights = getContentAttr<uint8_t>(ArrayRef<int64_t>{4, 2, 1, 1}, tensorType,
+                                           SmallVector<uint8_t>{1, 1, 1, 1, 1, 1, 1, 1});
     auto fusedType = mlir::RankedTensorType::get({1, 1, 1, 12}, tensorType);
     auto fusedConstantSetup = baseContentAttrSetup.fuse(fusedType, weightsTable, weights, {}, {});
 
@@ -1679,7 +1783,7 @@ TEST_F(MLIR_ContentSetupTest, MoveSubViewIntoFuseSplitInHalf) {
     checkFuseAttrAfterSubView(actualTransformationsLowerHalf[0], true, false, {}, {}, false, {}, {}, {}, true, true,
                               {0, 0, 0, 0}, {1, 2, 1, 1}, false, {}, {}, {});
 
-    baseContentAttrSetup = getContentSetup<uint8_t>(ArrayRef<int64_t>{1}, tensorType, SmallVector<uint8_t>{1});
+    baseContentAttrSetup = getContentSetup(ArrayRef<int64_t>{1}, tensorType);
     fusedConstantSetup = baseContentAttrSetup.fuse(fusedType, weightsTable, weights, {}, {});
     auto fusedUpperHalfSetup = fusedConstantSetup.subview(ShapeRef{0, 0, 0, 6}, ShapeRef{1, 1, 1, 6});
     auto actualTransformationsUpperHalf = fusedUpperHalfSetup.getTransformations();
@@ -1691,13 +1795,12 @@ TEST_F(MLIR_ContentSetupTest, MoveSubViewIntoFuseSplitInHalf) {
 TEST_F(MLIR_ContentSetupTest, MoveSubViewIntoFuseUnalignedViewIntoWeights) {
     auto tensorType = getInt8Type(&ctx);
 
-    auto baseContentAttrSetup = getContentSetup<uint8_t>(ArrayRef<int64_t>{1}, tensorType, SmallVector<uint8_t>{1});
+    auto baseContentAttrSetup = getContentSetup(ArrayRef<int64_t>{1}, tensorType);
 
     auto weightsTable =
-            getContentSetup<uint8_t>(ArrayRef<int64_t>{4, 1, 1, 1}, tensorType, SmallVector<uint8_t>{1, 1, 1, 1}).get();
-    auto weights = getContentSetup<uint8_t>(ArrayRef<int64_t>{4, 1, 1, 2}, tensorType,
-                                            SmallVector<uint8_t>{1, 1, 1, 1, 1, 1, 1, 1})
-                           .get();
+            getContentAttr<uint8_t>(ArrayRef<int64_t>{4, 1, 1, 1}, tensorType, SmallVector<uint8_t>{1, 1, 1, 1});
+    auto weights = getContentAttr<uint8_t>(ArrayRef<int64_t>{4, 1, 1, 2}, tensorType,
+                                           SmallVector<uint8_t>{1, 1, 1, 1, 1, 1, 1, 1});
     auto fusedType = mlir::RankedTensorType::get({1, 1, 1, 12}, tensorType);
     auto fusedConstantSetup = baseContentAttrSetup.fuse(fusedType, weightsTable, weights, {}, {});
 
@@ -1712,13 +1815,12 @@ TEST_F(MLIR_ContentSetupTest, MoveSubViewIntoFuseUnalignedViewIntoWeights) {
 TEST_F(MLIR_ContentSetupTest, MoveSubViewIntoFuseUnalignedViewIntoUnslicableWeights) {
     auto tensorType = getInt8Type(&ctx);
 
-    auto baseContentAttrSetup = getContentSetup<uint8_t>(ArrayRef<int64_t>{1}, tensorType, SmallVector<uint8_t>{1});
+    auto baseContentAttrSetup = getContentSetup(ArrayRef<int64_t>{1}, tensorType);
 
     auto weightsTable =
-            getContentSetup<uint8_t>(ArrayRef<int64_t>{4, 1, 1, 1}, tensorType, SmallVector<uint8_t>{1, 1, 1, 1}).get();
-    auto weights = getContentSetup<uint8_t>(ArrayRef<int64_t>{2, 1, 2, 2}, tensorType,
-                                            SmallVector<uint8_t>{1, 1, 1, 1, 1, 1, 1, 1})
-                           .get();
+            getContentAttr<uint8_t>(ArrayRef<int64_t>{4, 1, 1, 1}, tensorType, SmallVector<uint8_t>{1, 1, 1, 1});
+    auto weights = getContentAttr<uint8_t>(ArrayRef<int64_t>{2, 1, 2, 2}, tensorType,
+                                           SmallVector<uint8_t>{1, 1, 1, 1, 1, 1, 1, 1});
     auto fusedType = mlir::RankedTensorType::get({1, 1, 1, 12}, tensorType);
     auto fusedConstantSetup = baseContentAttrSetup.fuse(fusedType, weightsTable, weights, {}, {});
 
@@ -1729,17 +1831,50 @@ TEST_F(MLIR_ContentSetupTest, MoveSubViewIntoFuseUnalignedViewIntoUnslicableWeig
                               true, {1, 1, 1, 8}, {0, 0, 0, 3}, {1, 1, 1, 3});
 }
 
+TEST_F(MLIR_ContentSetupTest, MoveSubViewIntoFuseSubByteWeights) {
+    auto tensorType = getInt8Type(&ctx);
+
+    auto baseContentAttrSetup = getContentSetup(ArrayRef<int64_t>{1}, tensorType);
+
+    auto weightsTable =
+            getContentAttr<uint8_t>(ArrayRef<int64_t>{4, 1, 1, 1}, tensorType, SmallVector<uint8_t>{1, 1, 1, 1});
+
+    const auto baseWeightsType = mlir::RankedTensorType::get({4, 1, 1, 4}, mlir::IntegerType::get(&ctx, 8));
+
+    const std::vector<uint8_t> vals = {10};
+    const auto baseWeightsAttr = Const::createConstContent(baseWeightsType, ArrayRef(vals));
+
+    Const::ContentSetup baseWeightsContentAttrSetup(baseWeightsType);
+    auto weights = Const::ContentAttr::get(baseWeightsAttr,
+                                           baseWeightsContentAttrSetup.castElemType(mlir::IntegerType::get(&ctx, 4)));
+
+    auto fusedType = mlir::RankedTensorType::get({1, 1, 1, 12}, tensorType);
+    auto fusedConstantSetup = baseContentAttrSetup.fuse(fusedType, weightsTable, weights, {}, {});
+
+    auto fusedWithSubView = fusedConstantSetup.subview(ShapeRef{0, 0, 0, 8}, ShapeRef{1, 1, 1, 4});
+    auto actualTransformations = fusedWithSubView.getTransformations();
+    EXPECT_EQ(actualTransformations.size(), 1);
+
+    auto fuse = mlir::dyn_cast<Const::FuseAttr>(actualTransformations[0]);
+    ASSERT_TRUE(fuse != nullptr);
+
+    auto actualWeights = fuse.getWeights();
+    ASSERT_TRUE(actualWeights != nullptr);
+    auto actualWeightTransformations = actualWeights.getTransformations();
+    EXPECT_EQ(actualWeightTransformations.size(), 2);
+    checkSubViewAttr(actualWeightTransformations[0], {2, 0, 0, 0}, {2, 1, 1, 4});
+}
+
 TEST_F(MLIR_ContentSetupTest, MoveSubViewIntoFuseDontMoveSparse) {
     auto tensorType = getInt8Type(&ctx);
 
-    auto baseContentAttrSetup = getContentSetup<uint8_t>(ArrayRef<int64_t>{1}, tensorType, SmallVector<uint8_t>{1});
+    auto baseContentAttrSetup = getContentSetup(ArrayRef<int64_t>{1}, tensorType);
 
     auto weightsTable =
-            getContentSetup<uint8_t>(ArrayRef<int64_t>{4, 1, 1, 1}, tensorType, SmallVector<uint8_t>{1, 1, 1, 1}).get();
-    auto weights = getContentSetup<uint8_t>(ArrayRef<int64_t>{4, 2, 1, 1}, tensorType,
-                                            SmallVector<uint8_t>{1, 1, 1, 1, 1, 1, 1, 1})
-                           .get();
-    auto sparsity = getContentSetup<uint8_t>(ArrayRef<int64_t>{1, 1, 1, 1}, tensorType, SmallVector<uint8_t>{1}).get();
+            getContentAttr<uint8_t>(ArrayRef<int64_t>{4, 1, 1, 1}, tensorType, SmallVector<uint8_t>{1, 1, 1, 1});
+    auto weights = getContentAttr<uint8_t>(ArrayRef<int64_t>{4, 2, 1, 1}, tensorType,
+                                           SmallVector<uint8_t>{1, 1, 1, 1, 1, 1, 1, 1});
+    auto sparsity = getContentAttr<uint8_t>(ArrayRef<int64_t>{1, 1, 1, 1}, tensorType, SmallVector<uint8_t>{1});
     auto fusedType = mlir::RankedTensorType::get({1, 1, 1, 13}, tensorType);
     auto fusedConstantSetup = baseContentAttrSetup.fuse(fusedType, weightsTable, weights, sparsity, {});
 
@@ -1755,13 +1890,12 @@ TEST_F(MLIR_ContentSetupTest, MoveSubViewIntoFuseDontMoveSparse) {
 TEST_F(MLIR_ContentSetupTest, MoveSubViewIntoFuseDontMoveUnsupportedShape) {
     auto tensorType = getInt8Type(&ctx);
 
-    auto baseContentAttrSetup = getContentSetup<uint8_t>(ArrayRef<int64_t>{1}, tensorType, SmallVector<uint8_t>{1});
+    auto baseContentAttrSetup = getContentSetup(ArrayRef<int64_t>{1}, tensorType);
 
     auto weightsTable =
-            getContentSetup<uint8_t>(ArrayRef<int64_t>{4, 1, 1, 1}, tensorType, SmallVector<uint8_t>{1, 1, 1, 1}).get();
-    auto weights = getContentSetup<uint8_t>(ArrayRef<int64_t>{4, 2, 1, 1}, tensorType,
-                                            SmallVector<uint8_t>{1, 1, 1, 1, 1, 1, 1, 1})
-                           .get();
+            getContentAttr<uint8_t>(ArrayRef<int64_t>{4, 1, 1, 1}, tensorType, SmallVector<uint8_t>{1, 1, 1, 1});
+    auto weights = getContentAttr<uint8_t>(ArrayRef<int64_t>{4, 2, 1, 1}, tensorType,
+                                           SmallVector<uint8_t>{1, 1, 1, 1, 1, 1, 1, 1});
     auto fusedType = mlir::RankedTensorType::get({6, 1, 1, 2}, tensorType);
     auto fusedConstantSetup = baseContentAttrSetup.fuse(fusedType, weightsTable, weights, {}, {});
 
@@ -1772,4 +1906,96 @@ TEST_F(MLIR_ContentSetupTest, MoveSubViewIntoFuseDontMoveUnsupportedShape) {
     auto fuse = mlir::dyn_cast<Const::FuseAttr>(actualTransformations[0]);
     EXPECT_NE(fuse, nullptr);
     checkSubViewAttr(actualTransformations[1], {0, 0, 0, 0}, {1, 1, 1, 7});
+}
+
+TEST_F(MLIR_ContentSetupTest, FuseReorderAndMemPermute) {
+    const int64_t IC = 4;
+    const int64_t IH = 6;
+    const int64_t IW = 8;
+
+    auto baseContentAttrSetup = getContentSetup(ArrayRef<int64_t>{IC, IH, IW}, getInt8Type(&ctx));
+
+    auto contentAttrSetup = baseContentAttrSetup.reorder(DimsOrder::HWC);
+    contentAttrSetup = contentAttrSetup.memPermute(DimsOrder::WHC, DimsOrder::HCW);
+
+    // check final mem permute
+    auto actualTransformations = contentAttrSetup.getTransformations();
+    EXPECT_EQ(actualTransformations.size(), 1);
+
+    checkMemPermuteAttr(actualTransformations[0], DimsOrder::WHC, DimsOrder::WHC);
+}
+
+TEST_F(MLIR_ContentSetupTest, FuseMemPermuteAndReorder) {
+    const int64_t IC = 4;
+    const int64_t IH = 6;
+    const int64_t IW = 8;
+
+    auto baseContentAttrSetup = getContentSetup(ArrayRef<int64_t>{IC, IH, IW}, getInt8Type(&ctx));
+
+    auto contentAttrSetup = baseContentAttrSetup.memPermute(DimsOrder::WHC, DimsOrder::WHC);
+    contentAttrSetup = contentAttrSetup.reorder(DimsOrder::HWC);
+
+    // check final mem permute
+    auto actualTransformations = contentAttrSetup.getTransformations();
+    EXPECT_EQ(actualTransformations.size(), 1);
+
+    checkMemPermuteAttr(actualTransformations[0], DimsOrder::HWC, DimsOrder::HWC);
+}
+
+TEST_F(MLIR_ContentSetupTest, FoldReorder) {
+    const int64_t IC = 4;
+    const int64_t IH = 6;
+    const int64_t IW = 8;
+
+    auto baseContentAttrSetup = getContentSetup(ArrayRef<int64_t>{IC, IH, IW}, getInt8Type(&ctx));
+
+    auto contentAttrSetup = baseContentAttrSetup.reorder(DimsOrder::CHW);
+
+    auto actualTransformations = contentAttrSetup.getTransformations();
+    EXPECT_EQ(actualTransformations.size(), 0);
+}
+
+TEST_F(MLIR_ContentSetupTest, DoNotFoldTrivialReorder) {
+    const int64_t IC = 2;
+    const int64_t IH = 1;
+    const int64_t IW = 1;
+
+    auto baseContentAttrSetup = getContentSetup(ArrayRef<int64_t>{IC, IH, IW}, getInt8Type(&ctx));
+
+    auto contentAttrSetup = baseContentAttrSetup.reorder(DimsOrder::HWC);
+
+    // we cand fold reorder since type is changed
+    auto actualTransformations = contentAttrSetup.getTransformations();
+    EXPECT_EQ(actualTransformations.size(), 1);
+
+    checkReorderAttr(actualTransformations[0], DimsOrder::HWC);
+}
+
+TEST_F(MLIR_ContentSetupTest, FoldMemPerm) {
+    const int64_t IC = 4;
+    const int64_t IH = 6;
+    const int64_t IW = 8;
+
+    auto baseContentAttrSetup = getContentSetup(ArrayRef<int64_t>{IC, IH, IW}, getInt8Type(&ctx));
+
+    auto contentAttrSetup = baseContentAttrSetup.memPermute(DimsOrder::CHW, DimsOrder::CHW);
+
+    auto actualTransformations = contentAttrSetup.getTransformations();
+    EXPECT_EQ(actualTransformations.size(), 0);
+}
+
+TEST_F(MLIR_ContentSetupTest, DoNotFoldTrivialMemPerm) {
+    const int64_t IC = 2;
+    const int64_t IH = 1;
+    const int64_t IW = 1;
+
+    auto baseContentAttrSetup = getContentSetup(ArrayRef<int64_t>{IC, IH, IW}, getInt8Type(&ctx));
+
+    auto contentAttrSetup = baseContentAttrSetup.memPermute(DimsOrder::HWC, DimsOrder::HWC);
+
+    // we cand fold mem permute since type is changed
+    auto actualTransformations = contentAttrSetup.getTransformations();
+    EXPECT_EQ(actualTransformations.size(), 1);
+
+    checkMemPermuteAttr(actualTransformations[0], DimsOrder::HWC, DimsOrder::HWC);
 }

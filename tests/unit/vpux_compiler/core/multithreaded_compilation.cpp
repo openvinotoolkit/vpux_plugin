@@ -4,8 +4,8 @@
 //
 
 #include <common_test_utils/test_common.hpp>
-#include "intel_npu/al/config/common.hpp"
-#include "intel_npu/al/config/compiler.hpp"
+#include "intel_npu/config/common.hpp"
+#include "intel_npu/config/compiler.hpp"
 #include "vpux/compiler/compiler.hpp"
 #include "vpux/utils/core/logger.hpp"
 #include "vpux/utils/core/range.hpp"

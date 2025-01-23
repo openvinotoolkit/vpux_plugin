@@ -223,7 +223,7 @@ module @DpuProfilingMultipleOps  {
       DPUTask {cluster_id = 1 : i64, outEnd = [54, 43, 31], mpe_mode = #VPU.mpe_mode<VECTOR_FP16>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, outStart = [0, 33, 0]}
       DPUTask {cluster_id = 2 : i64, outEnd = [54, 54, 31], mpe_mode = #VPU.mpe_mode<VECTOR_FP16>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, outStart = [0, 44, 0]}
     } PPE :  {
-      PPETask {opaque_ppe = #VPU.PPEStub<>}
+      PPETask {ppe = #VPU.PPEStub<>}
     }
 
     //CHECK:        VPUIP.NCEClusterTask

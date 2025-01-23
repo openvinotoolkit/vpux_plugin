@@ -217,7 +217,7 @@ module @Test attributes {VPU.arch = #VPU.arch_kind<NPU37XX>, VPU.compilationMode
 //CHECK-DAG: %[[VAL16:.*]] = ELFNPU37XX.CreateSection {{.*}} secName = ".text.ActKernelInvocations"
 //CHECK-NEXT: ELFNPU37XX.PutOpInSection %[[VAL15]] : !VPURegMapped.Index<0:0:0>
 
-//CHECK-DAG: %[[VAL17:.*]] = VPUMI37XX.KernelParams inputs(%[[VAL3]] : memref<2000xui8, [@CMX_NN, 0]>) outputs(%[[VAL5]] : memref<2000xui8, [@CMX_NN, 0]>) dynamicInputShapes(() : ()) dynamicOutputShapes(() : ()) kernel_type("Softmax") kernel_params({{.*}}) -> !VPURegMapped.Index<0:0:0>
+//CHECK-DAG: %[[VAL17:.*]] = VPUMI37XX.KernelParams {isCompiled = false} inputs(%[[VAL3]] : memref<2000xui8, [@CMX_NN, 0]>) outputs(%[[VAL5]] : memref<2000xui8, [@CMX_NN, 0]>) dynamicInputShapes(() : ()) dynamicOutputShapes(() : ()) kernel_type("Softmax") kernel_params({{.*}}) -> !VPURegMapped.Index<0:0:0>
 //CHECK-DAG: %[[VAL18:.*]] = ELFNPU37XX.CreateSection {{.*}} secName = ".text.KernelParams"
 //CHECK-NEXT: ELFNPU37XX.PutOpInSection %[[VAL17]] : !VPURegMapped.Index<0:0:0>
 

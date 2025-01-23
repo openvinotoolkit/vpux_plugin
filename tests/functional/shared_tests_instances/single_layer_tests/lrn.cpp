@@ -5,7 +5,7 @@
 
 #include "single_op_tests/lrn.hpp"
 #include <vector>
-#include "npu_private_properties.hpp"
+#include "intel_npu/npu_private_properties.hpp"
 #include "vpu_ov2_layer_test.hpp"
 
 using namespace ov::test::utils;
@@ -39,7 +39,6 @@ TEST_P(LrnLayerTestCommon_FP32, NPU4000_SW) {
     setReferenceSoftwareMode();
     run(Platform::NPU4000);
 }
-
 }  // namespace test
 }  // namespace ov
 

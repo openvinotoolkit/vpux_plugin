@@ -1,4 +1,4 @@
-// Copyright (C) Intel Corporation
+// Copyright (C) 2023 - 2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -8,8 +8,8 @@
 #include "common/functions.h"
 #include "common/npu_test_env_cfg.hpp"
 #include "common/utils.hpp"
-#include "intel_npu/al/config/common.hpp"
-#include "npu_private_properties.hpp"
+#include "intel_npu/config/common.hpp"
+#include "intel_npu/npu_private_properties.hpp"
 
 namespace {
 

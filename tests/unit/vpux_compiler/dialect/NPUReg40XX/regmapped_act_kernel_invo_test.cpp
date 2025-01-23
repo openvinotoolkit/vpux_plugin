@@ -5,78 +5,36 @@
 
 #include <gtest/gtest.h>
 
-#include <npu_40xx_nnrt.hpp>
 #include "common/utils.hpp"
-#include "vpux/compiler/NPU40XX/dialect/NPUReg40XX/types.hpp"
+#include "vpux/compiler/NPU40XX/dialect/NPUReg40XX/descriptors.hpp"
+
+#include <npu_40xx_nnrt.hpp>
 
 using namespace npu40xx;
-
-#define CREATE_HW_DMA_DESC(field, value)                                                       \
-    [] {                                                                                       \
-        nn_public::VpuActKernelInvocation hwActKernelInvoDesc;                                 \
-        memset(reinterpret_cast<void*>(&hwActKernelInvoDesc), 0, sizeof(hwActKernelInvoDesc)); \
-        hwActKernelInvoDesc.field = value;                                                     \
-        return hwActKernelInvoDesc;                                                            \
-    }()
+using namespace vpux::NPUReg40XX;
 
 class NPUReg40XX_NpuActKernelInvocationTest :
-        public MLIR_RegMappedNPUReg40XXUnitBase<nn_public::VpuActKernelInvocation,
-                                                vpux::NPUReg40XX::RegMapped_VpuActKernelInvocationType> {};
+        public NPUReg_RegisterUnitBase<nn_public::VpuActKernelInvocation,
+                                       vpux::NPUReg40XX::Descriptors::VpuActKernelInvocation> {};
 
-TEST_P(NPUReg40XX_NpuActKernelInvocationTest, CheckFieldsConsistency) {
-    this->compare();
-}
+#define TEST_NPU4_ACTKERNELINVOCATION_REG_FIELD(FieldType, DescriptorMember)         \
+    HELPER_TEST_NPU_REGISTER_FIELD(NPUReg40XX_NpuActKernelInvocationTest, FieldType, \
+                                   vpux::NPUReg40XX::Fields::FieldType, DescriptorMember, 0)
 
-std::vector<std::pair<MappedRegValues, nn_public::VpuActKernelInvocation>> actKernelInvoFieldSet = {
-        {{
-                 {"range", {{"range", 0xFFFFFFFFFFFFFFFF}}},
-         },
-         CREATE_HW_DMA_DESC(range, 0xFFFFFFFFFFFFFFFF)},
-        {{
-                 {"kernel_args", {{"kernel_args", 0xFFFFFFFFFFFFFFFF}}},
-         },
-         CREATE_HW_DMA_DESC(kernel_args, 0xFFFFFFFFFFFFFFFF)},
-        {{
-                 {"data_window_base", {{"data_window_base", 0xFFFFFFFFFFFFFFFF}}},
-         },
-         CREATE_HW_DMA_DESC(data_window_base, 0xFFFFFFFFFFFFFFFF)},
-        {{
-                 {"perf_packet_out", {{"perf_packet_out", 0xFFFFFFFFFFFFFFFF}}},
-         },
-         CREATE_HW_DMA_DESC(perf_packet_out, 0xFFFFFFFFFFFFFFFF)},
-        {{
-                 {"barriers_wait_mask_hi_act", {{"barriers_wait_mask_hi_act", 0xFFFFFFFF}}},
-         },
-         CREATE_HW_DMA_DESC(barriers.wait_mask_hi_, 0xFFFFFFFF)},
-        {{
-                 {"barriers_wait_mask_lo_act", {{"barriers_wait_mask_lo_act", 0xFFFFFFFFFFFFFFFF}}},
-         },
-         CREATE_HW_DMA_DESC(barriers.wait_mask_lo_, 0xFFFFFFFFFFFFFFFF)},
-        {{
-                 {"barriers_post_mask_hi_act", {{"barriers_post_mask_hi_act", 0xFFFFFFFF}}},
-         },
-         CREATE_HW_DMA_DESC(barriers.post_mask_hi_, 0xFFFFFFFF)},
-        {{
-                 {"barriers_post_mask_lo_act", {{"barriers_post_mask_lo_act", 0xFFFFFFFFFFFFFFFF}}},
-         },
-         CREATE_HW_DMA_DESC(barriers.post_mask_lo_, 0xFFFFFFFFFFFFFFFF)},
-        {{
-                 {"act_invo_barriers_sched", {{"start_after_", 0xFFFFFFFF}}},
-         },
-         CREATE_HW_DMA_DESC(barriers_sched.start_after_, 0xFFFFFFFF)},
-        {{
-                 {"act_invo_barriers_sched", {{"clean_after_", 0xFFFFFFFF}}},
-         },
-         CREATE_HW_DMA_DESC(barriers_sched.clean_after_, 0xFFFFFFFF)},
-        {{
-                 {"invo_tile", {{"invo_tile", 0xFFFFFFFF}}},
-         },
-         CREATE_HW_DMA_DESC(invo_tile, 0xFFFFFFFF)},
-        {{
-                 {"kernel_range_index", {{"kernel_range_index", 0xFFFFFFFF}}},
-         },
-         CREATE_HW_DMA_DESC(kernel_range_index, 0xFFFFFFFF)},
-};
+#define TEST_NPU4_ACTKERNELINVOCATION_MULTIPLE_REGS_FIELD(ParentRegType, FieldType, DescriptorMember)        \
+    HELPER_TEST_NPU_MULTIPLE_REGS_FIELD(NPUReg40XX_NpuActKernelInvocationTest, ParentRegType##__##FieldType, \
+                                        vpux::NPUReg40XX::Registers::ParentRegType,                          \
+                                        vpux::NPUReg40XX::Fields::FieldType, DescriptorMember, 0)
 
-INSTANTIATE_TEST_SUITE_P(NPUReg40XX_MappedRegs, NPUReg40XX_NpuActKernelInvocationTest,
-                         testing::ValuesIn(actKernelInvoFieldSet));
+TEST_NPU4_ACTKERNELINVOCATION_REG_FIELD(range, range)
+TEST_NPU4_ACTKERNELINVOCATION_REG_FIELD(kernel_args, kernel_args)
+TEST_NPU4_ACTKERNELINVOCATION_REG_FIELD(data_window_base, data_window_base)
+TEST_NPU4_ACTKERNELINVOCATION_REG_FIELD(perf_packet_out, perf_packet_out)
+TEST_NPU4_ACTKERNELINVOCATION_REG_FIELD(barriers_wait_mask_hi_act, barriers.wait_mask_hi_)
+TEST_NPU4_ACTKERNELINVOCATION_REG_FIELD(barriers_wait_mask_lo_act, barriers.wait_mask_lo_)
+TEST_NPU4_ACTKERNELINVOCATION_REG_FIELD(barriers_post_mask_hi_act, barriers.post_mask_hi_)
+TEST_NPU4_ACTKERNELINVOCATION_REG_FIELD(barriers_post_mask_lo_act, barriers.post_mask_lo_)
+TEST_NPU4_ACTKERNELINVOCATION_MULTIPLE_REGS_FIELD(act_invo_barriers_sched, start_after_, barriers_sched.start_after_)
+TEST_NPU4_ACTKERNELINVOCATION_MULTIPLE_REGS_FIELD(act_invo_barriers_sched, clean_after_, barriers_sched.clean_after_)
+TEST_NPU4_ACTKERNELINVOCATION_REG_FIELD(invo_tile, invo_tile)
+TEST_NPU4_ACTKERNELINVOCATION_REG_FIELD(kernel_range_index, kernel_range_index)

@@ -83,7 +83,7 @@ func.func @ReflectPadOpToNCEQuantized(%input: tensor<1x16x80x80x!qElemType, {ord
     // CHECK-SAME:                         #VPU.SEPadding<mode = <REFLECT>, padding = [1, 2, 2, 1]>>
 
     // CHECK-DAG:   [[WEIGHTS:%.+]] = const.Declare tensor<16x16x1x1x!qElemType1, {order = #NHWC}> =
-    // CHECK-SAME:      : tensor<16x16x1x1xf32>, [#const.CastElemType<ui8>, #const.CastElemType<!qElemType1>, #const.Reorder<#NHWC>]
+    // CHECK-SAME:      : tensor<16x16x1x1xf32>, [#const.CastElemType<!qElemType1>, #const.Reorder<#NHWC>]
     // CHECK:       [[WEIGHTS_TABLE:%.+]] = const.Declare tensor<16x1x1x4xsi32>
     // CHECK-SAME{LITERAL}: = dense<[[[[0, 0, 1073745408, 0]]], [[[16, 0, 1073745408, 0]]], [[[32, 0, 1073745408, 0]]], [[[48, 0, 1073745408, 0]]],
     // CHECK-SAME{LITERAL}:         [[[64, 0, 1073745408, 0]]], [[[80, 0, 1073745408, 0]]], [[[96, 0, 1073745408, 0]]], [[[112, 0, 1073745408, 0]]],
@@ -170,8 +170,8 @@ func.func @FuseReflectPadOpToConv(%input: tensor<1x16x80x80xf16, {order = #NHWC}
     %weights = const.Declare tensor<16x16x3x3xf16, {order = #NHWC}> = dense<1.0> : tensor<16x16x3x3xf32>, [#const.CastElemType<f16>, #const.Reorder<#NHWC>]
     %weights_table = const.Declare tensor<16x1x1x4xsi32> = dense<1> : tensor<16x1x1x4xsi32>
     %conv = VPU.NCE.Convolution(%pad, %weights, %weights_table) {
-                opaque_ppe = #VPU.PPEInt<mode = <LRELU>, clamp_low = 0 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
+                ppe = #VPU.PPEInt<mode = <LRELU>, clamp_low = 0 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64>,
                 rawFilterShape = [16, 16, 3, 3], strides = [1, 1]
             } -> tensor<1x16x81x81xf16, {order = #NHWC}>
 
@@ -195,8 +195,8 @@ func.func @FuseReflectPadOpToConv(%input: tensor<1x16x80x80xf16, {order = #NHWC}
     // CHECK:       [[WEIGHTS_TABLE:%.+]] = const.Declare tensor<16x1x1x4xsi32> = dense<1> : tensor<16x1x1x4xsi32>
 
     // CHECK:       [[OUTPUT:%.+]] = VPU.NCE.Convolution([[INPUT_SPARSE]], [[WEIGHTS]], [[WEIGHTS_TABLE]]) {
-    // CHECK-SAME:          opaque_ppe = #VPU.PPEInt<mode = <LRELU>, clamp_low = 0 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64>,
     // CHECK-SAME:          pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
+    // CHECK-SAME:          ppe = #VPU.PPEInt<mode = <LRELU>, clamp_low = 0 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64>,
     // CHECK-SAME:          rawFilterShape = [16, 16, 3, 3], strides = [1, 1]
     // CHECK-SAME:      } -> tensor<1x16x81x81xf16, {order = #NHWC}>
 
@@ -224,8 +224,8 @@ func.func @FuseReflectPadOpToConvQuantized(%input: tensor<1x16x80x80x!qElemType,
     %weights = const.Declare tensor<16x16x3x3x!qElemType1, {order = #NHWC}> = dense<1> : tensor<16x16x3x3xui8, {order = #NHWC}>
     %weights_table = const.Declare tensor<16x1x1x4xsi32> = dense<1> : tensor<16x1x1x4xsi32>
     %conv = VPU.NCE.Convolution(%pad, %weights, %weights_table) {
-                opaque_ppe = #VPU.PPEInt<mode = <LRELU>, clamp_low = 0 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
+                ppe = #VPU.PPEInt<mode = <LRELU>, clamp_low = 0 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64>,
                 rawFilterShape = [16, 16, 3, 3], strides = [1, 1]
             } -> tensor<1x16x81x81x!qElemType, {order = #NHWC}>
 
@@ -249,8 +249,8 @@ func.func @FuseReflectPadOpToConvQuantized(%input: tensor<1x16x80x80x!qElemType,
     // CHECK:       [[WEIGHTS_TABLE:%.+]] = const.Declare tensor<16x1x1x4xsi32> = dense<1> : tensor<16x1x1x4xsi32>
 
     // CHECK:       [[OUTPUT:%.+]] = VPU.NCE.Convolution([[INPUT_SPARSE]], [[WEIGHTS]], [[WEIGHTS_TABLE]]) {
-    // CHECK-SAME:          opaque_ppe = #VPU.PPEInt<mode = <LRELU>, clamp_low = 0 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64>,
     // CHECK-SAME:          pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
+    // CHECK-SAME:          ppe = #VPU.PPEInt<mode = <LRELU>, clamp_low = 0 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64>,
     // CHECK-SAME:          rawFilterShape = [16, 16, 3, 3], strides = [1, 1]
     // CHECK-SAME:      } -> tensor<1x16x81x81x!qElemType, {order = #NHWC}>
 
@@ -332,7 +332,7 @@ func.func @RollToConvQuantized(%input: tensor<1x16x80x80x!qElemType, {order = #N
     // CHECK-SAME:                         #VPU.SERoll<shift = [6, 5], axes = [2, 3]>>
 
     // CHECK-DAG:   [[WEIGHTS:%.+]] = const.Declare tensor<16x16x1x1x!qElemType1, {order = #NHWC}> =
-    // CHECK-SAME:      : tensor<16x16x1x1xf32>, [#const.CastElemType<ui8>, #const.CastElemType<!qElemType1>, #const.Reorder<#NHWC>]
+    // CHECK-SAME:      : tensor<16x16x1x1xf32>, [#const.CastElemType<!qElemType1>, #const.Reorder<#NHWC>]
     // CHECK:       [[WEIGHTS_TABLE:%.+]] = const.Declare tensor<16x1x1x4xsi32>
     // CHECK-SAME{LITERAL}: = dense<[[[[0, 0, 1073745408, 0]]], [[[16, 0, 1073745408, 0]]], [[[32, 0, 1073745408, 0]]], [[[48, 0, 1073745408, 0]]],
     // CHECK-SAME{LITERAL}:         [[[64, 0, 1073745408, 0]]], [[[80, 0, 1073745408, 0]]], [[[96, 0, 1073745408, 0]]], [[[112, 0, 1073745408, 0]]],

@@ -76,7 +76,6 @@ TEST_P(FakeQuantizeLayerTest_SW_NPU4000, SW) {
     setReferenceSoftwareMode();
     run(Platform::NPU4000);
 }
-
 }  // namespace test
 }  // namespace ov
 

@@ -5,6 +5,7 @@
 
 //
 
+#include "vpux/compiler/dialect/const/attributes/content.hpp"
 #include "vpux/compiler/utils/types.hpp"
 
 #include "common/utils.hpp"
@@ -36,21 +37,15 @@ TEST_F(MLIR_SubByteTest, SubViewI4_1D_Splat) {
     auto offsetArr = std::vector<int64_t>{3};
     auto shapeArr = std::vector<int64_t>{7};
 
-    constexpr auto noop = [](void*, size_t, size_t) {};
-    constexpr bool isMutable = false;
+    const auto baseAttr = Const::createExternalConstContent(baseType, ArrayRef(inputVals), "testConst");
 
-    mlir::AsmResourceBlob blob(mlir::ArrayRef<char>(inputVals), noop, isMutable);
-    auto& manager = mlir::DenseResourceElementsHandle::getManagerInterface(&ctx);
-    const auto baseAttr = mlir::DenseResourceElementsAttr::get(
-            baseType, manager.insert("FromSplatDenseResourceElementsAttr", std::move(blob)));
-
-    auto contentSetup = Const::ContentSetup(baseAttr);
+    auto contentSetup = Const::ContentSetup(baseType);
 
     const auto offset = Shape(to_small_vector(offsetArr));
     const auto shape = Shape(to_small_vector(shapeArr));
     contentSetup = contentSetup.subview(offset, shape);
 
-    auto contentAttr = contentSetup.get();
+    auto contentAttr = Const::ContentAttr::get(baseAttr, std::move(contentSetup));
     const auto content = contentAttr.fold();
     EXPECT_TRUE(content.isSplat());
 
@@ -76,21 +71,15 @@ TEST_F(MLIR_SubByteTest, SubViewI4_1D) {
     auto offsetArr = std::vector<int64_t>{3};
     auto shapeArr = std::vector<int64_t>{4};
 
-    constexpr auto noop = [](void*, size_t, size_t) {};
-    constexpr bool isMutable = false;
+    const auto baseAttr = Const::createExternalConstContent(baseType, ArrayRef(inputVals), "testConst");
 
-    mlir::AsmResourceBlob blob(mlir::ArrayRef<char>(inputVals), noop, isMutable);
-    auto& manager = mlir::DenseResourceElementsHandle::getManagerInterface(&ctx);
-    const auto baseAttr = mlir::DenseResourceElementsAttr::get(
-            baseType, manager.insert("FromSplatDenseResourceElementsAttr", std::move(blob)));
-
-    auto contentSetup = Const::ContentSetup(baseAttr);
+    auto contentSetup = Const::ContentSetup(baseType);
 
     const auto offset = Shape(to_small_vector(offsetArr));
     const auto shape = Shape(to_small_vector(shapeArr));
     contentSetup = contentSetup.subview(offset, shape);
 
-    auto contentAttr = contentSetup.get();
+    auto contentAttr = Const::ContentAttr::get(baseAttr, std::move(contentSetup));
     const auto content = contentAttr.fold();
     EXPECT_FALSE(content.isSplat());
 
@@ -118,21 +107,15 @@ TEST_F(MLIR_SubByteTest, SubViewI4_2D_Splat) {
     auto offsetArr = std::vector<int64_t>{1, 2};
     auto shapeArr = std::vector<int64_t>{1, 2};
 
-    constexpr auto noop = [](void*, size_t, size_t) {};
-    constexpr bool isMutable = false;
+    const auto baseAttr = Const::createExternalConstContent(baseType, ArrayRef(inputVals), "testConst");
 
-    mlir::AsmResourceBlob blob(mlir::ArrayRef<char>(inputVals), noop, isMutable);
-    auto& manager = mlir::DenseResourceElementsHandle::getManagerInterface(&ctx);
-    const auto baseAttr = mlir::DenseResourceElementsAttr::get(
-            baseType, manager.insert("FromSplatDenseResourceElementsAttr", std::move(blob)));
-
-    auto contentSetup = Const::ContentSetup(baseAttr);
+    auto contentSetup = Const::ContentSetup(baseType);
 
     const auto offset = Shape(to_small_vector(offsetArr));
     const auto shape = Shape(to_small_vector(shapeArr));
     contentSetup = contentSetup.subview(offset, shape);
 
-    auto contentAttr = contentSetup.get();
+    auto contentAttr = Const::ContentAttr::get(baseAttr, std::move(contentSetup));
     const auto content = contentAttr.fold();
     EXPECT_TRUE(content.isSplat());
 
@@ -158,21 +141,15 @@ TEST_F(MLIR_SubByteTest, SubViewI4_2D) {
     auto offsetArr = std::vector<int64_t>{1, 2};
     auto shapeArr = std::vector<int64_t>{1, 2};
 
-    constexpr auto noop = [](void*, size_t, size_t) {};
-    constexpr bool isMutable = false;
+    const auto baseAttr = Const::createExternalConstContent(baseType, ArrayRef(inputVals), "testConst");
 
-    mlir::AsmResourceBlob blob(mlir::ArrayRef<char>(inputVals), noop, isMutable);
-    auto& manager = mlir::DenseResourceElementsHandle::getManagerInterface(&ctx);
-    const auto baseAttr = mlir::DenseResourceElementsAttr::get(
-            baseType, manager.insert("FromSplatDenseResourceElementsAttr", std::move(blob)));
-
-    auto contentSetup = Const::ContentSetup(baseAttr);
+    auto contentSetup = Const::ContentSetup(baseType);
 
     const auto offset = Shape(to_small_vector(offsetArr));
     const auto shape = Shape(to_small_vector(shapeArr));
     contentSetup = contentSetup.subview(offset, shape);
 
-    auto contentAttr = contentSetup.get();
+    auto contentAttr = Const::ContentAttr::get(baseAttr, std::move(contentSetup));
     const auto content = contentAttr.fold();
     EXPECT_FALSE(content.isSplat());
 
@@ -200,21 +177,15 @@ TEST_F(MLIR_SubByteTest, SubViewI4_3D_Splat) {
     auto offsetArr = std::vector<int64_t>{0, 1, 2};
     auto shapeArr = std::vector<int64_t>{1, 1, 2};
 
-    constexpr auto noop = [](void*, size_t, size_t) {};
-    constexpr bool isMutable = false;
+    const auto baseAttr = Const::createExternalConstContent(baseType, ArrayRef(inputVals), "testConst");
 
-    mlir::AsmResourceBlob blob(mlir::ArrayRef<char>(inputVals), noop, isMutable);
-    auto& manager = mlir::DenseResourceElementsHandle::getManagerInterface(&ctx);
-    const auto baseAttr = mlir::DenseResourceElementsAttr::get(
-            baseType, manager.insert("FromSplatDenseResourceElementsAttr", std::move(blob)));
-
-    auto contentSetup = Const::ContentSetup(baseAttr);
+    auto contentSetup = Const::ContentSetup(baseType);
 
     const auto offset = Shape(to_small_vector(offsetArr));
     const auto shape = Shape(to_small_vector(shapeArr));
     contentSetup = contentSetup.subview(offset, shape);
 
-    auto contentAttr = contentSetup.get();
+    auto contentAttr = Const::ContentAttr::get(baseAttr, std::move(contentSetup));
     const auto content = contentAttr.fold();
     EXPECT_TRUE(content.isSplat());
 
@@ -240,21 +211,15 @@ TEST_F(MLIR_SubByteTest, SubViewI4_3D) {
     auto offsetArr = std::vector<int64_t>{0, 1, 2};
     auto shapeArr = std::vector<int64_t>{1, 1, 2};
 
-    constexpr auto noop = [](void*, size_t, size_t) {};
-    constexpr bool isMutable = false;
+    const auto baseAttr = Const::createExternalConstContent(baseType, ArrayRef(inputVals), "testConst");
 
-    mlir::AsmResourceBlob blob(mlir::ArrayRef<char>(inputVals), noop, isMutable);
-    auto& manager = mlir::DenseResourceElementsHandle::getManagerInterface(&ctx);
-    const auto baseAttr = mlir::DenseResourceElementsAttr::get(
-            baseType, manager.insert("FromSplatDenseResourceElementsAttr", std::move(blob)));
-
-    auto contentSetup = Const::ContentSetup(baseAttr);
+    auto contentSetup = Const::ContentSetup(baseType);
 
     const auto offset = Shape(to_small_vector(offsetArr));
     const auto shape = Shape(to_small_vector(shapeArr));
     contentSetup = contentSetup.subview(offset, shape);
 
-    auto contentAttr = contentSetup.get();
+    auto contentAttr = Const::ContentAttr::get(baseAttr, std::move(contentSetup));
     const auto content = contentAttr.fold();
     EXPECT_FALSE(content.isSplat());
 
@@ -282,21 +247,15 @@ TEST_F(MLIR_SubByteTest, SubViewI4_4D_Splat) {
     auto offsetArr = std::vector<int64_t>{0, 1, 1, 1};
     auto shapeArr = std::vector<int64_t>{1, 1, 2, 3};
 
-    constexpr auto noop = [](void*, size_t, size_t) {};
-    constexpr bool isMutable = false;
+    const auto baseAttr = Const::createExternalConstContent(baseType, ArrayRef(inputVals), "testConst");
 
-    mlir::AsmResourceBlob blob(mlir::ArrayRef<char>(inputVals), noop, isMutable);
-    auto& manager = mlir::DenseResourceElementsHandle::getManagerInterface(&ctx);
-    const auto baseAttr = mlir::DenseResourceElementsAttr::get(
-            baseType, manager.insert("FromSplatDenseResourceElementsAttr", std::move(blob)));
-
-    auto contentSetup = Const::ContentSetup(baseAttr);
+    auto contentSetup = Const::ContentSetup(baseType);
 
     const auto offset = Shape(to_small_vector(offsetArr));
     const auto shape = Shape(to_small_vector(shapeArr));
     contentSetup = contentSetup.subview(offset, shape);
 
-    auto contentAttr = contentSetup.get();
+    auto contentAttr = Const::ContentAttr::get(baseAttr, std::move(contentSetup));
     const auto content = contentAttr.fold();
     EXPECT_TRUE(content.isSplat());
 
@@ -322,21 +281,15 @@ TEST_F(MLIR_SubByteTest, SubViewI4_4D) {
     auto offsetArr = std::vector<int64_t>{0, 1, 1, 1};
     auto shapeArr = std::vector<int64_t>{1, 1, 2, 3};
 
-    constexpr auto noop = [](void*, size_t, size_t) {};
-    constexpr bool isMutable = false;
+    const auto baseAttr = Const::createExternalConstContent(baseType, ArrayRef(inputVals), "testConst");
 
-    mlir::AsmResourceBlob blob(mlir::ArrayRef<char>(inputVals), noop, isMutable);
-    auto& manager = mlir::DenseResourceElementsHandle::getManagerInterface(&ctx);
-    const auto baseAttr = mlir::DenseResourceElementsAttr::get(
-            baseType, manager.insert("FromSplatDenseResourceElementsAttr", std::move(blob)));
-
-    auto contentSetup = Const::ContentSetup(baseAttr);
+    auto contentSetup = Const::ContentSetup(baseType);
 
     const auto offset = Shape(to_small_vector(offsetArr));
     const auto shape = Shape(to_small_vector(shapeArr));
     contentSetup = contentSetup.subview(offset, shape);
 
-    auto contentAttr = contentSetup.get();
+    auto contentAttr = Const::ContentAttr::get(baseAttr, std::move(contentSetup));
     const auto content = contentAttr.fold();
     EXPECT_FALSE(content.isSplat());
 
@@ -364,21 +317,15 @@ TEST_F(MLIR_SubByteTest, SubViewI4_Generic_Splat) {
     auto offsetArr = std::vector<int64_t>{0, 0, 1, 2, 0};
     auto shapeArr = std::vector<int64_t>{1, 1, 1, 2, 1};
 
-    constexpr auto noop = [](void*, size_t, size_t) {};
-    constexpr bool isMutable = false;
+    const auto baseAttr = Const::createExternalConstContent(baseType, ArrayRef(inputVals), "testConst");
 
-    mlir::AsmResourceBlob blob(mlir::ArrayRef<char>(inputVals), noop, isMutable);
-    auto& manager = mlir::DenseResourceElementsHandle::getManagerInterface(&ctx);
-    const auto baseAttr = mlir::DenseResourceElementsAttr::get(
-            baseType, manager.insert("FromSplatDenseResourceElementsAttr", std::move(blob)));
-
-    auto contentSetup = Const::ContentSetup(baseAttr);
+    auto contentSetup = Const::ContentSetup(baseType);
 
     const auto offset = Shape(to_small_vector(offsetArr));
     const auto shape = Shape(to_small_vector(shapeArr));
     contentSetup = contentSetup.subview(offset, shape);
 
-    auto contentAttr = contentSetup.get();
+    auto contentAttr = Const::ContentAttr::get(baseAttr, std::move(contentSetup));
     const auto content = contentAttr.fold();
     EXPECT_TRUE(content.isSplat());
 
@@ -404,21 +351,15 @@ TEST_F(MLIR_SubByteTest, SubViewI4_General) {
     auto offsetArr = std::vector<int64_t>{0, 0, 1, 2, 0};
     auto shapeArr = std::vector<int64_t>{1, 1, 1, 2, 1};
 
-    constexpr auto noop = [](void*, size_t, size_t) {};
-    constexpr bool isMutable = false;
+    const auto baseAttr = Const::createExternalConstContent(baseType, ArrayRef(inputVals), "testConst");
 
-    mlir::AsmResourceBlob blob(mlir::ArrayRef<char>(inputVals), noop, isMutable);
-    auto& manager = mlir::DenseResourceElementsHandle::getManagerInterface(&ctx);
-    const auto baseAttr = mlir::DenseResourceElementsAttr::get(
-            baseType, manager.insert("FromSplatDenseResourceElementsAttr", std::move(blob)));
-
-    auto contentSetup = Const::ContentSetup(baseAttr);
+    auto contentSetup = Const::ContentSetup(baseType);
 
     const auto offset = Shape(to_small_vector(offsetArr));
     const auto shape = Shape(to_small_vector(shapeArr));
     contentSetup = contentSetup.subview(offset, shape);
 
-    auto contentAttr = contentSetup.get();
+    auto contentAttr = Const::ContentAttr::get(baseAttr, std::move(contentSetup));
     const auto content = contentAttr.fold();
     EXPECT_FALSE(content.isSplat());
 

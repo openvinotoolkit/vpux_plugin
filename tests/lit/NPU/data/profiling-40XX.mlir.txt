@@ -4,18 +4,12 @@
 #loc = loc(unknown)
 #loc3 = loc("profiling_result")
 module @age_gender attributes {VPU.arch = #VPU.arch_kind<NPU40XX>, VPU.compilationMode = #VPU.compilation_mode<DefaultHW>} {
-  module @UsedMemory {
-    IE.MemoryResource 123008 bytes of @DDR loc(#loc)
-  } loc(#loc)
   VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096, 4096, 4096, 4096, 4096, 4096, 4096, 4096, 4096] loc(#loc)
   module @VPU.SW {
     func.func private @builtin_Convert(memref<*xf16, @CMX_NN>, memref<*xf32, @CMX_NN>) attributes {VPU.kernel_code = "convert.cpp", VPU.kernel_entry = "convert", VPU.task_type = @COMPUTE} loc(#loc)
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"} loc(#loc)
   } loc(#loc)
   IE.TileResource {activity_factor = 0.063640856190017581 : f64} 6 of @NCE at 1.700000e+03 MHz {
-    builtin.module @UsedMemory {
-      IE.MemoryResource 196608 bytes of @CMX_NN loc(#loc)
-    } loc(#loc)
     builtin.module @ReservedMemory {
       module @DmaProfilingReservedMemory {
         IE.MemoryResource 512 bytes of @CMX_NN offset 0 loc(#loc)

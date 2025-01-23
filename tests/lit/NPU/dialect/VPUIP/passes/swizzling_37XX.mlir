@@ -497,7 +497,7 @@ func.func @SetSwizzlingForConstantsSOK(%input : !Input_DDR) -> !Output_DDR
         }
         PPE :
         {
-            PPETask {opaque_ppe = #VPU.PPEStub<>}
+            PPETask {ppe = #VPU.PPEStub<>}
         }
 
     %5 = VPUIP.Copy { out_mem_space = @DDR } inputs(%4: !OutputDistributed) outputs(%output: !Output_DDR) -> !Output_DDR
@@ -610,7 +610,7 @@ func.func @SetSwizzlingForQuantConstantsSOK(%input : !Input_DDR) -> !Output_DDR
         }
         PPE :
         {
-            PPETask {opaque_ppe = #VPU.PPEStub<>}
+            PPETask {ppe = #VPU.PPEStub<>}
         }
 
     %5 = VPUIP.Copy { out_mem_space = @DDR } inputs(%4: !OutputDistributed) outputs(%output: !Output_DDR) -> !Output_DDR
@@ -956,7 +956,7 @@ func.func @SetSwizzlingForDpuToDpuBufferWithInplace(%in0 : memref<1x240x8x98xf16
            {
                PPETask
                    {
-                       opaque_ppe = #VPU.PPEStub<>
+                       ppe = #VPU.PPEStub<>
                    }
            }
 
@@ -992,7 +992,7 @@ func.func @SetSwizzlingForDpuToDpuBufferWithInplace(%in0 : memref<1x240x8x98xf16
            {
                PPETask
                    {
-                       opaque_ppe = #VPU.PPEStub<>
+                       ppe = #VPU.PPEStub<>
                    }
            }
 
@@ -1020,7 +1020,7 @@ func.func @SetSwizzlingForDpuToDpuBufferWithInplace(%in0 : memref<1x240x8x98xf16
            {
                PPETask
                    {
-                       opaque_ppe = #VPU.PPEStub<>
+                       ppe = #VPU.PPEStub<>
                    }
            }
 
@@ -1066,7 +1066,7 @@ func.func @SetSwizzlingForDpuToDpuBufferWithInplace(%in0 : memref<1x240x8x98xf16
            {
                PPETask
                    {
-                       opaque_ppe = #VPU.PPEStub<>
+                       ppe = #VPU.PPEStub<>
                    }
            }
 
@@ -1156,7 +1156,7 @@ func.func @CannotSwizzledDueToMultiUserWhichCannotSwizzled(%arg0 : memref<1x256x
         {
             PPETask
             {
-                opaque_ppe = #VPU.PPEStub<>
+                ppe = #VPU.PPEStub<>
             }
         }
 
@@ -1193,7 +1193,7 @@ func.func @CannotSwizzledDueToMultiUserWhichCannotSwizzled(%arg0 : memref<1x256x
         {
             PPETask
             {
-                opaque_ppe = #VPU.PPEStub<>
+                ppe = #VPU.PPEStub<>
             }
         }
 
@@ -1225,7 +1225,7 @@ func.func @CannotSwizzledDueToMultiUserWhichCannotSwizzled(%arg0 : memref<1x256x
     // CHECK-NEXT:        DPUTask {cluster_id = 0 : i64, inEnd = [79, 2, 255], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [39, 0, 255], outStart = [0, 0, 0], pad = #VPU.Padding<left = 1 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     // CHECK-NEXT:        DPUTask {cluster_id = 1 : i64, inEnd = [79, 2, 255], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [39, 0, 255], outStart = [0, 0, 0], pad = #VPU.Padding<left = 1 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     // CHECK-NEXT:      } PPE : {
-    // CHECK-NEXT:        PPETask {opaque_ppe = #VPU.PPEStub<>}
+    // CHECK-NEXT:        PPETask {ppe = #VPU.PPEStub<>}
     // CHECK-NEXT:      }
     // CHECK:      [[CONV_2:%.+]] = VPUIP.NCEClusterTask {is_superdense, kernel_padding = #VPU.Padding<left = 1 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, kernel_size = [3, 3], kernel_strides = [2, 2], minimumHardwareExecutionCost = 99787 : i64, task_type = #VPUIP.nce_task_type<CONV>}
     // CHECK-SAME:   input([[COPY_IN_2]] : memref<1x256x7x80xf16, #NHWC, @CMX_NN>) weights(%arg4 : memref<256x256x3x3xf16, #NHWC, @CMX_NN>) weight_table(%arg3 : memref<256x1x1x4xsi32, #NHWC, @CMX_NN>)
@@ -1234,7 +1234,7 @@ func.func @CannotSwizzledDueToMultiUserWhichCannotSwizzled(%arg0 : memref<1x256x
     // CHECK-NEXT:        DPUTask {cluster_id = 0 : i64, inEnd = [79, 4, 255], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [39, 1, 255], outStart = [0, 0, 0], pad = #VPU.Padding<left = 1 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     // CHECK-NEXT:        DPUTask {cluster_id = 1 : i64, inEnd = [79, 2, 255], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [39, 0, 255], outStart = [0, 0, 0], pad = #VPU.Padding<left = 1 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     // CHECK-NEXT:      } PPE : {
-    // CHECK-NEXT:        PPETask {opaque_ppe = #VPU.PPEStub<>}
+    // CHECK-NEXT:        PPETask {ppe = #VPU.PPEStub<>}
     // CHECK-NEXT:      }
     // CHECK:      [[OUT_1:%.+]] = VPUIP.Copy inputs([[CONV_1]] : memref<1x256x2x40xf16, #NHWC, @CMX_NN>) outputs([[OUTPUT_1]] : memref<1x256x2x40xf16, #NHWC, @DDR>) -> memref<1x256x2x40xf16, #NHWC, @DDR>
     // CHECK:      [[OUT_2:%.+]] = VPUIP.Copy inputs([[CONV_2]] : memref<1x256x3x40xf16, #NHWC, @CMX_NN>) outputs([[OUTPUT_2]] : memref<1x256x3x40xf16, #NHWC, @DDR>) -> memref<1x256x3x40xf16, #NHWC, @DDR>

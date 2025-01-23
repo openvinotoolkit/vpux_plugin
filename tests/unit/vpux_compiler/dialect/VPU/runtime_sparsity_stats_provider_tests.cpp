@@ -29,7 +29,7 @@ TEST_F(MLIR_VPU_RT_SPARSITY_STATS_PROVIDER, MissedStats) {
     module @main {
         func.func @main(%arg0: tensor<1x16x16x16xf16, {order = #NHWC}>, %wt: tensor<16x1x1x4xsi32>, %weights: tensor<16x16x1x1xf16, {order = #NHWC}>) -> tensor<1x16x16x16xf16, {order = #NHWC}> {
             %1 = VPU.NCE.Convolution(%arg0, %weights, %wt) {
-                    opaque_ppe = #VPU.PPEStub<>,
+                    ppe = #VPU.PPEStub<>,
                     pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
                     rawFilterShape = [16, 16, 1, 1],
                     strides = [1, 1]
@@ -68,19 +68,19 @@ TEST_F(MLIR_VPU_RT_SPARSITY_STATS_PROVIDER, WithStats) {
     module @main {
         func.func @main(%arg0: tensor<1x16x16x16xf16, {order = #NHWC}>, %wt: tensor<16x1x1x4xsi32>, %weights: tensor<16x16x1x1xf16, {order = #NHWC}>) -> (tensor<1x16x16x16xf16, {order = #NHWC}>, tensor<1x16x16x16xf16, {order = #NHWC}>) {
         %1 = VPU.NCE.Convolution(%arg0, %weights, %wt) {
-                opaque_ppe = #VPU.PPEStub<>,
+                ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
                 rawFilterShape = [16, 16, 1, 1],
                 strides = [1, 1]
             } -> tensor<1x16x16x16xf16, {order = #NHWC}> loc(fused["Conv_100", "t_Convolution"])
         %2 = VPU.NCE.Eltwise(%1, %1) {
                     op_type = #VPU.eltwise_type<ADD>,
-                    opaque_ppe = #VPU.PPEStub<>
+                    ppe = #VPU.PPEStub<>
                 } -> tensor<1x16x16x16xf16, {order = #NHWC}> loc(fused["Add_1", "t_Convolution"])
         %3 = VPU.MaxPool(%1) {
             kernel_size = [3, 3],
             pads_begin = [1, 1],
-            opaque_ppe = #VPU.PPEStub<>,
+            ppe = #VPU.PPEStub<>,
             pads_end = [1, 1],
             rounding_type = #IE.rounding_type<FLOOR>,
             strides = [1, 1]

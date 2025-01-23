@@ -6,6 +6,7 @@
 #include "vpux/compiler/dialect/VPU/IR/dialect.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPU/IR/types.hpp"
+#include "vpux/compiler/dialect/VPU/utils/sparsity_utils.hpp"
 #include "vpux/compiler/init.hpp"
 
 #include "vpux/utils/core/mem_size.hpp"
@@ -871,4 +872,34 @@ TEST_F(MLIR_NDTypeInterface, SparseTensorType_SETable_Interp_NEAREST_PREFER_FLOO
     ASSERT_TRUE(seInterpAttrUpdated != nullptr);
     auto outputTileRelOffsets = SmallVector<int64_t>({0, 0, 2, 2});
     EXPECT_EQ(parseIntArrayAttr<int64_t>(seInterpAttrUpdated.getOffsets()), outputTileRelOffsets);
+}
+
+TEST_F(MLIR_NDTypeInterface, SparseTensorType_Extract_DenseTile) {
+    mlir::MLIRContext ctx(registry);
+    ctx.loadDialect<VPU::VPUDialect>();
+
+    const Shape shape{1, 16, 32, 32};
+    const Shape sparsityMapShape{1, 16, 64, 64};
+    const Shape seTableShape{1, 1, 64, 64};
+    const auto data = mlir::RankedTensorType::get(shape.raw(), mlir::Float16Type::get(&ctx));
+    const auto sparsityMap = mlir::RankedTensorType::get(sparsityMapShape.raw(), mlir::IntegerType::get(&ctx, 1));
+    const auto seTable = mlir::RankedTensorType::get(seTableShape.raw(), mlir::IntegerType::get(&ctx, 32));
+    SmallVector<int64_t> numElems(64);
+    std::iota(numElems.begin(), numElems.end(), 0);
+    const auto numElemsType = mlir::RankedTensorType::get({64}, getInt64Type(&ctx));
+    const auto numElemsAttr = mlir::DenseElementsAttr::get(numElemsType, ArrayRef(numElems));
+    const int64_t compressionAxis = 0;
+    const int64_t alignment = 16;
+    const auto sparsityCompression = VPU::SparsityCompressionAttr::get(&ctx, getIntAttr(&ctx, compressionAxis),
+                                                                       numElemsAttr, getIntAttr(&ctx, alignment));
+    const auto sparseTensorType = VPU::SparseTensorType::get(data, sparsityMap, seTable, nullptr, sparsityCompression);
+
+    const auto effectiveSparseOutputType = VPU::getEffectiveSparseOutputType(sparseTensorType);
+
+    const Shape tileOffset{0, 0, 16, 16};
+    const Shape tileShape{1, 16, 16, 16};
+
+    auto tiledSparseShape = sparseTensorType.extractDenseTile(tileOffset, tileShape).getShape();
+    auto tiledEffectiveSparseShape = effectiveSparseOutputType.extractDenseTile(tileOffset, tileShape).getShape();
+    EXPECT_EQ(tiledSparseShape, tiledEffectiveSparseShape);
 }
