@@ -112,7 +112,8 @@
 
                 "ENABLE_DEVELOPER_BUILD": true,
 
-                "ENABLE_VPUX_DOCS": false
+                "ENABLE_VPUX_DOCS": false,
+                "ENABLE_NPU_MICRO_BENCHMARKS": true
             }
         },
         {
@@ -137,7 +138,8 @@
 
                 "ENABLE_DEVELOPER_BUILD": true,
 
-                "ENABLE_VPUX_DOCS": false
+                "ENABLE_VPUX_DOCS": false,
+                "ENABLE_NPU_MICRO_BENCHMARKS": true
             }
         },
         {
@@ -215,7 +217,7 @@
         {
             "name": "cid",
             "hidden": true,
-            "description": "Cid build necessary options. Please note the path of NPU plugin when use.",
+            "description": "cid build necessary options. Please note the path of NPU plugin when use.",
             "cacheVariables": {
                 "BUILD_SHARED_LIBS": false,
                 "ENABLE_OV_IR_FRONTEND": true,
@@ -270,20 +272,22 @@
                 "ENABLE_OPENCV": false,
 
                 "ENABLE_MULTI": false,
+                "ENABLE_HETERO": false,
                 "ENABLE_AUTO": false,
                 "ENABLE_AUTO_BATCH": false,
+                "ENABLE_TEMPLATE": false,
                 "ENABLE_PROXY": false,
-                "ENABLE_HETERO": false,
                 "ENABLE_INTEL_CPU": false,
                 "ENABLE_INTEL_GPU": false,
-                "ENABLE_TEMPLATE": false,
 
+                "ENABLE_NPU_PLUGIN_ENGINE": false,
                 "ENABLE_ZEROAPI_BACKEND": false,
                 "ENABLE_DRIVER_COMPILER_ADAPTER": false,
                 "ENABLE_INTEL_NPU_INTERNAL": false,
+                "ENABLE_INTEL_NPU_PROTOPIPE": false,
 
-                "ENABLE_NPU_PROTOPIPE": false,
-                "ENABLE_NPU_LSP_SERVER":false
+                "ENABLE_PRIVATE_TESTS": false,
+                "ENABLE_NPU_LSP_SERVER": false
             }
         },
         {
@@ -297,9 +301,7 @@
                     "type": "STRING",
                     "value": "Release"
                 },
-
                 "CMAKE_TOOLCHAIN_FILE":"${sourceDir}\\cmake\\toolchains\\onecoreuap.toolchain.cmake",
-
                 "ENABLE_LTO": false,
                 "ENABLE_FASTER_BUILD": false,
                 "ENABLE_CPPLINT": false,
@@ -326,20 +328,22 @@
                 "ENABLE_OPENCV": false,
 
                 "ENABLE_MULTI": false,
+                "ENABLE_HETERO": false,
                 "ENABLE_AUTO": false,
                 "ENABLE_AUTO_BATCH": false,
+                "ENABLE_TEMPLATE": false,
                 "ENABLE_PROXY": false,
-                "ENABLE_HETERO": false,
                 "ENABLE_INTEL_CPU": false,
                 "ENABLE_INTEL_GPU": false,
-                "ENABLE_TEMPLATE": false,
 
+                "ENABLE_NPU_PLUGIN_ENGINE": false,
                 "ENABLE_ZEROAPI_BACKEND": false,
                 "ENABLE_DRIVER_COMPILER_ADAPTER": false,
                 "ENABLE_INTEL_NPU_INTERNAL": false,
+                "ENABLE_INTEL_NPU_PROTOPIPE": false,
 
-                "ENABLE_NPU_PROTOPIPE": false,
-                "ENABLE_NPU_LSP_SERVER":false
+                "ENABLE_PRIVATE_TESTS": false,
+                "ENABLE_NPU_LSP_SERVER": false
             }
         },
         {

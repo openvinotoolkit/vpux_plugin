@@ -93,7 +93,7 @@ if(ENABLE_PRIVATE_TESTS)
     enable_testing()
 endif()
 
-print_enabled_kmb_features()
+print_enabled_npu_features()
 
 #
 # Build configuration
@@ -112,6 +112,10 @@ endif()
 
 if (ENABLE_SPLIT_DWARF)
     enable_split_dwarf()
+endif()
+
+if(ENABLE_DEVELOPER_BUILD OR uppercase_CMAKE_BUILD_TYPE STREQUAL "DEBUG")
+    enable_asserts()
 endif()
 
 #
