@@ -22,9 +22,17 @@
 
 enum ActionType { Generate };
 
+// E#146057: use NPUReg* dialects type definition from compiler
+enum NPURegDialectType { NPUReg40XX };
+
 static llvm::cl::opt<ActionType> Action(llvm::cl::desc("Actions to perform"),
                                         llvm::cl::values(clEnumValN(Generate, "generate", "")),
                                         llvm::cl::init(Generate));
+
+static llvm::cl::opt<NPURegDialectType> Platform(llvm::cl::desc("Specify the platform type"),
+                                                 llvm::cl::values(clEnumValN(NPURegDialectType::NPUReg40XX,
+                                                                             "NPUReg40XX", "NPU40XX platform")),
+                                                 llvm::cl::init(NPURegDialectType::NPUReg40XX));
 
 template <class... Args>
 void throwFormatted(llvm::StringLiteral format, Args&&... args) {
@@ -53,7 +61,7 @@ auto getAs(const llvm::Record* record, std::string_view name) {
     }
 }
 
-using Records = std::unordered_map<std::string, std::pair<const llvm::Record*, std::string>>;
+using Records = std::unordered_map<std::string, std::pair<const llvm::Record*, llvm::SmallVector<std::string>>>;
 
 // until C++20 string literals are unavailable as template arguments
 // generate a workaround to pass strings (names) as template arguments
@@ -83,8 +91,9 @@ using Records = std::unordered_map<std::string, std::pair<const llvm::Record*, s
 // e.g. the same method is unused and used, but not defined
 
 llvm::raw_ostream& emitNameAsTemplateArgumentWorkAround(llvm::raw_ostream& stream, const Records& fields,
-                                                        const Records& registers, const Records& descriptors) {
-    stream << "namespace vpux::NPUReg40XX::detail {\n";
+                                                        const Records& registers, const Records& descriptors,
+                                                        const std::string& platformTypeName) {
+    stream << "namespace vpux::" << platformTypeName << "::detail {\n";
     const auto emitWorkaround = [&stream](std::string_view level, const Records& records) {
         stream << "namespace " << level << " {\n";
         for (const auto& [name, _] : records) {
@@ -95,12 +104,13 @@ llvm::raw_ostream& emitNameAsTemplateArgumentWorkAround(llvm::raw_ostream& strea
     emitWorkaround("Fields", fields);
     emitWorkaround("Registers", registers);
     emitWorkaround("Descriptors", descriptors);
-    stream << "}  // namespace vpux::NPUReg40XX::detail\n";
+    stream << "}  // namespace vpux::" << platformTypeName << "::detail\n";
     return stream;
 }
 
-llvm::raw_ostream& emitForwardDeclarations(llvm::raw_ostream& stream, const Records& fields, const Records& registers) {
-    stream << "namespace vpux::NPUReg40XX {\n";
+llvm::raw_ostream& emitForwardDeclarations(llvm::raw_ostream& stream, const Records& fields, const Records& registers,
+                                           const std::string& platformTypeName) {
+    stream << "namespace vpux::" << platformTypeName << " {\n";
     const auto emitDeclarations = [&stream](std::string_view level, const Records& records) {
         stream << "namespace " << level << " {\n";
         for (const auto& [name, _] : records) {
@@ -110,69 +120,86 @@ llvm::raw_ostream& emitForwardDeclarations(llvm::raw_ostream& stream, const Reco
     };
     emitDeclarations("Fields", fields);
     emitDeclarations("Registers", registers);
-    stream << "}  // namespace vpux::NPUReg40XX\n";
+    stream << "}  // namespace vpux::" << platformTypeName << "\n";
     return stream;
 }
 
-llvm::raw_ostream& emitDescriptorsDefinitions(llvm::raw_ostream& stream, const Records& descriptors) {
-    stream << "namespace vpux::NPUReg40XX::Descriptors {\n";
-    constexpr llvm::StringLiteral descriptorTemplate = "struct {0} : ::vpux::VPURegMapped::detail::Descriptor<{0}, "
-                                                       "::vpux::NPUReg40XX::detail::Descriptors::{0}Name, {1}> {{};\n";
+llvm::raw_ostream& emitDescriptorsDefinitions(llvm::raw_ostream& stream, const Records& descriptors,
+                                              const std::string& platformTypeName) {
+    stream << "namespace vpux::" << platformTypeName << "::Descriptors {\n";
+    constexpr llvm::StringLiteral descriptorTemplate =
+            "struct {0} : ::vpux::VPURegMapped::detail::DescriptorTemplate<{0}, "
+            "::vpux::{1}::detail::Descriptors::{0}Name, {2}> {{};\n";
     for (const auto& [name, descriptorEntry] : descriptors) {
-        const auto [descriptor, parentName] = descriptorEntry;
-        assert(parentName.empty());
+        const auto [descriptor, parentsNames] = descriptorEntry;
+        assert(parentsNames.empty());
 
         const auto registersListInit = llvm::dyn_cast<llvm::ListInit>(descriptor->getValue("_registers")->getValue());
         std::stringstream registersList;
         for (size_t i = 0; i < registersListInit->getValues().size(); ++i) {
             const auto registerName = llvm::dyn_cast<llvm::StringInit>(registersListInit->getElement(i));
-            registersList << "::vpux::NPUReg40XX::Registers::" << registerName->getAsUnquotedString();
+            registersList << "::vpux::" << platformTypeName << "::Registers::" << registerName->getAsUnquotedString();
             if (i < registersListInit->getValues().size() - 1) {
                 registersList << ", ";
             }
         }
-        vpux::printTo(stream, descriptorTemplate, name, registersList.str());
+        vpux::printTo(stream, descriptorTemplate, name, platformTypeName, registersList.str());
     }
-    stream << "}  // namespace vpux::NPUReg40XX::Descriptors\n";
+    stream << "}  // namespace vpux::" << platformTypeName << "::Descriptors\n";
     return stream;
 }
 
-llvm::raw_ostream& emitRegistersDefinitions(llvm::raw_ostream& stream, const Records& registers) {
-    stream << "namespace vpux::NPUReg40XX::Registers {\n";
+llvm::raw_ostream& emitRegistersDefinitions(llvm::raw_ostream& stream, const Records& registers,
+                                            const std::string& platformTypeName) {
+    stream << "namespace vpux::" << platformTypeName << "::Registers {\n";
     constexpr llvm::StringLiteral registerTemplate =
             "struct {0} : "
-            "::vpux::VPURegMapped::detail::Register<::vpux::NPUReg40XX::detail::Registers::{0}Name, "
-            "::vpux::NPUReg40XX::Descriptors::{1}, {2}, {3}, {4}> {{};\n";
+            "::vpux::VPURegMapped::detail::RegisterTemplate<::vpux::{1}::detail::Registers::{0}Name, "
+            "{2}, {3}, {4}, {5}> {{};\n";
+
     for (const auto& [name, registerEntry] : registers) {
-        const auto [reg, descriptorName] = registerEntry;
-        assert(!descriptorName.empty());
+        const auto [reg, descriptorsNames] = registerEntry;
+        assert(!descriptorsNames.empty());
+
+        std::stringstream descriptorsList;
+        descriptorsList << "std::tuple<";
+        for (size_t i = 0; i < descriptorsNames.size(); ++i) {
+            descriptorsList << "::vpux::" << platformTypeName << "::Descriptors::" << descriptorsNames[i];
+            if (i < descriptorsNames.size() - 1) {
+                descriptorsList << ", ";
+            }
+        }
+        descriptorsList << '>';
 
         const auto fieldsListInit = llvm::dyn_cast<llvm::ListInit>(reg->getValue("_fields")->getValue());
         std::stringstream fieldsList;
         for (size_t i = 0; i < fieldsListInit->getValues().size(); ++i) {
             const auto fieldName = llvm::dyn_cast<llvm::StringInit>(fieldsListInit->getElement(i));
-            fieldsList << "::vpux::NPUReg40XX::Fields::" << fieldName->getAsUnquotedString();
+            fieldsList << "::vpux::" << platformTypeName << "::Fields::" << fieldName->getAsUnquotedString();
             if (i < fieldsListInit->getValues().size() - 1) {
                 fieldsList << ", ";
             }
         }
+
         const auto offsetVal = getAs<llvm::IntInit>(reg, "_offset")->getValue();
         const auto sizeVal = getAs<llvm::IntInit>(reg, "_size")->getValue();
-        vpux::printTo(stream, registerTemplate, name, descriptorName, offsetVal, sizeVal, fieldsList.str());
+        vpux::printTo(stream, registerTemplate, name, platformTypeName, descriptorsList.str(), offsetVal, sizeVal,
+                      fieldsList.str());
     }
-    stream << "}  // namespace vpux::NPUReg40XX::Registers\n";
+    stream << "}  // namespace vpux::" << platformTypeName << "::Registers\n";
     return stream;
 }
 
-llvm::raw_ostream& emitFieldsDefinitions(llvm::raw_ostream& stream, const Records& fields) {
-    stream << "namespace vpux::NPUReg40XX::Fields {\n";
+llvm::raw_ostream& emitFieldsDefinitions(llvm::raw_ostream& stream, const Records& fields,
+                                         const std::string& platformTypeName) {
+    stream << "namespace vpux::" << platformTypeName << "::Fields {\n";
     constexpr llvm::StringLiteral fieldTemplate =
-            "struct {0} : ::vpux::VPURegMapped::detail::Field<::vpux::NPUReg40XX::detail::Fields::{0}Name, "
-            "::vpux::NPUReg40XX::Registers::{1}, {2}, {3}, ::vpux::VPURegMapped::RegFieldDataType::{4}, {5}, {6}, {7}> "
+            "struct {0} : ::vpux::VPURegMapped::detail::FieldTemplate<::vpux::{1}::detail::Fields::{0}Name, "
+            "{2}, {3}, {4}, ::vpux::VPURegMapped::RegFieldDataType::{5}, {6}, {7}, {8}> "
             "{{};\n";
     for (const auto& [name, fieldEntry] : fields) {
-        const auto [field, registerName] = fieldEntry;
-        assert(!registerName.empty());
+        const auto [field, registersNames] = fieldEntry;
+        assert(!registersNames.empty());
 
         const auto offsetVal = getAs<llvm::IntInit>(field, "_offset")->getValue();
         const auto sizeVal = getAs<llvm::IntInit>(field, "_size")->getValue();
@@ -181,13 +208,24 @@ llvm::raw_ostream& emitFieldsDefinitions(llvm::raw_ostream& stream, const Record
         const auto major = getAs<llvm::IntInit>(versionVal, "major")->getValue();
         const auto minor = getAs<llvm::IntInit>(versionVal, "minor")->getValue();
         const auto patch = getAs<llvm::IntInit>(versionVal, "patch")->getValue();
-        vpux::printTo(stream, fieldTemplate, name, registerName, offsetVal, sizeVal, typeVal, major, minor, patch);
+
+        std::stringstream parentRegistersArgument;
+        parentRegistersArgument << "std::tuple<";
+        for (size_t i = 0; i < registersNames.size(); ++i) {
+            parentRegistersArgument << "::vpux::" << platformTypeName << "::Registers::" << registersNames[i];
+            if (i < registersNames.size() - 1) {
+                parentRegistersArgument << ", ";
+            }
+        }
+        parentRegistersArgument << '>';
+        vpux::printTo(stream, fieldTemplate, name, platformTypeName, parentRegistersArgument.str(), offsetVal, sizeVal,
+                      typeVal, major, minor, patch);
     }
-    stream << "}  // namespace vpux::NPUReg40XX::Fields\n";
+    stream << "}  // namespace vpux::" << platformTypeName << "::Fields\n";
     return stream;
 }
 
-llvm::Error generate(llvm::raw_ostream& stream, llvm::RecordKeeper& records) {
+llvm::Error generate(llvm::raw_ostream& stream, llvm::RecordKeeper& records, const std::string& platformTypeName) {
     stream << "#pragma once\n";
     stream << '\n';
     stream << "#include <cstdint>\n";
@@ -195,49 +233,50 @@ llvm::Error generate(llvm::raw_ostream& stream, llvm::RecordKeeper& records) {
     stream << '\n';
 
     Records fields;
-    for (auto field : records.getAllDerivedDefinitionsIfDefined("NPUReg40XX_RegFieldWrapper")) {
-        fields[getAs<llvm::StringInit>(field, "_name")->getAsUnquotedString()] = std::make_pair(field, "");
+    for (auto field : records.getAllDerivedDefinitionsIfDefined(platformTypeName + "_RegFieldWrapper")) {
+        fields[getAs<llvm::StringInit>(field, "_name")->getAsUnquotedString()] =
+                std::make_pair(field, llvm::SmallVector<std::string>{});
     }
 
     Records registers;
-    for (auto reg : records.getAllDerivedDefinitionsIfDefined("NPUReg40XX_RegisterWrapper")) {
+    for (auto reg : records.getAllDerivedDefinitionsIfDefined(platformTypeName + "_RegisterWrapper")) {
         const auto registerName = getAs<llvm::StringInit>(reg, "_name")->getAsUnquotedString();
-        registers[registerName] = std::make_pair(reg, "");
+        registers[registerName] = std::make_pair(reg, llvm::SmallVector<std::string>{});
 
         const auto fieldsListInit = llvm::dyn_cast<llvm::ListInit>(reg->getValue("_fields")->getValue());
         for (auto field : fieldsListInit->getValues()) {
             const auto fieldName = llvm::dyn_cast<llvm::StringInit>(field)->getAsUnquotedString();
             assert(fields.count(fieldName) == 1);
-            fields[fieldName].second = registerName;
+            fields[fieldName].second.push_back(registerName);
         }
     }
 
     Records descriptors;
-    for (auto descriptor : records.getAllDerivedDefinitionsIfDefined("NPUReg40XX_RegMappedWrapper")) {
+    for (auto descriptor : records.getAllDerivedDefinitionsIfDefined(platformTypeName + "_RegMappedWrapper")) {
         const auto descriptorName = getAs<llvm::StringInit>(descriptor, "_name")->getAsUnquotedString();
-        descriptors[descriptorName] = std::make_pair(descriptor, "");
+        descriptors[descriptorName] = std::make_pair(descriptor, llvm::SmallVector<std::string>{});
 
         const auto registersListInit = llvm::dyn_cast<llvm::ListInit>(descriptor->getValue("_registers")->getValue());
         for (auto reg : registersListInit->getValues()) {
             const auto registerName = llvm::dyn_cast<llvm::StringInit>(reg)->getAsUnquotedString();
             assert(registers.count(registerName) == 1);
-            registers[registerName].second = descriptorName;
+            registers[registerName].second.push_back(descriptorName);
         }
     }
 
-    emitNameAsTemplateArgumentWorkAround(stream, fields, registers, descriptors);
-    emitForwardDeclarations(stream, fields, registers);
+    emitNameAsTemplateArgumentWorkAround(stream, fields, registers, descriptors, platformTypeName);
+    emitForwardDeclarations(stream, fields, registers, platformTypeName);
 
-    emitDescriptorsDefinitions(stream, descriptors);
-    emitRegistersDefinitions(stream, registers);
-    emitFieldsDefinitions(stream, fields);
+    emitDescriptorsDefinitions(stream, descriptors, platformTypeName);
+    emitRegistersDefinitions(stream, registers, platformTypeName);
+    emitFieldsDefinitions(stream, fields, platformTypeName);
 
     return llvm::Error::success();
 }
 
 bool RegGenMain(llvm::raw_ostream& stream, llvm::RecordKeeper& records) {
-    auto doGenerate = [](auto& stream, auto& records) {
-        if (auto error = generate(stream, records)) {
+    auto doGenerate = [](auto& stream, auto& records, auto& platformTypeName) {
+        if (auto error = generate(stream, records, platformTypeName)) {
             handleAllErrors(std::move(error), [](const llvm::ErrorInfoBase& error) {
                 error.log(llvm::WithColor::error());
                 llvm::errs() << '\n';
@@ -246,9 +285,19 @@ bool RegGenMain(llvm::raw_ostream& stream, llvm::RecordKeeper& records) {
         }
         return false;
     };
+
+    std::string platformTypeName;
+    switch (Platform) {
+    case NPUReg40XX:
+        platformTypeName = "NPUReg40XX";
+        break;
+    default:
+        break;
+    }
+
     switch (Action) {
     case Generate:
-        return doGenerate(stream, records);
+        return doGenerate(stream, records, platformTypeName);
     default:
         return true;
     }

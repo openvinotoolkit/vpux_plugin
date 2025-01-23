@@ -30,6 +30,7 @@
 #include "vpux/utils/core/error.hpp"
 
 #include <mlir/Dialect/Func/Transforms/Passes.h>
+#include <mlir/Dialect/MemRef/Transforms/Passes.h>
 #include <mlir/Tools/mlir-lsp-server/MlirLspServerMain.h>
 #include <mlir/Tools/mlir-opt/MlirOptMain.h>
 #include <mlir/Transforms/Passes.h>
@@ -73,6 +74,7 @@ int main(int argc, char* argv[]) {
 
         mlir::registerTransformsPasses();
         mlir::func::registerFuncPasses();
+        mlir::memref::registerResolveShapedTypeResultDims();
 
         return mlir::asMainReturnCode(mlir::MlirLspServerMain(argc, argv, registry));
     } catch (const std::exception& e) {

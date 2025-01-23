@@ -4,6 +4,7 @@
 //
 
 #include "vpux/compiler/NPU40XX/dialect/ELF/export.hpp"
+#include "vpux/compiler/act_kernels/shave_binary_resources.h"
 #include "vpux/compiler/dialect/ELFNPU37XX/export.hpp"
 #include "vpux/compiler/dialect/ELFNPU37XX/import.hpp"
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
@@ -139,12 +140,8 @@ mlir::OwningOpRef<mlir::ModuleOp> importIE(llvm::SourceMgr& sourceMgr, mlir::MLI
         // constants in MLIR protects the code from use-after-free errors.
         constexpr bool useSharedConstants = false;
 
-        // For NPU37XX and NPU40XX the graph transformations are different compared to the rest of the platforms
-        // because scales do not need to be aligned. Running with VPU::ArchKind::UNKNOWN will align scales, which
-        // can result in an accuracy drop for NPU37XX and NPU40XX.
         module = IE::importNetwork(ctx, model, IE::buildOVParams(model), IE::buildOVResults(model), useSharedConstants,
-                                   rootTiming, vpuxProfiling, enableDummyOpReplacement, dynamicShapeToStatic,
-                                   VPU::ArchKind::UNKNOWN);
+                                   rootTiming, vpuxProfiling, enableDummyOpReplacement, dynamicShapeToStatic);
     } catch (const std::exception& ex) {
         printTo(llvm::errs(), "Failed to translate IE IR {0} to MLIR : {1}", netFileName, ex.what());
         return nullptr;
@@ -189,13 +186,16 @@ mlir::OwningOpRef<mlir::ModuleOp> importELF(llvm::SourceMgr& sourceMgr, mlir::ML
 //
 
 mlir::LogicalResult exportELF(mlir::ModuleOp module, llvm::raw_ostream& output) {
+    auto compilationMode = VPU::getCompilationMode(module.getOperation());
+    if (compilationMode == VPU::CompilationMode::ShaveCodeGen) {
+        ShaveBinaryResources::loadElfData(module);
+    }
+
     mlir::DefaultTimingManager tm;
 
     auto arch = VPU::getArch(module.getOperation());
 
-    const std::set<VPU::ArchKind> compatibleTargets = {
-            VPU::ArchKind::NPU40XX,
-    };
+    const std::set<VPU::ArchKind> compatibleTargets = {VPU::ArchKind::NPU40XX};
 
     if (arch == VPU::ArchKind::NPU37XX) {
         const auto buf = ELFNPU37XX::exportToELF(module);
