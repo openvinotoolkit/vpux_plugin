@@ -56,6 +56,10 @@ class DPUVariantExpandOpInterfaceModel final :
         public VPUASM::DPUVariantExpandOpInterface::ExternalModel<DPUVariantExpandOpInterfaceModel,
                                                                   VPUASM::DPUVariantOp> {
 public:
+    mlir::LogicalResult expandGeneralConfig(mlir::Operation* dpuVariantOp, mlir::OpBuilder& builder, Logger log) const {
+        return arch40xx::buildDPUVariantGeneral(mlir::cast<VPUASM::DPUVariantOp>(dpuVariantOp), builder, log);
+    }
+
     mlir::LogicalResult expandIDUConfig(mlir::Operation* dpuVariantOp, mlir::OpBuilder& builder, const Logger& log,
                                         ELF::SymbolReferenceMap& symRefMap) const {
         return arch40xx::buildDPUVariantIDU(mlir::cast<VPUASM::DPUVariantOp>(dpuVariantOp), builder, log, symRefMap);

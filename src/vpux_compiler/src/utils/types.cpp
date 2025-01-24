@@ -7,6 +7,8 @@
 
 #include "vpux/compiler/core/attributes/stride_reqs.hpp"
 #include "vpux/compiler/core/attributes/strides.hpp"
+#include "vpux/compiler/core/type_interfaces.hpp"
+#include "vpux/compiler/core/types/quantile_float/types.hpp"
 #include "vpux/compiler/dialect/IE/IR/attributes.hpp"
 #include "vpux/compiler/dialect/VPUIP/IR/attributes.hpp"
 #include "vpux/compiler/dialect/VPUIP/IR/types.hpp"
@@ -17,6 +19,7 @@
 #include <mlir/Dialect/Quant/QuantTypes.h>
 
 #include <llvm/ADT/TypeSwitch.h>
+#include <mlir/IR/BuiltinTypes.h>
 #include <numeric>
 
 using namespace vpux;
@@ -27,6 +30,10 @@ using namespace vpux;
 
 mlir::IntegerType vpux::getInt1Type(mlir::MLIRContext* ctx) {
     return mlir::IntegerType::get(ctx, 1);
+}
+
+mlir::IntegerType vpux::getInt2Type(mlir::MLIRContext* ctx) {
+    return mlir::IntegerType::get(ctx, 2);
 }
 
 mlir::IntegerType vpux::getInt4Type(mlir::MLIRContext* ctx) {
@@ -99,6 +106,10 @@ mlir::IntegerType vpux::getBool8Type(mlir::MLIRContext* ctx) {
 //
 
 Bit vpux::getElemTypeSize(mlir::Type type) {
+    if (const auto quantileFloatType = mlir::dyn_cast<vpux::type::QuantileFloatType>(type)) {
+        return Bit(quantileFloatType.getWidth());
+    }
+
     if (const auto ndType = type.dyn_cast<vpux::NDTypeInterface>()) {
         return getElemTypeSize(ndType.getElementType());
     }
@@ -147,6 +158,36 @@ std::optional<int32_t> vpux::getQuantizedAxis(int32_t axis, ShapeRef prevShape, 
     }
 
     return std::nullopt;
+}
+
+Byte vpux::getExpectedBufferSize(mlir::Type type) {
+    const Bit elemSize = getElemTypeSize(type);
+    const auto ndType = mlir::cast<NDTypeInterface>(type);
+    const auto elemCount = ndType.getNumElements();
+
+    const auto totalBits = elemCount * elemSize.count();
+    VPUX_THROW_UNLESS(totalBits >= 0, "Cannot calculate buffer size required for '{0}'", type);
+
+    // practically, total bits must be always byte-aligned (think of aligned
+    // malloc analogy here):
+    //
+    // offset = 0b111, ~offset = 0b11111...1000
+    // 1. already aligned case:
+    //  * totalBits = N * 8 = N * 0b1000
+    //  * totalBits + offset = N * 0b1000 + 0b0111
+    //  * (totalBits + offset) & ~offset = (N * 0b1000 + 0b0111) & 0b111...1000
+    //    = N * 0b1000 + 0b0000 = N * 0b1000 -> same value
+    //
+    // 2. unaligned case:
+    //  * totalBits = N * 8 + 3 = N * 0b1000 + 0b11
+    //  * totalBits + offset = N * 0b1000 + 0b11 + 0b0111 = N * 0b1000 + 0b1010
+    //                                      (3 + 7 = 10)
+    //  * (totalBits + offset) & ~offset = (N * 0b1000 + 0b1010) & 0b111...1000
+    //    = N * 0b1000 + 0b1000 = (N + 1) * 0b1000 = (N + 1) * 8 -> original
+    //    value promoted to "next divisible by 8"
+    constexpr size_t offset = CHAR_BIT - 1;
+    const auto alignedBits = (static_cast<size_t>(totalBits) + offset) & ~offset;
+    return Byte(alignedBits / CHAR_BIT);
 }
 
 //
@@ -283,14 +324,14 @@ bool vpux::areTypesCompatible(mlir::TypeRange lhs, mlir::TypeRange rhs, IE::Type
         if (lhsOrigType.getTypeID() != rhsOrigType.getTypeID()) {
             if (IE::bitEnumContainsAny(elemComparisonModes, (IE::TypeComparisonMode::ALLOW_GROUPED_OUTPUT |
                                                              IE::TypeComparisonMode::ALLOW_DISTRIBUTED_OUTPUT))) {
-                const auto oneIsGrouped = (lhsOrigType.isa<vpux::GroupedTypeInterface>() &&
-                                           !rhsOrigType.isa<vpux::GroupedTypeInterface>()) ||
-                                          (!lhsOrigType.isa<vpux::GroupedTypeInterface>() &&
-                                           rhsOrigType.isa<vpux::GroupedTypeInterface>());
-                const auto oneIsDistributed = (lhsOrigType.isa<vpux::VPU::DistributedTensorType>() &&
-                                               !rhsOrigType.isa<vpux::VPU::DistributedTensorType>()) ||
-                                              (!lhsOrigType.isa<vpux::VPU::DistributedTensorType>() &&
-                                               rhsOrigType.isa<vpux::VPU::DistributedTensorType>());
+                const auto oneIsGrouped = (mlir::isa<vpux::GroupedTypeInterface>(lhsOrigType) &&
+                                           !mlir::isa<vpux::GroupedTypeInterface>(rhsOrigType)) ||
+                                          (!mlir::isa<vpux::GroupedTypeInterface>(lhsOrigType) &&
+                                           mlir::isa<vpux::GroupedTypeInterface>(rhsOrigType));
+                const auto oneIsDistributed = (mlir::isa<vpux::VPU::DistributedTensorType>(lhsOrigType) &&
+                                               !mlir::isa<vpux::VPU::DistributedTensorType>(rhsOrigType)) ||
+                                              (!mlir::isa<vpux::VPU::DistributedTensorType>(lhsOrigType) &&
+                                               mlir::isa<vpux::VPU::DistributedTensorType>(rhsOrigType));
 
                 if (!oneIsGrouped && !oneIsDistributed) {
                     return false;
@@ -300,8 +341,8 @@ bool vpux::areTypesCompatible(mlir::TypeRange lhs, mlir::TypeRange rhs, IE::Type
             }
         }
 
-        auto lhsType = lhsOrigType.dyn_cast<NDTypeInterface>();
-        auto rhsType = rhsOrigType.dyn_cast<NDTypeInterface>();
+        auto lhsType = mlir::dyn_cast<NDTypeInterface>(lhsOrigType);
+        auto rhsType = mlir::dyn_cast<NDTypeInterface>(rhsOrigType);
 
         if (lhsType == nullptr || rhsType == nullptr) {
             return false;
@@ -316,22 +357,18 @@ bool vpux::areTypesCompatible(mlir::TypeRange lhs, mlir::TypeRange rhs, IE::Type
                 return false;
             }
 
-            const auto lhsQuantizedType = lhsType.getElementType().dyn_cast<mlir::quant::QuantizedType>();
-            const auto rhsQuantizedType = rhsType.getElementType().dyn_cast<mlir::quant::QuantizedType>();
+            const auto lhsQuantizedType = mlir::dyn_cast<mlir::quant::QuantizedType>(lhsType.getElementType());
+            const auto rhsQuantizedType = mlir::dyn_cast<mlir::quant::QuantizedType>(rhsType.getElementType());
 
-            if (!lhsQuantizedType && !rhsQuantizedType) {
-                return false;
-            } else if (lhsQuantizedType && rhsQuantizedType) {
+            if (lhsQuantizedType && rhsQuantizedType) {
                 if ((lhsQuantizedType.getExpressedType() != rhsQuantizedType.getExpressedType()) ||
                     (lhsQuantizedType.getStorageType() != rhsQuantizedType.getStorageType())) {
                     if (!IE::bitEnumContainsAny(elemComparisonModes, IE::TypeComparisonMode::ALLOW_DIFFERENT_QUANT)) {
                         return false;
                     }
                 }
-            } else {
-                if (!IE::bitEnumContainsAny(elemComparisonModes, IE::TypeComparisonMode::ALLOW_QUANT_MIXED_PRECISION)) {
-                    return false;
-                }
+            } else if (!IE::bitEnumContainsAny(elemComparisonModes, IE::TypeComparisonMode::ALLOW_MIXED_PRECISION)) {
+                return false;
             }
         }
 

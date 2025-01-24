@@ -9,8 +9,8 @@
 namespace vpux {
 namespace vpumi40xx2vpuasm {
 
-mlir::LogicalResult EnqueueRewriter::symbolize(VPURegMapped::EnqueueOp op, SymbolMapper&,
-                                               mlir::ConversionPatternRewriter& rewriter) const {
+mlir::FailureOr<SymbolizationResult> EnqueueRewriter::symbolize(VPURegMapped::EnqueueOp op, SymbolMapper&,
+                                                                mlir::ConversionPatternRewriter& rewriter) const {
     auto result = op.getResult();
     auto symName = findSym(result).getRootReference();
     auto taskIdx = mlir::TypeAttr::get(op.getType());
@@ -28,11 +28,12 @@ mlir::LogicalResult EnqueueRewriter::symbolize(VPURegMapped::EnqueueOp op, Symbo
 
     auto realTaskIdx = mlir::TypeAttr::get(op.getStart().getType());
 
-    rewriter.create<VPUASM::WorkItemOp>(op.getLoc(), symName, taskIdx, realTaskIdx, op.getTaskTypeAttr(), firstTaskSym,
-                                        rewriter.getI64IntegerAttr(static_cast<int64_t>(count)));
+    auto newOp =
+            rewriter.create<VPUASM::WorkItemOp>(op.getLoc(), symName, taskIdx, realTaskIdx, op.getTaskTypeAttr(),
+                                                firstTaskSym, rewriter.getI64IntegerAttr(static_cast<int64_t>(count)));
     rewriter.eraseOp(op);
 
-    return mlir::success();
+    return SymbolizationResult(newOp);
 }
 
 }  // namespace vpumi40xx2vpuasm

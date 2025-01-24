@@ -52,6 +52,15 @@ mlir::FailureOr<mlir::Type> inferElemType(VPU::AffineReshapeOpAdaptor affineResh
         return mlir::failure();
     }
 
+    if (const auto perAxisQuantileQType = inputElemType.dyn_cast_or_null<mlir::quant::QuantileQuantizedPerAxisType>()) {
+        return mlir::quant::QuantileQuantizedPerAxisType::get(
+                perAxisQuantileQType.getFlags(), perAxisQuantileQType.getStorageType(),
+                perAxisQuantileQType.getQuantileType(), perAxisQuantileQType.getExpressedType(),
+                perAxisQuantileQType.getQuantiles(), perAxisQuantileQType.getScales(),
+                perAxisQuantileQType.getZeroPoints(), static_cast<int32_t>(outQAxis), perAxisQType.getStorageTypeMin(),
+                perAxisQuantileQType.getStorageTypeMax());
+    }
+
     return mlir::quant::UniformQuantizedPerAxisType::get(
             perAxisQType.getFlags(), perAxisQType.getStorageType(), perAxisQType.getExpressedType(),
             perAxisQType.getScales(), perAxisQType.getZeroPoints(), static_cast<int32_t>(outQAxis),

@@ -5,9 +5,7 @@
 
 #pragma once
 
-#include <vector>
 #include "vpux/compiler/NPU40XX/dialect/ELF/ops.hpp"
-#include "vpux/compiler/act_kernels/nce2p7.h"
 #include "vpux/compiler/dialect/VPUASM/types.hpp"
 #include "vpux/compiler/dialect/VPURegMapped/types.hpp"
 #include "vpux/compiler/utils/logging.hpp"
@@ -141,6 +139,12 @@ std::pair<uint8_t, uint8_t> reduceWaitMaskTo8bit(uint64_t waitMask);
 // creates a linear (1D) MemrefType of dimension (memrefSize x dataType)
 mlir::MemRefType getLinearMemrefType(mlir::MLIRContext* ctx, int64_t memrefSize, mlir::Type dataType,
                                      VPU::MemoryKind memKind);
+
+using SectionMapper = typename std::unordered_map<ELF::SectionSignature, ELF::ElfSectionInterface>;
+mlir::SymbolRefAttr moveOpToSection(mlir::Operation* op, SectionMapper& sectionMap, mlir::OpBuilder& builder);
+mlir::SymbolRefAttr cloneSectionSymbol(mlir::SymbolRefAttr from, mlir::SymbolRefAttr to);
+
+void insertELFMain(mlir::func::FuncOp netFunc);
 
 }  // namespace ELF
 }  // namespace vpux

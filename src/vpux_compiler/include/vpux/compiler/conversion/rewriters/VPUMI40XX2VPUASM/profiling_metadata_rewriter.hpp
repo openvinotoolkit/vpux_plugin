@@ -13,8 +13,8 @@ namespace vpumi40xx2vpuasm {
 class ProfilingMetadataRewriter : public VPUASMSymbolizationPattern<VPUMI40XX::ProfilingMetadataOp> {
 public:
     using Base::Base;
-    mlir::LogicalResult symbolize(VPUMI40XX::ProfilingMetadataOp op, SymbolMapper& mapper,
-                                  mlir::ConversionPatternRewriter& rewriter) const override;
+    mlir::FailureOr<SymbolizationResult> symbolize(VPUMI40XX::ProfilingMetadataOp op, SymbolMapper& mapper,
+                                                   mlir::ConversionPatternRewriter& rewriter) const override;
     llvm::SmallVector<mlir::FlatSymbolRefAttr> getSymbolicNames(VPUMI40XX::ProfilingMetadataOp, size_t) override;
 };
 

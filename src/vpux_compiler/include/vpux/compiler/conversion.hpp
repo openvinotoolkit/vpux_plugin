@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include "utils/options.hpp"
 #include "vpux/compiler/NPU40XX/dialect/ELF/dialect.hpp"
 #include "vpux/compiler/NPU40XX/dialect/NPUReg40XX/dialect.hpp"
 #include "vpux/compiler/dialect/ELFNPU37XX/dialect.hpp"
@@ -77,6 +78,7 @@ std::unique_ptr<mlir::Pass> createAddBuffersForNetResults(Logger log = Logger::g
 
 std::unique_ptr<mlir::Pass> createConvertSWLayers2AffinePass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createConvertAffine2LLVMPass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createConvertIERT2VPUIPPass(Logger log = Logger::global());
 
 // ELF back-end lowerings
 std::unique_ptr<mlir::Pass> createConvertVPUIP2VPUMI37XXPass(Logger log = Logger::global());
@@ -84,14 +86,14 @@ std::unique_ptr<mlir::Pass> createConvertVPUMI37XX2VPUASMPass(Logger log = Logge
 std::unique_ptr<mlir::Pass> createConvertVPUMI37XX2ELFPass(Logger log = Logger::global());
 
 // NPUReg40XX ELF specific passes
-std::unique_ptr<mlir::Pass> createConvertVPUIP2VPUMI40XXPass(Logger log = Logger::global(),
-                                                             bool enableMemorySideCache = false);
-std::unique_ptr<mlir::Pass> createConvertVPUMI40XX2VPUASMPass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createConvertVPUIP2VPUMI40XXPass(
+        Logger log = Logger::global(), bool enableMemorySideCache = false,
+        AllocateShaveStackFrames allocateShaveStackFrames = AllocateShaveStackFrames::DISABLED);
+std::unique_ptr<mlir::Pass> createConvertVPUMI40XX2VPUASMPass(Logger log = Logger::global(), bool enablePWLM = false);
+
 std::unique_ptr<mlir::Pass> createConvertVPUIPDPU2NPUReg40XXPass(
         Logger log = Logger::global(), VPU::DPUDryRunMode dpuDryRunMode = VPU::DPUDryRunMode::NONE);
-std::unique_ptr<mlir::Pass> createConvertVPUASM2NPUReg40XXPass(Logger log = Logger::global());
-std::unique_ptr<mlir::Pass> createConvertVPUASM2NPUReg40XXRelocsPass(Logger log = Logger::global(),
-                                                                     bool enableWLM = false);
+std::unique_ptr<mlir::Pass> createConvertVPUASM2NPUReg40XXPass(Logger log = Logger::global(), bool enableWLM = false);
 
 //
 // registerConversionPipelines

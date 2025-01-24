@@ -103,16 +103,16 @@ const std::map<uint32_t, DecoderAlgorithm> Encoder::Impl::encoder_to_decoder_map
         {0, DecoderAlgorithm::ADDPROC},         {1, DecoderAlgorithm::SIGNSHFTADDPROC},
         {2, DecoderAlgorithm::SIGNSHFTADDPROC}, {3, DecoderAlgorithm::NOPROC},
         {4, DecoderAlgorithm::SIGNSHFTPROC},    {5, DecoderAlgorithm::SIGNSHFTADDPROC},
-        {6, DecoderAlgorithm::SIGNSHFTADDBLK},  // >= NPU40XX only
+        {6, DecoderAlgorithm::SIGNSHFTADDBLK},  // >= NPU4 only
         {7, DecoderAlgorithm::BINEXPPROC},      {8, DecoderAlgorithm::BTEXPPROC}};
 
 void Encoder::Impl::verify_config(const BitCompactorConfig& config) {
     if (config.arch_type == ArchType::NPU27) {
         if (config.mode_fp16_enable) {
-            throw std::logic_error{"FP16 is not supported when using NPU37XX"};
+            throw std::logic_error{"FP16 is not supported when using NPU27"};
         }
         if (!config.weight_compress_enable) {
-            throw std::logic_error{"NPU37XX doesn't support activation compression"};
+            throw std::logic_error{"NPU27 doesn't support activation compression"};
         }
     }
 }
@@ -136,7 +136,7 @@ void Encoder::Impl::init(const BitCompactorConfig& config, const std::vector<uin
     algorithm_encoder_[static_cast<uint32_t>(EncoderAlgorithm::NOPRDCT)] = &Encoder::Impl::noprdct;
     algorithm_encoder_[static_cast<uint32_t>(EncoderAlgorithm::NOSPRDCT)] = &Encoder::Impl::nosprdct;
     algorithm_encoder_[static_cast<uint32_t>(EncoderAlgorithm::PREVBLKPRDCT)] =
-            &Encoder::Impl::prevblkprdct;  // >= NPU40XX only
+            &Encoder::Impl::prevblkprdct;  // >= NPU4 only
     algorithm_encoder_[static_cast<uint32_t>(EncoderAlgorithm::BINCMPCT)] = &Encoder::Impl::binexpproc;
     algorithm_encoder_[static_cast<uint32_t>(EncoderAlgorithm::BTMAP)] = &Encoder::Impl::btexpproc;
 

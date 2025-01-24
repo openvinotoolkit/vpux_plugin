@@ -10,8 +10,9 @@
 #include "vpux/compiler/dialect/VPUIP/utils/sw_utils.hpp"
 #include "vpux/compiler/utils/logging.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
-#include "vpux/utils/IE/prefix.hpp"
 #include "vpux/utils/core/error.hpp"
+
+#include <intel_npu/prefix.hpp>
 
 #include <mlir/IR/BuiltinAttributes.h>
 #include <mlir/IR/BuiltinTypes.h>
@@ -80,7 +81,8 @@ void UngroupBoundedBuffersAsFuncArgs::safeRunOnModule() {
 
         const auto typeAttr = mlir::TypeAttr::get(
                 mlir::RankedTensorType::get(dynamicShapeMemRef.getShape(), dynamicShapeMemRef.getElementType()));
-        const auto nameAttr = mlir::StringAttr::get(ctx, SHAPE_TENSOR_PREFIX + dataInfo[index].getName());
+        const auto nameAttr =
+                mlir::StringAttr::get(ctx, std::string(intel_npu::SHAPE_TENSOR_PREFIX) + dataInfo[index].getName());
 
         auto insertionPointAfter = std::next(infoBlock.begin(), dataBufferCount);
         auto infoBuilder = mlir::OpBuilder(&infoBlock, insertionPointAfter, builder.getListener());

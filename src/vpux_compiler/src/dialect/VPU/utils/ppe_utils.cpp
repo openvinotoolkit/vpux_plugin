@@ -28,7 +28,7 @@ double VPU::computeQuantScale(mlir::Type inputType, mlir::Type outputType) {
     return inputScale / outputScale;
 }
 
-double VPU::computeQuantScaleForConv(mlir::Type inputType, mlir::Type outputType, mlir::Type weightsType) {
+double VPU::computeQuantScaleWithWeightedOps(mlir::Type inputType, mlir::Type outputType, mlir::Type weightsType) {
     const auto weightsScale = mlir::isa_and_nonnull<mlir::quant::QuantizedType>(weightsType)
                                       ? extractScalesAndZeroPoints(weightsType).first.front()
                                       : 1.0;
@@ -47,19 +47,20 @@ double VPU::computeScale(mlir::Operation* operation) {
         if (!mlir::isa<mlir::quant::UniformQuantizedPerAxisType>(inputElemType) &&
             !mlir::isa<mlir::quant::UniformQuantizedPerAxisType>(weightsElemType) &&
             !mlir::isa<mlir::quant::UniformQuantizedPerAxisType>(outputElemType)) {
-            return computeQuantScaleForConv(inputElemType, outputElemType, weightsElemType);
+            auto staticScale = 1.0;
+            if (auto convOp = mlir::dyn_cast<IE::ConvolutionOp>(operation)) {
+                staticScale =
+                        convOp.getStaticScaleAttr() != nullptr ? convOp.getStaticScaleAttr().getValueAsDouble() : 1.0;
+            }
+            return computeQuantScaleWithWeightedOps(inputElemType, outputElemType, weightsElemType) * staticScale;
         }
+
     } else if (auto avgPoolOp = mlir::dyn_cast<IE::AvgPoolOp>(operation)) {
         const auto kernelSize = vpux::parseIntArrayAttr<int64_t>(avgPoolOp.getKernelSizeAttr());
         const auto staticScale =
                 avgPoolOp.getStaticScaleAttr() != nullptr ? avgPoolOp.getStaticScaleAttr().getValueAsDouble() : 1.0;
         return computeAvgPoolQuantScale(inputElemType, outputElemType, kernelSize) * staticScale;
-    } else if (auto convOp = mlir::dyn_cast<IE::ConvolutionOp>(operation)) {
-        const auto staticScale =
-                convOp.getStaticScaleAttr() != nullptr ? convOp.getStaticScaleAttr().getValueAsDouble() : 1.0;
-        return computeQuantScale(inputElemType, outputElemType) * staticScale;
     }
-
     return computeQuantScale(inputElemType, outputElemType);
 }
 

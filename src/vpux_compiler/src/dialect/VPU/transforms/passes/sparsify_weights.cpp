@@ -7,11 +7,14 @@
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_sparsity.hpp"
 #include "vpux/compiler/dialect/VPU/utils/strategy_manager/sparsity_strategy.hpp"
+#include "vpux/compiler/dialect/const/utils/utils.hpp"
 
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/compiler/utils/loop.hpp"
 #include "vpux/compiler/utils/sparsity.hpp"
 #include "vpux/compiler/utils/types.hpp"
+
+#include <llvm/Support/ThreadPool.h>
 
 using namespace vpux;
 
@@ -24,22 +27,44 @@ namespace {
 class SparsifyWeightsPass final : public VPU::SparsifyWeightsBase<SparsifyWeightsPass> {
 public:
     explicit SparsifyWeightsPass(VPU::WeightsSparsityHeuristic heuristic, std::optional<double> manualThreshold,
-                                 Logger log)
-            : _heuristic(heuristic), _manualThreshold(manualThreshold) {
+                                 int64_t largeConstThreshold, Logger log)
+            : _heuristic(heuristic),
+              _manualThreshold(manualThreshold),
+              _largeConstThreshold(checkThreshold(largeConstThreshold)) {
         Base::initLogger(log, Base::getArgumentName());
     }
 
 private:
     void safeRunOnFunc() final;
 
+    static Byte checkThreshold(int64_t threshold) {
+        VPUX_THROW_UNLESS(threshold >= 0, "Weights sparsity largeConstThreshold is negative '{0}'", threshold);
+        return Byte(threshold);
+    }
+
 private:
     VPU::WeightsSparsityHeuristic _heuristic;
     std::optional<double> _manualThreshold;
+    const Byte _largeConstThreshold;
+    const Byte _tinyConstThreshold = Byte(1024);
 };
 
 //
 // safeRunOnFunc
 //
+
+int64_t getSizeInfo(Const::DeclareOp& origOp) {
+    const auto& contentAttr = origOp.getContentAttr();
+    auto inputType = contentAttr.getBaseContent().getType().cast<NDTypeInterface>();
+    auto maximumSize = inputType.getTotalAllocSize().count();
+    auto transformations = contentAttr.getTransformations();
+    for (auto transformation : transformations) {
+        inputType = transformation.inferOutputType(inputType);
+        auto size = inputType.getTotalAllocSize().count();
+        maximumSize = (size > maximumSize) ? size : maximumSize;
+    }
+    return maximumSize;
+}
 
 void SparsifyWeightsPass::safeRunOnFunc() {
     using namespace VPU::NCESparsity;
@@ -79,7 +104,7 @@ void SparsifyWeightsPass::safeRunOnFunc() {
         VPUX_THROW_UNLESS(nceOp != nullptr, "Unexpected non-NCE operation that supports weights sparsity");
 
         const auto weights = nceOp.getWeightsOperand();
-        if (weights == nullptr) {
+        if (weights == nullptr || mlir::isa<mlir::BlockArgument>(weights)) {
             return;
         }
         auto weightsType = weights.getType().cast<vpux::NDTypeInterface>();
@@ -115,7 +140,8 @@ void SparsifyWeightsPass::safeRunOnFunc() {
     DenseMap<Const::DeclareOp, VPU::GroupSparseTensorOp> localReplacementCache;
     // poor man's way to only create a GroupSparseTensor once. done this way to
     // limit the amount of changes around multi-threaded code.
-    const auto getCachedSparseTensorOp = [&](Const::DeclareOp weightsOp, const Const::ContentSetup& newContentAttrSetup,
+    const auto getCachedSparseTensorOp = [&](Const::DeclareOp weightsOp, mlir::DenseElementsAttr data,
+                                             const Const::ContentSetup& newContentAttrSetup,
                                              VPU::SparsityCompressionAttr sparsityCompressionAttr) {
         auto it = localReplacementCache.find(weightsOp);
         if (it != localReplacementCache.end()) {
@@ -123,8 +149,8 @@ void SparsifyWeightsPass::safeRunOnFunc() {
         }
 
         mlir::OpBuilder builder(weightsOp);
-        auto sparsityMapContent = newContentAttrSetup.clone().getSparsityMap().get();
-        auto sparsifiedContent = newContentAttrSetup.clone().sparsify(false).get();
+        auto sparsityMapContent = Const::ContentAttr::get(data, newContentAttrSetup.clone().getSparsityMap());
+        auto sparsifiedContent = Const::ContentAttr::get(data, newContentAttrSetup.clone().sparsify(false));
         const auto sparsifiedWeights = builder.create<Const::DeclareOp>(weightsOp.getLoc(), sparsifiedContent.getType(),
                                                                         std::move(sparsifiedContent));
         const auto sparsityMap = builder.create<Const::DeclareOp>(weightsOp.getLoc(), sparsityMapContent.getType(),
@@ -177,20 +203,20 @@ void SparsifyWeightsPass::safeRunOnFunc() {
         const auto contentSize = checked_cast<size_t>(foldedContentType.getTotalAllocSize().count());
         std::vector<char> newContent(contentSize);
         foldedContent.copyTo(MutableArrayRef(newContent.data(), contentSize));
-        const auto foldedBaseContent = mlir::DenseElementsAttr::getFromRawBuffer(
-                mlir::cast<mlir::ShapedType>(foldedContentType), ArrayRef(newContent));
-        auto newContentAttrSetup = Const::ContentAttr::transform(foldedBaseContent);
+        const auto foldedBaseContent =
+                Const::createConstContent(mlir::cast<mlir::ShapedType>(foldedContentType), ArrayRef(newContent));
+        Const::ContentSetup newContentAttrSetup(foldedContentType);
         // Folded constants with INT8 element types have to be cast to quantized types for the correct type to be
         // inferred from the new Const::ContentAttr
         if (auto qType = foldedElemType.dyn_cast<mlir::quant::QuantizedType>()) {
-            newContentAttrSetup = newContentAttrSetup.quantCast(qType);
+            newContentAttrSetup = newContentAttrSetup.castElemType(qType);
         }
 
         // IR modification is not thread safe according to MLIR documentation.
         std::lock_guard<std::mutex> guard(irModificationMutex);
 
         VPU::GroupSparseTensorOp groupedView =
-                getCachedSparseTensorOp(weightsOp, newContentAttrSetup, sparsityCompressionAttr);
+                getCachedSparseTensorOp(weightsOp, foldedBaseContent, newContentAttrSetup, sparsityCompressionAttr);
 
         weightsOp->replaceUsesWithIf(groupedView, [useToReplace = sparsifiableOp.getOperation()](mlir::OpOperand& use) {
             return use.getOwner() == useToReplace;
@@ -202,18 +228,74 @@ void SparsifyWeightsPass::safeRunOnFunc() {
         ++numSparsifiedWeights;
     };
 
-    loop_1d(LoopExecPolicy::Parallel, &getContext(), sparseCandidates.size(), [&](const size_t index) {
-        // Note: since we are folding here, doing a linear iterator increment is
-        // likely cheap enough.
-        auto it = sparseCandidates.begin();
-        std::advance(it, index);
-
-        auto [weightsOp, sparsifiableOps] = *it;
-        const auto foldedContent = weightsOp.getContent();
-        for (auto sparsifiableOp : sparsifiableOps) {
-            tryToSparsify(sparsifiableOp, weightsOp, foldedContent);
+    // If multi-threading is not enabled, sparsify all weights sequentially
+    if (!ctx.isMultithreadingEnabled()) {
+        for (auto& [weightsOp, sparsifiableOps] : sparseCandidates) {
+            for (auto sparsifiableOp : sparsifiableOps) {
+                tryToSparsify(sparsifiableOp, weightsOp, weightsOp.getContent());
+            }
         }
-    });
+    } else {
+        SmallVector<Const::DeclareOp> parallelSet;
+        DenseMap<Const::DeclareOp, int64_t> constSizes;
+
+        // Sparsify all constants that are within tinyConstThreshold or exceed largeConstThreshold
+        // by using a single thread.
+        for (auto& [weightsOp, sparsifiableOps] : sparseCandidates) {
+            int64_t constSize = getSizeInfo(weightsOp);
+            constSizes[weightsOp] = constSize;
+            if (constSize > _tinyConstThreshold.count() && constSize < _largeConstThreshold.count()) {
+                parallelSet.push_back(weightsOp);
+                continue;
+            }
+            for (auto sparsifiableOp : sparsifiableOps) {
+                tryToSparsify(sparsifiableOp, weightsOp, weightsOp.getContent());
+            }
+        }
+
+        // Iterate over other constant operations and accumulate constants until the combined size
+        // exceeds the large constant threshold or the end is reached.
+        auto& threadPool = ctx.getThreadPool();
+        auto op = parallelSet.begin();
+        auto opsEnd = parallelSet.end();
+
+        while (op != opsEnd) {
+            int64_t constSizeInParallel = 0;
+            unsigned int constNumInParallel = 0;
+            auto opReserve = op;
+            while (constSizeInParallel <= _largeConstThreshold.count() && op != opsEnd) {
+                auto weightsOpInParallel = *op;
+                int64_t cstSize = constSizes[weightsOpInParallel];
+                constSizeInParallel += cstSize;
+                constNumInParallel++;
+                ++op;
+            }
+
+            mlir::ParallelDiagnosticHandler handler(&ctx);
+            std::atomic<unsigned int> curIndex(0);
+            auto processConstants = [&] {
+                while (true) {
+                    const unsigned int index = curIndex++;
+                    if (index >= constNumInParallel) {
+                        break;
+                    }
+                    handler.setOrderIDForThread(index);
+                    Const::DeclareOp curOp = *(std::next(opReserve, index));
+                    for (auto sparsifiableOp : sparseCandidates[curOp]) {
+                        tryToSparsify(sparsifiableOp, curOp, curOp.getContent());
+                    }
+                    handler.eraseOrderIDForThread();
+                }
+            };
+
+            llvm::ThreadPoolTaskGroup tasksGroup(threadPool);
+            unsigned int numActions = std::min(constNumInParallel, threadPool.getThreadCount());
+            for (unsigned int i = 0; i < numActions; ++i) {
+                tasksGroup.async(processConstants);
+            }
+            tasksGroup.wait();
+        }
+    }
 
     _log.trace("Sparsified weights for {0} operations out of {1} candidates", numSparsifiedWeights,
                numCandidatesSparseWeights);
@@ -226,6 +308,7 @@ void SparsifyWeightsPass::safeRunOnFunc() {
 //
 
 std::unique_ptr<mlir::Pass> vpux::VPU::createSparsifyWeightsPass(VPU::WeightsSparsityHeuristic heuristic,
-                                                                 std::optional<double> manualThreshold, Logger log) {
-    return std::make_unique<SparsifyWeightsPass>(heuristic, manualThreshold, log);
+                                                                 std::optional<double> manualThreshold,
+                                                                 int64_t largeConstThreshold, Logger log) {
+    return std::make_unique<SparsifyWeightsPass>(heuristic, manualThreshold, largeConstThreshold, log);
 }

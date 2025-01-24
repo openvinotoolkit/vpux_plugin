@@ -43,7 +43,7 @@ void compressConstWeightsType(mlir::func::FuncOp func) {
     auto ctx = func.getContext();
 
     func.walk([&](Const::DeclareOp constOp) {
-        const auto contentAttr = constOp.getContentAttr();
+        const auto& contentAttr = constOp.getContentAttr();
         const auto transformations = contentAttr.getTransformations();
         const auto sparsifyTransformationIt =
                 std::find_if(transformations.rbegin(), transformations.rend(), [](Const::TransformAttrInterface tr) {

@@ -14,10 +14,6 @@
 - [ ] BUG
 - [ ] Feature
 
-## Related PRs
-
-* [PR-xxx](https://github.com/intel-innersource/applications.ai.vpu-accelerators.vpux-plugin/pull/xxx) description
-
 ## Code Review Survey (Copy and Complete in your code review)
 
 - number_minutes_spent_on_review[0]

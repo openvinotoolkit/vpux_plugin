@@ -5,7 +5,6 @@
 
 #include "vpux/compiler/NPU40XX/dialect/ELF/ops.hpp"
 #include "vpux/compiler/NPU40XX/dialect/ELF/passes.hpp"
-#include "vpux/compiler/utils/ELF/utils.hpp"
 
 #include <vpux_elf/types/vpu_extensions.hpp>
 
@@ -63,8 +62,6 @@ void AddElfSymbolTablePass::safeRunOnFunc() {
         symbolBuilder.setInsertionPointToEnd(symTab.getBlock());
         symbolBuilder.create<ELF::SymbolOp>(section.getLoc(), symbolSignature);
     }
-
-    return;
 }
 }  // namespace
 

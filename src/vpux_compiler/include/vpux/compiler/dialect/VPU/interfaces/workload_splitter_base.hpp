@@ -40,7 +40,8 @@ protected:
     mlir::DenseSet<mlir::Operation*> findProducersForConsumers(
             mlir::Value value, mlir::DenseSet<mlir::Operation*> processedConsumerOps = {});
 
-    mlir::DenseSet<mlir::Operation*> findInvalidDepthwiseOps(const mlir::DenseSet<mlir::Operation*>& nceOps);
+    mlir::DenseSet<mlir::Operation*> findInvalidDepthwiseOps(const mlir::DenseSet<mlir::Operation*>& nceOps,
+                                                             ArrayRef<int64_t> supportedChannels);
     mlir::DenseSet<mlir::Operation*> findInvalidNCEPermuteOps(const mlir::DenseSet<mlir::Operation*>& nceOps);
 
     // Get offset from start of the cluster

@@ -171,8 +171,11 @@ mlir::LogicalResult vpux::VPU::NCEAveragePoolOp::inferReturnTypes(
     const auto dataPaddingBelow = SmallVector<int64_t>({padTop, padLeft});
     const auto dataPaddingAbove = SmallVector<int64_t>({padBottom, padRight});
 
-    const auto shapeI64 =
-            inferAvgPoolOutputShape(inShape, windowStrides, dataPaddingBelow, dataPaddingAbove, windowShape);
+    auto shapeI64 = inferAvgPoolOutputShape(inShape, windowStrides, dataPaddingBelow, dataPaddingAbove, windowShape);
+
+    if (op.getOutputChannels().has_value()) {
+        shapeI64[Dims4D::Act::C.ind()] = op.getOutputChannels().value();
+    }
 
     auto inputType = mlir::cast<vpux::NDTypeInterface>(op.getInput().getType());
     auto outputType =

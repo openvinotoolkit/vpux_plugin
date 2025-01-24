@@ -3,15 +3,12 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
-#include "vpux/compiler/NPU40XX/dialect/VPUIPDPU/ops.hpp"
 #include "vpux/compiler/dialect/VPUASM/ops.hpp"
 #include "vpux/compiler/utils/ELF/utils.hpp"
-#include "vpux/compiler/utils/traits_utils.hpp"
 
 #include <npu_40xx_nnrt.hpp>
 
 using namespace vpux;
-using namespace npu40xx;
 
 void vpux::VPUASM::DPUInvariantOp::serialize(elf::writer::BinaryDataSection<uint8_t>&) {
     // TODO: E#80148 after interface refactoring should we not require serialization for DPUInvariantOp
@@ -22,12 +19,12 @@ void vpux::VPUASM::DPUInvariantOp::serialize(elf::writer::BinaryDataSection<uint
     return;
 }
 
-size_t vpux::VPUASM::DPUInvariantOp::getBinarySize() {
-    return sizeof(nn_public::VpuDPUInvariant);
+size_t vpux::VPUASM::DPUInvariantOp::getBinarySize(VPU::ArchKind /*arch*/) {
+    return sizeof(npu40xx::nn_public::VpuDPUInvariant);
 }
 
-size_t vpux::VPUASM::DPUInvariantOp::getAlignmentRequirements() {
-    return alignof(nn_public::VpuDPUInvariant);
+size_t vpux::VPUASM::DPUInvariantOp::getAlignmentRequirements(VPU::ArchKind /*arch*/) {
+    return alignof(npu40xx::nn_public::VpuDPUInvariant);
 }
 
 vpux::ELF::SectionFlagsAttr vpux::VPUASM::DPUInvariantOp::getPredefinedMemoryAccessors() {
@@ -53,12 +50,12 @@ void vpux::VPUASM::DPUVariantOp::serialize(elf::writer::BinaryDataSection<uint8_
     return;
 }
 
-size_t vpux::VPUASM::DPUVariantOp::getBinarySize() {
-    return sizeof(nn_public::VpuDPUVariant);
+size_t vpux::VPUASM::DPUVariantOp::getBinarySize(VPU::ArchKind /*arch*/) {
+    return sizeof(npu40xx::nn_public::VpuDPUVariant);
 }
 
-size_t vpux::VPUASM::DPUVariantOp::getAlignmentRequirements() {
-    return alignof(nn_public::VpuDPUVariant);
+size_t vpux::VPUASM::DPUVariantOp::getAlignmentRequirements(VPU::ArchKind /*arch*/) {
+    return alignof(npu40xx::nn_public::VpuDPUVariant);
 }
 
 vpux::ELF::SectionFlagsAttr vpux::VPUASM::DPUVariantOp::getPredefinedMemoryAccessors() {
@@ -83,12 +80,12 @@ void vpux::VPUASM::DPUInvariantOp_37XX::serialize(elf::writer::BinaryDataSection
     return;
 }
 
-size_t vpux::VPUASM::DPUInvariantOp_37XX::getBinarySize() {
-    return sizeof(nn_public::VpuDPUInvariant);
+size_t vpux::VPUASM::DPUInvariantOp_37XX::getBinarySize(VPU::ArchKind) {
+    return sizeof(npu40xx::nn_public::VpuDPUInvariant);
 }
 
-size_t vpux::VPUASM::DPUInvariantOp_37XX::getAlignmentRequirements() {
-    return alignof(nn_public::VpuDPUInvariant);
+size_t vpux::VPUASM::DPUInvariantOp_37XX::getAlignmentRequirements(VPU::ArchKind) {
+    return alignof(npu40xx::nn_public::VpuDPUInvariant);
 }
 
 vpux::ELF::SectionFlagsAttr vpux::VPUASM::DPUInvariantOp_37XX::getPredefinedMemoryAccessors() {
@@ -112,12 +109,12 @@ void vpux::VPUASM::DPUVariantOp_37XX::serialize(elf::writer::BinaryDataSection<u
     return;
 }
 
-size_t vpux::VPUASM::DPUVariantOp_37XX::getBinarySize() {
-    return sizeof(nn_public::VpuDPUVariant);
+size_t vpux::VPUASM::DPUVariantOp_37XX::getBinarySize(VPU::ArchKind) {
+    return sizeof(npu40xx::nn_public::VpuDPUVariant);
 }
 
-size_t vpux::VPUASM::DPUVariantOp_37XX::getAlignmentRequirements() {
-    return alignof(nn_public::VpuDPUVariant);
+size_t vpux::VPUASM::DPUVariantOp_37XX::getAlignmentRequirements(VPU::ArchKind) {
+    return alignof(npu40xx::nn_public::VpuDPUVariant);
 }
 
 vpux::ELF::SectionFlagsAttr vpux::VPUASM::DPUVariantOp_37XX::getPredefinedMemoryAccessors() {

@@ -129,8 +129,8 @@ VPUIP::DMADescriptorAttr NNDMARewriter::getDmaTransactionTraits(VPUMI37XX::NNDMA
     return transactionAttr;
 }
 
-mlir::LogicalResult NNDMARewriter::symbolize(VPUMI37XX::NNDMAOp op, SymbolMapper& mapper,
-                                             mlir::ConversionPatternRewriter& rewriter) const {
+mlir::FailureOr<SymbolizationResult> NNDMARewriter::symbolize(VPUMI37XX::NNDMAOp op, SymbolMapper& mapper,
+                                                              mlir::ConversionPatternRewriter& rewriter) const {
     mlir::MLIRContext* ctx = rewriter.getContext();
     auto result = op.getResult();
 
@@ -147,7 +147,7 @@ mlir::LogicalResult NNDMARewriter::symbolize(VPUMI37XX::NNDMAOp op, SymbolMapper
     }
     auto outputs = mlir::ArrayAttr::get(ctx, llvm::ArrayRef<mlir::Attribute>(outputSyms));
 
-    mlir::FlatSymbolRefAttr nextLink;
+    mlir::SymbolRefAttr nextLink;
     if (auto nextDmaIdx = op.getNextDMAIdx()) {
         auto nextDma = mlir::cast<VPUMI37XX::NNDMAOp>(nextDmaIdx.getDefiningOp());
         auto nextLinkIt = mapper.find(nextDmaIdx);
@@ -172,16 +172,17 @@ mlir::LogicalResult NNDMARewriter::symbolize(VPUMI37XX::NNDMAOp op, SymbolMapper
 
     auto taskIdx = mlir::TypeAttr::get(op.getType());
 
-    rewriter.create<VPUASM::NNDMAOp>(op.getLoc(), symName, taskIdx, taskLocation, nextLink, input, outputs, waitAttr,
-                                     updateAttr, startAfter, cleanAfter, accelerationMode, isOutOfOrder, isCritical,
-                                     /*enable_msc*/ nullptr,
-                                     /*act_compression_size_entry*/ nullptr, /*act_compression_sparsity_map*/ nullptr,
-                                     descriptor,
-                                     /*dma_hwp_id*/ nullptr, /*tile_indexes*/ nullptr, nullptr);
+    auto newOp = rewriter.create<VPUASM::NNDMAOp>(
+            op.getLoc(), symName, taskIdx, taskLocation, nextLink, input, outputs, waitAttr, updateAttr, startAfter,
+            cleanAfter, accelerationMode, isOutOfOrder, isCritical,
+            /*enable_msc*/ nullptr,
+            /*act_compression_size_entry*/ nullptr, /*act_compression_sparsity_map*/ nullptr,
+            /*dma_transaction*/ nullptr, descriptor,
+            /*dma_hwp_id*/ nullptr, /*tile_indexes*/ nullptr, nullptr);
 
     rewriter.eraseOp(op);
 
-    return mlir::success();
+    return SymbolizationResult(newOp);
 }
 
 }  // namespace vpumi37xx2vpuasm

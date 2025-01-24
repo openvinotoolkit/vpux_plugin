@@ -321,15 +321,13 @@ mlir::Value DepthToSpaceSliceRewriter::getConcatResult(mlir::PatternRewriter& re
     auto loc = input.getLoc();
     auto inputType = input.getType();
     auto inputShape = getShape(input);
-    SmallVector<float> zeroTensor(inputShape.totalSize());
+    float zeroValue = 0.f;
 
     const auto elemType = inputType.cast<vpux::NDTypeInterface>().getElementType();
 
     if (auto qInputElemType = elemType.dyn_cast<mlir::quant::UniformQuantizedType>()) {
         const auto zeroPoint = qInputElemType.getZeroPoint();
-        std::fill(zeroTensor.begin(), zeroTensor.end(), static_cast<float>(zeroPoint));
-    } else if (elemType.isa<mlir::Float16Type>()) {
-        std::fill(zeroTensor.begin(), zeroTensor.end(), 0.0f);
+        zeroValue = static_cast<float>(zeroPoint);
     }
 
     auto filterTensorAttr = vpux::getTensorAttr(getContext(), DimsOrder::NHWC, nullptr);
@@ -338,17 +336,17 @@ mlir::Value DepthToSpaceSliceRewriter::getConcatResult(mlir::PatternRewriter& re
     auto dataStorageType =
             mlir::RankedTensorType::get(inputShape.raw(), mlir::Float32Type::get(filterType.getContext()));
 
-    auto dataAttr = mlir::DenseElementsAttr::get(dataStorageType, ArrayRef(zeroTensor));
-    auto contentAttrSetup = Const::ContentAttr::transform(dataAttr);
+    auto dataAttr = Const::createConstContent(dataStorageType, ArrayRef(zeroValue));
+    Const::ContentSetup contentAttrSetup(dataStorageType);
 
     if (auto qElemType = elemType.dyn_cast<mlir::quant::QuantizedType>()) {
-        contentAttrSetup = contentAttrSetup.castElemType(getUInt8Type(filterType.getContext())).quantCast(qElemType);
+        contentAttrSetup = contentAttrSetup.castElemType(qElemType);
     } else if (elemType.isa<mlir::Float16Type>()) {
         contentAttrSetup = contentAttrSetup.castElemType(mlir::Float16Type::get(filterType.getContext()));
     } else {
         VPUX_THROW("Unsupported type {0}", elemType);
     }
-    auto contentAttr = contentAttrSetup.reorder(filterType.getDimsOrder()).get();
+    auto contentAttr = Const::ContentAttr::get(dataAttr, contentAttrSetup.reorder(filterType.getDimsOrder()));
     auto constTensor = rewriter.create<Const::DeclareOp>(loc, filterType, std::move(contentAttr)).getOutput();
     // Concat along H axis and blockSize as stride
     auto axis = Dims4D::Act::H;

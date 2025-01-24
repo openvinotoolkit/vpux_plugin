@@ -31,6 +31,6 @@ DOT::EdgeDir VPUMI40XX::M2IOp::getEdgeDirection(mlir::Operation* source) {
     return DOT::EdgeDir::EDGE_NORMAL;
 }
 
-bool M2IOp::supportsHardLink() {
+bool M2IOp::supportsTaskLink() {
     return true;
 }

@@ -201,6 +201,7 @@ vpux::VPURT::BarrierSimulator::BarrierSimulator(mlir::func::FuncOp funcOp, bool 
     if (wlmFlag) {
         configureForWlm(barrierInfo);
     }
+    _barrierInfo = barrierInfo;
 }
 
 void vpux::VPURT::BarrierSimulator::configureForWlm(vpux::BarrierInfo& barrierInfo) {
@@ -309,8 +310,9 @@ void vpux::VPURT::BarrierSimulator::parseTasks(mlir::Operation* parentOp) {
             auto nceOp = mlir::dyn_cast<VPUIP::NCEClusterTaskOp>(wrappedTaskOp);
             VPUX_THROW_UNLESS(nceOp != nullptr, "Could not cast to NCE task");
 
-            _nceTasks.emplace_back(virtualDep, nceOp.getNumVariants());
-            updateBarrierConfigs(taskOp, nceOp.getNumVariants());
+            int64_t numVariants = BarrierInfo::getNumOfSlotsUsed(taskOp);
+            _nceTasks.emplace_back(virtualDep, numVariants);
+            updateBarrierConfigs(taskOp, numVariants);
             break;
         }
 
@@ -366,8 +368,8 @@ mlir::LogicalResult vpux::VPURT::BarrierSimulator::checkProducerCount(Logger log
         const auto producerCount = _barriers[vid].producerCount;
 
         if (producerCount > _barrierProducerSlotCount) {
-            log.error("Barrier {0} at '{1}' has {2} producers (max {3})", vid, _barriers[vid].loc, producerCount,
-                      _barrierProducerSlotCount);
+            log.warning("Barrier {0} at '{1}' has {2} producers (max {3})", vid, _barriers[vid].loc, producerCount,
+                        _barrierProducerSlotCount);
             return mlir::failure();
         }
     }
@@ -381,8 +383,8 @@ mlir::LogicalResult vpux::VPURT::BarrierSimulator::checkProducerAndConsumerCount
         const auto consumerCount = _barriers[vid].consumerCount;
 
         if (producerCount + consumerCount > _barrierTotalSlotCount) {
-            log.error("Barrier {0} at '{1}' has {2} producers and {3} consumers (max sum {4})", vid, _barriers[vid].loc,
-                      producerCount, consumerCount, _barrierTotalSlotCount);
+            log.warning("Barrier {0} at '{1}' has {2} producers and {3} consumers (max sum {4})", vid,
+                        _barriers[vid].loc, producerCount, consumerCount, _barrierTotalSlotCount);
             return mlir::failure();
         }
     }
@@ -767,14 +769,14 @@ mlir::LogicalResult vpux::VPURT::BarrierSimulator::simulateBarriers(Logger log, 
         }
 
         if (!progressed) {
-            log.error("Barrier simulation blocked at DMA:{0}; DPU: {1} / {2}; ACT: {3} / {4}; "
+            log.debug("Barrier simulation blocked at DMA:{0}; DPU: {1} / {2}; ACT: {3} / {4}; "
                       "M2I: {5} / {6}; BAR: {7} / {8}",
                       getDmaProgressLog(), dpu, _nceTasks.size(), act, _actTasks.size(), m2i, _m2iTasks.size(), bar,
                       _barriers.size());
 
             for (size_t b = 0; b < bar; ++b) {
                 if (_barriers[b].producerCount != 0 || _barriers[b].consumerCount != 0)
-                    log.error("Barrier {0} mapped to real {1} with remaining producers: {2}, consumers: {3}", b,
+                    log.debug("Barrier {0} mapped to real {1} with remaining producers: {2}, consumers: {3}", b,
                               _barriers[b].realId, _barriers[b].producerCount, _barriers[b].consumerCount);
             }
 
@@ -782,7 +784,8 @@ mlir::LogicalResult vpux::VPURT::BarrierSimulator::simulateBarriers(Logger log, 
         }
     }
 
-    if (barrierLegalizationSim && !_barrierBatchesToLegalize.empty()) {
+    if (barrierLegalizationSim && !getBarrierBatchesToLegalize().empty()) {
+        // fail only when batches contain barriers that are actually used by tasks
         log.trace("Barrier Legalization: barrier batch to legalize {0}", _barrierBatchesToLegalize.size());
         return mlir::failure();
     }
@@ -912,6 +915,42 @@ VPURT::BarrierSimulator::Status vpux::VPURT::BarrierSimulator::processSim(
     }
 
     return Status::Success;
+}
+
+void vpux::VPURT::BarrierSimulator::calculateBarrierBatchesForParallelTasks() {
+    auto getBarrierIndBatch = [&](mlir::DenseSet<VPURT::DeclareVirtualBarrierOp>& barrierOpsBatch) {
+        std::set<int64_t> barrierIndBatch;
+        for (const auto barrierOp : barrierOpsBatch) {
+            barrierIndBatch.insert(_barrierInfo.getIndex(barrierOp));
+        }
+        return barrierIndBatch;
+    };
+
+    for (auto& barriersToLegalize : getBarrierBatchesToLegalize()) {
+        calculateBarrierBatchesForParallelTasks(getBarrierIndBatch(barriersToLegalize));
+    }
+}
+
+void vpux::VPURT::BarrierSimulator::calculateBarrierBatchesForParallelTasks(const std::set<int64_t>& activeBarriers) {
+    // try to select tasks that can run in parallel to tasks associated with the barriers selected for legalization
+    auto activeBarrierUsers = _barrierInfo.getBarriersUsers(activeBarriers);
+    auto parallelTasksBatches = _barrierInfo.findParallelTasksWithBarrierDependence(activeBarrierUsers);
+    if (_barrierBatchesToLegalize.empty()) {
+        _barrierBatchesToLegalize.push_back({});
+    }
+
+    // add barriers associated with tasks that can execute in parallel to
+    // tasks governed by currently active barriers
+    for (auto parallelTasks : parallelTasksBatches) {
+        for (auto parallelTask : parallelTasks) {
+            for (auto bar : _barrierInfo.getUpdateBarriers(parallelTask)) {
+                _barrierBatchesToLegalize.rbegin()->insert(bar);
+            }
+            for (auto bar : _barrierInfo.getWaitBarriers(parallelTask)) {
+                _barrierBatchesToLegalize.rbegin()->insert(bar);
+            }
+        }
+    }
 }
 
 void vpux::VPURT::BarrierSimulator::linkNextIds(Logger log) {

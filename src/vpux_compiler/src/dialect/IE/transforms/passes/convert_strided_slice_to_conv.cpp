@@ -26,7 +26,6 @@ IE::ConvolutionOp createStridedSliceConv(mlir::Value input, mlir::ArrayRef<int64
             rewriter, SmallVector<int64_t>{checked_cast<int64_t>(strides[2]), checked_cast<int64_t>(strides[3])});
     auto padBeginAttr = getIntArrayAttr(rewriter, SmallVector<int64_t>{0, 0});
     auto padEndAttr = getIntArrayAttr(rewriter, SmallVector<int64_t>{0, 0});
-
     SmallVector<int64_t> outShapeVec(inShape.size());
     for (size_t dimIdx = 0; dimIdx < inShape.size(); dimIdx++) {
         outShapeVec[dimIdx] = (inShape.raw()[dimIdx] - 1) / strides[dimIdx] + 1;
@@ -165,28 +164,20 @@ public:
 
 public:
     mlir::LogicalResult matchAndRewrite(IE::StridedSliceOp origOp, mlir::PatternRewriter& rewriter) const final;
-    bool isBenefitialToConvert(IE::StridedSliceOp origOp, ShapeRef newInShape) const;
+    bool isBeneficialToConvert(ShapeRef newInShape) const;
 
 private:
     Logger _log;
 };
 
-bool StridedSliceOpConverter::isBenefitialToConvert(IE::StridedSliceOp slice, ShapeRef newInShape) const {
-    // Check alignment
-    const auto stridedSliceInType = slice.getInput().getType().cast<vpux::NDTypeInterface>();
-    const auto alignment = VPU::NCEInvariant::getAlignment(stridedSliceInType.getElementType());
-    auto IC = newInShape[Dims4D::Act::C];
-    if (IC % alignment == 0) {
-        return true;
-    }
-
-    // Check if is output and order is NCHW
-    const auto sliceOutput = slice.getOutput();
-    const auto user = *sliceOutput.getUsers().begin();
-    const auto outOrder = sliceOutput.getType().cast<vpux::NDTypeInterface>().getDimsOrder();
-    if (user->use_empty() && outOrder == DimsOrder::NCHW) {
+bool StridedSliceOpConverter::isBeneficialToConvert(ShapeRef newInShape) const {
+    constexpr auto MINIMAL_SIZE = 2048;
+    // Conv need NHWC input, then there may be a transpose(permuteQuantize) needed, sometime when IC or IW is
+    // not aligned, we need to introduce expand and slice operation, no benefit when size is small
+    if (newInShape.isStatic() && newInShape.totalSize() <= MINIMAL_SIZE) {
         return false;
     }
+
     return true;
 }
 
@@ -204,6 +195,13 @@ mlir::LogicalResult StridedSliceOpConverter::matchAndRewrite(IE::StridedSliceOp 
     auto strides = parseIntArrayAttr<int64_t>(origOp.getStridesAttr().value());
     if (llvm::all_of(strides, isOne)) {
         _log.trace("If strides on all axis are 1, it is a normal SliceOp");
+        return mlir::failure();
+    }
+
+    if (llvm::any_of(strides, [](auto stride) {
+            return stride > VPU::NCEInvariant::MAX_STRIDE;
+        })) {
+        _log.trace("Stride exceeds MAX_STRIDE of NCEConv");
         return mlir::failure();
     }
 
@@ -236,12 +234,39 @@ mlir::LogicalResult StridedSliceOpConverter::matchAndRewrite(IE::StridedSliceOp 
 
     auto inOrder = DimsOrder::fromValue(input);
     Shape newInShape = Shape(inputShape.size(), 0);
+    auto beginMask = parseIntArrayAttr<int64_t>(origOp.getBeginMaskAttr());
+    auto endMask = parseIntArrayAttr<int64_t>(origOp.getEndMaskAttr());
+
+    // begins/ends attribute can contain:
+    // 1 - out-of-bounds values which exceed the shape of input. These values need to be clamped to the input shape
+    // 2 - negative values which means indexing starts from the end
+    //
+    // begin/endMask meaning:
+    // 0 - means that the corresponding dimension of the end input is taken from begin attribute
+    // 1 - means that the corresponding dimension of the end input is ignored and the ‘real’ beginning of the tensor
+    // is used along corresponding dimension
+
+    // For cases when begin and ends have negative values will not apply the rewrite
+    const auto negativeBegins = std::any_of(begins.begin(), begins.end(), [](auto val) {
+        return val < 0;
+    });
+    const auto negativeEnds = std::any_of(ends.begin(), ends.end(), [](auto val) {
+        return val < 0;
+    });
+    if (negativeBegins || negativeEnds) {
+        return mlir::failure();
+    }
     for (auto ind : irange(inputShape.size())) {
         auto idx = inOrder.dimAt(ind);
-        newInShape[idx] = ends[idx] - begins[idx];
+        const auto actualBegin = beginMask[ind] == 0 ? begins[idx] : 0;
+        if (endMask[ind] == 1 || ends[idx] > inputShape[idx]) {
+            newInShape[idx] = inputShape[idx] - actualBegin;
+        } else {
+            newInShape[idx] = ends[idx] - actualBegin;
+        }
     }
 
-    if (!isBenefitialToConvert(origOp, newInShape)) {
+    if (!isBeneficialToConvert(newInShape)) {
         _log.trace("Cannot or is not beneficial to convert StridedSlice to Conv");
         return mlir::failure();
     }

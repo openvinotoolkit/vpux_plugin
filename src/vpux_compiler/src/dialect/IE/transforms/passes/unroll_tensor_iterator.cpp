@@ -4,6 +4,7 @@
 //
 
 #include "vpux/compiler/dialect/IE/transforms/passes.hpp"
+#include "vpux/compiler/dialect/const/utils/utils.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/compiler/utils/logging.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
@@ -223,7 +224,7 @@ mlir::LogicalResult LoopRewriter::matchAndRewrite(IE::LoopOp origOp, mlir::Patte
     // Check if internal execCond are consts
     bool isInExecCondsConst = true;
     const auto execCondIndex = origOp.getExecCondIndex();
-    auto loopTerminator = mlir::dyn_cast<IE::LoopTerminatorOp>(bodyBlock->getTerminator());
+    auto loopTerminator = mlir::cast<IE::LoopTerminatorOp>(bodyBlock->getTerminator());
     auto internalExecutionCondition = loopTerminator.getOperands()[execCondIndex];
     auto internalExecutionConditionConst = internalExecutionCondition.getDefiningOp<Const::DeclareOp>();
     if (internalExecutionConditionConst == nullptr) {
@@ -258,9 +259,8 @@ mlir::LogicalResult LoopRewriter::matchAndRewrite(IE::LoopOp origOp, mlir::Patte
         if (currentIterIndex != -1) {
             const auto elemType = bodyInputs[currentIterIndex].getType().cast<vpux::NDTypeInterface>().getElementType();
             const auto dataStorageTensor = mlir::RankedTensorType::get({1}, mlir::Float32Type::get(ctx));
-            auto denseElementVal = wrapData(dataStorageTensor, currentIter);
-            auto constIter = rewriter.create<Const::DeclareOp>(origOp->getLoc(), dataStorageTensor,
-                                                               Const::ContentAttr::get(denseElementVal));
+            auto constIter = Const::createFloatConst(rewriter, origOp->getLoc(), dataStorageTensor,
+                                                     static_cast<float>(currentIter));
             if (elemType.isF32()) {
                 mapper.map(bodyInputs[currentIterIndex], constIter);
             } else {

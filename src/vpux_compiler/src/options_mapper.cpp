@@ -3,8 +3,8 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
-#include "intel_npu/al/config/common.hpp"
-#include "intel_npu/al/config/compiler.hpp"
+#include "intel_npu/config/common.hpp"
+#include "intel_npu/config/compiler.hpp"
 
 #include "vpux/compiler/compiler.hpp"
 #include "vpux/compiler/options_mapper.hpp"
@@ -13,7 +13,6 @@
 #include "vpux/compiler/NPU37XX/pipelines.hpp"
 #include "vpux/compiler/NPU40XX/pipelines.hpp"
 
-#include <device_helpers.hpp>
 #include <openvino/runtime/properties.hpp>
 #include <vpux/utils/core/error.hpp>
 
@@ -50,7 +49,6 @@ int getMaxDPUClusterNum(const intel_npu::Config& config) {
 
 int getNumberOfDPUGroupsUnchecked(const intel_npu::Config& config) {
     const std::string platform = ov::intel_npu::Platform::standardize(config.get<intel_npu::PLATFORM>());
-
     const auto& performanceHintOverride = getPerformanceHintOverride(config);
     // NPUPerformanceMode consists of same enums as ov::hint::PerformanceMode + EFFICIENCY
     // In future, ov::hint::PerformanceMode can be extended with the new value, so
@@ -188,23 +186,37 @@ std::optional<int> vpux::getNumberOfDPUGroups(const intel_npu::Config& config) {
     if (config.has<intel_npu::TILES>() && config.has<intel_npu::DPU_GROUPS>()) {
         VPUX_THROW("Config conflict! NPU_TILES and NPU_DPU_GROUPS both set. Please only set NPU_TILES");
     } else if (config.has<intel_npu::TILES>()) {
-        const int requestedNpuTiles = checked_cast<int>(config.get<intel_npu::TILES>());
-        VPUX_THROW_WHEN(requestedNpuTiles > getMaxDPUClusterNum(config),
-                        "Requested number of NPU tiles is larger than maximum available tiles: {0} > {1}",
-                        requestedNpuTiles, getMaxDPUClusterNum(config));
+        int requestedNpuTiles = checked_cast<int>(config.get<intel_npu::TILES>());
+        int maxTiles = getMaxDPUClusterNum(config);
+        if (requestedNpuTiles > maxTiles) {
+            vpux::Logger::global().warning(
+                    "Requested number of NPU tiles is larger than maximum available tiles: ({0}) "
+                    "> ({1}). Override to ({1})",
+                    requestedNpuTiles, maxTiles);
+            requestedNpuTiles = maxTiles;
+        }
         return requestedNpuTiles;
     } else if (config.has<intel_npu::DPU_GROUPS>()) {
-        const int requestedDpuGroups = checked_cast<int>(config.get<intel_npu::DPU_GROUPS>());
-        VPUX_THROW_WHEN(requestedDpuGroups > getMaxDPUClusterNum(config),
-                        "Requested number of DPU groups is larger than maximum available tiles: {0} > {1}",
-                        requestedDpuGroups, getMaxDPUClusterNum(config));
+        int requestedDpuGroups = checked_cast<int>(config.get<intel_npu::DPU_GROUPS>());
+        int maxTiles = getMaxDPUClusterNum(config);
+
+        if (requestedDpuGroups > maxTiles) {
+            vpux::Logger::global().warning(
+                    "Requested number of DPU Groups is larger than maximum available tiles: ({0}) "
+                    "> ({1}). Override to ({1})",
+                    requestedDpuGroups, maxTiles);
+            requestedDpuGroups = maxTiles;
+        }
         return requestedDpuGroups;
     }
 
-    const int numOfDpuGroups = getNumberOfDPUGroupsUnchecked(config);
-    const auto maybeMaxTiles = getMaxTilesValue(config);
+    int numOfDpuGroups = getNumberOfDPUGroupsUnchecked(config);
+    auto maybeMaxTiles = getMaxTilesValue(config);
     if (maybeMaxTiles.has_value() && (numOfDpuGroups > maybeMaxTiles.value())) {
-        vpux::Logger::global().warning("PERFORMANCE_HINT parameter used more DPU_GROUPS than MAX_TILES");
+        vpux::Logger::global().warning(
+                "PERFORMANCE_HINT parameter used more DPU_GROUPS ({0}) than MAX_TILES ({1}). Override to ({1})",
+                numOfDpuGroups, maybeMaxTiles.value());
+        numOfDpuGroups = maybeMaxTiles.value();
     }
 
     return numOfDpuGroups;
@@ -345,6 +357,8 @@ std::optional<std::string> getPerformanceHintOverride(const intel_npu::Config& c
     } else if (compilationMode == VPU::CompilationMode::ReferenceHW) {
         return getPerformanceHintOverride<ReferenceHWOptions>(config);
     } else if (compilationMode == VPU::CompilationMode::DefaultHW) {
+        return getPerformanceHintOverride<DefaultHWOptions>(config);
+    } else if (compilationMode == VPU::CompilationMode::ShaveCodeGen) {
         return getPerformanceHintOverride<DefaultHWOptions>(config);
     } else {
         return std::nullopt;
@@ -584,6 +598,44 @@ std::optional<bool> getEnableMemoryUsageCollector(const intel_npu::Config& confi
 }
 
 template <typename Options>
+std::optional<bool> getEnableFunctionStatisticsInstrumentation(const intel_npu::Config& config) {
+    const auto options = Options::createFromString(config.get<intel_npu::COMPILATION_MODE_PARAMS>());
+    if (options == nullptr) {
+        return std::nullopt;
+    }
+    return options->enableFunctionStatisticsInstrumentation;
+}
+
+template <typename ReferenceSWOptions, typename ReferenceHWOptions, typename DefaultHWOptions>
+std::optional<bool> getEnableFunctionStatisticsInstrumentation(const intel_npu::Config& config) {
+    const auto compilationMode = getCompilationMode(config);
+    if (compilationMode == VPU::CompilationMode::ReferenceSW) {
+        return getEnableFunctionStatisticsInstrumentation<ReferenceSWOptions>(config);
+    } else if (compilationMode == VPU::CompilationMode::ReferenceHW) {
+        return getEnableFunctionStatisticsInstrumentation<ReferenceHWOptions>(config);
+    } else if (compilationMode == VPU::CompilationMode::DefaultHW) {
+        return getEnableFunctionStatisticsInstrumentation<DefaultHWOptions>(config);
+    } else if (compilationMode == VPU::CompilationMode::ShaveCodeGen) {
+        return getEnableFunctionStatisticsInstrumentation<DefaultHWOptions>(config);
+    } else {
+        return std::nullopt;
+    }
+}
+
+std::optional<bool> getEnableFunctionStatisticsInstrumentation(const intel_npu::Config& config) {
+    const auto arch = getArchKind(config);
+    if (arch == VPU::ArchKind::NPU37XX) {
+        return getEnableFunctionStatisticsInstrumentation<ReferenceSWOptions37XX, ReferenceHWOptions37XX,
+                                                          DefaultHWOptions37XX>(config);
+    } else if (arch == VPU::ArchKind::NPU40XX) {
+        return getEnableFunctionStatisticsInstrumentation<ReferenceSWOptions40XX, ReferenceHWOptions40XX,
+                                                          DefaultHWOptions40XX>(config);
+    } else {
+        return std::nullopt;
+    }
+}
+
+template <typename Options>
 std::optional<DummyOpMode> getDummyOpReplacement(const intel_npu::Config& config) {
     const auto options = Options::createFromString(config.get<intel_npu::COMPILATION_MODE_PARAMS>());
     if (options == nullptr) {
@@ -663,5 +715,43 @@ std::optional<ConstantFoldingConfig> getConstantFoldingInBackground(const intel_
 }
 
 #endif
+
+template <typename Options>
+bool getEnableExtraShapeBoundOps(const intel_npu::Config& config) {
+    const auto options = Options::createFromString(config.get<intel_npu::COMPILATION_MODE_PARAMS>());
+    if (options == nullptr) {
+        return false;
+    }
+    return options->enableExtraShapeBoundOps;
+}
+
+template <typename ReferenceSWOptions, typename ReferenceHWOptions, typename DefaultHWOptions>
+bool getEnableExtraShapeBoundOps(const intel_npu::Config& config) {
+    const auto compilationMode = getCompilationMode(config);
+    if (compilationMode == VPU::CompilationMode::ReferenceSW) {
+        return getEnableExtraShapeBoundOps<ReferenceSWOptions>(config);
+    } else if (compilationMode == VPU::CompilationMode::ReferenceHW) {
+        return getEnableExtraShapeBoundOps<ReferenceHWOptions>(config);
+    } else if (compilationMode == VPU::CompilationMode::DefaultHW) {
+        return getEnableExtraShapeBoundOps<DefaultHWOptions>(config);
+    } else if (compilationMode == VPU::CompilationMode::ShaveCodeGen) {
+        return getEnableExtraShapeBoundOps<DefaultHWOptions>(config);
+    } else {
+        return false;
+    }
+}
+
+bool getEnableExtraShapeBoundOps(const intel_npu::Config& config) {
+    const auto arch = getArchKind(config);
+    if (arch == VPU::ArchKind::NPU37XX) {
+        return getEnableExtraShapeBoundOps<ReferenceSWOptions37XX, ReferenceHWOptions37XX, DefaultHWOptions37XX>(
+                config);
+    } else if (arch == VPU::ArchKind::NPU40XX) {
+        return getEnableExtraShapeBoundOps<ReferenceSWOptions40XX, ReferenceHWOptions40XX, DefaultHWOptions40XX>(
+                config);
+    } else {
+        return false;
+    }
+}
 
 }  // namespace vpux

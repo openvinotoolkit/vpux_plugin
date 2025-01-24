@@ -55,12 +55,20 @@ std::vector<int32_t> getWeightsTable(mlir::Type inElemType, mlir::Type outElemTy
                                      mlir::Type weightsElemType = nullptr, const Const::ContentAttr& bias = {},
                                      mlir::FloatAttr constScale = nullptr);
 
+std::vector<float> getScaleTable(mlir::Type inElemType, mlir::Type outElemType,
+                                 VPU::NCESparsity::PPEConverterCb ppeConverter, int64_t OC,
+                                 mlir::Type weightsElemType = nullptr, mlir::FloatAttr constScale = nullptr);
+
+std::vector<float> getBiasTable(mlir::Type inElemType, mlir::Type outElemType,
+                                VPU::NCESparsity::BiasConverterCb biasConverter, int64_t OC,
+                                mlir::Type weightsElemType = nullptr, const Const::ContentAttr& bias = {});
+
 std::vector<int32_t> patchWeightsTableSparsityPtrs(const std::vector<std::int32_t>& weightsTableVals,
                                                    const int32_t sparsityPtrOffset, const int32_t sparsityPtrStep);
 
-SmallVector<int32_t> getInstructionListTable(ArrayRef<int> rangeAttr, ArrayRef<int> shiftAttr, ArrayRef<int> biasAttr);
-
 Shape inferWeightsTableShape(int64_t OC);
+Shape inferScaleTableShape(int64_t OC);
+Shape inferBiasTableShape(int64_t OC);
 Shape inferWeightsSparsityMapShape(ShapeRef dataShape);
 
 mlir::FailureOr<SmallVector<double>> getRescaledBias(const Const::ContentAttr& biasAttr, mlir::Type inElemType,
@@ -115,6 +123,60 @@ public:
 private:
     vpux::Logger _logger;
     std::multimap<std::string, IE::SparsityInfoOp> _lookup;
+};
+
+//
+// NewWeightsTableFormatMapper
+//
+
+class NewWeightsTableFormatMapper {
+public:
+    // utility function
+    static int32_t normalizeKAndReturnCurrentGroupOf128Sets(int32_t index, int32_t& k);
+
+    // enconding and decoding functions between the zero point initial index and its new index in the new format
+    // these two functions use mathematical computations in order to compute the result
+    static int32_t mathematicallyEncodePositionInNewZeroPointOnlyTableLayout(int32_t zeroPointIndex, int32_t k);
+    static int32_t mathematicallyDecodePositionInNewZeroPointOnlyTableLayout(int32_t position, int32_t k);
+
+    // utility functions
+    static std::vector<int32_t> computeInversePermutation(std::vector<int32_t> v);
+    static std::vector<int32_t> getZeroPointTableByK(int32_t k);
+    static std::vector<int32_t> getZeroPointInversePermutationTableByK(int32_t k);
+
+    // enconding and decoding functions between the zero point initial index and its new index in the new format
+    // these two functions use statically-constructed vectors in order to deduce the result
+    static int32_t encodePositionInNewZeroPointOnlyTableLayout(int32_t zeroPointIndex, int32_t k);
+    static int32_t decodePositionInNewZeroPointOnlyTableLayout(int32_t position, int32_t k);
+
+    // utility function used by constructNewZeroPointOnlyTable
+    static void mapElementsToNewFormat(std::vector<int32_t>& table, int32_t start, int32_t end,
+                                       std::vector<int32_t>& result);
+    // function that constructs a zero point only table (in the new format) starting from a vector that
+    // contains the zero points in ascending order based on their indices
+    static std::vector<int32_t> constructNewZeroPointOnlyTable(std::vector<int32_t> table);
+
+private:
+    static std::vector<int32_t> zeroPointsK16;
+    static std::vector<int32_t> zeroPointsK32;
+    static std::vector<int32_t> zeroPointsK48;
+    static std::vector<int32_t> zeroPointsK64;
+    static std::vector<int32_t> zeroPointsK80;
+    static std::vector<int32_t> zeroPointsK96;
+    static std::vector<int32_t> zeroPointsK112;
+    static std::vector<int32_t> zeroPointsK128;
+
+    static std::vector<int32_t> zeroPointsK16InversePermutation;
+    static std::vector<int32_t> zeroPointsK32InversePermutation;
+    static std::vector<int32_t> zeroPointsK48InversePermutation;
+    static std::vector<int32_t> zeroPointsK64InversePermutation;
+    static std::vector<int32_t> zeroPointsK80InversePermutation;
+    static std::vector<int32_t> zeroPointsK96InversePermutation;
+    static std::vector<int32_t> zeroPointsK112InversePermutation;
+    static std::vector<int32_t> zeroPointsK128InversePermutation;
+
+    static std::vector<std::vector<int32_t>> zeroPointTables;
+    static std::vector<std::vector<int32_t>> zeroPointInversePermutationTables;
 };
 
 }  // namespace NCESparsity

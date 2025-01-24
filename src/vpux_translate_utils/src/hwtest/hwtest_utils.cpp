@@ -140,42 +140,55 @@ const std::vector<uint16_t> TANH_CONFIG_LUT = {
         63, 63, 63, 63, 63, 63, 63, 63, 63, 63, 0, 0,    0,    0,    0,    0,    0,    0,  0,  0,  0,  0,
         0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0, 0,    0,    0,    0,    0,    0,    0,  0,  0};
 
-mlir::Type parseType(mlir::OpBuilder builder, mlir::Type ty, const nb::QuantParams& qp) {
-    if (!qp.present) {
-        return ty;
-    }
+// SIN_PIX
+const std::vector<std::vector<uint16_t>> SIN_PIX_SATURATION_TABLE_LUT = {
+        {0, 1024, 0},          {31744, 31745, 32767}, {65535, 65535, 65534}, {65535, 65535, 65534},
+        {65535, 65535, 65534}, {65535, 65535, 65534}, {65535, 65535, 65534}, {65535, 65535, 65534}};
 
-    auto intTy = ty.dyn_cast<mlir::IntegerType>();
-    auto float8E5M2Ty = ty.dyn_cast<mlir::Float8E5M2Type>();
-    auto float8E4M3Ty = ty.dyn_cast<mlir::Float8E4M3FNType>();
-    if (!intTy && !float8E5M2Ty && !float8E4M3Ty) {
-        return ty;
-    }
+const std::vector<std::vector<uint16_t>> SIN_PIX_SLOPE_INTERCEPT_LUT = {
+        {16968, 2632},  {16968, 3656},  {16968, 4680},  {16968, 5704},  {16968, 6728},  {16968, 7752},  {16968, 8776},
+        {16967, 9800},  {16964, 10824}, {16956, 11846}, {16945, 12466}, {16929, 12862}, {16910, 13254}, {16887, 13477},
+        {16861, 13668}, {16830, 13855}, {16797, 14039}, {16760, 14219}, {16719, 14365}, {16675, 14450}, {16628, 14532},
+        {16578, 14611}, {16525, 14687}, {16469, 14760}, {16411, 14829}, {16316, 14895}, {16189, 14957}, {16058, 15015},
+        {15923, 15069}, {15783, 15118}, {15641, 15163}, {15495, 15204}, {15332, 15240}, {15030, 15272}, {14724, 15299},
+        {14414, 15321}, {13868, 15338}, {13167, 15350}, {11523, 15358}, {44232, 15360}, {45905, 15358}, {46621, 15350},
+        {47175, 15338}, {47485, 15321}, {47791, 15299}, {48093, 15272}, {48259, 15240}, {48405, 15204}, {48548, 15163},
+        {48687, 15118}, {48823, 15069}, {48954, 15015}, {49081, 14957}, {49178, 14895}, {49236, 14829}, {49292, 14760},
+        {49345, 14687}, {49395, 14611}, {49442, 14532}, {49486, 14450}, {49527, 14365}, {49564, 14219}, {49598, 14039},
+        {49628, 13855}, {49655, 13668}, {49678, 13477}, {49697, 13254}, {49712, 12862}, {49724, 12466}, {49732, 11846},
+        {49736, 10824}, {49736, 0},     {49732, 43592}, {49725, 44614}, {49713, 45234}, {49698, 45630}, {49679, 46022},
+        {49656, 46245}, {49629, 46436}, {49599, 46623}, {49566, 46807}, {49529, 46987}, {49488, 47133}, {49444, 47218},
+        {49397, 47300}, {49347, 47379}, {49295, 47455}, {49239, 47528}, {49180, 47597}, {49087, 47663}, {48960, 47725},
+        {48829, 47783}, {48694, 47837}, {48555, 47886}, {48412, 47931}, {48266, 47972}, {48107, 48008}, {47805, 48040},
+        {47499, 48067}, {47190, 48089}, {46651, 48106}, {45964, 48118}, {44350, 48126}, {11424, 48128}, {13118, 48126},
+        {13843, 48118}, {14402, 48106}, {14712, 48089}, {15018, 48067}, {15321, 48040}, {15489, 48008}, {15635, 47972},
+        {15778, 47931}, {15917, 47886}, {16053, 47837}, {16184, 47783}, {16311, 47725}, {16409, 47663}, {16467, 47597},
+        {16523, 47528}, {16576, 47455}, {16626, 47379}, {16674, 47300}, {16718, 47218}, {16758, 47133}, {16796, 46987},
+        {16829, 46807}, {16860, 46623}, {16886, 46436}, {16909, 46245}, {16929, 46022}, {16944, 45630}, {16956, 45234},
+        {16964, 44614}, {16968, 43592}, {0, 0},         {0, 0},         {0, 0},         {0, 0},         {0, 0},
+        {0, 0},         {0, 0},         {0, 0},         {0, 0},         {0, 0},         {0, 0},         {0, 0},
+        {0, 0},         {0, 0},         {0, 0},         {0, 0},         {0, 0},         {0, 0},         {0, 0},
+        {0, 0},         {0, 0},         {0, 0},         {0, 0},         {0, 0},         {0, 0},         {0, 0},
+        {0, 0},         {0, 0},         {0, 0},         {0, 0},         {0, 0},         {0, 0},         {0, 0},
+        {0, 0},         {0, 0},         {0, 0},         {0, 0},         {0, 0},         {0, 0},         {0, 0},
+        {0, 0},         {0, 0},         {0, 0},         {0, 0},         {0, 0},         {0, 0},         {0, 0},
+        {0, 0},         {0, 0},         {0, 0},         {0, 0},         {0, 0},         {0, 0},         {0, 0},
+        {0, 0},         {0, 0},         {0, 0},         {0, 0},         {0, 0},         {0, 0},         {0, 0},
+        {0, 0},         {0, 0},         {0, 0},         {0, 0},         {0, 0},         {0, 0},         {0, 0},
+        {0, 0},         {0, 0},         {0, 0},         {0, 0},         {0, 0},         {0, 0},         {0, 0},
+        {0, 0},         {0, 0},         {0, 0},         {0, 0},         {0, 0},         {0, 0},         {0, 0},
+        {0, 0},         {0, 0},         {0, 0},         {0, 0},         {0, 0},         {0, 0},         {0, 0},
+        {0, 0},         {0, 0},         {0, 0},         {0, 0},         {0, 0},         {0, 0},         {0, 0},
+        {0, 0},         {0, 0},         {0, 0},         {0, 0},         {0, 0},         {0, 0},         {0, 0},
+        {0, 0},         {0, 0},         {0, 0},         {0, 0},         {0, 0},         {0, 0},         {0, 0},
+        {0, 0},         {0, 0},         {0, 0},         {0, 0},         {0, 0},         {0, 0},         {0, 0},
+        {0, 0},         {0, 0},         {0, 0},         {0, 0}};
 
-    auto lowRange = qp.low_range;
-    auto highRange = qp.high_range;
-    auto outputType = builder.getF32Type();
-    auto flags = intTy && intTy.isSigned() ? mlir::quant::QuantizationFlags::Signed : 0;
-    if (float8E5M2Ty != nullptr) {
-        lowRange = std::numeric_limits<vpux::type::float8_e5m2>::lowest();
-        highRange = std::numeric_limits<vpux::type::float8_e5m2>::max();
-        flags = mlir::quant::QuantizationFlags::Signed;
-    } else if (float8E4M3Ty != nullptr) {
-        lowRange = std::numeric_limits<vpux::type::float8_e4m3>::lowest();
-        highRange = std::numeric_limits<vpux::type::float8_e4m3>::max();
-        flags = mlir::quant::QuantizationFlags::Signed;
-    }
-
-    if (qp.scale.size() == 1) {
-        return mlir::quant::UniformQuantizedType::get(flags, ty, outputType, qp.scale.front(), qp.zeropoint, lowRange,
-                                                      highRange);
-    }
-
-    std::vector<int64_t> zeropoint(qp.scale.size(), qp.zeropoint);
-    return mlir::quant::UniformQuantizedPerAxisType::get(flags, ty, outputType, qp.scale, zeropoint,
-                                                         (DimsOrder::NCHW).dimPos(vpux::Dims4D::Act::C), lowRange,
-                                                         highRange);
-}
+const std::vector<uint16_t> SIN_PIX_CONFIG_LUT = {
+        195, 0,   1,   2,   3,   4,    5,    6,    7,    8,   1033, 2059, 3087, 4119, 5159, 6215,
+        135, 135, 135, 135, 135, 5255, 4263, 3255, 2239, 195, 195,  195,  195,  195,  195,  195,
+        0,   0,   0,   0,   0,   0,    0,    0,    0,    0,   0,    0,    0,    0,    0,    0,
+        0,   0,   0,   0,   0,   0,    0,    0,    0,    0,   0,    0,    0,    0,    0,    0};
 
 mlir::Type convertToMLIRType(mlir::OpBuilder builder, nb::DType dtype) {
     auto ctx = builder.getContext();
@@ -200,8 +213,90 @@ mlir::Type convertToMLIRType(mlir::OpBuilder builder, nb::DType dtype) {
         return builder.getF32Type();
     case nb::DType::BF16:
         return builder.getBF16Type();
+    case nb::DType::U1:
+        return mlir::IntegerType::get(ctx, 1, mlir::IntegerType::Unsigned);
+    case nb::DType::U2:
+        return mlir::IntegerType::get(ctx, 2, mlir::IntegerType::Unsigned);
+    case nb::DType::U3:
+        return mlir::IntegerType::get(ctx, 3, mlir::IntegerType::Unsigned);
+    case nb::DType::U5:
+        return mlir::IntegerType::get(ctx, 5, mlir::IntegerType::Unsigned);
+    case nb::DType::U6:
+        return mlir::IntegerType::get(ctx, 6, mlir::IntegerType::Unsigned);
     default:
         throw std::domain_error{"Expected a valid data type"};
+    }
+}
+
+mlir::Type parseType(mlir::OpBuilder builder, mlir::Type ty, const nb::QuantParams& qp,
+                     const nb::PalletTableInfo& plt = {}) {
+    const bool isPalletized = plt.pMode != nb::PalletMode::NO_PLT;
+    if (!qp.present && !isPalletized) {
+        return ty;
+    }
+
+    // the legality of storageType and quantileType pair was checked already in the json parser
+    auto quantileType = isPalletized ? convertToMLIRType(builder, plt.quantileType) : ty;
+    auto intTy = ty.dyn_cast<mlir::IntegerType>();
+    auto float8E5M2Ty = ty.dyn_cast<mlir::Float8E5M2Type>();
+    auto float8E4M3Ty = ty.dyn_cast<mlir::Float8E4M3FNType>();
+    if (!intTy && !float8E5M2Ty && !float8E4M3Ty) {
+        return ty;
+    }
+
+    std::int64_t lowRange;
+    std::int64_t highRange;
+    auto outputType = builder.getF32Type();
+    auto flags = intTy && intTy.isSigned() ? mlir::quant::QuantizationFlags::Signed : 0;
+
+    // populate quantization params
+    if (qp.present) {
+        lowRange = qp.low_range;
+        highRange = qp.high_range;
+        if (float8E5M2Ty != nullptr) {
+            lowRange = std::numeric_limits<vpux::type::float8_e5m2>::lowest();
+            highRange = std::numeric_limits<vpux::type::float8_e5m2>::max();
+            flags = mlir::quant::QuantizationFlags::Signed;
+        } else if (float8E4M3Ty != nullptr) {
+            lowRange = std::numeric_limits<vpux::type::float8_e4m3>::lowest();
+            highRange = std::numeric_limits<vpux::type::float8_e4m3>::max();
+            flags = mlir::quant::QuantizationFlags::Signed;
+        }
+    } else {
+        // no quantization but palletization enabled (only int storageType)
+        const auto width = intTy.getWidth();
+        lowRange = mlir::quant::QuantizedType::getDefaultMinimumForInteger(intTy.isSigned(), width);
+        highRange = mlir::quant::QuantizedType::getDefaultMaximumForInteger(intTy.isSigned(), width);
+    }
+
+    if (!isPalletized) {
+        if (qp.scale.size() == 1) {
+            return mlir::quant::UniformQuantizedType::get(flags, ty, outputType, qp.scale.front(), qp.zeropoint,
+                                                          lowRange, highRange);
+        }
+
+        std::vector<int64_t> zeropoint(qp.scale.size(), qp.zeropoint);
+        return mlir::quant::UniformQuantizedPerAxisType::get(flags, ty, outputType, qp.scale, zeropoint,
+                                                             (DimsOrder::NCHW).dimPos(vpux::Dims4D::Act::C), lowRange,
+                                                             highRange);
+    } else {
+        if (qp.present) {
+            if (qp.scale.size() == 1) {
+                return mlir::quant::QuantileQuantizedType::get(flags, ty, quantileType, outputType, plt.quantileLUT,
+                                                               qp.scale.front(), qp.zeropoint, lowRange, highRange);
+            }
+
+            std::vector<int64_t> zeropoint(qp.scale.size(), qp.zeropoint);
+            return mlir::quant::QuantileQuantizedPerAxisType::get(
+                    flags, ty, quantileType, outputType, plt.quantileLUT, qp.scale, zeropoint,
+                    (DimsOrder::NCHW).dimPos(vpux::Dims4D::Act::C), lowRange, highRange);
+        } else {
+            // no explicit quantization parameters
+            double scale = 1.0;
+            int64_t zeropoint = 0;
+            return mlir::quant::QuantileQuantizedType::get(flags, ty, quantileType, outputType, plt.quantileLUT, scale,
+                                                           zeropoint, lowRange, highRange);
+        }
     }
 }
 
@@ -268,6 +363,7 @@ mlir::DenseElementsAttr generateWeights(mlir::OpBuilder builder, llvm::ArrayRef<
         std::cerr << "Warning: Unable to open weight data file " << weightsFileName << '\n';
     }
 
+    // TODO: need to add handling of 1,2,3,5,6 bit sizes, for palletization
     if (type.isInteger(4)) {
         std::vector<int64_t> uintWrapperShape{shape.begin(), shape.end()};
         VPUX_THROW_UNLESS(!uintWrapperShape.empty(), "generateWeights: Got empty shape");
@@ -320,26 +416,24 @@ mlir::DenseElementsAttr generateWeights(mlir::OpBuilder builder, llvm::ArrayRef<
 }
 
 vpux::Const::ContentAttr generateDefaultWeightsAttr(mlir::DenseElementsAttr weights, mlir::Type type) {
-    auto weightsAttributeSetup = vpux::Const::ContentAttr::transform(weights).reorder(vpux::DimsOrder::OYXI);
+    auto weightsAttributeSetup = Const::ContentSetup(weights.getType()).reorder(vpux::DimsOrder::OYXI);
 
     if (auto qty = type.dyn_cast<mlir::quant::QuantizedType>()) {
         auto storageType = mlir::quant::QuantizedType::castToStorageType(qty);
         if (!(storageType.isFloat8E5M2() || storageType.isFloat8E4M3FN())) {
-            auto contentType = Const::inferFinalTypeAndSplat(weightsAttributeSetup.getBaseContent(),
-                                                             weightsAttributeSetup.getTransformations())
-                                       .first;
+            auto contentType = Const::inferFinalTypeAndSplat(weights, weightsAttributeSetup.getTransformations()).first;
             const auto quantizedType = vpux::changeStorageType(qty, contentType.getElementType());
-            weightsAttributeSetup = weightsAttributeSetup.quantCast(quantizedType);
+            weightsAttributeSetup = weightsAttributeSetup.castElemType(quantizedType);
             if (qty.getStorageType().isInteger(4)) {
                 weightsAttributeSetup = weightsAttributeSetup.bitPack(4);
             }
         }
     }
 
-    return weightsAttributeSetup.get();
+    return Const::ContentAttr::get(weights, std::move(weightsAttributeSetup));
 }
 
-std::vector<uint16_t> computeSprLookupTable(nb::ActivationType activation_type) {
+std::vector<uint16_t> computeSprLookupTable(nb::ActivationType activation_type, vpux::VPU::ArchKind /*arch*/) {
     // LUT Data; Following values (fp16) are synced with numerics-bench rsqrt LUT
 
     // Saturation/bypass regions, from l-to-r:
@@ -372,6 +466,7 @@ std::vector<uint16_t> computeSprLookupTable(nb::ActivationType activation_type) 
     // SYM_B = 0 (pos 128) (1 for SIN and TANH)
     // RCP = 0 (pos 129)
     // RSQRT = 0 (pos 130) (1 for RSQRT)
+    // SIN = 0 (pos 131) (1 for SIN)
     uint16_t specialConfig = 0;
 
     switch (activation_type) {
@@ -388,16 +483,22 @@ std::vector<uint16_t> computeSprLookupTable(nb::ActivationType activation_type) 
         specialConfig = 0x0000;
         break;
     case nb::ActivationType::Sin:
-        saturationTableLutPtr = &SIN_SATURATION_TABLE_LUT;
-        slopeInterceptLutPtr = &SIN_SLOPE_INTERCEPT_LUT;
-        configLutPtr = &SIN_CONFIG_LUT;
-        specialConfig = 0x0001;
+        saturationTableLutPtr = &SIN_PIX_SATURATION_TABLE_LUT;
+        slopeInterceptLutPtr = &SIN_PIX_SLOPE_INTERCEPT_LUT;
+        configLutPtr = &SIN_PIX_CONFIG_LUT;
+        specialConfig = 0x0009;  // 1001 -> 9 SYM_B and SIN
         break;
     case nb::ActivationType::Tanh:
         saturationTableLutPtr = &TANH_SATURATION_TABLE_LUT;
         slopeInterceptLutPtr = &TANH_SLOPE_INTERCEPT_LUT;
         configLutPtr = &TANH_CONFIG_LUT;
         specialConfig = 0x0001;
+        break;
+    case nb::ActivationType::Cos:
+        saturationTableLutPtr = &SIN_PIX_SATURATION_TABLE_LUT;
+        slopeInterceptLutPtr = &SIN_PIX_SLOPE_INTERCEPT_LUT;
+        configLutPtr = &SIN_PIX_CONFIG_LUT;
+        specialConfig = 0x0009;  // 1001 -> 9 SYM_B and SIN
         break;
     default:
         VPUX_THROW("Unexpected activation type data type");
@@ -443,8 +544,8 @@ std::vector<uint16_t> computeSprLookupTable(nb::ActivationType activation_type) 
 }
 
 std::size_t totalTensorSize(llvm::ArrayRef<int64_t> shape, mlir::Type elementType) {
-    auto qType = elementType.dyn_cast_or_null<mlir::quant::UniformQuantizedType>();
-    auto qPerChType = elementType.dyn_cast_or_null<mlir::quant::UniformQuantizedPerAxisType>();
+    auto qType = mlir::dyn_cast_or_null<mlir::quant::UniformQuantizedType>(elementType);
+    auto qPerChType = mlir::dyn_cast_or_null<mlir::quant::UniformQuantizedPerAxisType>(elementType);
 
     if (qType) {
         elementType = qType.getStorageType();
@@ -457,13 +558,13 @@ std::size_t totalTensorSize(llvm::ArrayRef<int64_t> shape, mlir::Type elementTyp
     const auto totalSize =
             std::accumulate(shape.begin(), shape.end(), static_cast<std::int64_t>(1), std::multiplies<std::int64_t>());
     const auto totalBits = totalSize * numBits;
-    VPUX_THROW_UNLESS(totalBits % CHAR_BIT == 0, "Tensors size is not allligned to Byte");
+    VPUX_THROW_UNLESS(totalBits % CHAR_BIT == 0, "Tensors size is not aligned to Byte");
     return static_cast<std::size_t>(totalBits / CHAR_BIT);
 }
 
 std::size_t totalWeightsSize(llvm::ArrayRef<int64_t> shape, mlir::Type elementType) {
-    auto qType = elementType.dyn_cast_or_null<mlir::quant::UniformQuantizedType>();
-    auto qPerChType = elementType.dyn_cast_or_null<mlir::quant::UniformQuantizedPerAxisType>();
+    auto qType = mlir::dyn_cast_or_null<mlir::quant::UniformQuantizedType>(elementType);
+    auto qPerChType = mlir::dyn_cast_or_null<mlir::quant::UniformQuantizedPerAxisType>(elementType);
 
     if (qType) {
         elementType = qType.getStorageType();
@@ -476,7 +577,7 @@ std::size_t totalWeightsSize(llvm::ArrayRef<int64_t> shape, mlir::Type elementTy
     const auto weightsSetSize = shape[vpux::Dims4D::Filter::IC.ind()] * shape[vpux::Dims4D::Filter::KX.ind()] *
                                 shape[vpux::Dims4D::Filter::KY.ind()];
     const auto weightsSetSizeBits = weightsSetSize * numBits;
-    VPUX_THROW_UNLESS(weightsSetSizeBits % CHAR_BIT == 0, "Weights tensor size is not allligned to Byte");
+    VPUX_THROW_UNLESS(weightsSetSizeBits % CHAR_BIT == 0, "Weights tensor size is not aligned to Byte");
     const auto weightsSetSizeBytes = weightsSetSizeBits / CHAR_BIT;
     const std::uint64_t weightsAlignment = 32;
     const auto weightsSizeBytesAligned = vpux::alignValUp(weightsSetSizeBytes, weightsAlignment);
@@ -505,7 +606,7 @@ mlir::Type parseOutputType(mlir::OpBuilder builder, const nb::OutputLayer& outpu
 }
 
 mlir::Type parseWeightsType(mlir::OpBuilder builder, const nb::WeightLayer& weight) {
-    return parseType(builder, convertToMLIRType(builder, weight.dtype), weight.qp);
+    return parseType(builder, convertToMLIRType(builder, weight.dtype), weight.qp, weight.plt);
 }
 
 void buildCNNOp(mlir::OpBuilder& builder, llvm::StringRef mainFuncName, llvm::ArrayRef<mlir::Type> inputs,
@@ -529,8 +630,9 @@ void buildCNNOp(mlir::OpBuilder& builder, llvm::StringRef mainFuncName, llvm::Ar
     auto inputsInfoBuilder = mlir::OpBuilder::atBlockBegin(&cnnOp.getInputsInfo().front(), builder.getListener());
     for (auto input : enumerate(inputs)) {
         auto inputType = input.value().cast<mlir::ShapedType>();
-        auto quantized = inputType.getElementType().dyn_cast_or_null<mlir::quant::UniformQuantizedType>();
-        auto quantizedPerCh = inputType.getElementType().dyn_cast_or_null<mlir::quant::UniformQuantizedPerAxisType>();
+        auto quantized = llvm::dyn_cast_or_null<mlir::quant::UniformQuantizedType>(inputType.getElementType());
+        auto quantizedPerCh =
+                llvm::dyn_cast_or_null<mlir::quant::UniformQuantizedPerAxisType>(inputType.getElementType());
 
         if (quantized) {
             inputType = inputType.clone(quantized.getStorageType());
@@ -552,8 +654,9 @@ void buildCNNOp(mlir::OpBuilder& builder, llvm::StringRef mainFuncName, llvm::Ar
     auto outputsInfoBuilder = mlir::OpBuilder::atBlockBegin(&cnnOp.getOutputsInfo().front(), builder.getListener());
     for (auto output : enumerate(outputs)) {
         auto outputType = output.value().cast<mlir::ShapedType>();
-        auto quantized = outputType.getElementType().dyn_cast_or_null<mlir::quant::UniformQuantizedType>();
-        auto quantizedPerCh = outputType.getElementType().dyn_cast_or_null<mlir::quant::UniformQuantizedPerAxisType>();
+        auto quantized = llvm::dyn_cast_or_null<mlir::quant::UniformQuantizedType>(outputType.getElementType());
+        auto quantizedPerCh =
+                llvm::dyn_cast_or_null<mlir::quant::UniformQuantizedPerAxisType>(outputType.getElementType());
 
         if (quantized) {
             outputType = outputType.clone(quantized.getStorageType());
@@ -609,7 +712,7 @@ void buildCNNOp(mlir::OpBuilder& builder, llvm::StringRef mainFuncName, llvm::Ar
 
 mlir::DenseElementsAttr splitWeightsOverC(mlir::DenseElementsAttr wt_vec, ArrayRef<int64_t> wt_shape, mlir::Type dtype,
                                           mlir::MLIRContext* ctx, size_t start_C, size_t end_C) {
-    auto qType = dtype.dyn_cast<mlir::quant::UniformQuantizedType>();
+    auto qType = mlir::dyn_cast<mlir::quant::UniformQuantizedType>(dtype);
     if (!((dtype.isF16() || (qType && qType.getStorageType().isUnsignedInteger(8)))))
         throw std::domain_error{
                 printToString("splitWeightsOverC only supports weight data type fp16 or uint8; got {0}", dtype)};
@@ -939,5 +1042,15 @@ std::pair<mlir::SmallVector<mlir::Value>, size_t> insertWLMStartSequence(mlir::O
     return {{startBarrier1}, 2};
 }
 
+bool supportsSmallKernelOpt(vpux::VPU::ArchKind /*arch*/, int64_t /*kernelX*/, int64_t /*strideX*/,
+                            int64_t workloadSizeZ, uint64_t /*actOffset*/, int64_t inputTypeSize,
+                            int64_t weightsTypeSize, vpux::VPUIP::NCETaskType /*nceTaskType*/) {
+    // Crossing of 8bit activations and 16bit weights with IC>16 is not supported
+    if (inputTypeSize == 8 && weightsTypeSize == 16 && workloadSizeZ > 16) {
+        return false;
+    }
+
+    return false;
+}
 }  // namespace hwtest
 }  // namespace vpux

@@ -367,7 +367,7 @@ def SwapMaxPoolWithActivation : PassBase<"swap-maxpool-with-act", "vpux::Functio
     let summary = "Swaps the MaxPool and activation";
 
     let description = [{
-        This pass is needed for NPU37XX only since HW MaxPool does not support post-op operations.
+        This pass is needed for VPUX37XX only since HW MaxPool does not support post-op operations.
         Operations are swapped only if there is an operation before MaxPool that supports post-ops.
     }];
 

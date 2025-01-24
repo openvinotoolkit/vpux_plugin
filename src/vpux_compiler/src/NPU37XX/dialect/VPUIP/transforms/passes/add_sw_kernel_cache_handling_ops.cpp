@@ -17,7 +17,6 @@ using namespace vpux;
 constexpr StringLiteral vpuTaskTypeAttrName{"VPU.task_type"};
 constexpr StringLiteral cacheFlushFuncName{"cache_flush"};
 constexpr StringLiteral cacheFlushInvalidateFuncName{"cache_flush_invalidate"};
-constexpr StringLiteral cacheInvalidateFuncName{"cache_invalidate"};
 
 namespace {
 
@@ -117,31 +116,6 @@ bool isCacheFlushNeeded(ArrayRef<mlir::Operation*> users) {
     return false;
 }
 
-bool hasCacheFlushDependency(mlir::OperandRange dependencies) {
-    return llvm::any_of(dependencies, [](mlir::Value dependency) {
-        auto depExecOp = dependency.getDefiningOp<mlir::async::ExecuteOp>();
-        auto depExecutor = vpux::VPUIP::VPUIPDialect::getExecutorKind(depExecOp);
-        if (depExecutor != VPU::ExecutorKind::SHAVE_ACT) {
-            return false;
-        }
-
-        auto firstOp = &depExecOp.getBody()->front();
-        if (auto firstSwKernel = mlir::dyn_cast<VPUIP::SwKernelOp>(firstOp)) {
-            if (firstSwKernel.getKernelFunction().getLeafReference().str() == cacheFlushFuncName) {
-                return true;
-            }
-        }
-        return false;
-    });
-}
-
-bool hasShaveBodyOperands(mlir::OperandRange bodyOperands) {
-    return llvm::any_of(bodyOperands, [](mlir::Value operand) {
-        auto operandExecOp = operand.getDefiningOp<mlir::async::ExecuteOp>();
-        return vpux::VPUIP::VPUIPDialect::getExecutorKind(operandExecOp) == VPU::ExecutorKind::SHAVE_ACT;
-    });
-}
-
 //
 // AddSwKernelCacheHandlingOpsPass
 //
@@ -194,23 +168,15 @@ void AddSwKernelCacheHandlingOpsPass::safeRunOnFunc() {
         bool hasConstInputBuffs = hasAnyConstBuffer(inputBuffs);
         bool hasConstOutputBuffs = hasAnyConstBuffer(outputBuffs);
 
-        // create CACHE_INVALIDATE OR CACHE_FLUSH_INVALIDATE op
+        // create CACHE_FLUSH_INVALIDATE op
         auto origExecOpDependencies = origExecOp.getDependencies();
         auto origExecOpDependenciesVector = to_small_vector(origExecOpDependencies);
-        auto origExecOpBodyOperands = origExecOp.getBodyOperands();
         if (hasInputsInDDR) {
             if ((isCacheInvalidateNeeded(origExecOpDependencies) || hasConstInputBuffs)) {
                 builder.setInsertionPoint(origExecOp);
 
-                VPU::ActShaveTaskType taskType;
-                StringLiteral funcName = "";
-                if (hasShaveBodyOperands(origExecOpBodyOperands) && !hasCacheFlushDependency(origExecOpDependencies)) {
-                    taskType = VPU::ActShaveTaskType::CACHE_FLUSH_INVALIDATE;
-                    funcName = cacheFlushInvalidateFuncName;
-                } else {
-                    taskType = VPU::ActShaveTaskType::CACHE_INVALIDATE;
-                    funcName = cacheInvalidateFuncName;
-                }
+                auto taskType = VPU::ActShaveTaskType::CACHE_FLUSH_INVALIDATE;
+                auto funcName = cacheFlushInvalidateFuncName;
 
                 auto invalidateExecOp = createCacheHandlingSwKernel(builder, builderLog, _log, newLoc, origOp, funcName,
                                                                     taskType, origExecOpDependenciesVector);

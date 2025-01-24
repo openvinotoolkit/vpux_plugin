@@ -17,20 +17,22 @@ void vpux::VPU::arch37xx::buildIncrementalPipeline(mlir::OpPassManager& pm, cons
     pm.addPass(VPU::arch37xx::createDecomposeMVNPass(log));
 
     pm.addPass(VPU::createMultiClusterStrategyAssignmentPass(options.enablePrefetching, options.enableMCSideLoadDump,
-                                                             options.modelHash, log));
+                                                             options.opTilingCacheThreshold, options.modelHash, log));
 
     pm.addPass(VPU::createManualStrategyUtilsPass(options.writeStrategyToJson, writeStrategyFileLocation,
                                                   options.readStrategyFromJson, readStrategyFileLocation,
                                                   options.enableMCSideLoadDump, options.modelHash, log));
 
     pm.addPass(VPU::createSplitGRUSequencePass(log));
-    pm.addPass(VPU::arch37xx::createApplyTilingMVN1SumPass(log));
+    pm.addPass(VPU::arch37xx::createApplyTilingMVN1SumPass(options.enablePrefetching, log));
 
     VPU::buildTilingPipeline(pm, VPU::TilingOptions(options), log);
+    pm.addPass(VPU::createMakeOpsWithDistributedTensorPass(options.enableExplicitDistributionInfoAttr, log));
 
+    pm.addPass(VPU::createComputeInterpolateCoordinatesPass(options.enableExplicitDistributionInfoAttr, log));
     pm.addPass(VPU::createRemoveOutputSparseToAvoidSuboptimalDPUWorkloadsPass(log));
 
-    pm.addPass(VPU::createMakeOpsWithDistributedTensorPass(options.enableExplicitDistributionInfoAttr, log));
+    pm.addPass(VPU::createMakeDistributedCopiesPass(log));
     pm.addPass(VPU::createAdjustDistributedTensorAroundOpsPass(log));
 }
 
@@ -41,6 +43,12 @@ void vpux::VPU::arch37xx::buildIncrementalPipeline(mlir::OpPassManager& pm, cons
 void vpux::VPU::arch37xx::buildDefaultHWPipeline(mlir::OpPassManager& pm,
                                                  const VPU::arch37xx::DefaultHWOptions& options, Logger log) {
     const auto grc = getDefaultGreedyRewriteConfig();
+
+    if (options.enableConcatRepeatingBlockOutlining) {
+        pm.addPass(VPU::createConcatRepeatingBlocksOutliningPass(options.concatRepeatingBlockOutliningSeqLength, log));
+        pm.addPass(mlir::createCanonicalizerPass(grc));
+    }
+
     pm.addPass(VPU::arch37xx::createAdjustForOptimizedLayersPass(log));
 
     pm.addPass(VPU::createDetectionOutputDecompositionPass(log));
@@ -58,7 +66,7 @@ void vpux::VPU::arch37xx::buildDefaultHWPipeline(mlir::OpPassManager& pm,
 
     pm.addPass(VPU::createFuseClampPass(log));
 
-    pm.addPass(VPU::createEnsureNCEOpsSizeRequirementsPass(log));
+    pm.addPass(VPU::createEnsureNCEOpsSizeRequirementsPass(true, log));
     pm.addPass(VPU::createOptimizeConcatPass(log));
 
     if (options.enableWeightsSparsity) {
@@ -84,15 +92,15 @@ void vpux::VPU::arch37xx::buildDefaultHWPipeline(mlir::OpPassManager& pm,
     pm.addPass(VPU::createOptimizeConcatPass(log));
     pm.addPass(VPU::createAdjustMemorySpacePass(log));
     pm.addPass(mlir::createCanonicalizerPass(grc));
-    pm.addPass(VPU::createWrapDistributedOpsInNCEClusterTiling(log));
 
-    pm.addPass(VPU::createCMXConcatPass(log, options.supportNCEOpInsertion));
+    pm.addPass(VPU::createCMXConcatPass(log));
     pm.addPass(mlir::createCanonicalizerPass(grc));
 
     pm.addPass(VPU::createSplitNCEOpsOntoWorkloadsPass(log));
+    pm.addPass(VPU::createWrapDistributedOpsInNCEClusterTiling(log));
     pm.addPass(VPU::arch37xx::createCorrectNCEWorkloadsPass(log));
     pm.addPass(VPU::createResolveEltwiseWithZTiledWorkloadsPass(log));
-    pm.addPass(VPU::createLegalizeDynamicShapeConcatForSWLayersPass(log));
+    pm.addPass(VPU::createOutlineEntireMainContentPass(log));
 }
 
 void vpux::VPU::arch37xx::registerVPUPipelines() {

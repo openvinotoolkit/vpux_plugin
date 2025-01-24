@@ -299,8 +299,7 @@ mlir::Value OptimizeGroupConvConcat::convertGroupConvWeights(IE::GroupConvolutio
     auto origFilter = groupConv.getFilter();
     auto origFilterOp = origFilter.getDefiningOp<Const::DeclareOp>();
     VPUX_THROW_WHEN(origFilterOp == nullptr, "Unable to find filter constant operation");
-    auto origContentAttr = origFilterOp.getContentAttr();
-    auto origContent = origContentAttr.fold();
+    auto origContent = origFilterOp.getContentAttr().fold();
     auto origContentType = origContent.getType();
 
     const auto origFiliterShape = getShape(origFilter);
@@ -605,7 +604,7 @@ mlir::LogicalResult OptimizeConvConcat::matchAndRewrite(IE::ConcatOp origOp, mli
     }
 
     auto newConvOp = rewriter.create<IE::ConvolutionOp>(
-            origOp.getLoc(), root, concatWeights, concatBias, convOp.getStrides(), convOp.getPadsBegin(),
+            origOp.getLoc(), outputType, root, concatWeights, concatBias, convOp.getStrides(), convOp.getPadsBegin(),
             convOp.getPadsEnd(), convOp.getDilations(), convOp.getPostOpAttr(), convOp.getClampAttr(),
             convOp.getStaticScaleAttr(), convOp.getOutputChannelsAttr(), convOp.getInputChannelsAttr());
 
@@ -834,8 +833,8 @@ mlir::LogicalResult OptimizeSliceMultiplyConcat::matchAndRewrite(IE::ConcatOp or
         if (multiply != nullptr) {
             auto constOp = multiply.getInput2().getDefiningOp<Const::DeclareOp>();
             VPUX_THROW_WHEN(constOp == nullptr, "Multiply input is not a constant");
-            auto constAttr = constOp.getContentAttr().fold();
-            auto scale = constAttr.getSplatValue<float>();
+            auto constContent = constOp.getContentAttr().fold();
+            auto scale = constContent.getSplatValue<float>();
             newWeights.push_back(createWeightsForScale(
                     appendLoc(origOp.getLoc(), "branches_concat_to_conv_weights_slice_{0}", inputIndex), weightShape,
                     elemType, offset, scale, rewriter));

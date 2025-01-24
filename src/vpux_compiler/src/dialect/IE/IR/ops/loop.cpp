@@ -11,6 +11,10 @@
 using namespace vpux;
 using namespace mlir;
 
+namespace {
+constexpr int LOOP_NUM_ITERATION_UPPER_BOUND = 10;  // max number of loop for 'while' case
+}
+
 mlir::LogicalResult vpux::IE::LoopOp::verify() {
     // Check if num_iterations is correct
     if (getNumIterationsAttr() == nullptr) {
@@ -44,7 +48,7 @@ LogicalResult vpux::IE::LoopOp::inferReturnTypeComponents(MLIRContext* ctx, std:
 
     mlir::Region* region = regions.front();
     auto& block = region->getBlocks().front();
-    auto loopTerminator = dyn_cast<IE::LoopTerminatorOp>(block.getTerminator());
+    auto loopTerminator = cast<IE::LoopTerminatorOp>(block.getTerminator());
 
     // Collecting concating along axis cases
     auto numIterations = loopOperator.getNumIterations();
@@ -102,6 +106,32 @@ LogicalResult vpux::IE::LoopOp::inferReturnTypeComponents(MLIRContext* ctx, std:
 // Canonicalizer
 //
 namespace {
+
+void updateNumIterations(IE::LoopOp& origOp, bool executionConditionValue, bool internalExecutionConditionValue,
+                         int64_t tripCountValue, Logger& logger) {
+    // executionConditionValue == false case: while(false)
+    // executionConditionValue == true and internalExecutionConditionValue == false case: do-while(false)
+    // executionConditionValue == true and internalExecutionConditionValue == true case: for loop
+    // Change numIterations when the original inference is wrong
+    auto inferredNumIterations = !executionConditionValue ? 0 : (!internalExecutionConditionValue ? 1 : tripCountValue);
+    if (origOp.getNumIterations() != inferredNumIterations || inferredNumIterations == -1) {
+        logger.warning("Inferred `num_iterations` is {0}, while the original value is {1}. The executionConditionValue "
+                       "{2}, internalExecutionConditionValue is {3}, and tripCountValue is {4}. Replacing "
+                       "`num_iteration` of {5} to {6} ",
+                       inferredNumIterations, origOp.getNumIterations(), executionConditionValue,
+                       internalExecutionConditionValue, tripCountValue, origOp.getLoc(), inferredNumIterations);
+        if (inferredNumIterations == -1) {
+            inferredNumIterations = LOOP_NUM_ITERATION_UPPER_BOUND;
+            logger.warning("For 'While' Loop, using {0} to be the number of iterations as an upper bound.",
+                           LOOP_NUM_ITERATION_UPPER_BOUND);
+        }
+        origOp.setNumIterations(inferredNumIterations);
+    }
+}
+
+void checkConstSplat(Const::DeclareOp& constOp) {
+    VPUX_THROW_WHEN(!constOp.getContentAttr().isSplat(), "Expected splat values, actually got {0}", constOp);
+}
 
 //
 // RemoveConstants
@@ -169,16 +199,13 @@ mlir::LogicalResult RemoveConstants::matchAndRewrite(IE::LoopOp origOp, mlir::Pa
     // Checking trip_count, execution_condition param, which is stored in input[0] and input[1]
     auto tripCountConst = origOp.getInputs()[0].getDefiningOp<Const::DeclareOp>();
     auto executionConditionConst = origOp.getInputs()[1].getDefiningOp<Const::DeclareOp>();
-    // Non-const tripCountParam, executionConditionParam cases are unsupported for now
     if ((tripCountConst == nullptr) || (executionConditionConst == nullptr)) {
         logger.trace("Got non-const input[0][1], skip removing consts.");
         return mlir::failure();
     }
-    if ((!tripCountConst.getContentAttr().isSplat()) || (!executionConditionConst.getContentAttr().isSplat())) {
-        VPUX_THROW("Expected splat values on input[0](trip_count) and input[1](execution_conditon), actually got {0} "
-                   "and {1}",
-                   tripCountConst, executionConditionConst);
-    }
+    checkConstSplat(tripCountConst);
+    checkConstSplat(executionConditionConst);
+
     // Self check if num_iterations is inferred correctly
     const auto tripCountValue = tripCountConst.getContent().getSplatValue<int64_t>();
     const auto executionConditionValue = executionConditionConst.getContent().getSplatValue<bool>();
@@ -186,31 +213,17 @@ mlir::LogicalResult RemoveConstants::matchAndRewrite(IE::LoopOp origOp, mlir::Pa
     bool internalExecutionConditionValue = true;
     bool isInExecCondConst = true;
     // Get internal execution condition value
-    const auto execCondIndex = origOp.getExecCondIndex();
     auto loopTerminator = *origOp.getBodyModule().getOps<IE::LoopTerminatorOp>().begin();
-    auto internalExecutionConditionConst =
-            loopTerminator.getOperands()[execCondIndex].getDefiningOp<Const::DeclareOp>();
-    if ((internalExecutionConditionConst != nullptr) && internalExecutionConditionConst.getContentAttr().isSplat()) {
+    if (auto internalExecutionConditionConst =
+                loopTerminator.getOperands()[origOp.getExecCondIndex()].getDefiningOp<Const::DeclareOp>()) {
+        checkConstSplat(internalExecutionConditionConst);
         internalExecutionConditionValue = internalExecutionConditionConst.getContent().getSplatValue<bool>();
     } else {
         logger.trace("Got non-const internal execCond, skip removing consts.");
         isInExecCondConst = false;
     }
 
-    // executionConditionValue == false case: while(false)
-    // executionConditionValue == true and internalExecutionConditionValue == false case: do-while(false)
-    // executionConditionValue == true and internalExecutionConditionValue == true case: for loop
-    // Change numIterations when the original inference is wrong
-    auto inferredNumIterations = !executionConditionValue ? 0 : (!internalExecutionConditionValue ? 1 : tripCountValue);
-    if (origOp.getNumIterations() != inferredNumIterations) {
-        logger.warning(
-                "RemoveConstants Warning: Inferred `num_iterations` is {0}, while the original value is {1}. The "
-                "executionConditionValue {2}, internalExecutionConditionValue is {3}, and tripCountValue is "
-                "{4}. Replacing `num_iteration` of {5} to {6} ",
-                inferredNumIterations, origOp.getNumIterations(), executionConditionValue,
-                internalExecutionConditionValue, tripCountValue, origOp.getLoc(), inferredNumIterations);
-        origOp.setNumIterations(inferredNumIterations);
-    }
+    updateNumIterations(origOp, executionConditionValue, internalExecutionConditionValue, tripCountValue, logger);
 
     if (!isInExecCondConst) {
         return mlir::failure();
@@ -255,9 +268,7 @@ mlir::LogicalResult InferNumIterations::matchAndRewrite(IE::LoopOp origOp, mlir:
     auto logger = Logger::global().nest("loop-canonicalizer-inferNumIterations", 0);
     logger.trace("InferNumIterations for LoopOp starts.");
 
-    // Check if numIterations needs to re-infer
     if (origOp.getNumIterations() != -1) {
-        // Already inferred, i.e. trip_count, exExecCond and inExecCond are all consts
         return mlir::failure();
     }
     logger.trace("Got -1 on numIterations: inferring.");
@@ -266,51 +277,28 @@ mlir::LogicalResult InferNumIterations::matchAndRewrite(IE::LoopOp origOp, mlir:
     // Non-const tripCountParam cases are unsupported for now, tracking number: E#124558
     auto tripCountConst = origOp.getInputs()[0].getDefiningOp<Const::DeclareOp>();
     VPUX_THROW_WHEN(tripCountConst == nullptr, "Non-const trip_count is unsupported for now!");
-    VPUX_THROW_WHEN(!tripCountConst.getContentAttr().isSplat(),
-                    "Expected splat values on input[0] (i.e. trip_count), actually got {0} ", tripCountConst);
+    checkConstSplat(tripCountConst);
     const auto tripCountValue = tripCountConst.getContent().getSplatValue<int64_t>();
-    VPUX_THROW_WHEN(tripCountValue <= 0, "Invalid trip_count value: {0}", tripCountValue);
+    VPUX_THROW_WHEN(tripCountValue == 0 || tripCountValue < -1, "Invalid trip_count value: {0}", tripCountValue);
 
     // Checking external execution_condition param, which is stored in input[1]
     auto executionConditionConst = origOp.getInputs()[1].getDefiningOp<Const::DeclareOp>();
     bool executionConditionValue = true;
     if (executionConditionConst != nullptr) {
-        VPUX_THROW_WHEN(!executionConditionConst.getContentAttr().isSplat(),
-                        "Expected splat value on input[1](execution_conditon), actually got {0} ",
-                        executionConditionConst);
-    }
-    if (executionConditionConst != nullptr && executionConditionConst.getContentAttr().isSplat()) {
+        checkConstSplat(executionConditionConst);
         executionConditionValue = executionConditionConst.getContent().getSplatValue<bool>();
     }
 
     // Checking internal execution_condition param, which is stored in region output[execCondIndex]
     bool internalExecutionConditionValue = true;
-    bool isInExecCondConst = false;
-    const auto execCondIndex = origOp.getExecCondIndex();
     auto loopTerminator = *origOp.getBodyModule().getOps<IE::LoopTerminatorOp>().begin();
-    auto internalExecutionConditionConst =
-            loopTerminator.getOperands()[execCondIndex].getDefiningOp<Const::DeclareOp>();
-    if ((internalExecutionConditionConst != nullptr) && internalExecutionConditionConst.getContentAttr().isSplat()) {
-        isInExecCondConst = true;
+    if (auto internalExecutionConditionConst =
+                loopTerminator.getOperands()[origOp.getExecCondIndex()].getDefiningOp<Const::DeclareOp>()) {
+        checkConstSplat(internalExecutionConditionConst);
         internalExecutionConditionValue = internalExecutionConditionConst.getContent().getSplatValue<bool>();
     }
-    if (internalExecutionConditionConst != nullptr) {
-        VPUX_THROW_WHEN(!internalExecutionConditionConst.getContentAttr().isSplat(),
-                        "Expected splat value of internal execution_conditon, actually got {0} ",
-                        internalExecutionConditionConst);
-    }
 
-    // executionConditionValue == false case: while(false)
-    // executionConditionValue == true and internalExecutionConditionValue == false case: do-while(false)
-    // executionConditionValue == true and internalExecutionConditionValue == true case: for loop
-    auto inferredNumIterations = !executionConditionValue ? 0 : (!internalExecutionConditionValue ? 1 : tripCountValue);
-    logger.warning(
-            "InferNumIterations Warning: Inferred `num_iterations` is {0}, while the original value is {1}. The "
-            "executionCondition is const: {2}, internalExecutionConditionValue is const: {3}, and tripCountValue is"
-            "{4}. Replacing `num_iteration` of {5} to {6} ",
-            inferredNumIterations, origOp.getNumIterations(), executionConditionConst != nullptr, isInExecCondConst,
-            tripCountValue, origOp.getLoc(), inferredNumIterations);
-    origOp.setNumIterations(inferredNumIterations);
+    updateNumIterations(origOp, executionConditionValue, internalExecutionConditionValue, tripCountValue, logger);
 
     return mlir::success();
 }

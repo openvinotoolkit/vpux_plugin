@@ -146,8 +146,9 @@ void generateWorkloads(mlir::OpBuilder& builder, VPU::NCEOpInterface origOp,
 void splitOntoWorkloads(mlir::OpBuilder& builder, VPU::NCEOpInterface origOp, VPUIP::WorkloadCostParams& costParams,
                         VPU::MPEMode mpeMode, ArrayRef<bool> isTileOverDimsSupported, VPUNN::VPUCostModel& costModel,
                         Logger log) {
-    if (auto clusterOp = mlir::dyn_cast<VPU::NCEClusterTilingOp>(origOp->getParentOp())) {
-        const auto outputs = clusterOp->getResults();
+    auto distributedIf = mlir::dyn_cast<VPU::DistributedTypeInterface>(origOp->getResult(0).getType());
+    if ((distributedIf != nullptr) && (distributedIf.containsDistributedTypes())) {
+        const auto outputs = origOp->getResults();
         VPUX_THROW_UNLESS(outputs.size() == 1, "Wrong outputs size: {0}", outputs.size());
 
         const auto output = *outputs.begin();
@@ -169,7 +170,7 @@ void splitOntoWorkloads(mlir::OpBuilder& builder, VPU::NCEOpInterface origOp, VP
                         "sub tensor size:{0} not equal to offset size:{1}", outputSubTensorShapes.size(),
                         outputSubTensorOffsets.size());
 
-        const auto inputs = clusterOp->getOperands();
+        const auto inputs = origOp->getOperands();
         VPUX_THROW_UNLESS(inputs.size() >= 1, "Wrong inputs size: {0}", inputs.size());
 
         const auto input = *inputs.begin();

@@ -3,41 +3,16 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+#include "vpux/compiler/NPU40XX/dialect/VPUIPDPU/transforms/passes/expand_dpu_config/expand_dpu_config_invariant_odu.hpp"
 #include "vpux/compiler/NPU40XX/dialect/VPUIPDPU/ops.hpp"
 #include "vpux/compiler/NPU40XX/dialect/VPUIPDPU/transforms/passes/expand_dpu_config/expand_dpu_config_invariant.hpp"
 #include "vpux/compiler/dialect/VPUASM/ops.hpp"
 #include "vpux/compiler/dialect/VPUIPDPU/rewriters/utils.hpp"
 
-namespace {
-
 using namespace VPUIPDPU;
+using namespace VPUIPDPU::arch40xx::ODU;
 
-struct ODUConfig {
-    struct OutTensorSize {
-        uint32_t dimX = 0;
-        uint32_t dimY = 0;
-        uint32_t dimZ = 0;
-    } outTensorSize;
-    struct DataReuse {
-        ODUActivationReuseMode activationReuse = ODUActivationReuseMode::NTHW_1;
-    } dataReuse;
-    struct PermuteData {
-        ODUPermuteDataMode permuteMode = ODUPermuteDataMode::PERMUTE_ZXY;
-    } permuteData;
-    struct Sparsity {
-        std::optional<bool> compressionEnabled;
-        std::optional<int64_t> sparseValue;
-    } sparsity;
-    struct SwizzleData {
-        DPUSwizzleKey swizzleKey = DPUSwizzleKey::SWIZZLE_OFF;
-    } swizzleData;
-    struct OutActivations {
-        std::optional<ODUDataBitWidth> dataWidth;
-    } outActivations;
-    struct MemoryMode {
-        ODUMemoryMode memMode = ODUMemoryMode::MODE_DENSE;
-    } memoryMode;
-};
+namespace vpux::VPUIPDPU::arch40xx::ODU {
 
 std::optional<ODUDataBitWidth> getOutDataWidth(mlir::Type outDataType) {
     std::optional<ODUDataBitWidth> outDataWidth;
@@ -347,7 +322,7 @@ mlir::LogicalResult buildODUConfig(mlir::OpBuilder& builder, const mlir::Locatio
     return mlir::success();
 }
 
-}  // namespace
+}  // namespace vpux::VPUIPDPU::arch40xx::ODU
 
 mlir::LogicalResult vpux::VPUIPDPU::arch40xx::buildDPUInvariantODU(
         VPUASM::DPUInvariantOp origInvOp, mlir::OpBuilder& builder, const Logger& log, mlir::Block* invBlock,

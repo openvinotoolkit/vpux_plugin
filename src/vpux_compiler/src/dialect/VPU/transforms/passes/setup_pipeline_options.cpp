@@ -81,6 +81,7 @@ void SetupPipelineOptionsPass::initializeFromOptions() {
             registerPpeFactory<VPU::arch37xx::PpeFactory>();
             _log.info("Auto target PPE version set to: 'IntPPE'");
         }
+
     } else if (ppeVersion == "IntPPE") {
         registerPpeFactory<VPU::arch37xx::PpeFactory>();
     } else {

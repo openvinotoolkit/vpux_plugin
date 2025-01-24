@@ -138,7 +138,7 @@ DMAPattern reduceDimsForDma(vpux::NDTypeInterface ndType) {
 
         accumulatedSize *= currentSize;
         // Found non-compact stride
-        if (checked_cast<int64_t>(currentSize) * previousStrideInBits < currentStrideInBits) {
+        if (checked_cast<int64_t>(currentSize) * previousStrideInBits != currentStrideInBits) {
             reducedBitDims.push_back(Bit(accumulatedSize));
             reducedBitStrides.push_back(currentStrideInBits);
             accumulatedSize = elemSize;
@@ -154,11 +154,23 @@ DMAPattern reduceDimsForDma(vpux::NDTypeInterface ndType) {
         reducedBitStrides.push_back(memStrides.front());
     }
 
-    // Align all dims to byte size and divide by elemSize except innermost dim
-    auto reducedDims = to_small_vector(reducedBitDims | vpux::transformed(alignToByteBoundary) |
-                                       vpux::transformed([elemSize](auto bitDim) {
-                                           return checked_cast<size_t>(bitDim.count() / elemSize);
-                                       }));
+    // Align dim[0] to byte size and divide by elemSize
+    // Only src/dst dim[0] represents data movement in terms of bytes, all subsequent dims represent a loop over that
+    // dimension and don't have the same restrictions
+    SmallVector<Bit> reducedBitDimsByteAligned;
+    reducedBitDimsByteAligned.reserve(reducedBitDims.size());
+    if (!reducedBitDims.empty()) {
+        reducedBitDimsByteAligned.push_back(alignToByteBoundary(reducedBitDims[0]));
+        std::copy(reducedBitDims.begin() + 1, reducedBitDims.end(), std::back_inserter(reducedBitDimsByteAligned));
+    }
+
+    SmallVector<size_t> reducedDims;
+    reducedDims.reserve(reducedBitDimsByteAligned.size());
+    std::transform(reducedBitDimsByteAligned.begin(), reducedBitDimsByteAligned.end(), std::back_inserter(reducedDims),
+                   [elemSize](const Bit& bitDim) {
+                       return checked_cast<size_t>(bitDim.count() / elemSize);
+                   });
+
     // Innermost dim is special
     reducedDims.front() = Bit(reducedDims.front() * elemSize).to<Byte>().count();
 

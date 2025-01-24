@@ -57,6 +57,41 @@ mlir::LogicalResult insertInvBlockArgs(VPUASM::DPUInvariantOp op, const Logger& 
         invBlockArgsPos[BlockArg::WEIGHTS_TABLE] = invBlock->getNumArguments() - 1;
     }
 
+    // weights table data ptr
+    if (op.getWeightTableDataPtr()) {
+        auto weightTableDataPtrType = getBufferType(symRefMap.lookupSymbol(op.getWeightTableDataPtr().value()));
+        invBlock->addArgument(weightTableDataPtrType, op.getLoc());
+        invBlockArgsPos[BlockArg::WEIGHTS_TABLE_DATA_PTR] = invBlock->getNumArguments() - 1;
+    }
+
+    // weights table sp ptr
+    if (op.getWeightTableSpPtr()) {
+        auto weightTableSpPtrType = getBufferType(symRefMap.lookupSymbol(op.getWeightTableSpPtr().value()));
+        invBlock->addArgument(weightTableSpPtrType, op.getLoc());
+        invBlockArgsPos[BlockArg::WEIGHTS_TABLE_SP_PTR] = invBlock->getNumArguments() - 1;
+    }
+
+    // weights table scale
+    if (op.getWeightTableScale()) {
+        auto weightTableScaleType = getBufferType(symRefMap.lookupSymbol(op.getWeightTableScale().value()));
+        invBlock->addArgument(weightTableScaleType, op.getLoc());
+        invBlockArgsPos[BlockArg::WEIGHTS_TABLE_SCALE] = invBlock->getNumArguments() - 1;
+    }
+
+    // weights table bias
+    if (op.getWeightTableBias()) {
+        auto weightTableBiasType = getBufferType(symRefMap.lookupSymbol(op.getWeightTableBias().value()));
+        invBlock->addArgument(weightTableBiasType, op.getLoc());
+        invBlockArgsPos[BlockArg::WEIGHTS_TABLE_BIAS] = invBlock->getNumArguments() - 1;
+    }
+
+    // weights table bias
+    if (op.getWeightZeroPoints()) {
+        auto weightZeroPointsType = getBufferType(symRefMap.lookupSymbol(op.getWeightZeroPoints().value()));
+        invBlock->addArgument(weightZeroPointsType, op.getLoc());
+        invBlockArgsPos[BlockArg::WEIGHTS_ZERO_POINTS] = invBlock->getNumArguments() - 1;
+    }
+
     // weights
     if (op.getWeights()) {
         auto weightsType = getBufferType(symRefMap.lookupSymbol(op.getWeights().value()));
@@ -116,8 +151,10 @@ mlir::LogicalResult DPUInvariantRewriter::matchAndRewrite(VPUASM::DPUInvariantOp
     auto inv = rewriter.create<VPUIPDPU::DPUInvariantOp>(
             op.getLoc(), op.getSymNameAttr(), op.getTaskIndexAttr(), op.getTaskLocationAttr(), op.getInputAttr(),
             op.getInputSparsityMapAttr(), op.getInputStorageElementTableAttr(), op.getWeightsAttr(),
-            op.getWeightsSparsityMapAttr(), op.getWeightTableAttr(), op.getSprLookupTableAttr(), op.getOutputAttr(),
-            op.getOutputSparsityMapAttr(), op.getProfilingDataAttr(), op.getNceTaskTypeAttr(), op.getIsContinuedAttr());
+            op.getWeightsSparsityMapAttr(), op.getWeightTableAttr(), op.getWeightTableScaleAttr(),
+            op.getSprLookupTableAttr(), op.getOutputAttr(), op.getOutputSparsityMapAttr(), op.getProfilingDataAttr(),
+            op.getIsZeroOffsetWeightsTableAttr(), op.getMaxPerXyAttr(), op.getMinPerXyAttr(),
+            op.getMinMaxPerTensorAttr(), op.getNceTaskTypeAttr(), op.getIsContinuedAttr());
 
     auto& invRegion = inv.getRegion();
     auto invBlock = rewriter.createBlock(&invRegion);

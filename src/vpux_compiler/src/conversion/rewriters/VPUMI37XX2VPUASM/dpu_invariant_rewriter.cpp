@@ -9,13 +9,13 @@
 namespace vpux {
 namespace vpumi37xx2vpuasm {
 
-mlir::LogicalResult DPUInvariantRewriter::symbolize(VPUMI37XX::DPUInvariantOp op, SymbolMapper&,
-                                                    mlir::ConversionPatternRewriter& rewriter) const {
+mlir::FailureOr<SymbolizationResult> DPUInvariantRewriter::symbolize(VPUMI37XX::DPUInvariantOp op, SymbolMapper&,
+                                                                     mlir::ConversionPatternRewriter& rewriter) const {
     auto ctx = getContext();
     auto symName = findSym(op).getRootReference();
     auto taskLocation = findSym(op.getTaskLocation());
 
-    auto optionalSym = [&](mlir::Value val) -> mlir::FlatSymbolRefAttr {
+    auto optionalSym = [&](mlir::Value val) -> mlir::SymbolRefAttr {
         auto sym = val ? findSym(val) : nullptr;
         return sym;
     };
@@ -54,8 +54,8 @@ mlir::LogicalResult DPUInvariantRewriter::symbolize(VPUMI37XX::DPUInvariantOp op
             parentOutputSym, outputSymsAttr, profilingDataSym, waitAttr, updateAttr, op.getNceTaskTypeAttr(),
             op.getEltwiseTypeAttr(), op.getMpeFrequentModeAttr(), op.getKernelSizeAttr(), op.getKernelStridesAttr(),
             op.getKernelPaddingAttr(), op.getIsContinuedAttr(), op.getCmSpPatternAttr(),
-            op.getInputChannelsCompressionAttr(), op.getIsSegmentedAttr(), op.getOutChannelOffsetAttr(),
-            op.getStartAfterAttr(), op.getCleanAfterAttr());
+            op.getInputChannelsCompressionAttr(), op.getIsZeroOffsetWeightsTableAttr(), op.getIsSegmentedAttr(),
+            op.getOutChannelOffsetAttr(), op.getStartAfterAttr(), op.getCleanAfterAttr());
 
     {
         auto& ppeRegion = invariant.getPpe();
@@ -71,7 +71,7 @@ mlir::LogicalResult DPUInvariantRewriter::symbolize(VPUMI37XX::DPUInvariantOp op
     }
     rewriter.eraseOp(op);
 
-    return mlir::success();
+    return SymbolizationResult(invariant);
 }
 
 }  // namespace vpumi37xx2vpuasm

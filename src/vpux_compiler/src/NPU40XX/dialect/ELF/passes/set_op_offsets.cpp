@@ -49,6 +49,7 @@ mlir::LogicalResult SetOpOffsetsPass::initialize(mlir::MLIRContext* ctx) {
 void SetOpOffsetsPass::safeRunOnFunc() {
     auto netFunc = getOperation();
     mlir::MLIRContext* ctx = &getContext();
+    const auto arch = VPU::getArch(netFunc);
 
     auto mainOps = to_small_vector(netFunc.getOps<ELF::MainOp>());
     VPUX_THROW_UNLESS(mainOps.size() == 1, "Expected exactly one ELF mainOp. Got {0}", mainOps.size());
@@ -73,7 +74,7 @@ void SetOpOffsetsPass::safeRunOnFunc() {
         for (auto& operation : block->getOperations()) {
             auto offsetAttr = mlir::IntegerAttr::get(u64Type, mlir::APInt(64, tracker, false));
             if (auto binaryOperation = mlir::dyn_cast_or_null<ELF::BinaryOpInterface>(&operation)) {
-                tracker += binaryOperation.getBinarySizeCached(symRefMap);
+                tracker += binaryOperation.getBinarySizeCached(symRefMap, arch);
             }
 
             // each wrappable operation is binary one, all operations in sections are wrappable
@@ -110,9 +111,9 @@ void SetOpOffsetsPass::safeRunOnFunc() {
                 tileTracker = taskBufferOp.getTileIndex();
                 offsetTracker = 0;
                 offsetAttr = mlir::IntegerAttr::get(u64Type, mlir::APInt(64, offsetTracker, false));
-                offsetTracker += taskBufferOp.getBinarySize();
+                offsetTracker += taskBufferOp.getBinarySize(arch);
             } else {
-                offsetTracker += taskBufferOp.getBinarySize();
+                offsetTracker += taskBufferOp.getBinarySize(arch);
             }
             taskBufferOp.setMemoryOffset(offsetAttr);
         }

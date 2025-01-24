@@ -7,6 +7,6 @@
 
 using namespace vpux;
 
-void vpux::VPUIP::PPETaskOp::build(mlir::OpBuilder& builder, mlir::OperationState& state, VPU::PPEAttr opaque_ppe) {
-    build(builder, state, opaque_ppe, /*ppe_fp_scale=*/nullptr, /*ppe_fp_bias=*/nullptr);
+void vpux::VPUIP::PPETaskOp::build(mlir::OpBuilder& builder, mlir::OperationState& state, VPU::PPEAttr ppeAttr) {
+    build(builder, state, ppeAttr, /*ppe_fp_scale=*/nullptr, /*ppe_fp_bias=*/nullptr);
 }

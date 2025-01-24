@@ -5,7 +5,6 @@
 
 #include <vpux_elf/writer.hpp>
 #include "vpux/compiler/NPU40XX/dialect/ELF/ops.hpp"
-#include "vpux/compiler/utils/ELF/utils.hpp"
 
 using namespace vpux;
 

@@ -35,7 +35,8 @@ public:
     /*
      Get the limit of tiles based on several values
     */
-    virtual int64_t getLimitValue(mlir::ArrayRef<int64_t> values) const = 0;
+    virtual int64_t getLimitValue(mlir::ArrayRef<int64_t> alignedValues,
+                                  mlir::ArrayRef<int64_t> unalignedValues) const = 0;
 };
 
 }  // namespace vpux::VPU

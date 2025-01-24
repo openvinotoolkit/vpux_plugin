@@ -6,7 +6,10 @@
 #include "vpux/utils/core/numeric.hpp"
 
 #include "vpux/compiler/NPU37XX/dialect/VPU/impl/ppe_factory.hpp"
+#include "vpux/compiler/dialect/VPU/utils/eltwise_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/ppe_utils.hpp"
+
+#include <llvm/ADT/TypeSwitch.h>
 
 using namespace vpux;
 using namespace vpux::VPU;
@@ -87,13 +90,32 @@ void PpeFactory::calculateFpPReluAlpha(mlir::Operation* operation, PpeFactory::A
         }
 
         // Mixed mode with float input and quant weights requires negative slope rescaling.
-        if (auto nceOp = mlir::dyn_cast<NCEOpInterface>(*operation)) {
-            if (const auto weights = nceOp.getWeightsOperand()) {
-                const auto weightsElemType = weights.getType().dyn_cast<vpux::NDTypeInterface>().getElementType();
-                if (const auto uqType = weightsElemType.dyn_cast<mlir::quant::UniformQuantizedType>()) {
-                    builder.fpPReluAlpha *= static_cast<float>(uqType.getScale());
-                }
-            }
+        const auto weightsType =
+                llvm::TypeSwitch<mlir::Operation*, mlir::Type>(operation)
+                        .Case<NCEOpInterface>([](auto op) {
+                            const auto weights = op.getWeightsOperand();
+                            return weights != nullptr ? weights.getType()
+                                                                .template dyn_cast<vpux::NDTypeInterface>()
+                                                                .getElementType()
+                                                      : nullptr;
+                        })
+                        // This method may also be called before NCEOpInterface is attached, so case-by-case checks are
+                        // needed (until a WeightedOpInterface is devised):
+                        .Case<IE::ConvolutionOp>([](auto op) {
+                            return op.getFilter().getType().template dyn_cast<vpux::NDTypeInterface>().getElementType();
+                        })
+                        .Case<IE::GroupConvolutionOp>([](auto op) {
+                            return op.getFilter().getType().template dyn_cast<vpux::NDTypeInterface>().getElementType();
+                        })
+                        .Case<IE::TransposedConvolutionOp>([](auto op) {
+                            return op.getFilter().getType().template dyn_cast<vpux::NDTypeInterface>().getElementType();
+                        })
+                        .Default([](auto) {
+                            return mlir::Type(nullptr);
+                        });
+
+        if (const auto uqType = mlir::dyn_cast_or_null<mlir::quant::UniformQuantizedType>(weightsType)) {
+            builder.fpPReluAlpha *= static_cast<float>(uqType.getScale());
         }
     }
 }
@@ -276,8 +298,9 @@ PpeFactory::AttrBuilder PpeFactory::retrieveEltwisePPEAttribute(mlir::Operation*
                                     ? vpux::extractScalesAndZeroPoints(outputElemType).first.front()
                                     : 1.0;
 
+    const auto eltwiseType = vpux::VPU::decodeNceEltwiseType(operation);
     const auto allScaleApproximation =
-            vpux::EltwiseQuantizationApproximation(input1QuantScale, input2QuantScale, outputQuantScale);
+            vpux::EltwiseQuantizationApproximation(input1QuantScale, input2QuantScale, outputQuantScale, eltwiseType);
 
     builder.quantMult = mlir::SmallVector<int64_t>{allScaleApproximation.output().mult()};
     builder.quantShift = mlir::SmallVector<int64_t>{allScaleApproximation.output().shift()};
@@ -294,10 +317,10 @@ PPEAttr PpeFactory::retrievePPEAttribute(mlir::Operation* operation) const {
     return builder.getAttr();
 }
 
-vpux::VPU::PPEIntAttr PpeFactory::castToConcreteAttr(PPEAttr opaqueAttr) const {
-    const auto intPpeAttr = opaqueAttr.dyn_cast<PPEIntAttr>();
+vpux::VPU::PPEIntAttr PpeFactory::castToConcreteAttr(PPEAttr ppeAttr) const {
+    const auto intPpeAttr = ppeAttr.dyn_cast<PPEIntAttr>();
     VPUX_THROW_WHEN(intPpeAttr == nullptr,
-                    "Expected PPEIntAttr type but got {0}, make sure to use the right factory version", opaqueAttr);
+                    "Expected PPEIntAttr type but got {0}, make sure to use the right factory version", ppeAttr);
     return intPpeAttr;
 }
 

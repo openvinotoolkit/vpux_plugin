@@ -5,40 +5,12 @@
 
 #include "vpux/compiler/dialect/IE/transforms/passes/expand_activation_channels.hpp"
 #include "vpux/compiler/NPU37XX/dialect/IE/transforms/passes.hpp"
-#include "vpux/compiler/NPU37XX/dialect/IE/transforms/passes/expand_activation_channels.hpp"
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 
 #include <mlir/Transforms/GreedyPatternRewriteDriver.h>
 
 using namespace vpux;
-
-//
-// AveragePoolRewriter
-//
-
-mlir::LogicalResult arch37xx::AveragePoolRewriter::matchAndRewrite(IE::AvgPoolOp origOp,
-                                                                   mlir::PatternRewriter& rewriter) const {
-    _log.trace("[{0}] Got AveragePool layer at '{1}'", getDebugName(), origOp->getLoc());
-
-    const auto opCreator = [&](mlir::Value expandedInput, int64_t outChanPadsEnd) -> mlir::Operation* {
-        const Shape outPadBefore(checked_cast<size_t>(origOp.getType().getRank()), 0);
-
-        Shape outPadAfter(checked_cast<size_t>(origOp.getType().getRank()), 0);
-        outPadAfter[Dims4D::Act::C] = outChanPadsEnd;
-
-        const auto ndType = origOp.getType().cast<vpux::NDTypeInterface>();
-        const auto newOutputType = ndType.pad(outPadBefore, outPadAfter);
-
-        return rewriter.create<IE::AvgPoolOp>(origOp.getLoc(), newOutputType, expandedInput, origOp.getKernelSize(),
-                                              origOp.getStrides(), origOp.getPadsBegin(), origOp.getPadsEnd(),
-                                              origOp.getRoundingType(), origOp.getExcludePads(), origOp.getPostOpAttr(),
-                                              origOp.getClampAttr(), origOp.getStaticScaleAttr(),
-                                              origOp.getOutputChannelsAttr(), origOp.getInputChannelsAttr());
-    };
-
-    return generalRewrite(origOp, rewriter, opCreator, extractMeaningfulOutput, _log.nest());
-}
 
 namespace {
 
@@ -109,7 +81,7 @@ void ExpandActivationChannelsPass::safeRunOnFunc() {
 
     mlir::RewritePatternSet patterns(&ctx);
     patterns.add<IE::MaxPoolRewriter>(&ctx, _log);
-    patterns.add<arch37xx::AveragePoolRewriter>(&ctx, _log);
+    patterns.add<IE::AvgPoolRewriter>(&ctx, _log);
     patterns.add<IE::EltwiseRewriter<IE::AddOp>>(&ctx, _log);
     patterns.add<IE::ConvolutionRewriter>(&ctx, _log);
     patterns.add<IE::GroupConvolutionRewriter>(&ctx, _log);

@@ -240,19 +240,19 @@ def VPU_NCEOpInterface : OpInterface<"NCEOpInterface"> {
 
         InterfaceMethod<
             "Get NCE operation PPE",
-            "vpux::VPU::PPEAttr", "getOpaquePPE", (ins),
+            "vpux::VPU::PPEAttr", "getPPE", (ins),
             [{}],
             [{
-                return $_op.getOpaquePpe();
+                return $_op.getPpe();
             }]
         >,
 
         InterfaceMethod<
             "Set NCE operation PPE",
-            "void", "setOpaquePPE", (ins "vpux::VPU::PPEAttr":$opaque_ppe),
+            "void", "setPPE", (ins "vpux::VPU::PPEAttr":$ppe),
             [{}],
             [{
-                $_op->setAttr($_op.getOpaquePpeAttrName(), opaque_ppe);
+                $_op->setAttr($_op.getPpeAttrName(), ppe);
             }]
         >,
 
@@ -563,7 +563,7 @@ class VPU_PPETaskOpBase<Dialect dialect, string mnemonic, list<Trait> props = []
     let summary = "PPE Type";
 
     let arguments = (ins
-        VPU_PPEAttr:$opaque_ppe,
+        VPU_PPEAttr:$ppe,
         OptionalAttr<F64Attr>:$ppe_fp_scale,
         OptionalAttr<F64Attr>:$ppe_fp_bias
     );
@@ -571,6 +571,22 @@ class VPU_PPETaskOpBase<Dialect dialect, string mnemonic, list<Trait> props = []
     let assemblyFormat = [{
         attr-dict
     }];
+}
+
+//
+// ClusterBroadcastingOpInterface
+//
+
+def VPU_ClusterBroadcastingOpInterface : OpInterface<"ClusterBroadcastingOpInterface"> {
+    let description = "Interface for layers to check if it is broadcast capable";
+    let cppNamespace = "vpux::VPU";
+
+    let methods = [
+        InterfaceMethod<
+            "check if it is broadcast capable",
+            "bool", "isBroadcastCapable", (ins "int64_t":$axis)
+        >
+    ];
 }
 
 #endif

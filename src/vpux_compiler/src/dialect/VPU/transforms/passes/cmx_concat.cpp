@@ -5,15 +5,14 @@
 
 #include <mlir/Dialect/Quant/QuantTypes.h>
 #include <mlir/IR/Operation.h>
+#include "vpux/compiler/core/layers.hpp"
 #include "vpux/compiler/core/type_interfaces.hpp"
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
-#include "vpux/compiler/dialect/VPU/utils/ppe_version_config.hpp"
-
-#include "vpux/compiler/core/layers.hpp"
+#include "vpux/compiler/dialect/VPU/utils/auto_padding_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/ppe_utils.hpp"
-#include "vpux/compiler/utils/VPU/ppe_utils.hpp"
+#include "vpux/compiler/dialect/VPU/utils/ppe_version_config.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 
@@ -121,31 +120,39 @@ size_t getSize(vpux::NDTypeInterface type) {
 
 struct NceBasedPart {
     VPU::CopyOp copyOp;
-    VPU::NCEClusterTilingOp copyClusterOp;
     VPU::NCEOpInterface nceOp;
-    VPU::NCEClusterTilingOp nceClusterOp;
 
-    NceBasedPart(VPU::CopyOp copy, VPU::NCEOpInterface nce)
-            : copyOp(copy), copyClusterOp(nullptr), nceOp(nce), nceClusterOp(nullptr) {
-    }
-
-    NceBasedPart(VPU::CopyOp copy, VPU::NCEClusterTilingOp copyCluster, VPU::NCEOpInterface nce,
-                 VPU::NCEClusterTilingOp nceCluster)
-            : copyOp(copy), copyClusterOp(copyCluster), nceOp(nce), nceClusterOp(nceCluster) {
+    NceBasedPart(VPU::CopyOp copy, VPU::NCEOpInterface nce): copyOp(copy), nceOp(nce) {
     }
 
     virtual ~NceBasedPart() = default;
 
     virtual bool isMultiCluster() const {
-        return copyClusterOp != nullptr && nceClusterOp != nullptr;
+        auto isDistributedType = [](mlir::Value val) {
+            auto distributedIf = mlir::dyn_cast<VPU::DistributedTypeInterface>(val.getType());
+            return ((distributedIf != nullptr) && (distributedIf.containsDistributedTypes()));
+        };
+
+        if (copyOp != nullptr) {
+            return (isDistributedType(copyOp->getOperand(0)) || isDistributedType(copyOp->getResult(0)));
+        }
+        if (nceOp != nullptr) {
+            if (llvm::any_of(nceOp->getOperands(), isDistributedType)) {
+                return true;
+            }
+            if (llvm::any_of(nceOp->getResults(), isDistributedType)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     virtual mlir::Operation* getCopyOp() {
-        return copyClusterOp != nullptr ? copyClusterOp.getOperation() : copyOp.getOperation();
+        return copyOp.getOperation();
     }
 
     virtual mlir::Operation* getNceOp() {
-        return nceClusterOp != nullptr ? nceClusterOp.getOperation() : nceOp.getOperation();
+        return nceOp.getOperation();
     }
 };
 
@@ -170,14 +177,6 @@ struct InputConcatPart final : public NceBasedPart {
     InputConcatPart(mlir::Value operand, VPU::CopyOp copy, VPU::NCEOpInterface nce)
             : NceBasedPart(copy, nce), concatOperand(operand), isBlockArgOrConsant(false) {
         if (copy == nullptr && nce == nullptr) {
-            isBlockArgOrConsant = true;
-        }
-    }
-
-    InputConcatPart(mlir::Value operand, VPU::CopyOp copy, VPU::NCEClusterTilingOp copyCluster, VPU::NCEOpInterface nce,
-                    VPU::NCEClusterTilingOp nceCluster)
-            : NceBasedPart(copy, copyCluster, nce, nceCluster), concatOperand(operand), isBlockArgOrConsant(false) {
-        if (copy == nullptr && copyCluster == nullptr && nce == nullptr && nceCluster == nullptr) {
             isBlockArgOrConsant = true;
         }
     }
@@ -209,7 +208,7 @@ public:
     ArrayRef<InputConcatPart> getInputParts() const;
 
     void rewrite();
-    bool inputPatternCanBeCMXed(size_t cmxSize, bool supportNCEOpInsertion);
+    bool inputPatternCanBeCMXed(size_t cmxSize);
     bool inputConcatOnlyMeetRequirement();
     bool isInputConcatOnly = false;
 
@@ -221,7 +220,7 @@ private:
 private:
     size_t getConcatSize();
     bool concatFitsInCMX(size_t cmxSize);
-    bool inputsHaveNotOnlyCopiesUsers(bool supportNCEOpInsertion);
+    bool inputsHaveNotOnlyCopiesUsers();
     bool insertNCEOperation();
     bool isMemConsistentPerCluster();
     bool areDistributionTypesConsistent();
@@ -282,18 +281,13 @@ void InputConcatPattern::insertCopyAfterConcat() {
     } else {
         auto multiclusterPart = *multiclusterIt;
         const auto nceDistributedType =
-                multiclusterPart.nceClusterOp->getResult(0).getType().cast<VPU::DistributedTypeInterface>();
+                mlir::cast<VPU::DistributedTypeInterface>(multiclusterPart.nceOp->getResult(0).getType());
         auto newConcatOutputType =
                 getConcatDistributedType(nceDistributedType, concatType.getShape(), concatType.getElementType());
         _concat.getOutput().setType(newConcatOutputType);
 
-        const auto outputTensorBodyBuilder = [&](mlir::OpBuilder& builder, mlir::Location loc,
-                                                 mlir::ValueRange newOperands) {
-            auto outputTensorDistributedCopyOp = builder.create<VPU::CopyOp>(loc, newOperands[0], memSpace);
-            builder.create<YieldOp>(loc, outputTensorDistributedCopyOp->getResults());
-        };
-        const auto tilingCopyOp = builder.create<NCEClusterTilingOp>(_concat.getLoc(), concatType,
-                                                                     _concat->getResult(0), outputTensorBodyBuilder);
+        const auto tilingCopyOp =
+                builder.create<VPU::CopyOp>(_concat.getLoc(), concatType, _concat->getResult(0), memSpace);
         _concat->getResult(0).replaceAllUsesExcept(tilingCopyOp->getResult(0),
                                                    llvm::SmallPtrSet<mlir::Operation*, 1>{tilingCopyOp});
     }
@@ -342,6 +336,7 @@ void InputConcatPattern::rewrite() {
         const auto& operandIdx = p.index();
         auto& inputPart = p.value();
         auto origType = inputPart.concatOperand.getType().cast<NDTypeInterface>();
+        auto inputCopyOp = _concat.getOperand(operandIdx).getDefiningOp<VPU::CopyOp>();
 
         if (inputPart.isMultiCluster()) {
             // If the inputPattern has MC layer, then the outputPattern must have MC layer so the concat could be
@@ -362,7 +357,7 @@ void InputConcatPattern::rewrite() {
                                                .getMode()
                                                .getValue();
 
-            auto nceProducerOutput = inputPart.getCopyOp()->getOperand(0);
+            auto nceProducerOutput = inputCopyOp->getOperand(0);
             auto nceDistributedType = nceProducerOutput.getType().cast<VPU::DistributedTypeInterface>();
 
             auto copyPatternType =
@@ -394,7 +389,7 @@ void InputConcatPattern::rewrite() {
             _log.trace("Removing input Copy from NNCMX to DDR '{0}' at '{1}'", inputPart.getCopyOp()->getName(),
                        inputPart.getCopyOp()->getLoc());
 
-            auto newConcatInput = inputPart.getCopyOp()->getOperand(0);
+            auto newConcatInput = inputCopyOp->getOperand(0);
             _concat.setOperand(operandIdx, newConcatInput);
             continue;
         }
@@ -415,19 +410,14 @@ void InputConcatPattern::rewrite() {
         }
 
         auto multiclusterPart = *multiclusterIt;
-        const auto outputTensorBodyBuilder = [&](mlir::OpBuilder& builder, mlir::Location loc,
-                                                 mlir::ValueRange newOperands) {
-            auto outputTensorDistributedCopyOp = builder.create<VPU::CopyOp>(loc, newOperands[0], memSpace);
-            builder.create<YieldOp>(loc, outputTensorDistributedCopyOp->getResults());
-        };
 
         auto distributedConcatOutType = _concat.getOutput().getType().cast<VPU::DistributedTypeInterface>();
         auto newType =
                 getConcatDistributedType(distributedConcatOutType, origType.getShape(), origType.getElementType());
 
         _log.trace("Insert Cluster tiling Copy from DDR to CMX for constant input '{0}'", inputPart.concatOperand);
-        const auto newConcatInputOp = builder.create<NCEClusterTilingOp>(
-                _concat.getLoc(), newType, inputPart.concatOperand, outputTensorBodyBuilder);
+        const auto newConcatInputOp =
+                builder.create<VPU::CopyOp>(_concat.getLoc(), newType, inputPart.concatOperand, memSpace);
 
         _concat.setOperand(operandIdx, newConcatInputOp->getResult(0));
     }
@@ -450,7 +440,8 @@ bool InputConcatPattern::concatFitsInCMX(size_t cmxSize) {
         // consts (weights table and activation window) already exists
         auto nceOp = concatPart.getNceOp();
         if (nceOp != nullptr) {
-            for (auto input : nceOp->getOperands()) {
+            llvm::DenseSet<mlir::Value> operands(nceOp->getOperands().begin(), nceOp->getOperands().end());
+            for (auto input : operands) {
                 currUserSize += getSize(input.getType());
             }
         }
@@ -462,11 +453,7 @@ bool InputConcatPattern::concatFitsInCMX(size_t cmxSize) {
     return (concatSize + maxUserSize) <= cmxSize;
 }
 
-bool isSupportedAndBeneficialToInsertNCEOp(bool supportNCEOpInsertion, InputConcatPart concatPart) {
-    if (!supportNCEOpInsertion) {
-        return false;
-    }
-
+bool isSupportedAndBeneficialToInsertNCEOp(InputConcatPart concatPart) {
     if (!concatPart.isMultiCluster()) {
         return true;
     }
@@ -490,22 +477,9 @@ bool isSupportedAndBeneficialToInsertNCEOp(bool supportNCEOpInsertion, InputConc
              VPU::bitEnumContainsAny(nceDistributionMode, VPU::DistributionMode::MULTICASTED));
 }
 
-bool InputConcatPattern::inputsHaveNotOnlyCopiesUsers(bool supportNCEOpInsertion) {
+bool InputConcatPattern::inputsHaveNotOnlyCopiesUsers() {
     // avoid concats which are complex, where the inputs to the concat are used
     // by other operations
-
-    const auto userIsCopyOp = [](mlir::Operation* user) {
-        if (mlir::isa<VPU::CopyOp>(user)) {
-            return true;
-        }
-
-        auto clusterTiling = mlir::dyn_cast<VPU::NCEClusterTilingOp>(user);
-        if (clusterTiling == nullptr) {
-            return false;
-        }
-
-        return clusterTiling.getInnerTaskOpOfType<VPU::CopyOp>() != nullptr;
-    };
 
     for (auto& concatPart : _inputParts) {
         auto nceOp = concatPart.getNceOp();
@@ -515,8 +489,8 @@ bool InputConcatPattern::inputsHaveNotOnlyCopiesUsers(bool supportNCEOpInsertion
 
         for (auto result : nceOp->getResults()) {
             for (auto user : result.getUsers()) {
-                if (!userIsCopyOp(user)) {
-                    if (!isSupportedAndBeneficialToInsertNCEOp(supportNCEOpInsertion, concatPart)) {
+                if (!mlir::isa<VPU::CopyOp>(user)) {
+                    if (!isSupportedAndBeneficialToInsertNCEOp(concatPart)) {
                         return true;
                     }
                     concatPart.insertNCEOps = true;
@@ -531,7 +505,10 @@ bool InputConcatPattern::inputsHaveNotOnlyCopiesUsers(bool supportNCEOpInsertion
 bool InputConcatPattern::insertNCEOperation() {
     mlir::OpBuilder builder(_concat);
 
-    for (auto& concatPart : _inputParts) {
+    for (auto p : _inputParts | indexed) {
+        const auto& operandIdx = p.index();
+        auto& concatPart = p.value();
+
         if (!concatPart.insertNCEOps) {
             continue;
         }
@@ -555,58 +532,56 @@ bool InputConcatPattern::insertNCEOperation() {
 
             auto newOperandType = newOperands[0].getType();
 
-            auto ppeOpaqueAttr = VPU::PpeVersionConfig::retrievePPEAttribute(nceOp);
+            auto ppeAttr = VPU::PpeVersionConfig::retrievePPEAttribute(nceOp);
 
             // Update Clamp in PPE to align with the original NCE task
             auto nceOpIface = mlir::dyn_cast<VPU::NCEOpInterface>(nceOp);
-            if (nceOpIface == nullptr) {
-                auto clusterOp = mlir::dyn_cast<VPU::NCEClusterTilingOp>(nceOp);
-                VPUX_THROW_WHEN(clusterOp == nullptr, "Can't find NCEClusterTilingOp");
-                nceOpIface = clusterOp.getInnerTaskOpOfType<VPU::NCEOpInterface>();
-            }
             VPUX_THROW_WHEN(nceOpIface == nullptr, "Can't find NCEOpInterface");
 
-            const auto origPPETask = nceOpIface.getOpaquePPE();
+            const auto origPPETask = nceOpIface.getPPE();
             const auto& clampAdapter = VPU::PpeVersionConfig::getFactoryAs<VPU::IPpeAdapterClamp>();
-            ppeOpaqueAttr = clampAdapter.updateClamps(ppeOpaqueAttr, origPPETask);
+            ppeAttr = clampAdapter.updateClamps(ppeAttr, origPPETask);
             const auto elemType = newOperandType.cast<vpux::NDTypeInterface>().getElementType();
             if (mlir::isa<mlir::quant::QuantizedType>(elemType)) {
                 if (const auto quantParamsAdapter =
                             VPU::PpeVersionConfig::getFactoryAs<VPU::IPpeAdapterQuantParams*>()) {
                     const auto kernelShape = parseIntArrayAttr<int64_t>(kernelSizeAttr);
-                    ppeOpaqueAttr =
-                            quantParamsAdapter->recomputeQuantParams(ppeOpaqueAttr, elemType, elemType, kernelShape);
+                    ppeAttr = quantParamsAdapter->recomputeQuantParams(ppeAttr, elemType, elemType, kernelShape);
                 }
             }
             if (const auto scaleAdapter = VPU::PpeVersionConfig::getFactoryAs<VPU::IPpeAdapterScale*>()) {
-                ppeOpaqueAttr = scaleAdapter->updateScale(ppeOpaqueAttr, {1.0});
+                ppeAttr = scaleAdapter->updateScale(ppeAttr, {1.0});
             }
 
             const auto padAttr = VPU::getPaddingAttr(ctx, PadInfo(padBeginAttr, padEndAttr));
 
+            auto outputChannelsAttr = nceOp->hasAttr(VPU::outChanAttrName)
+                                              ? nceOp->getAttr(VPU::outChanAttrName).cast<mlir::IntegerAttr>()
+                                              : nullptr;
+
             return builder.create<VPU::NCEAveragePoolOp>(loc, newOperandType, newOperands[0], kernelSizeAttr,
-                                                         stridesAttr, padAttr, ppeOpaqueAttr,
-                                                         /*multi_cluster_strategyAttr=*/nullptr);
+                                                         stridesAttr, padAttr, ppeAttr,
+                                                         /*multi_cluster_strategyAttr=*/nullptr, outputChannelsAttr);
         };
 
         mlir::Operation* newAvgPoolOp = nullptr;
         builder.setInsertionPointAfter(nceOp);
-        if (concatPart.isMultiCluster()) {
-            const auto bodyBuilder = [createPoolFunc](mlir::OpBuilder& builder, mlir::Location loc,
-                                                      mlir::ValueRange newOperands) {
-                auto poolOp = createPoolFunc(builder, loc, newOperands);
-                builder.create<YieldOp>(loc, poolOp.getOutput());
-            };
 
-            newAvgPoolOp =
-                    builder.create<NCEClusterTilingOp>(appendLoc(nceOp->getLoc(), "inserted_AVG_Pooling"),
-                                                       nceOp->getResult(0).getType(), nceOp->getResult(0), bodyBuilder);
-        } else {
-            newAvgPoolOp =
-                    createPoolFunc(builder, appendLoc(nceOp->getLoc(), "inserted_AVG_Pooling"), nceOp->getResult(0));
+        mlir::Operation* newCopyOp = nullptr;
+        const auto copyOutOpType = mlir::cast<vpux::NDTypeInterface>(copyOutOp->getResult(0).getType());
+        const auto copyMemSpace = copyOutOpType.getMemSpace();
+
+        newAvgPoolOp = createPoolFunc(builder, appendLoc(nceOp->getLoc(), "inserted_AVG_Pooling"), nceOp->getResult(0));
+
+        if (!copyOutOp->hasOneUse()) {
+            newCopyOp = builder.create<VPU::CopyOp>(copyOutOp->getLoc(), newAvgPoolOp->getResult(0), copyMemSpace);
         }
 
-        copyOutOp->setOperand(0, newAvgPoolOp->getResult(0));
+        if (!copyOutOp->hasOneUse()) {
+            _concat.setOperand(operandIdx, newCopyOp->getResult(0));
+        } else {
+            copyOutOp->setOperand(0, newAvgPoolOp->getResult(0));
+        }
         _log.trace("Inserted an identity AvgPooling {0}", *newAvgPoolOp);
     }
 
@@ -634,7 +609,7 @@ bool InputConcatPattern::isMemConsistentPerCluster() {
         if (!concatPart.isMultiCluster()) {
             return false;
         }
-        const auto disType = concatPart.nceClusterOp.getResult(0)
+        const auto disType = concatPart.nceOp->getResult(0)
                                      .getType()
                                      .cast<VPU::DistributedTypeInterface>()
                                      .getDistributedTypes()
@@ -670,7 +645,7 @@ bool InputConcatPattern::areDistributionTypesConsistent() {
     auto& multiclusterPart = *it;
 
     const auto distributedTypeInterfaceOutput =
-            multiclusterPart.nceClusterOp.getResult(0).getType().cast<VPU::DistributedTypeInterface>();
+            multiclusterPart.nceOp->getResult(0).getType().cast<VPU::DistributedTypeInterface>();
     if (!distributedTypeInterfaceOutput.containsDistributedTypes()) {
         return false;
     }
@@ -689,7 +664,7 @@ bool InputConcatPattern::areDistributionTypesConsistent() {
         }
 
         const auto distributedTypeInterfaceInput =
-                part.nceClusterOp.getResult(0).getType().cast<VPU::DistributedTypeInterface>();
+                part.nceOp->getResult(0).getType().cast<VPU::DistributedTypeInterface>();
         if (!distributedTypeInterfaceInput.containsDistributedTypes()) {
             return false;
         }
@@ -709,9 +684,6 @@ bool InputConcatPattern::areDistributionTypesConsistent() {
 bool InputConcatPattern::areAnyInputsInPlace() {
     for (auto& inputPart : _inputParts) {
         auto nceEltwiseOp = mlir::dyn_cast_or_null<VPU::NCEEltwiseOp>(inputPart.getNceOp());
-        if (auto clusterTilingOp = mlir::dyn_cast_or_null<VPU::NCEClusterTilingOp>(inputPart.getNceOp())) {
-            nceEltwiseOp = clusterTilingOp.getInnerTaskOpOfType<VPU::NCEEltwiseOp>();
-        }
         if (nceEltwiseOp == nullptr) {
             continue;
         }
@@ -722,7 +694,7 @@ bool InputConcatPattern::areAnyInputsInPlace() {
     return false;
 }
 
-bool InputConcatPattern::inputPatternCanBeCMXed(size_t cmxSize, bool supportNCEOpInsertion) {
+bool InputConcatPattern::inputPatternCanBeCMXed(size_t cmxSize) {
     // Check compatibility between input distribution types
     if (!areDistributionTypesConsistent()) {
         _log.trace("Distribution types are inconsistent");
@@ -741,7 +713,7 @@ bool InputConcatPattern::inputPatternCanBeCMXed(size_t cmxSize, bool supportNCEO
         return false;
     }
 
-    if (inputsHaveNotOnlyCopiesUsers(supportNCEOpInsertion)) {
+    if (inputsHaveNotOnlyCopiesUsers()) {
         _log.trace("Concat is complex");
         return false;
     }
@@ -765,11 +737,6 @@ struct OutputConcatPart final : public NceBasedPart {
 
     OutputConcatPart(VPU::CopyOp copy, VPU::SliceOp slice, VPU::NCEOpInterface nce, unsigned idx)
             : NceBasedPart(copy, nce), sliceOp(slice), nceInput(idx) {
-    }
-
-    OutputConcatPart(VPU::CopyOp copy, VPU::NCEClusterTilingOp copyCluster, VPU::SliceOp slice, VPU::NCEOpInterface nce,
-                     VPU::NCEClusterTilingOp nceCluster, unsigned idx)
-            : NceBasedPart(copy, copyCluster, nce, nceCluster), sliceOp(slice), nceInput(idx) {
     }
 
     bool hasSliceOp() const {
@@ -905,10 +872,8 @@ bool OutputConcatPattern::outputPatternCanBeCMXed(size_t cmxSize) {
         return true;
     }
 
-    const auto distributedTypeInterfaceInput = _outputParts[0]
-                                                       .nceClusterOp.getOperand(_outputParts[0].nceInput)
-                                                       .getType()
-                                                       .cast<VPU::DistributedTypeInterface>();
+    const auto distributedTypeInterfaceInput =
+            _outputParts[0].nceOp->getOperand(_outputParts[0].nceInput).getType().cast<VPU::DistributedTypeInterface>();
     if (!distributedTypeInterfaceInput.containsDistributedTypes()) {
         return true;
     }
@@ -917,9 +882,8 @@ bool OutputConcatPattern::outputPatternCanBeCMXed(size_t cmxSize) {
 
     if (inTypeDistributed != nullptr) {
         for (auto concatPart : ArrayRef(_outputParts).drop_front()) {
-            const auto distributedTypeInterfaceOutput = concatPart.nceClusterOp.getOperand(concatPart.nceInput)
-                                                                .getType()
-                                                                .cast<VPU::DistributedTypeInterface>();
+            const auto distributedTypeInterfaceOutput =
+                    concatPart.nceOp->getOperand(concatPart.nceInput).getType().cast<VPU::DistributedTypeInterface>();
             if (!distributedTypeInterfaceOutput.containsDistributedTypes()) {
                 return false;
             }
@@ -952,8 +916,7 @@ void OutputConcatPattern::moveConcatToCMX() {
     }
     // If the outputPattern has MC layer, set the same distribution for Concat output as for the following consumer
 
-    auto outputCopyType =
-            _outputParts.front().copyClusterOp->getResult(0).getType().cast<VPU::DistributedTypeInterface>();
+    auto outputCopyType = _outputParts.front().copyOp->getResult(0).getType().cast<VPU::DistributedTypeInterface>();
     auto newConcatOutputType =
             getConcatDistributedType(outputCopyType, concatType.getShape(), concatType.getElementType());
     _concat.getOutput().setType(newConcatOutputType);
@@ -988,11 +951,9 @@ void OutputConcatPattern::replaceSliceCopy() {
 
 class CMXConcatPass final : public CMXConcatBase<CMXConcatPass> {
 public:
-    explicit CMXConcatPass(Logger log, bool supportNCEOpInsertion): _supportNCEOpInsertion(supportNCEOpInsertion) {
+    explicit CMXConcatPass(Logger log) {
         Base::initLogger(log, Base::getArgumentName());
     }
-
-    mlir::LogicalResult initialize(mlir::MLIRContext* ctx) final;
 
 private:
     void safeRunOnFunc() override;
@@ -1004,8 +965,6 @@ private:
     bool isSplitSupportedOnDPU(VPU::SliceOp sliceOp);
     bool isPotentialCMXConcat(VPU::ConcatOp concat);
     bool areInputOutputPatternsCompatible(InputConcatPattern& inputPattern, OutputConcatPattern& outputPattern);
-
-    bool _supportNCEOpInsertion;
 };
 
 mlir::FailureOr<InputConcatPattern> CMXConcatPass::getInputPattern(VPU::ConcatOp concat) {
@@ -1039,40 +998,30 @@ mlir::FailureOr<InputConcatPattern> CMXConcatPass::getInputPattern(VPU::ConcatOp
         }
 
         auto inputCopyOp = input.getDefiningOp<VPU::CopyOp>();
-        auto inputClusterTilingOp = input.getDefiningOp<VPU::NCEClusterTilingOp>();
-        if (inputClusterTilingOp) {
-            if (auto innerOp = inputClusterTilingOp.getInnerTaskOpOfType<VPU::CopyOp>()) {
-                inputCopyOp = innerOp;
-            }
-        }
-
         if (inputCopyOp == nullptr) {
             logNest.trace("InputPattern mismatch: Copy op is not found");
             return mlir::failure();
         }
 
         auto parentNCEOp = inputCopyOp.getInput().getDefiningOp<VPU::NCEOpInterface>();
-        VPU::NCEClusterTilingOp parentNCEClusterTilingOp;
+        auto isDistributedType = [](mlir::Value val) {
+            auto distributedIf = mlir::dyn_cast<VPU::DistributedTypeInterface>(val.getType());
+            return ((distributedIf != nullptr) && (distributedIf.containsDistributedTypes()));
+        };
 
-        if (inputClusterTilingOp) {
-            auto inputClusterTiling = inputClusterTilingOp.getOperand(0);
-            parentNCEClusterTilingOp = inputClusterTiling.getDefiningOp<VPU::NCEClusterTilingOp>();
-            if (parentNCEClusterTilingOp) {
-                if (auto innerOp = parentNCEClusterTilingOp.getInnerTaskOpOfType<VPU::NCEOpInterface>()) {
-                    parentNCEOp = innerOp;
-                    // ViewOp is inserted between NCEPermuteOp and ClusterTiling copy(CMX2CMX) when bufferizing for
-                    // NCEPermuteOp.
-                    // The ViewOp would block removing this CMX2CMX ClusterTiling copy and lead to unrolling error
-                    // because the input and ouput are both distributed.
-                    // So skip CMXConcat for NCEPermuteOp, see E#118060 for details.
-                    if (mlir::isa<VPU::NCEPermuteOp>(parentNCEOp)) {
-                        logNest.trace("Skip CMXConcat for NCEPermuteOp");
-                        return mlir::failure();
-                    }
+        if (isDistributedType(inputCopyOp->getOperand(0)) || isDistributedType(inputCopyOp->getResult(0))) {
+            if (parentNCEOp) {
+                // ViewOp is inserted between NCEPermuteOp and ClusterTiling copy(CMX2CMX) when bufferizing for
+                // NCEPermuteOp.
+                // The ViewOp would block removing this CMX2CMX ClusterTiling copy and lead to unrolling error
+                // because the input and ouput are both distributed.
+                // So skip CMXConcat for NCEPermuteOp, see E#118060 for details.
+                if (mlir::isa<VPU::NCEPermuteOp>(parentNCEOp)) {
+                    logNest.trace("Skip CMXConcat for NCEPermuteOp");
+                    return mlir::failure();
                 }
             }
         }
-
         if (parentNCEOp == nullptr) {
             logNest.trace("InputPattern mismatch: NCE op is not found");
             return mlir::failure();
@@ -1082,8 +1031,7 @@ mlir::FailureOr<InputConcatPattern> CMXConcatPass::getInputPattern(VPU::ConcatOp
             return mlir::failure();
         }
         nceInputs.insert(input);
-        inputParts.push_back(
-                InputConcatPart(input, inputCopyOp, inputClusterTilingOp, parentNCEOp, parentNCEClusterTilingOp));
+        inputParts.push_back(InputConcatPart(input, inputCopyOp, parentNCEOp));
     }
 
     auto hasNce = llvm::any_of(inputParts, [](InputConcatPart& part) {
@@ -1105,7 +1053,6 @@ mlir::FailureOr<OutputConcatPattern> CMXConcatPass::getOutputPattern(VPU::Concat
     for (auto user : concat.getOutput().getUsers()) {
         auto outputSliceOp = mlir::dyn_cast<VPU::SliceOp>(user);
         auto outputCopyOp = mlir::dyn_cast<VPU::CopyOp>(user);
-        auto outputClusterCopyOp = mlir::dyn_cast<VPU::NCEClusterTilingOp>(user);
 
         // Store the CopyOp or ClusterTiling(CopyOp)
         SmallVector<mlir::Operation*> copyOutOps;
@@ -1121,18 +1068,7 @@ mlir::FailureOr<OutputConcatPattern> CMXConcatPass::getOutputPattern(VPU::Concat
             }
             for (auto copyOp : outputSliceOp.getResult().getUsers()) {
                 outputCopyOp = mlir::dyn_cast<VPU::CopyOp>(copyOp);
-                outputClusterCopyOp = mlir::dyn_cast<VPU::NCEClusterTilingOp>(copyOp);
-
-                if (outputClusterCopyOp) {
-                    if (outputClusterCopyOp.getInnerTaskOpOfType<VPU::CopyOp>()) {
-                        // match Concat->SliceOp->ClusterTiling(CopyOp)
-                        copyOutOps.push_back(outputClusterCopyOp);
-                        continue;
-                    }
-
-                    logNest.trace("OutputPattern mismatch: No CopyOp in the ClusterTilingOp after Slice");
-                    return mlir::failure();
-                } else if (outputCopyOp) {
+                if (outputCopyOp) {
                     // match Concat->SliceOp->CopyOp
                     copyOutOps.push_back(outputCopyOp);
                     continue;
@@ -1140,15 +1076,6 @@ mlir::FailureOr<OutputConcatPattern> CMXConcatPass::getOutputPattern(VPU::Concat
                 logNest.trace("OutputPattern mismatch: No CopyOp after Slice");
                 return mlir::failure();
             }
-        } else if (outputClusterCopyOp) {
-            // case 2. if the child of concat is ClusterTilingOp
-            if (outputClusterCopyOp.getInnerTaskOpOfType<VPU::CopyOp>() == nullptr) {
-                logNest.trace("OutputPattern mismatch: No CopyOp in the ClusterTilingOp");
-                return mlir::failure();
-            }
-
-            // match Concat->ClusterTiling(CopyOp)
-            copyOutOps.push_back(outputClusterCopyOp);
         } else if (outputCopyOp) {
             // case 3. if the child of concat is CopyOp
             copyOutOps.push_back(outputCopyOp);
@@ -1159,49 +1086,16 @@ mlir::FailureOr<OutputConcatPattern> CMXConcatPass::getOutputPattern(VPU::Concat
 
         // Look for the NCEOps according to the CopyOps
         for (auto& op : copyOutOps) {
-            llvm::DenseSet<mlir::Operation*> nceUsers;
             for (auto opUser : op->getResult(0).getUsers()) {
                 auto childNCEOp = mlir::dyn_cast<VPU::NCEOpInterface>(opUser);
-                auto childNCEClusterOp = mlir::dyn_cast<VPU::NCEClusterTilingOp>(opUser);
-                if (childNCEClusterOp) {
-                    if (auto innerOp = childNCEClusterOp.getInnerTaskOpOfType<VPU::NCEOpInterface>()) {
-                        childNCEOp = innerOp;
-                    }
-                }
 
                 if (childNCEOp == nullptr) {
                     logNest.trace("OutputPattern mismatch: No NCEOp");
                     return mlir::failure();
                 }
-
-                if (nceUsers.find(opUser) != nceUsers.end()) {
-                    // avoid multiple reads from the same location at the same time
-                    logNest.trace("Concat input used twice by the same operation, can not cmx");
-                    return mlir::failure();
-                }
-                nceUsers.insert(opUser);
-                if (childNCEClusterOp) {
-                    auto copyOp = mlir::dyn_cast<VPU::CopyOp>(op);
-                    auto copyClusterOp = mlir::dyn_cast<VPU::NCEClusterTilingOp>(op);
-                    if (copyClusterOp) {
-                        if (auto innerOp = copyClusterOp.getInnerTaskOpOfType<VPU::CopyOp>()) {
-                            copyOp = innerOp;
-                        }
-                    }
-
-                    if (copyOp == nullptr) {
-                        logNest.trace("OutputPattern mismatch: No CopyOp");
-                        return mlir::failure();
-                    }
-
-                    auto index = getIndexOfInput(childNCEClusterOp, op);
-                    outputParts.push_back(OutputConcatPart(copyOp, copyClusterOp, outputSliceOp, childNCEOp,
-                                                           childNCEClusterOp, index));
-                } else {
-                    auto index = getIndexOfInput(childNCEOp, op);
-                    outputParts.push_back(
-                            OutputConcatPart(mlir::dyn_cast<VPU::CopyOp>(op), outputSliceOp, childNCEOp, index));
-                }
+                auto index = getIndexOfInput(childNCEOp, op);
+                outputParts.push_back(
+                        OutputConcatPart(mlir::dyn_cast<VPU::CopyOp>(op), outputSliceOp, childNCEOp, index));
             }
         }
     }
@@ -1310,13 +1204,13 @@ bool CMXConcatPass::areInputOutputPatternsCompatible(InputConcatPattern& inputPa
     });
 
     if (inputHasDistributed && outputHasDistributed) {
-        const auto inputType = (*inIt).nceClusterOp->getResult(0)
+        const auto inputType = (*inIt).nceOp->getResult(0)
                                        .getType()
                                        .cast<VPU::DistributedTypeInterface>()
                                        .getDistributedTypes()
                                        .front()
                                        .cast<VPU::DistributedTensorType>();
-        const auto outputType = (*outIt).nceClusterOp->getOperand(0)
+        const auto outputType = (*outIt).nceOp->getOperand(0)
                                         .getType()
                                         .cast<VPU::DistributedTypeInterface>()
                                         .getDistributedTypes()
@@ -1365,21 +1259,6 @@ bool CMXConcatPass::areInputOutputPatternsCompatible(InputConcatPattern& inputPa
     return true;
 }
 
-mlir::LogicalResult CMXConcatPass::initialize(mlir::MLIRContext* ctx) {
-    if (mlir::failed(Base::initialize(ctx))) {
-        return mlir::failure();
-    }
-
-    if (supportNCEOpInsertion.hasValue()) {
-        _log.trace("Overloading the default value {0} of the '_supportNCEOpInsertion' field to the value {1} of the "
-                   "pass option 'supportNCEOpInsertion' generated by MLIR",
-                   _supportNCEOpInsertion, supportNCEOpInsertion);
-        _supportNCEOpInsertion = supportNCEOpInsertion;
-    }
-
-    return mlir::success();
-}
-
 void CMXConcatPass::safeRunOnFunc() {
     auto func = getOperation();
     auto module = func->getParentOfType<mlir::ModuleOp>();
@@ -1403,7 +1282,7 @@ void CMXConcatPass::safeRunOnFunc() {
         }
 
         auto inputPattern = potentialInputPattern.value();
-        if (!inputPattern.inputPatternCanBeCMXed(cmxSize, _supportNCEOpInsertion)) {
+        if (!inputPattern.inputPatternCanBeCMXed(cmxSize)) {
             nestLog.trace("Concat input pattern can not be cmx-ed");
             return;
         }
@@ -1443,6 +1322,6 @@ void CMXConcatPass::safeRunOnFunc() {
 // createCMXConcatPass
 //
 
-std::unique_ptr<mlir::Pass> vpux::VPU::createCMXConcatPass(Logger log, bool supportNCEOpInsertion) {
-    return std::make_unique<CMXConcatPass>(log, supportNCEOpInsertion);
+std::unique_ptr<mlir::Pass> vpux::VPU::createCMXConcatPass(Logger log) {
+    return std::make_unique<CMXConcatPass>(log);
 }

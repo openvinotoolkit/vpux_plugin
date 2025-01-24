@@ -12,6 +12,7 @@
 //
 
 #include "vpux/compiler/dialect/VPU/utils/strategy_manager/subgraph_optimizer.hpp"
+#include "vpux/compiler/core/type_interfaces.hpp"
 #include "vpux/compiler/dialect/VPU/utils/const_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/generate_tiling.hpp"
 #include "vpux/compiler/dialect/VPU/utils/strategy_manager/strategy_manager.hpp"
@@ -183,7 +184,7 @@ VPU::MultiClusterStrategy SubgraphOptimizer::getBestInSOHLikeStrategies(VPU::Clu
         SOHCost += spillingCost;
         _log.trace("SplitOverHeight has spilling cost {0}", spillingCost);
     }
-    // Currently only compressedConv op has SplitOverHeightOverlapped strategy on NPU37XX
+    // Currently only compressedConv op has SplitOverHeightOverlapped strategy on VPUX37XX
     // For general implementation, we consider both SOH & SOHO.
     if (isValidStrategy(clusteredOp, VPU::MultiClusterStrategy::SplitOverHeightOverlapped)) {
         SOHOverlappedCost =
@@ -668,16 +669,14 @@ bool SubgraphOptimizer::hasLongTermSpilling(VPU::ClusteredOpInterface origOp, VP
 
     auto swOpFitsInCMX = [&](VPU::SWOpInterface softwareOp) {
         // single-cluster op
-        SmallVector<vpux::NDTypeInterface> operandTypes;
-        for (const auto& operand : softwareOp->getOperands()) {
-            operandTypes.push_back(operand.getType().cast<vpux::NDTypeInterface>());
+        SmallVector<NDTypeInterface> operationNDTypes;
+        for (auto type : softwareOp->getOperandTypes()) {
+            operationNDTypes.push_back(mlir::cast<NDTypeInterface>(type));
         }
-
-        VPUX_THROW_UNLESS(softwareOp->getResults().size() == 1, "Only support SW with one output, but got '{0}'",
-                          softwareOp->getResults().size());
-        operandTypes.push_back(softwareOp->getResult(0).getType().cast<vpux::NDTypeInterface>());
-
-        return softwareOp.fitIntoCMX(operandTypes, reservedMem);
+        for (auto type : softwareOp->getResultTypes()) {
+            operationNDTypes.push_back(mlir::cast<NDTypeInterface>(type));
+        }
+        return softwareOp.fitIntoCMX(operationNDTypes, reservedMem);
     };
 
     auto doesMiddleOpFitCMX = [&](mlir::Operation* op) {
@@ -719,7 +718,11 @@ bool SubgraphOptimizer::hasLongTermSpilling(VPU::ClusteredOpInterface origOp, VP
                 });
     };
 
-    auto hasSpilling = !llvm::all_of(middleOps, doesMiddleOpFitCMX);
+    auto hasSingleResult = [](mlir::Operation* op) {
+        return op->getNumResults() == 1;
+    };
+
+    auto hasSpilling = !llvm::all_of(middleOps, hasSingleResult) || !llvm::all_of(middleOps, doesMiddleOpFitCMX);
     if (hasSpilling) {
         _log.trace(" Long term spilling {0} -> {1} happens", parent->getLoc(), user->getLoc());
     }
@@ -1266,6 +1269,8 @@ void SubgraphOptimizer::removeClusteringStrategyAvoidSpillingOnSubgraph(VPU::Clu
 }
 
 void SubgraphOptimizer::optimizeStrategyAvoidSpillingOnModel() {
+    // Assure Layer cost only include layer DPU cost under this phase. Exclude layer activation DMAs
+    _layerCostModel.setUnderSubgraphOpt(true);
     // detect shortcuts in model like resnet
     detectShortcuts();
 

@@ -30,7 +30,7 @@ void SplitExceedingVariantCountBarriersPass::safeRunOnFunc() {
     const auto maxAvailableSlots = maxVariantCount.hasValue() ? checked_cast<size_t>(maxVariantCount.getValue())
                                                               : VPUIP::getBarrierMaxVariantCount(func);
 
-    // A hw limit from NPU40XX - variants sum of one barrier cann't exceed maxVariantSum
+    // A hw limit from VPUX40XX - variants sum of one barrier cann't exceed maxVariantSum
     const auto maxSlotsSum = maxVariantSum.hasValue() ? checked_cast<size_t>(maxVariantSum.getValue())
                                                       : VPUIP::getBarrierMaxVariantSum(func);
     bool maxSlotsSumLimitEnabled = false;
@@ -62,7 +62,7 @@ void SplitExceedingVariantCountBarriersPass::safeRunOnFunc() {
     VPUX_THROW_UNLESS(barrierInfo.verifyControlGraphSplit(), "Encountered split of control graph is incorrect");
     barrierInfo.clearAttributes();
     VPURT::postProcessBarrierOps(func);
-    VPURT::verifyBarrierSlots(func, _log);
+    VPUX_THROW_UNLESS(VPURT::verifyBarrierSlots(func, _log), "Barrier slot count check failed");
 }
 
 }  // namespace

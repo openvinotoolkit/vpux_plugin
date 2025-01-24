@@ -36,9 +36,10 @@ bool RemoveSplitConcat::run_on_model(const std::shared_ptr<ov::Model>& m) {
                         const auto concat_node =
                                 std::dynamic_pointer_cast<ov::op::v0::Concat>(consumer->shared_from_this());
                         if (concat_node != nullptr) {
-                            replace_output_update_name(concat_node->output(0), split_node->input_value(0));
-                            pass_applied = true;
-                            break;
+                            if (replace_output_update_name(concat_node->output(0), split_node->input_value(0))) {
+                                pass_applied = true;
+                                break;
+                            }
                         }
                     }
                 }

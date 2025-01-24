@@ -18,11 +18,15 @@ namespace {
 ArrayRef<char> getCostModelData(VPU::ArchKind archKind, bool isFastModel) {
     switch (archKind) {
     case VPU::ArchKind::NPU37XX:
-    case VPU::ArchKind::NPU40XX:
         if (isFastModel) {
             return ArrayRef(VPU::COST_MODEL_2_7_FAST, VPU::COST_MODEL_2_7_FAST_SIZE);
         }
         return ArrayRef(VPU::COST_MODEL_2_7, VPU::COST_MODEL_2_7_SIZE);
+    case VPU::ArchKind::NPU40XX:
+        if (isFastModel) {
+            return ArrayRef(VPU::COST_MODEL_4_0_FAST, VPU::COST_MODEL_4_0_FAST_SIZE);
+        }
+        return ArrayRef(VPU::COST_MODEL_4_0, VPU::COST_MODEL_4_0_SIZE);
     default:
         VPUX_THROW("Unsupported VPU arch type: '{0}'", archKind);
     }
@@ -38,12 +42,18 @@ std::shared_ptr<VPUNN::VPUCostModel> vpux::VPU::createCostModel(ArchKind arch) {
     return std::make_shared<VPUNN::VPUCostModel>(costModelData.data(), costModelData.size(), false);
 }
 
-std::shared_ptr<VPUNN::VPULayerCostModel> vpux::VPU::createLayerCostModel(ArchKind arch, bool isFastModel) {
+std::shared_ptr<VPUNN::VPULayerCostModel> vpux::VPU::createLayerCostModel(ArchKind arch) {
     // VPUNN provides two models - default and fast.
     // Currently use default model for workload generation. Ticket to explore moving to fast model [E#70055].
     // Currently use fast model for per layer evaluation in multi-cluster strategy selection
+    bool isFastModel = true;
     const auto costModelData = getCostModelData(arch, isFastModel);
-    return std::make_shared<VPUNN::VPULayerCostModel>(costModelData.data(), costModelData.size(), false);
+    auto layerCostModel = std::make_shared<VPUNN::VPULayerCostModel>(costModelData.data(), costModelData.size(), false);
+    if (VPU::isArchVPUX3XXX(arch)) {
+        // keep same per tile workload channel limit on 37XX after new vpunn software update
+        layerCostModel->set_maxWorkloadsPerIntraTileSplit(50U);
+    }
+    return layerCostModel;
 }
 
 ///@brief Validate vpunn cost. If cost is not the defined error code then return it
@@ -167,6 +177,9 @@ std::optional<VPUNN::DataType> vpux::VPU::getVPUNNElementType(mlir::Type type) {
             // Temporary enablement; follow up E#103211
             return qType.isSigned() ? VPUNN::DataType::INT8 : VPUNN::DataType::UINT8;
         }
+    } else if (type.isF32()) {
+        // Temporary enablement; follow up E#149202
+        return VPUNN::DataType::BFLOAT16;
     }
 
     return std::nullopt;
@@ -247,7 +260,7 @@ VPUNN::VPULayerStrategy vpux::VPU::getVPULayerStrategy(VPU::MultiClusterStrategy
     // TODO:[E-122321] Investigate if VPUNN Cost Model supports multiple batch query.
     // As a workaround, we set SOB MC to SOH tiling strategy for now.
     case VPU::MultiClusterStrategy::SplitOverBatch:
-        VPUNNStrategy.tiling_strategy = VPUNN::VPUTilingStrategy::SOH;
+        VPUNNStrategy.tiling_strategy = VPUNN::VPUTilingStrategy::SOH_Overlapped;
         return VPUNNStrategy;
     case VPU::MultiClusterStrategy::SplitOverKernel:
         VPUNNStrategy.tiling_strategy = VPUNN::VPUTilingStrategy::SOK;
@@ -406,8 +419,8 @@ VPUNN::DPUWorkload vpux::VPU::getDPUWorkload(const VPUIP::WorkloadCostParams& ti
     }
 
     // set activation
-    if (tileParams.ppeOpaqueAttr != nullptr) {
-        vpunnDPUWorkload.activation_function = getVPUNNActivationFunction(tileParams.ppeOpaqueAttr);
+    if (tileParams.ppeAttr != nullptr) {
+        vpunnDPUWorkload.activation_function = getVPUNNActivationFunction(tileParams.ppeAttr);
     }
 
     return vpunnDPUWorkload;
@@ -446,7 +459,7 @@ VPUIP::WorkloadCostParams vpux::VPU::getWorkloadCostParam(VPU::NCEOpInterface nc
     params.isWeightsSparsityEnabled = false;
 
     // set ppe for workload activation
-    params.ppeOpaqueAttr = nceOp.getOpaquePPE();
+    params.ppeAttr = nceOp.getPPE();
 
     // set MC strategy
     auto op = nceOp.getOperation();
@@ -486,7 +499,7 @@ VPUIP::WorkloadCostParams vpux::VPU::getWorkloadCostParam(VPU::NCEOpInterface nc
                 (numTilesIn[Dims4D::Act::H.ind()] > 1)) {
                 params.layerStrategy = VPU::MultiClusterStrategy::SplitOverHeight;
             } else if (modeIn == VPU::DistributionMode::OVERLAPPED) {
-                // Set SplitOverHeightOverlapped to be different from SplitOverHeight for VPUNN even on NPU40XX
+                // Set SplitOverHeightOverlapped to be different from SplitOverHeight for VPUNN even on VPUX40XX
                 params.layerStrategy = VPU::MultiClusterStrategy::SplitOverHeightOverlapped;
             } else if (modeOut == (VPU::DistributionMode::SEGMENTED | VPU::DistributionMode::MULTICASTED)) {
                 params.layerStrategy = VPU::MultiClusterStrategy::HKSwitch;
@@ -528,6 +541,9 @@ VPUIP::WorkloadCostParams vpux::VPU::getWorkloadCostParam(VPU::NCEOpInterface nc
             })
             .Case<VPU::NCEMatMulOp>([&](auto) {
                 params.nceTaskType = VPUIP::NCETaskType::CONV;
+            })
+            .Case<VPU::NCEReduceOp>([&](VPU::NCEReduceOp) {
+                params.nceTaskType = VPUIP::NCETaskType::REDUCEMEAN;
             })
             // Only for VPUNN L1 DPU API
             // For L2 API, the strategy SOW is not supported by VPUNN, refer to #86188

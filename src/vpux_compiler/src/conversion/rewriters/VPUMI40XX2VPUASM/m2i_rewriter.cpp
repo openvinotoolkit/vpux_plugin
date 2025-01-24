@@ -9,12 +9,12 @@
 namespace vpux {
 namespace vpumi40xx2vpuasm {
 
-mlir::LogicalResult M2IRewriter::symbolize(VPUMI40XX::M2IOp op, SymbolMapper& mapper,
-                                           mlir::ConversionPatternRewriter& rewriter) const {
+mlir::FailureOr<SymbolizationResult> M2IRewriter::symbolize(VPUMI40XX::M2IOp op, SymbolMapper& mapper,
+                                                            mlir::ConversionPatternRewriter& rewriter) const {
     auto result = op.getResult();
     mlir::StringAttr symName = findSym(result).getRootReference();
 
-    auto optionalSym = [&](mlir::Value val) -> mlir::FlatSymbolRefAttr {
+    auto optionalSym = [&](mlir::Value val) -> mlir::SymbolRefAttr {
         return val ? findSym(val) : nullptr;
     };
 
@@ -25,7 +25,7 @@ mlir::LogicalResult M2IRewriter::symbolize(VPUMI40XX::M2IOp op, SymbolMapper& ma
         return mlir::isa<VPUMI40XX::M2IOp>(op);
     });
 
-    mlir::FlatSymbolRefAttr nextLink = nullptr;
+    mlir::SymbolRefAttr nextLink = nullptr;
     if (nextM2IIt != result.user_end()) {
         auto nextM2I = mlir::cast<VPUMI40XX::M2IOp>(*nextM2IIt);
         auto nextLinkIt = mapper.find(nextM2I.getTaskLocation());
@@ -44,7 +44,7 @@ mlir::LogicalResult M2IRewriter::symbolize(VPUMI40XX::M2IOp op, SymbolMapper& ma
     auto startAfter = op.getStartAfterAttr();
     auto cleanAfter = op.getCleanAfterAttr();
 
-    rewriter.create<VPUASM::M2IOp>(
+    auto newOp = rewriter.create<VPUASM::M2IOp>(
             op.getLoc(), symName, taskIdx, taskLocation, nextLink, inputSym, outputSym, profilingDataSym,
             op.getDoCscAttr(), op.getDoNormAttr(), op.getInFmtAttr(), op.getOutFmtAttr(),
             op.getChromaInReverseChannelsAttr(), op.getChromaOutReverseChannelsAttr(),
@@ -54,7 +54,7 @@ mlir::LogicalResult M2IRewriter::symbolize(VPUMI40XX::M2IOp op, SymbolMapper& ma
 
     rewriter.eraseOp(op);
 
-    return mlir::success();
+    return SymbolizationResult(newOp);
 }
 
 }  // namespace vpumi40xx2vpuasm

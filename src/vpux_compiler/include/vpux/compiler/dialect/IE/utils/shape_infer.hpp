@@ -1,25 +1,57 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 #pragma once
 
-#include "vpux/compiler/core/ops_interfaces.hpp"
 #include "vpux/compiler/dialect/IE/IR/attributes.hpp"
 
-#include "vpux/compiler/dialect/const/ops.hpp"
 #include "vpux/utils/core/array_ref.hpp"
+#include "vpux/utils/core/logger.hpp"
 #include "vpux/utils/core/small_vector.hpp"
+
+#include <mlir/IR/OpDefinition.h>
 
 namespace vpux {
 namespace IE {
+
+bool isBroadcastable(int64_t d0, int64_t d1);
 
 mlir::FailureOr<SmallVector<int64_t>> broadcastEltwiseShape(ArrayRef<int64_t> shape1, ArrayRef<int64_t> shape2,
                                                             AutoBroadcastType broadcastType, mlir::Location loc);
 
 mlir::FailureOr<SmallVector<int64_t>> broadcastEltwiseShape(ArrayRef<ArrayRef<int64_t>> shapes,
                                                             AutoBroadcastType broadcastType, mlir::Location loc);
+
+mlir::FailureOr<SmallVector<mlir::OpFoldResult>> reifyEltwiseTensors(mlir::OpBuilder& builder, mlir::Value input1,
+                                                                     mlir::Value input2,
+                                                                     IE::AutoBroadcastType broadcastType,
+                                                                     mlir::Location loc);
+
+mlir::FailureOr<SmallVector<mlir::OpFoldResult>> reifyMatMulTensors(mlir::OpBuilder& builder, mlir::Value input1,
+                                                                    mlir::Value input2, bool transposeA,
+                                                                    bool transposeB, mlir::Location loc);
+
+/**
+ * @brief Reify tensors for convolution or pooling operations. Currently, it supports only convolution with dilation
+ * equal to 1 and pooling.
+ *
+ * @param builder - builder to create new operations
+ * @param input - input tensor
+ * @param output - output tensor
+ * @param kernelSize - kernel size
+ * @param strides - strides
+ * @param padBegin - padding begin
+ * @param padEnd - padding end
+ *
+ * @return reified shapes for output tensor
+ */
+mlir::FailureOr<SmallVector<mlir::OpFoldResult>> reifyConvPoolTensors(mlir::OpBuilder& builder, mlir::Value input,
+                                                                      mlir::Value output, ArrayRef<int64_t> kernelSize,
+                                                                      ArrayRef<int64_t> strides,
+                                                                      ArrayRef<int64_t> padBegin,
+                                                                      ArrayRef<int64_t> padEnd, mlir::Location loc);
 
 mlir::FailureOr<SmallVector<int64_t>> constInputToData(mlir::Location loc, const mlir::Value& value);
 

@@ -35,10 +35,11 @@ std::unique_ptr<mlir::Pass> createResolveTaskLocationPass(Logger log = Logger::g
 std::unique_ptr<mlir::Pass> createBarrierTopologicalMappingPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createGroupExecutionOpsPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createUnGroupExecutionOpsPass(Logger log = Logger::global());
-std::unique_ptr<mlir::Pass> createWorkloadManagementPass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createAddFetchOpsPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createResolveWLMTaskLocationPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createPropagateFinalBarrierPass(Logger log = Logger::global());
-std::unique_ptr<mlir::Pass> createAddEnqueueOpsPass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createAddEnqueueOpsPass(WlmVpurtEnqueueMode wlmVpurtEnqueue = WlmVpurtEnqueueMode::DISABLED,
+                                                    Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createUnrollFetchTaskOpsPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createLinkEnqueueTargetsPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createLinkAllOpsPass(Logger log = Logger::global());
@@ -46,6 +47,14 @@ std::unique_ptr<mlir::Pass> createUnrollEnqueueOpsPass(Logger log = Logger::glob
 std::unique_ptr<mlir::Pass> createSplitEnqueueOpsPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createAddBootstrapOpsPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createNextSameIdAssignmentPass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createAddPlatformInfoPass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createDumpStatisticsOfWlmOpsPass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createAddInitialBarrierConfigurationOps(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createAddMappedInferenceVersionOpPass(Logger log = Logger::global(),
+                                                                  uint32_t versionMajor = 0, uint32_t versionMinor = 0,
+                                                                  uint32_t versionPatch = 0);
+
+std::unique_ptr<mlir::Pass> createUpdateMappedInferenceVersionOpPass(Logger log = Logger::global());
 
 //
 // Generated

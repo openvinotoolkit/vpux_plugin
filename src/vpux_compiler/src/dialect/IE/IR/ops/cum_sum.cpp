@@ -67,7 +67,7 @@ mlir::LogicalResult ConvertConstToAttr::matchAndRewrite(IE::CumSumOp cumsumOp, m
         return mlir::failure();
     }
 
-    if (const auto attr = axisConst.getContentAttr(); !attr.isSplat()) {
+    if (const auto& attr = axisConst.getContentAttr(); !attr.isSplat()) {
         return mlir::failure();
     }
 

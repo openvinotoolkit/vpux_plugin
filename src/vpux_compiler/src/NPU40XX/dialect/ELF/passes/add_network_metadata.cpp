@@ -6,7 +6,6 @@
 #include "vpux/compiler/NPU40XX/dialect/ELF/ops.hpp"
 #include "vpux/compiler/NPU40XX/dialect/ELF/passes.hpp"
 #include "vpux/compiler/dialect/VPUASM/ops.hpp"
-#include "vpux/compiler/utils/logging.hpp"
 
 using namespace vpux;
 
@@ -36,8 +35,8 @@ void AddNetworkMetadata::safeRunOnFunc() {
     builder.setInsertionPointToEnd(&metadataSection.getContent().emplaceBlock());
     auto metadataOp = builder.create<VPUASM::NetworkMetadataOp>(netFunc.getLoc(), "NetworkMetadata");
 
-    auto actualAlignment =
-            builder.getIntegerAttr(builder.getIntegerType(64, false), metadataOp.getAlignmentRequirements());
+    auto actualAlignment = builder.getIntegerAttr(builder.getIntegerType(64, false),
+                                                  metadataOp.getAlignmentRequirements(VPU::getArch(netFunc)));
     metadataSection.setSecAddrAlignAttr(actualAlignment);
 }
 }  // namespace

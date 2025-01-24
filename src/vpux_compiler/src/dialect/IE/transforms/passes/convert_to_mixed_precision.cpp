@@ -154,24 +154,12 @@ mlir::LogicalResult FloatOutAddRewriter::matchAndRewrite(IE::AddOp addOp, mlir::
         return mlir::failure();
     }
 
-    auto lhsType = lhsDequant.getType().cast<vpux::NDTypeInterface>();
-    auto lhsQuantType = lhsType.getElementType().cast<mlir::quant::UniformQuantizedType>();
+    auto lhsElemType = lhsDequant.getType().cast<vpux::NDTypeInterface>().getElementType();
+    auto rhsElemType = rhsDequant.getType().cast<vpux::NDTypeInterface>().getElementType();
 
-    auto rhsType = rhsDequant.getType().cast<vpux::NDTypeInterface>();
-    auto rhsQuantType = rhsType.getElementType().cast<mlir::quant::UniformQuantizedType>();
-
-    // Check that the input Dequantize operands have compatible types
-    if (lhsQuantType.getExpressedType() != rhsQuantType.getExpressedType() ||
-        lhsQuantType.getStorageType() != rhsQuantType.getStorageType() ||
-        lhsQuantType.isSigned() != rhsQuantType.isSigned()) {
+    if (!isSupportedEltwiseQuantization(lhsElemType, rhsElemType, _allowDifferentScales, /*allowDifferentZp=*/true,
+                                        VPU::EltwiseType::ADD)) {
         return mlir::failure();
-    }
-
-    // If target architecture does not support different scales, check that they are the same
-    if (!_allowDifferentScales) {
-        if (!isDoubleEqual(lhsQuantType.getScale(), rhsQuantType.getScale())) {
-            return mlir::failure();
-        }
     }
 
     rewriter.replaceOpWithNewOp<IE::AddOp>(addOp, addOp.getType(), lhsDequant, rhsDequant, addOp.getAutoBroadcast(),

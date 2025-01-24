@@ -11,6 +11,16 @@ namespace IE {
 
 using SupportedMixedPrecisionFunctor = std::function<bool(mlir::Operation*, const bool isPReLUSupported, Logger log)>;
 
+template <typename ConcreteOp>
+mlir::LogicalResult findQuantizeOrQuantizedNCE(ConcreteOp origOp, mlir::PatternRewriter& rewriter,
+                                               mlir::Value eltwiseInput,
+                                               SmallVector<mlir::Operation*>& eltwiseToQuantizeOps, Logger log);
+template <typename ConcreteOp>
+mlir::LogicalResult removeQuantOrFusedQuant(ConcreteOp origOp, mlir::PatternRewriter& rewriter,
+                                            ArrayRef<mlir::Operation*> eltwiseToQuantizeOps,
+                                            mlir::Operation* quantOrQuantizedNCE, mlir::Type elementType,
+                                            const SupportedMixedPrecisionFunctor& isMixPrecisionSupported, Logger log);
+
 //
 // QuantizeWithTwoInputsNCEEltwiseOpGeneric
 //
@@ -52,12 +62,21 @@ public:
 private:
     const SupportedMixedPrecisionFunctor _isMixPrecisionSupported;
     Logger _log;
-    mlir::LogicalResult findQuantizeOrQuantizedNCE(ConcreteOp origOp, mlir::PatternRewriter& rewriter,
-                                                   mlir::Value addInput,
-                                                   SmallVector<mlir::Operation*>& addToQuantizeOps) const;
-    mlir::LogicalResult removeQuantOrFusedQuant(ConcreteOp origOp, mlir::PatternRewriter& rewriter,
-                                                ArrayRef<mlir::Operation*> addToQuantizeOps,
-                                                mlir::Operation* quantOrQuantizedNCE, mlir::Type elementType) const;
+};
+
+class QuantizeWithAvgPool final : public mlir::OpRewritePattern<IE::AvgPoolOp> {
+public:
+    QuantizeWithAvgPool(mlir::MLIRContext* ctx, const SupportedMixedPrecisionFunctor& isMixPrecisionSupported,
+                        Logger log)
+            : mlir::OpRewritePattern<IE::AvgPoolOp>(ctx), _isMixPrecisionSupported(isMixPrecisionSupported), _log(log) {
+    }
+
+public:
+    mlir::LogicalResult matchAndRewrite(IE::AvgPoolOp avgPoolOp, mlir::PatternRewriter& rewriter) const final;
+
+private:
+    const SupportedMixedPrecisionFunctor _isMixPrecisionSupported;
+    Logger _log;
 };
 }  // namespace IE
 }  // namespace vpux

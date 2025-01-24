@@ -36,12 +36,12 @@ mlir::LogicalResult ClampConverter::matchAndRewrite(VPU::ClampOp clampOp, mlir::
     const auto outElemType = nceOp->getResult(0).getType().cast<vpux::NDTypeInterface>().getElementType();
 
     // Update PPE attribute clamps
-    auto opaquePPEAttr = nceOp.getOpaquePPE();
+    auto ppeAttr = nceOp.getPPE();
     const auto& adapter = VPU::PpeVersionConfig::getFactoryAs<vpux::VPU::IPpeAdapterClamp>();
-    opaquePPEAttr = adapter.intersectClamps(opaquePPEAttr, clampMin, clampMax, outElemType);
+    ppeAttr = adapter.intersectClamps(ppeAttr, clampMin, clampMax, outElemType);
 
     auto newOp = mlir::dyn_cast_or_null<VPU::NCEOpInterface>(rewriter.clone(*nceOp));
-    newOp.setOpaquePPE(opaquePPEAttr);
+    newOp.setPPE(ppeAttr);
     rewriter.replaceOp(clampOp, newOp->getResult(0));
     if (nceOp.use_empty()) {
         rewriter.eraseOp(nceOp);

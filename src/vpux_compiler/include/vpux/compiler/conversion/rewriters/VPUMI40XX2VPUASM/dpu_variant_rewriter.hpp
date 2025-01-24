@@ -13,8 +13,8 @@ namespace vpumi40xx2vpuasm {
 class DPUVariantRewriter : public VPUASMSymbolizationPattern<VPUMI40XX::DPUVariantOp> {
 public:
     using Base::Base;
-    mlir::LogicalResult symbolize(VPUMI40XX::DPUVariantOp op, SymbolMapper& mapper,
-                                  mlir::ConversionPatternRewriter& rewriter) const override;
+    mlir::FailureOr<SymbolizationResult> symbolize(VPUMI40XX::DPUVariantOp op, SymbolMapper& mapper,
+                                                   mlir::ConversionPatternRewriter& rewriter) const override;
 };
 
 }  // namespace vpumi40xx2vpuasm

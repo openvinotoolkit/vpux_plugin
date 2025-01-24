@@ -319,7 +319,7 @@ mlir::OpFoldResult vpux::IE::MemPermuteOp::fold(FoldAdaptor adaptor) {
     }
 
     auto operands = adaptor.getOperands();
-    if (const auto cst = mlir::dyn_cast_or_null<Const::EphemeralContentAttr>(operands[0])) {
+    if (const auto cst = mlir::dyn_cast_or_null<Const::ContentAttr>(operands[0])) {
         auto dstOrder = DimsOrder::fromAffineMap(getDstOrder());
         auto memPerm = DimsOrder::fromAffineMap(getMemPerm());
         return static_cast<Const::ContentAttr>(cst).transform().memPermute(dstOrder, memPerm).get();

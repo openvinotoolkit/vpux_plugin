@@ -1,7 +1,10 @@
-#include "vpux/compiler/dialect/VPUMI40XX/ops.hpp"
+//
+// Copyright (C) 2024 Intel Corporation.
+// SPDX-License-Identifier: Apache 2.0
+//
+
 #include "vpux/compiler/dialect/VPUMI40XX/passes.hpp"
 #include "vpux/compiler/dialect/VPUMI40XX/utils.hpp"
-#include "vpux/compiler/dialect/VPURegMapped/ops.hpp"
 
 using namespace vpux;
 
@@ -23,8 +26,14 @@ void LinkAllOpsPass::safeRunOnFunc() {
     for (auto taskOp : netFunc.getOps<VPURegMapped::TaskOpInterface>()) {
         auto index = taskOp.getIndexType();
 
-        if ((index.getValue() != 0) && taskOp.supportsHardLink()) {
-            taskOp.enableHardLink();
+        if (taskOp.getTaskType() == VPURegMapped::TaskType::ActKernelInvocation) {
+            // shave linked lists are disabled on non-WLM path
+            // as they require FW changes that break compatiblity
+            continue;
+        }
+
+        if ((index.getValue() != 0) && taskOp.supportsTaskLink()) {
+            taskOp.linkToPreviousTask();
         }
     }
 

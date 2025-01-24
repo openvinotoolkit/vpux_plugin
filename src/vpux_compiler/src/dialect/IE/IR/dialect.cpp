@@ -112,7 +112,7 @@ void vpux::IE::IEDialect::initialize() {
 
 mlir::Operation* vpux::IE::IEDialect::materializeConstant(mlir::OpBuilder& builder, mlir::Attribute value,
                                                           mlir::Type type, mlir::Location loc) {
-    if (!mlir::isa<Const::EphemeralContentAttr>(value)) {
+    if (!mlir::isa<Const::ContentAttr>(value)) {
         (void)errorAt(loc, "Can't materialize IE Constant from Attribute '{0}'", value);
         return nullptr;
     }
@@ -122,8 +122,7 @@ mlir::Operation* vpux::IE::IEDialect::materializeConstant(mlir::OpBuilder& build
         return nullptr;
     }
 
-    return builder.create<Const::DeclareOp>(
-            loc, type, static_cast<Const::ContentAttr>(mlir::cast<Const::EphemeralContentAttr>(value)));
+    return builder.create<Const::DeclareOp>(loc, type, mlir::cast<Const::ContentAttr>(value));
 }
 
 //

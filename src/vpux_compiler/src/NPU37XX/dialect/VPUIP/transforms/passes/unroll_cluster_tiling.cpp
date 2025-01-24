@@ -72,15 +72,10 @@ void VPUIP::arch37xx::ClusterSWRewriter::matchAndRewrite(VPUIP::SwKernelOp swTas
         return;
     }
 
-    auto inDistribution = inputType.getDistribution();
-    auto outDistribution = outputType.getDistribution();
-
-    VPUX_THROW_UNLESS(inDistribution.getNumClusters() == outDistribution.getNumClusters(),
-                      "Input '{0}' and output '{1}' number of clusters are not equal", inDistribution.getNumClusters(),
-                      outDistribution.getNumClusters());
-
-    auto inDistributionMode = inDistribution.getMode().getValue();
-    auto outDistributionMode = outDistribution.getMode().getValue();
+    auto inDistributionMode =
+            inputType != nullptr ? inputType.getDistribution().getMode().getValue() : VPU::DistributionMode::NONE;
+    auto outDistributionMode =
+            outputType != nullptr ? outputType.getDistribution().getMode().getValue() : VPU::DistributionMode::NONE;
     VPUX_THROW_WHEN(outDistributionMode == VPU::DistributionMode::OVERLAPPED,
                     "No support for SW op {0}; output in OVERLAPPED mode.", swTask->getLoc());
     VPUX_THROW_WHEN(inDistributionMode == VPU::DistributionMode::OVERLAPPED &&
@@ -88,7 +83,9 @@ void VPUIP::arch37xx::ClusterSWRewriter::matchAndRewrite(VPUIP::SwKernelOp swTas
                     "When SW op has input in OVERLAPPED mode then output must be segmented. op = {0}, out mode = '{1}'",
                     swTask->getLoc(), VPU::stringifyDistributionMode(outDistributionMode));
 
-    auto numClusters = inDistribution.getNumClusters().getInt();
+    const auto distributionAttr = inputType != nullptr ? inputType.getDistribution() : outputType.getDistribution();
+    const auto numClusters = distributionAttr.getNumClusters().getInt();
+
     auto loc = swTask->getLoc();
 
     auto parentInputBuffs = swTask.getInputs();

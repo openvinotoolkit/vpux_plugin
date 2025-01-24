@@ -272,32 +272,26 @@ public:
     }
 
 private:
-    void setNextSameID(mlir::MLIRContext* ctx, mlir::func::FuncOp funcOp) {
+    // Set next_same_id attribute and previousSameId operand for each ConfigureBarrier operation,
+    // and here we don't need to verify barrier if it has same previousSameId with other same physical id barrier,
+    // because the previousSameId operand is continuously increasing
+    void setBarrierIDs(mlir::MLIRContext* ctx, mlir::func::FuncOp funcOp) {
         auto MAX_PID = VPUIP::getNumAvailableBarriers(funcOp);
-        std::vector<std::list<size_t>> nextSameID(MAX_PID);
+
+        std::vector<VPUMI37XX::ConfigureBarrierOp> lastAssignedBarrier(MAX_PID);
 
         for (auto op : funcOp.getOps<VPUMI37XX::ConfigureBarrierOp>()) {
-            auto opIndexType = op.getOperation()->getResult(0).getType().cast<VPURegMapped::IndexType>();
+            auto vid = op.getOperation()->getResult(0).getType().cast<VPURegMapped::IndexType>().getValue();
+            auto pid = op.getId();
 
-            auto vid = opIndexType.getValue();
-
-            if (vid >= MAX_PID) {
-                nextSameID[op.getId()].push_back(vid);
-            }
-        }
-
-        for (auto op : funcOp.getOps<VPUMI37XX::ConfigureBarrierOp>()) {
-            auto newNextSameID = -1;
-
-            if (!nextSameID[op.getId()].empty()) {
-                newNextSameID = nextSameID[op.getId()].front();
-                nextSameID[op.getId()].pop_front();
+            auto& lastBarrier = lastAssignedBarrier[pid];
+            if (lastBarrier != nullptr) {
+                op.getPreviousSameIdMutable().assign(lastBarrier.getOperation()->getResult(0));
+                lastBarrier.setNextSameIdAttr(
+                        mlir::IntegerAttr::get(mlir::IntegerType::get(ctx, 64, mlir::IntegerType::Signed), vid));
             }
 
-            auto newNextSameIDAttr =
-                    mlir::IntegerAttr::get(mlir::IntegerType::get(ctx, 64, mlir::IntegerType::Signed), newNextSameID);
-
-            op.setNextSameIdAttr(newNextSameIDAttr);
+            lastBarrier = op;
         }
     }
 
@@ -336,7 +330,7 @@ private:
         auto funcOp = getOperation();
         mlir::MLIRContext* ctx = &(getContext());
 
-        setNextSameID(ctx, funcOp);
+        setBarrierIDs(ctx, funcOp);
 
         VirtualDependencyTracker vdt_;
 

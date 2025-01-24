@@ -47,7 +47,10 @@ std::tuple<mlir::Value, Shape, Shape> getInputConcatAndPadding(mlir::PatternRewr
         zeroConstShape[Dims4D::Act::H] = isDimX ? getShape(inputConcat)[Dims4D::Act::H] : (pad - kernel / 2);
         const auto zeroType = mlir::RankedTensorType::get(
                 zeroConstShape.raw(), mlir::cast<NDTypeInterface>(input.getType()).getElementType());
-        return Const::createZerosConst(rewriter, origOp->getLoc(), zeroType);
+        auto zeroConst = Const::createZerosConst(rewriter, origOp->getLoc(), zeroType);
+        const auto dataOrder = mlir::cast<NDTypeInterface>(input.getType()).getDimsOrder();
+        const auto orderMap = dataOrder.toAffineMap(rewriter.getContext());
+        return rewriter.createOrFold<IE::ReorderOp>(origOp->getLoc(), zeroConst, orderMap);
     };
 
     if (padLeft > KX / 2) {
@@ -100,8 +103,6 @@ mlir::LogicalResult createNewOpAndReplaceOldOne(mlir::PatternRewriter& rewriter,
     } else {
         return mlir::failure();
     }
-
-    vpux::inferReturnTypes(newOp, vpux::InferShapedTypeMode::ALL);
 
     rewriter.replaceOp(origOp, newOp->getResult(0));
     return mlir::success();

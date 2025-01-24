@@ -210,7 +210,8 @@ mlir::LogicalResult verifyLocationsUniquenessImpl(mlir::Operation* op, StringRef
         if (isIgnoredOp(nestedOp)) {
             return mlir::WalkResult::advance();
         }
-        VPUX_THROW_UNLESS(loc.isa<mlir::FusedLoc>(), "Location '{0}' isn't FusedLoc after '{1}'", loc, passName);
+        VPUX_THROW_UNLESS(loc.isa<mlir::FusedLoc>() || loc.isa<mlir::CallSiteLoc>(),
+                          "Location '{0}' isn't FusedLoc after '{1}'", loc, passName);
 
         ++totalNamedOps;
         const KeyType key = ADTProvider::convertOpToKey(nestedOp);

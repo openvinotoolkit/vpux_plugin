@@ -85,6 +85,6 @@ DOT::EdgeDir NNDMAOp::getEdgeDirection(mlir::Operation* source) {
     return DOT::EdgeDir::EDGE_NORMAL;
 }
 
-bool NNDMAOp::supportsHardLink() {
+bool NNDMAOp::supportsTaskLink() {
     return true;
 }

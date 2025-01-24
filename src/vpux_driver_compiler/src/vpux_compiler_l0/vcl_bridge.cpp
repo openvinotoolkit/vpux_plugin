@@ -14,7 +14,7 @@
 #include "vcl_profiling.hpp"
 #include "vcl_query_network.hpp"
 
-#include "intel_npu/al/config/compiler.hpp"
+#include "intel_npu/config/compiler.hpp"
 
 using namespace vpux;
 

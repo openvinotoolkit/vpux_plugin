@@ -235,7 +235,8 @@ void ConvertNearestToBroadcastOrStridedConcatPass::safeRunOnFunc() {
     mlir::ConversionTarget target(ctx);
     target.addDynamicallyLegalOp<IE::InterpolateOp>([&](IE::InterpolateOp op) {
         if (_interpolateAsSEOp) {
-            if (VPU::NCEInterpolateOp::isSupported(op, logCb, /*checkLayout=*/false, /*checkChannelAlignment=*/false)) {
+            if (VPU::NCEInterpolateOp::isSupported(op, logCb, /*checkLayout=*/false, /*checkChannelAlignment=*/false,
+                                                   /*checkBatch=*/false)) {
                 return true;
             }
         }

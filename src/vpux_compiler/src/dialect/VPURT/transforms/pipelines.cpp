@@ -17,13 +17,13 @@ using namespace vpux;
 // BarrierLegalization
 //
 
-void vpux::VPURT::buildBarrierLegalizationPipeline(mlir::OpPassManager& pm, const bool wlmFlag,
+void vpux::VPURT::buildBarrierLegalizationPipeline(mlir::OpPassManager& pm,
                                                    std::optional<int> virtualBarrierThresholdforWlm,
                                                    const bool unevenVariantSplitFlag, Logger log) {
     pm.addPass(VPURT::createSplitExceedingVariantCountBarriersPass(log));
-    pm.addPass(VPURT::createSatisfyOneWaitBarrierPerTaskPass(wlmFlag, virtualBarrierThresholdforWlm,
-                                                             unevenVariantSplitFlag, log));
-    pm.addPass(VPURT::createReduceExceedingActiveCountBarriersPass(wlmFlag, virtualBarrierThresholdforWlm,
+    pm.addPass(
+            VPURT::createSatisfyOneWaitBarrierPerTaskPass(virtualBarrierThresholdforWlm, unevenVariantSplitFlag, log));
+    pm.addPass(VPURT::createReduceExceedingActiveCountBarriersPass(virtualBarrierThresholdforWlm,
                                                                    unevenVariantSplitFlag, log));
 }
 

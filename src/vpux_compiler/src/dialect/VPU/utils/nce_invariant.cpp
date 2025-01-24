@@ -254,7 +254,7 @@ bool vpux::VPU::NCEInvariant::isSuperdenseSupported(const VPU::ArchKind arch) {
     return compatibleTargets.contains(arch);
 }
 
-bool vpux::VPU::NCEInvariant::isElementwiseMultiplySupported(const VPU::ArchKind) {
+bool vpux::VPU::NCEInvariant::isElementwiseMultiplySupported(const VPU::ArchKind /*arch*/) {
     return false;
 }
 
@@ -306,7 +306,7 @@ mlir::LogicalResult vpux::VPU::NCEInvariant::isSupported(mlir::Operation* op, Lo
                     })
                     .Case<IE::InterpolateOp>([&](IE::InterpolateOp origOp) {
                         return VPU::NCEInterpolateOp::isSupported(origOp, emptyLogCb, checkLayout,
-                                                                  checkChannelAlignment);
+                                                                  checkChannelAlignment, /*checkBatch=*/false);
                     })
                     .Case<IE::TransposedConvolutionOp>([&](IE::TransposedConvolutionOp origOp) {
                         return isSupportedSEPTransposedConv(origOp, emptyLogCb, checkLayout, checkChannelAlignment);
@@ -330,7 +330,7 @@ bool vpux::VPU::NCEInvariant::isSmallKernelOptimizationSupported(const VPU::Arch
     if (arch != VPU::ArchKind::NPU40XX) {
         return false;
     }
-    if (!mlir::isa<VPU::NCEDepthConvolutionOp, VPU::NCEAveragePoolOp>(op)) {
+    if (!mlir::isa<VPU::NCEDepthConvolutionOp>(op)) {
         return false;
     }
     auto nceOp = mlir::dyn_cast<VPU::NCEOpInterface>(op);
@@ -350,9 +350,12 @@ bool vpux::VPU::NCEInvariant::isSmallKernelOptimizationSupported(const VPU::Arch
     mlir::DenseSet<int64_t> workloadsChannels;
     const auto workloads = nceOp.getWorkloads().getOps<VPU::DPUWorkloadOp>();
 
-    const auto workloadChannelsMeetRequirement = llvm::all_of(workloads, [](auto workload) {
+    const auto isFp16Input = mlir::cast<vpux::NDTypeInterface>(op->getOperand(0).getType()).getElementType().isF16();
+
+    const auto workloadChannelsMeetRequirement = llvm::all_of(workloads, [&](auto workload) {
         const auto wlSizes = parseIntArrayAttr<int64_t>(workload.getOutSizes());
-        return wlSizes[Dims4D::Act::C.ind()] == VPU_CHANNEL_SIZE_FOR_L1OPT;
+        return isFp16Input ? wlSizes[Dims4D::Act::C.ind()] == VPU_CHANNEL_SIZE_FOR_L1OPT
+                           : wlSizes[Dims4D::Act::C.ind()] % VPU_CHANNEL_SIZE_FOR_L1OPT == 0;
     });
 
     return KX == 3 && SX == 1 && workloadChannelsMeetRequirement;

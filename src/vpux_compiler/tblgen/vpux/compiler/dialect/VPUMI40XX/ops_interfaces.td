@@ -56,10 +56,17 @@ def VPUMI40XX_ExecutableTaskOpInterface : OpInterface<"ExecutableTaskOpInterface
             }]
         >,
         InterfaceMethod<
-            "Barriers that will be an enqueue target for this task",
+            "Barrier that will be an enqueue target for this task",
             "mlir::Value", "getEnqueueBarrier", (ins), [{}],
             [{
                 return $_op.getEnqueueBarrier();
+            }]
+        >,
+        InterfaceMethod<
+            "Barrier that will be an enqueue target for this task",
+            "mlir::MutableOperandRange", "enqueueBarrierMutable", (ins),
+            [{
+                return $_op.getEnqueueBarrierMutable();
             }]
         >,
     ];

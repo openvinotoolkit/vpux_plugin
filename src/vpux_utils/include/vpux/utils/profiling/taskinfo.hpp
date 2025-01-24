@@ -8,7 +8,7 @@
 #pragma once
 
 #include <cstdint>
-#include <cstring>
+#include <string>
 #include <tuple>
 #include <vector>
 
@@ -33,20 +33,20 @@ struct LayerInfo {
 static_assert(sizeof(LayerInfo) == 368);
 
 struct TaskInfo {
-    char name[256];
-    char layer_type[50];
+    std::string name;
+    std::string layer_type;
     enum class ExecType { NONE, DPU, SW, DMA, M2I };
     ExecType exec_type;
     uint64_t start_time_ns;
     uint64_t duration_ns;
-    uint32_t active_cycles = 0;
+    uint32_t total_cycles = 0;
     uint32_t stall_cycles = 0;
-    uint32_t task_id = -1;
-    uint32_t parent_layer_id = -1;  ///< Not used
+    struct stall_counters {
+        uint32_t lsu0_stalls = 0;
+        uint32_t lsu1_stalls = 0;
+        uint32_t instruction_stalls = 0;
+    } stall_counters;
 };
-
-// Size must match L0-ext ze_profiling_task_info
-static_assert(sizeof(TaskInfo) == 344);
 
 enum class FreqStatus { UNKNOWN, VALID, INVALID, SIM };
 constexpr double UNINITIALIZED_FREQUENCY_VALUE = -1;
@@ -64,9 +64,8 @@ struct ProfInfo {
 
 template <typename T>
 bool profilingTaskStartTimeComparator(const T& a, const T& b) {
-    const auto namesCompareResult = std::strcmp(a.name, b.name);
-    return std::forward_as_tuple(a.start_time_ns, namesCompareResult, b.duration_ns) <
-           std::forward_as_tuple(b.start_time_ns, 0, a.duration_ns);
+    return std::forward_as_tuple(a.start_time_ns, a.name, b.duration_ns) <
+           std::forward_as_tuple(b.start_time_ns, b.name, a.duration_ns);
 }
 
 }  // namespace vpux::profiling

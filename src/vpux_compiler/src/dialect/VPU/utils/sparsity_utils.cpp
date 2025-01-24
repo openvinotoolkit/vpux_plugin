@@ -6,6 +6,7 @@
 #include "vpux/compiler/dialect/VPU/utils/sparsity_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/distributed_tensor_utils.hpp"
 
+#include "vpux/compiler/dialect/VPU/utils/nce_invariant.hpp"
 #include "vpux/utils/core/error.hpp"
 
 #include <algorithm>
@@ -48,9 +49,20 @@ bool VPU::isActSparsityEnabled(const StrOption& enableActivationSparsityOption) 
 // The storage element size must be a multiple of 16
 // Example: if the number of channels is 48 and the sparsity constraint is for the storage element size to be a power of
 // two, the returned value will be 16
-int64_t VPU::getSESize(int64_t channels, const VPU::SparsityConstraint& sparsityConstraint) {
-    for (int64_t seSize = channels; seSize >= 16; seSize -= 16) {
-        if (channels % seSize == 0 && sparsityConstraint.areChannelsFitForSESize(seSize)) {
+int64_t VPU::getSESize(int64_t channels, const VPU::SparsityConstraint& sparsityConstraint, bool isDepthwise) {
+    auto checkDepthwiseLimitation = [&](int64_t seSize) {
+        if (!isDepthwise) {
+            return true;
+        }
+        // Only 16,32 and 64 is supported for depthwise
+        return llvm::find(NCEInvariant::DEPTHWISE_WORKLOAD_SIZES, seSize) !=
+               NCEInvariant::DEPTHWISE_WORKLOAD_SIZES.end();
+    };
+    constexpr int64_t maxDepthWiseSeSize = 64;
+    int64_t seSize = isDepthwise ? std::min(maxDepthWiseSeSize, channels) : channels;
+    for (; seSize >= 16; seSize -= 16) {
+        if (channels % seSize == 0 && sparsityConstraint.areChannelsFitForSESize(seSize) &&
+            checkDepthwiseLimitation(seSize)) {
             return seSize;
         }
     }

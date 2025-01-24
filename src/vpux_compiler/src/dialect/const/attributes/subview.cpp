@@ -423,11 +423,6 @@ Const::Content vpux::Const::SubViewAttr::transform(vpux::Const::Content& input) 
     return output;
 }
 
-Const::ContentSetup vpux::Const::ContentSetup::subview(ShapeRef offset, ShapeRef shape) {
-    return addTransformation(
-            Const::SubViewAttr::get(getIntArrayAttr(getContext(), offset), getIntArrayAttr(getContext(), shape)));
-}
-
 //
 // SubViewAttr::supportsSubByteStorageType
 //

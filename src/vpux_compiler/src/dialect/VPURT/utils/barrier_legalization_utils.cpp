@@ -213,7 +213,7 @@ void VPURT::orderExecutionTasksAndBarriers(mlir::func::FuncOp funcOp, BarrierInf
                       newTaskOpOrder.size());
 
     size_t barriersWithNoUse = 0;
-    funcOp->walk([&](VPURT::DeclareVirtualBarrierOp barrierOp) {
+    funcOp->walk([&](VPURT::BarrierOpInterface barrierOp) {
         if (!barrierOp.getBarrier().use_empty()) {
             return;
         }
@@ -234,7 +234,7 @@ void VPURT::orderExecutionTasksAndBarriers(mlir::func::FuncOp funcOp, BarrierInf
         } else {
             auto declareBufferOps = to_small_vector(funcOp.getOps<VPURT::DeclareBufferOp>());
             if (declareBufferOps.empty()) {
-                auto barrierOps = to_small_vector(funcOp.getOps<VPURT::DeclareVirtualBarrierOp>());
+                auto barrierOps = to_small_vector(funcOp.getOps<VPURT::BarrierOpInterface>());
                 if (!barrierOps.empty()) {
                     taskOp->moveAfter(barrierOps.back());
                 } else {
@@ -250,9 +250,10 @@ void VPURT::orderExecutionTasksAndBarriers(mlir::func::FuncOp funcOp, BarrierInf
 
     // reorder barriers in the IR based on new order
     auto& block = funcOp.getBody().front();
-    mlir::Operation* prevBarrier = nullptr;
+    VPURT::BarrierOpInterface prevBarrier = nullptr;
+    VPURT::BarrierOpInterface finalBarOp = nullptr;
     for (auto& barrierOpIdx : newBarrierOrder) {
-        mlir::Operation* barrierOp = barrierInfo.getBarrierOpAtIndex(barrierOpIdx);
+        auto barrierOp = barrierInfo.getBarrierOpAtIndex(barrierOpIdx);
         // move barriers to top of block
         if (prevBarrier != nullptr) {
             barrierOp->moveAfter(prevBarrier);
@@ -260,6 +261,16 @@ void VPURT::orderExecutionTasksAndBarriers(mlir::func::FuncOp funcOp, BarrierInf
             barrierOp->moveBefore(&block, block.begin());
         }
         prevBarrier = barrierOp;
+
+        if (barrierOp.getIsFinalBarrier()) {
+            VPUX_THROW_UNLESS(finalBarOp == nullptr, "More then one final barrier: {0} and {1}", finalBarOp, barrierOp);
+            finalBarOp = barrierOp;
+        }
+    }
+
+    // Other passes expect final barrier to be at the end of IR
+    if (finalBarOp != nullptr && prevBarrier != finalBarOp) {
+        finalBarOp->moveAfter(prevBarrier);
     }
 
     // regenerate barrier info based on new order

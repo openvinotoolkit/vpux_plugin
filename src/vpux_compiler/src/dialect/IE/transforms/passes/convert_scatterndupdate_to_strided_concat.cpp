@@ -251,7 +251,7 @@ mlir::LogicalResult ConvertScatterNDUpdateToStridedConcatPass::ConvertToStridedC
         const auto upsamplingFactorAttr = getIntArrayAttr(ctx, upsamplingFactor);
         return rewriter
                 .create<IE::UpsamplingOp>(takeOpLoc(origOp, "upsample"), origOp.getUpdates(), upsamplingFactorAttr,
-                                          padAttr)
+                                          padAttr, nullptr)
                 .getOutput();
     };
 

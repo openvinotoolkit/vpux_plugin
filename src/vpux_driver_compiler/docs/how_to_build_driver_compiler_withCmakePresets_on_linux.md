@@ -15,13 +15,11 @@ Before you start to build Driver Compiler targets, please check the necessary co
 
 > Notice: RAM is not mandatory either. If your RAM is less than 32GB, you can compensate by reducing the number of threads during the build or by increasing the swap memory.
 
-> Notice: Ccache and Ninja are required for the build options defined in the CMake Presets. Therefore, both of these tools are necessary. If you are unable to install them, please remove and update the relevant sections in [CMakePresets.json](../../../CMakePresets.json#L5).
-
 ## Using CMakePresets to build
 
 #### Using CMakePresets to build and using NPU-Plugin as an extra module of OpenVINO
 
-Here provides a default pre-configured CMake presets for users named: "npuCidReleaseXXX", `npuCidReleaseLinux` for Linux and `npuCidReleaseWindows` for Windows. The setting is to build [NPU-Plugin Project] as an extra module of [OpenVINO Project]. In this case, `NPU_PLUGIN_HOME` environment variable must be set.
+Here provides a default pre-configured CMake presets for users named: "npuCidReleasexxx", `npuCidReleaseLinux` for Linux and `npuCidReleaseWindows` for Windows. The setting is to build [NPU-Plugin Project] as an extra module of [OpenVINO Project]. In this case, `NPU_PLUGIN_HOME` environment variable must be set.
 
 1. Clone repos:
 
@@ -40,9 +38,9 @@ Here provides a default pre-configured CMake presets for users named: "npuCidRel
         git submodule update --init --recursive
 
         cd /home/useraccount/workspace (Just an example, you could use your own branch/tag/commit.)
-        git clone https://github.com/openvinotoolkit/npu_plugin.git
-        cd npu_plugin
-        git checkout -b develop origin/develop (Just an example, you could use your own branch/tag/commit.)
+        git clone https://github.com/openvinotoolkit/npu_compiler.git
+        cd npu_compiler
+        git checkout -b master origin/master (Just an example, you could use your own branch/tag/commit.)
         git submodule update --init --recursive
     ```
     </details>
@@ -57,7 +55,7 @@ Here provides a default pre-configured CMake presets for users named: "npuCidRel
     ```sh
         # set the enviroment variables
         export OPENVINO_HOME=/home/useraccount/workspace/openvino (need change to your own path)
-        export NPU_PLUGIN_HOME=/home/useraccount/workspace/npu_plugin (need change to your own path)
+        export NPU_PLUGIN_HOME=/home/useraccount/workspace/npu_compiler (need change to your own path)
 
         cd $OPENVINO_HOME
         ln -s $NPU_PLUGIN_HOME/CMakePresets.json ./CMakePresets.json
@@ -66,8 +64,8 @@ Here provides a default pre-configured CMake presets for users named: "npuCidRel
 
 3. Build with the following commands:
 
-    Before build with the following instructions, please make sure you have sset `OPENVINO_HOME` and `NPU_PLUGIN_HOME` enviroment variables.
-    
+    Before build with the following instructions, please make sure `OPENVINO_HOME` and `NPU_PLUGIN_HOME` enviroment variables have been set.
+
     <details>
     <summary>Instructions</summary>
     
@@ -75,11 +73,11 @@ Here provides a default pre-configured CMake presets for users named: "npuCidRel
         cd $OPENVINO_HOME
         cmake --preset npuCidReleaseLinux
         cd build-x86_64/Release/
-        cmake --build ./ --target compilerTest profilingTest vpuxCompilerL0Test loaderTest -j8
+        cmake --build ./ --target npu_driver_compiler compilerTest profilingTest vpuxCompilerL0Test loaderTest -j8
     ```
     </details>
 
-    The defined build option for npuCidReleaseLinux Cmake Preset is listed [here](../../../CMakePresets.json#L238). For additional information about its build options, please refer to section `2.2 Build instructions notes` in [how to build Driver Compiler on linux](./how_to_build_driver_compiler_on_linux.md).
+    The defined build option for npuCidReleaseLinux Cmake Preset is listed [here](../../../CMakePresets.json#L240). For additional information about its build options, please refer to section `2.2 Build instructions notes` in [how to build Driver Compiler on linux](./how_to_build_driver_compiler_on_linux.md).
 
 4. (Optional) Prepare final Driver Compiler package for driver:
 
@@ -105,31 +103,44 @@ Here provides a default pre-configured CMake presets for users named: "npuCidRel
 5. (Optional) Instruction notes about TBB:
 
     <details>
-    <summary>5.1 Default build mode</summary>
+    <summary>5.1 Default tbb location</summary>
 
-    Nowadays the Driver Compiler is building with TBB mode as default using `-D THREADING=TBB`.
-    
-    You can also use Sequential mode `-D THREADING=SEQ` to compile. More info about SEQ mode, please refer to this [file](https://github.com/openvinotoolkit/openvino/blob/0ebff040fd22daa37612a82fdf930ffce4ebb099/docs/dev/cmake_options_for_custom_compilation.md#options-affecting-binary-size).
+    The [build instructions](../../../CMakePresets.json#L274) uses the `"ENABLE_SYSTEM_TBB": false` option, which means that the TBB library downloaded by [OpenVINO Project] will be used. The download path for this TBB library is `$OPENVINO_HOME/temp/tbb`. Within the downloaded TBB folder, `$OPENVINO_HOME/temp/tbb/lib/libtbb.so.12` and `$OPENVINO_HOME/temp/tbb/lib/libtbbmalloc.so.2` are required for the Release version. 
 
     </details>
 
     <details>
     <summary>5.2 Use different TBB version</summary>
 
-    When use TBB mode in build option, the default TBB is downloaded by [OpenVINO Project], located in `$OPENVINO_HME/temp/tbb`.
+    If you wish to build with system TBB, you need install TBB in your local system first and then use `"ENABLE_SYSTEM_TBB": true` option to instead of `"ENABLE_SYSTEM_TBB": false` option in [here](../../../CMakePresets.json#L274).
 
-    If you wish to build with a specific version of TBB, you can download it from [oneTBB Project] and unzip its [release package](https://github.com/oneapi-src/oneTBB/releases). Then, use the `-D ENABLE_SYSTEM_TBB=OFF -D TBBROOT=/home/username/path/to/downloaded/tbb` option o build.
+    If you wish to build with a specific version of TBB, you can download it from [oneTBB Project] and unzip its release package. Then, add the following new lines after line 251 in [CMakePresets.json](../../../CMakePresets.json#L251) file.
+
+    ```sh
+        "TBBROOT": {
+            "type": "FILEPATH",
+            "value": "/home/username/path/to/downloaded/tbb"
+        }
+    ```
     
-    If you would like to build TBB on your own, please refer to [INSTALL.md](https://github.com/oneapi-src/oneTBB/blob/master/INSTALL.md#build-onetbb) in [oneTBB Project].
+    The version of TBB downloaded by [OpenVINO Project] is 2021.13.0, and you can find the version information in the [corresponding file](https://github.com/openvinotoolkit/openvino/blob/master/cmake/dependencies.cmake#L120) within [OpenVINO Project].
+
+    </details>
+
+    <details>
+    <summary>5.3 Do not use TBB</summary>
+
+    If you wish to build without TBB (which will result in a slower build process), you need change `"value": "TBB"` to `"value": "SEQ"` in [here](../../../CMakePresets.json#L228). More info about SEQ mode, please refer to this [file](https://github.com/openvinotoolkit/openvino/blob/master/docs/dev/cmake_options_for_custom_compilation.md#options-affecting-binary-size).
 
     </details>
 
 ### Note
 
-1. Presets step for "npuCidReleaseLinux" need to be built in [OpenVINO Project] folder. The defined build directory for "npuCidReleaseLinux" preset is %OPENVINO_HOME%\build-x86_64\Release.
-2. The presets are configured to use `Ninja` as default generator, so installing Ninja package is an extra requirement.
-3. Currently, presets for "npuCidReleaseLinux" will build the smallest size targrts of Driver Compiler. If the user wishes to build Driver Compiler and other targets, can driectly inherit "cid" preset and enable the needed build option to self configuration presets.
+1. Presets step for "npuCidReleasexxx" need to be built in [OpenVINO Project] folder.
+2. The presets for "npuCidReleasexxx" define the build directory build-x86_64/Release.
+3. The presets are configured to use Ninja as default generator, so installing Ninja package is an extra requirement.
+4. Currently Presets for "npuCidReleasexxx" will build the smallest size targrts of Driver Compiler. If the user wishes to build Driver Compiler and other targets, can driectly inherit "Cid" preset and enable the needed build option to self configuration presets.
 
 [OpenVINO Project]: https://github.com/openvinotoolkit/openvino
-[NPU-Plugin Project]: https://github.com/openvinotoolkit/npu_plugin
+[NPU-Plugin Project]: https://github.com/openvinotoolkit/npu_compiler.git
 [oneTBB Project]: https://github.com/oneapi-src/oneTBB

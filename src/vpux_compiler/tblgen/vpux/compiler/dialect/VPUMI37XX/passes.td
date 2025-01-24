@@ -16,7 +16,7 @@ def BarrierComputation : PassBase<"barrier-computation-VPUMI37XX", "vpux::Functi
     let summary = "Compute and setup scheduling related fields";
 
     let description = [{
-        This pass computes and sets up the (barrier) scheduling related fields - next_same_id, start_after, clean_after.
+        This pass computes and sets up the (barrier) scheduling related fields - next_same_id, previousSameId, start_after, clean_after.
         This logic was clasically part of the parser, but in ELF pipeline, it is included in the lowering.
     }];
 

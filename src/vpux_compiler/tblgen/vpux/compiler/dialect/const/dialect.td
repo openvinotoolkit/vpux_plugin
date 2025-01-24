@@ -101,14 +101,15 @@ The `Const::ConstContentAttr` might hold a list of transformations, they will be
 Note: the tensor-related type attributes (shape, layout, element type) for the `Const::DeclareOp` result value
 and for `Const::ConstContentAttr` final infered type must match.
 
-The quantized constant is represented via special `#const.QuantCast` transformation, which casts raw integer storage representation
-to quantized type with quantization parameters:
+The quantized constant is represented via `#const.CastElemType` transformation,
+which casts raw integer storage representation to quantized type with
+quantization parameters:
 
 ```MLIR
 %0 = const.Declare tensor<1x16x1x1x!quant.uniform<u8:f16, ...>> =
         dense<...> : tensor<1x16x1x1xui8>,
         [
-            #const.QuantCast<!quant.uniform<u8:f16, ...>>
+            #const.CastElemType<!quant.uniform<u8:f16, ...>>
         ]
 ```
 

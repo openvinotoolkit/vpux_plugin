@@ -6,14 +6,18 @@
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 
 #include "vpux/compiler/dialect/IE/utils/concat_utils.hpp"
+#include "vpux/compiler/dialect/IE/utils/dynamic_shape_utils.hpp"
 #include "vpux/compiler/dialect/IE/utils/elem_type_info_utils.hpp"
 #include "vpux/compiler/dialect/IE/utils/slice_utils.hpp"
+#include "vpux/compiler/dialect/const/utils/utils.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/compiler/utils/error.hpp"
 #include "vpux/compiler/utils/loop.hpp"
 #include "vpux/compiler/utils/quantization.hpp"
 
 #include "vpux/utils/core/checked_cast.hpp"
+
+#include <mlir/Dialect/Arith/Utils/Utils.h>
 
 #include <numeric>
 #include <unordered_set>
@@ -468,19 +472,20 @@ mlir::LogicalResult FuseConstConcat::matchAndRewrite(IE::ConcatOp origOp, mlir::
 
     const auto contentElemType = outNdInterface.getElementType();
     auto rankedTensorType = outNdInterface.cast<mlir::RankedTensorType>();
-    mlir::DenseElementsAttr denseAttr;
-    Const::ContentSetup contentAttrSetup;
-    if (auto qtype = contentElemType.dyn_cast<mlir::quant::QuantizedType>()) {
-        rankedTensorType =
-                outNdInterface.changeElemType(normalizeQuantStorageType(qtype)).cast<mlir::RankedTensorType>();
-        denseAttr = mlir::DenseElementsAttr::getFromRawBuffer(rankedTensorType, output.getRawStorageBuf());
-        contentAttrSetup = Const::ContentAttr::transform(denseAttr).quantCast(qtype);
-    } else {
-        denseAttr = mlir::DenseElementsAttr::getFromRawBuffer(rankedTensorType, output.getRawStorageBuf());
-        contentAttrSetup = Const::ContentAttr::transform(denseAttr);
-    }
+    auto [denseAttr, contentAttrSetup] = [&]() -> std::pair<mlir::DenseElementsAttr, Const::ContentSetup> {
+        if (auto qtype = contentElemType.dyn_cast<mlir::quant::QuantizedType>()) {
+            rankedTensorType =
+                    outNdInterface.changeElemType(normalizeQuantStorageType(qtype)).cast<mlir::RankedTensorType>();
+            return {Const::createConstContent(rankedTensorType, output.getRawStorageBuf()),
+                    Const::ContentSetup(rankedTensorType).castElemType(qtype)};
+        } else {
+            return {Const::createConstContent(rankedTensorType, output.getRawStorageBuf()),
+                    Const::ContentSetup(rankedTensorType)};
+        }
+    }();
 
-    rewriter.replaceOpWithNewOp<Const::DeclareOp>(origOp, origOp.getType(), contentAttrSetup.get());
+    rewriter.replaceOpWithNewOp<Const::DeclareOp>(origOp, origOp.getType(),
+                                                  Const::ContentAttr::get(denseAttr, contentAttrSetup));
     return mlir::success();
 }
 
@@ -636,4 +641,75 @@ mlir::OpFoldResult vpux::IE::ConcatOp::fold(FoldAdaptor) {
     }
 
     return nullptr;
+}
+
+namespace {
+mlir::Attribute dispatchStaticDim(mlir::OpBuilder& builder, const int64_t dimIdx, const int64_t concatAxis,
+                                  const mlir::ValueRange operands) {
+    if (concatAxis != dimIdx) {
+        // Concatenation axis does not match current dimension:
+        // IE.Concat(1x2x3x?, 1x2x3x?) {concatAxis = 1, dimIdx = 2} -> 1x4x3x?
+        // Fetch the dimension value from any input (outShape[dimIdx] = inShape[dimIdx] = 3)
+        const auto inputShapedType = mlir::cast<mlir::ShapedType>(operands.front().getType());
+        return builder.getIndexAttr(inputShapedType.getDimSize(dimIdx));
+    }
+    // Concatenation axis matches current dimension:
+    // IE.Concat(1x2x3x?, 1x2x3x?) {concatAxis = 1, dimIdx = 1} -> 1x4x3x?
+    // Accumulate shape[dimIdx] values over all the inputs
+    // outShape[dimIdx] = in1Shape[dimIdx] + in2Shape[dimIdx]= 2 + 2 = 4
+    const auto accumulateDimSizes = [dimIdx](const int64_t acc, const mlir::Value operand) {
+        return acc + mlir::cast<mlir::ShapedType>(operand.getType()).getDimSize(dimIdx);
+    };
+    const int64_t dimSize = std::accumulate(operands.begin(), operands.end(), int64_t{0}, accumulateDimSizes);
+    return builder.getIndexAttr(dimSize);
+}
+
+mlir::Value dispatchDynamicDim(mlir::OpBuilder& builder, const int64_t dimIdx, const mlir::ValueRange operands) {
+    // Concatenation over static dimension.
+    // Apply DimOp to any dynamic input.
+    const auto firstDynOpIter = std::find_if(operands.begin(), operands.end(), IE::hasDynamicShape);
+    if (firstDynOpIter == operands.end()) {
+        return nullptr;
+    }
+    const auto firstDynamicOperand = *firstDynOpIter;
+    mlir::OpFoldResult firstDimOp =
+            builder.createOrFold<mlir::tensor::DimOp>(firstDynamicOperand.getLoc(), firstDynamicOperand, dimIdx);
+    return mlir::getValueOrCreateConstantIndexOp(builder, firstDynamicOperand.getLoc(), firstDimOp);
+}
+};  // namespace
+
+mlir::LogicalResult vpux::IE::ConcatOp::reifyResultShapes(mlir::OpBuilder& builder,
+                                                          mlir::ReifiedRankedShapedTypeDims& reifiedReturnShapes) {
+    const auto operands = getInputs();
+    if (operands.empty()) {
+        return mlir::failure();
+    }
+    const auto concatAxis = getConcatAxis(*this);
+    if (!concatAxis.has_value()) {
+        return mlir::failure();
+    }
+    const auto axisValue = concatAxis.value().ind();
+
+    const auto outputShapedType = mlir::cast<mlir::ShapedType>(getOutput().getType());
+    if (outputShapedType.isDynamicDim(axisValue)) {
+        // Concatenation over dynamic dimension is not supported
+        return mlir::failure();
+    }
+
+    SmallVector<mlir::OpFoldResult> shapes;
+    for (const auto& dimIdx : irange(outputShapedType.getRank())) {
+        if (outputShapedType.isDynamicDim(dimIdx)) {
+            const mlir::Value dynamicDim = dispatchDynamicDim(builder, dimIdx, operands);
+            if (dynamicDim == nullptr) {
+                return mlir::failure();
+            }
+            shapes.push_back(dynamicDim);
+        } else {
+            // Technically, reification does not care much about the correctness of static dimensions.
+            // This case might've returned inputShapedType.getDimSize(dimIdx)
+            shapes.push_back(dispatchStaticDim(builder, dimIdx, axisValue, operands));
+        }
+    }
+    reifiedReturnShapes.emplace_back(std::move(shapes));
+    return mlir::success();
 }

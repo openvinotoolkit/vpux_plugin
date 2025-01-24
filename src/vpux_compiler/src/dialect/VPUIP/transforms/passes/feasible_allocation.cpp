@@ -15,6 +15,7 @@
 #include "vpux/compiler/core/schedule_analysis_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/cost_model/cost_model.hpp"
 #include "vpux/compiler/dialect/VPUIP/IR/dialect.hpp"
+#include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
 #include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/compiler/utils/error.hpp"
@@ -297,6 +298,8 @@ void FeasibleAllocationPass::updateAsyncExecuteOpPosition(
         }
         prevAsyncOp = asyncOp;
     }
+
+    VPUIP::moveDeclarationsToTop(netFunc);
 }
 
 // This method will insert defined not scheduled operations after current operation and update reScheduled ops
@@ -665,22 +668,23 @@ void FeasibleAllocationPass::safeRunOnFunc() {
     // 2. prefetching
     if (_enablePrefetching && !_linearizeSchedule) {
         PrefetchDataOps prefetching(scheduledOps, depsInfo);
-        prefetching.enableDataOpPrefetching();
+        if (prefetching.enableDataOpPrefetching()) {
+            VPUIP::moveDeclarationsToTop(func);
+            LinearScan<mlir::Value, LinearScanHandler> prefetchScan(maxSize.count(), reservedMemVec, alignment);
+            auto prefetchLiveRangeInfo = MemLiveRangeInfoMemType<VPU::MemoryKind::CMX_NN>{func, aliasesInfo};
+            // prefetching logic has reordered IR, depsInfo needs to be regenerated since
+            // scheduling depends on incrementing value of async-deps-info along IR
+            depsInfo = AsyncDepsInfo{func};
+            if (!_enablePipelining) {
+                linearizeComputeOps(_linearizeSchedule, _enablePipelining, func, depsInfo);
+            }
 
-        LinearScan<mlir::Value, LinearScanHandler> prefetchScan(maxSize.count(), reservedMemVec, alignment);
-        auto prefetchLiveRangeInfo = MemLiveRangeInfoMemType<VPU::MemoryKind::CMX_NN>{func, aliasesInfo};
-        // prefetching logic has reordered IR, depsInfo needs to be regenerated since
-        // scheduling depends on incrementing value of async-deps-info along IR
-        depsInfo = AsyncDepsInfo{func};
-        if (!_enablePipelining) {
-            linearizeComputeOps(_linearizeSchedule, _enablePipelining, func, depsInfo);
+            FeasibleMemoryScheduler schedulerWithPrefetch(_memKind, _secondLvlMemKind, prefetchLiveRangeInfo, depsInfo,
+                                                          _log, prefetchScan, arch, costModel, tileCount, dmaCount,
+                                                          _enableScheduleStatistics, _optimizeFragmentation);
+            scheduledOps = schedulerWithPrefetch.generateSchedule();
+            scan = std::move(prefetchScan);
         }
-
-        FeasibleMemoryScheduler schedulerWithPrefetch(_memKind, _secondLvlMemKind, prefetchLiveRangeInfo, depsInfo,
-                                                      _log, prefetchScan, arch, costModel, tileCount, dmaCount,
-                                                      _enableScheduleStatistics, _optimizeFragmentation);
-        scheduledOps = schedulerWithPrefetch.generateSchedule();
-        scan = std::move(prefetchScan);
     }
 
     // TODO: recurse to strategy with useful info
@@ -780,8 +784,6 @@ void FeasibleAllocationPass::safeRunOnFunc() {
         signalPassFailure();
         return;
     }
-
-    IE::setUsedMemory(func, _memKindAttr, scan.handler().maxAllocatedSize());
 }
 
 }  // namespace

@@ -12,6 +12,7 @@
 #include "vpux/compiler/dialect/VPUIP/IR/types.hpp"
 #include "vpux/compiler/dialect/VPUIP/transforms/passes.hpp"
 #include "vpux/compiler/dialect/VPUIP/utils/sw_utils.hpp"
+#include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/compiler/utils/logging.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 
@@ -132,13 +133,23 @@ mlir::LogicalResult UngroupSwKernelOp::matchAndRewrite(VPUIP::SwKernelOp origOp,
     initSwKernel(swKernelOp, swKernelOperands, swKernelOutputBuffs, args, _log.nest());
 
     SmallVector<mlir::Value> newResults;
-    for (auto i : irange(origOp.getNumResults())) {
-        if (mlir::isa<VPUIP::BoundedBufferType>(origOp.getResult(i).getType())) {
-            auto groupOp = rewriter.create<VPUIP::GroupBoundedBufferOp>(swKernelOp.getLoc(), swKernelOp.getResult(i),
-                                                                        swKernelOp.getDynamicOutputShapes()[i]);
-            newResults.push_back(groupOp.getOutput());
-        } else {
-            newResults.push_back(swKernelOp.getResult(i));
+    const auto kernelName = getSwKernelEntryName(origOp);
+    // TODO: refactoring ticket E#145673
+    if (kernelName == "dynamic_reshape" && (parseIntAttr<int64_t>(args[0]) != 0)) {
+        // dynamic_reshape will only propagate shape
+        auto dataOperand = swKernelOperands[0];
+        auto shapeResult = swKernelOp.getResult(1);
+        auto groupOp = rewriter.create<VPUIP::GroupBoundedBufferOp>(swKernelOp.getLoc(), dataOperand, shapeResult);
+        newResults.push_back(groupOp.getOutput());
+    } else {
+        for (auto i : irange(origOp.getNumResults())) {
+            if (mlir::isa<VPUIP::BoundedBufferType>(origOp.getResult(i).getType())) {
+                auto groupOp = rewriter.create<VPUIP::GroupBoundedBufferOp>(
+                        swKernelOp.getLoc(), swKernelOp.getResult(i), swKernelOp.getDynamicOutputShapes()[i]);
+                newResults.push_back(groupOp.getOutput());
+            } else {
+                newResults.push_back(swKernelOp.getResult(i));
+            }
         }
     }
     rewriter.replaceOp(origOp, newResults);

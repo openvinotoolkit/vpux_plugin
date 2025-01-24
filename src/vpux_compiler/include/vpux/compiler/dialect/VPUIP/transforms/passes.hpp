@@ -41,15 +41,10 @@ static ConditionFunc makeStubCondition() {
 }
 
 std::unique_ptr<mlir::Pass> createConvertWeightsTableOp2ConstPass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createUpdateSwKernelParamsPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createDumpStatisticsOfTaskOpsPass(Logger log = Logger::global(), bool forceLogging = true);
 std::unique_ptr<mlir::Pass> createUnrollClusterTilingPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createUnwrapClusterTilingPass(Logger log = Logger::global());
-std::unique_ptr<mlir::Pass> createUnrollDepthToSpaceDMAPass(Logger log = Logger::global());
-std::unique_ptr<mlir::Pass> createUnrollSpaceToDepthDMAPass(Logger log = Logger::global());
-std::unique_ptr<mlir::Pass> createUnrollUpsamplingDMAPass(Logger log = Logger::global());
-std::unique_ptr<mlir::Pass> createUnrollPermuteToNNDMAPass(Logger log = Logger::global());
-std::unique_ptr<mlir::Pass> createUnrollExpandDMAPass(Logger log = Logger::global());
-std::unique_ptr<mlir::Pass> createUnrollPerAxisTileDMAPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createUnrollSwKernelPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createDMABarrierOptimizationPass(Logger log = Logger::global());
 
@@ -67,6 +62,7 @@ std::unique_ptr<mlir::Pass> createMoveSubViewBeforeSparseBufferPass(Logger log =
 std::unique_ptr<mlir::Pass> createCopyOpTilingPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createSetMemorySpacePass(MemKindCreateFunc memKindCb, Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createConvertEltwiseToInPlacePass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createConvertSprLUTToConstPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createInsertCopyForEltwiseInPlaceInputPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createLinearizationPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createBreakDataFlowPass(Logger log = Logger::global());
@@ -99,6 +95,7 @@ std::unique_ptr<mlir::Pass> createComputeSEBasePtrsPass(Logger log = Logger::glo
 std::unique_ptr<mlir::Pass> createConvertSETablesToConstantsPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createAdjustInputDataForExplicitSETablePass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createTileActShaveKernelTaskPass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createSetZeroOffsetWeightsTablePass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createSegmentHalosPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createAdjustSpillSizePass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createCompressDmaReserveMemPass(Logger log = Logger::global());
@@ -149,21 +146,27 @@ std::unique_ptr<mlir::Pass> createFeasibleAllocationPass(
         Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createQueryArgsAllocationAnalysisPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createStaticAllocationPass(MemKindCreateFunc memKindCb, Logger log = Logger::global());
-std::unique_ptr<mlir::Pass> createCollectUsedMemoryPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createBatchMatMulToMatMulPass(Logger log = Logger::global());
 
 //
-// Weights separation
+// DMA Unrolling Pipeline
 //
 
-std::unique_ptr<mlir::Pass> createIntroduceInitFunctionPass(const Logger& log = Logger::global());
+void buildDMAUnrollingPipeline(mlir::OpPassManager& pm, Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createUnrollDMAAnalysisPass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createUnrollDepthToSpaceDMAPass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createUnrollSpaceToDepthDMAPass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createUnrollUpsamplingDMAPass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createUnrollPermuteToNNDMAPass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createUnrollExpandDMAPass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createUnrollPerAxisTileDMAPass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createInvalidateUnrollDMAAnalysisPass(Logger log = Logger::global());
+
 //
 // DefaultHWOptions(for all devices)
 //
 
 struct DefaultHWOptionsDialectBase : public virtual vpux::DefaultHWOptionsBase {
-    BoolOption enableProfiling{*this, "profiling", llvm::cl::desc("Enable profiling"), llvm::cl::init(false)};
-
     BoolOption enableDPUProfiling{*this, "dpu-profiling", llvm::cl::desc("Enable DPU task profiling"),
                                   llvm::cl::init(true)};
 
@@ -203,6 +206,9 @@ struct DefaultHWOptionsDialectBase : public virtual vpux::DefaultHWOptionsBase {
     BoolOption enableDumpTaskStats{*this, "dump-task-stats",
                                    ::llvm::cl::desc("Enable dumping statistics of Task operations"),
                                    ::llvm::cl::init(vpux::isDeveloperBuild())};
+
+    BoolOption enableShaveKernelTiling{*this, "enable-shave-kernel-tiling",
+                                       ::llvm::cl::desc("Enable shave kernel tiling"), ::llvm::cl::init(true)};
 };
 
 //

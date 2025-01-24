@@ -2,7 +2,6 @@
 // Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
-//
 #include <mlir/IR/BuiltinTypes.h>
 
 #include "vpux/compiler/dialect/VPUIP/IR/types.hpp"
@@ -737,7 +736,7 @@ void SetupInvariant_Grid(vpux::VPUMI37XX::DPUInvariantOp fb_invariant, nn_public
         invariant.kernel_pad_cfg.kernel_pad_cfg_bf.mpe_assign = nn_public::VpuMPEGrid::MPE_GRID_4x4;
         break;
     case VPU::MPEMode::CUBOID_8x16:  // NTH = 2, NTW=4, NTK = 8 (8, 8)
-    case VPU::MPEMode::VECTOR:       // nn_public::VpuMPE_GRID_16x1 not valid for NPU37XX
+    case VPU::MPEMode::VECTOR:       // nn_public::VpuMPE_GRID_16x1 not valid for VPUX37XX
         invariant.odu_cfg.odu_cfg_bf.grid = static_cast<unsigned int>(nn_public::VpuODUGrid::ODU_GRID_4x4);
         invariant.odu_cfg.odu_cfg_bf.nthw = static_cast<unsigned int>(nn_public::VpuODUNthw::ODU_NTHW_8);
         invariant.kernel_pad_cfg.kernel_pad_cfg_bf.mpe_assign = nn_public::VpuMPEGrid::MPE_GRID_4x4;
@@ -875,7 +874,7 @@ void SetupInput(vpux::VPUMI37XX::BlobWriter& writer, vpux::VPUMI37XX::DPUInvaria
                 (inputRef->quant_zero() && inputRef->quant_zero()->size()) ? inputRef->quant_zero()->Get(0) : 0;
     }
 
-    // pad_value is not set for NPU37XX
+    // pad_value is not set for VPUX37XX
     // registers.tensor_mode.tensor_mode_bf.pad_value =
     //         (inputRef->quant_zero() && inputRef->quant_zero()->size()) ? inputRef->quant_zero()->Get(0) : 0;
 
@@ -948,7 +947,7 @@ void SetupWeights(vpux::VPUMI37XX::BlobWriter& writer, vpux::VPUMI37XX::DPUInvar
 
 void SetupKernel(vpux::VPUMI37XX::DPUInvariantOp op, nn_public::VpuDPUInvariantRegisters& registers) {
     registers.kernel_pad_cfg.kernel_pad_cfg_bf.rst_ctxt = 1;
-    // MPE_GRID_16x1 is deprecated for DPU 2.7 (NPU37XX). Will always be MPE_GRID_4x4
+    // MPE_GRID_16x1 is deprecated for DPU 2.7 (VPUX37XX). Will always be MPE_GRID_4x4
     registers.kernel_pad_cfg.kernel_pad_cfg_bf.mpe_assign = MPE_GRID_4x4;
 
     int64_t kernelSizeH = 1, kernelSizeW = 1;
@@ -1248,7 +1247,7 @@ void SetupInvariant_SOH(FlatBufferAccessor<MVCNN::TensorReference> in_tensor,
             }
         }
 
-        // Assuming symmetric SOH layer split across both NPU37XX tiles
+        // Assuming symmetric SOH layer split across both VPUX37XX tiles
         invariantRegisters.se_sp_size[1] = invariantRegisters.se_sp_size[0];
         invariantRegisters.kernel_pad_cfg.kernel_pad_cfg_bf.sp_se_tbl_segment = 1;
     }
@@ -1507,10 +1506,10 @@ bool SetupInvariant_Eltwise(vpux::VPUMI37XX::BlobWriter& writer, vpux::VPUMI37XX
     ::std::optional<SmallVector<int64_t>> in2QuantMult;
 
     for (auto ppeOp : op.getPpe().getOps<VPUMI37XX::PPETaskOp>()) {
-        auto opaquePpeAttr = ppeOp.getOpaquePpeAttr();
-        auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(opaquePpeAttr);
+        auto ppeAttr = ppeOp.getPpeAttr();
+        auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(ppeAttr);
         VPUX_THROW_WHEN(intPpeAttr == nullptr,
-                        "Expected PPEIntAttr type but got {0}, make sure to use the right factory version", opaquePpeAttr);
+                        "Expected PPEIntAttr type but got {0}, make sure to use the right factory version", ppeAttr);
         if (const auto in1QuantMultAttr = intPpeAttr.getIn1QuantMult()) {
             in1QuantMult = parseIntArrayAttr<int64_t>(in1QuantMultAttr);
         }
@@ -1524,7 +1523,7 @@ bool SetupInvariant_Eltwise(vpux::VPUMI37XX::BlobWriter& writer, vpux::VPUMI37XX
     const auto isInputQuantizationProvided = in1QuantMult.has_value() && in2QuantMult.has_value();
 
     if (isInputQuantizationProvided) {
-        // Shifts must be set 0 for NPU37XX and NPU40XX runtime to be considered, otherwise runtime will ignore inputs
+        // Shifts must be set 0 for VPUX37XX and VPUX40XX runtime to be considered, otherwise runtime will ignore inputs
         // MULT.
         const auto inputSparsityMapOffset =
                 inputSparsityMap ? std::optional<int64_t>{inputSparsityMap.getDefiningOp<VPURT::DeclareBufferOp>()
@@ -1547,7 +1546,7 @@ bool SetupInvariant_Eltwise(vpux::VPUMI37XX::BlobWriter& writer, vpux::VPUMI37XX
 
     uint32_t elop_scale_a = 1;
     uint32_t elop_scale_b = 1;
-    // For NPU37XX, original code computing eltwise scales on the VPU disabled (E#5671)
+    // For VPUX37XX, original code computing eltwise scales on the VPU disabled (E#5671)
     // If blob contains scales, it is the final values (E#33155)
     if (inputRef->quant_mult()->size() && weightsRef->quant_mult()->size() && inputRef->quant_shift()->size() &&
         weightsRef->quant_shift()->size()) {
@@ -1558,6 +1557,7 @@ bool SetupInvariant_Eltwise(vpux::VPUMI37XX::BlobWriter& writer, vpux::VPUMI37XX
         }
     }
 
+    // elop_scale_* registers are U16 unlike ppe_scale_mult which are I16
     registers.elop_scale.elop_scale_bf.elop_scale_a = elop_scale_a;
     registers.elop_scale.elop_scale_bf.elop_scale_b = elop_scale_b;
 
@@ -1594,10 +1594,10 @@ FlatBufferAccessor<MVCNN::PPETask> getPPETask(vpux::VPUMI37XX::BlobWriter& write
     float fpPReluAlpha = 1.f;
 
     for (auto ppeOp : op.getPpe().getOps<VPUMI37XX::PPETaskOp>()) {
-            auto opaquePpeAttr = ppeOp.getOpaquePpeAttr();
-            auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(opaquePpeAttr);
+            auto ppeAttr = ppeOp.getPpeAttr();
+            auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(ppeAttr);
             VPUX_THROW_WHEN(intPpeAttr == nullptr,
-                            "Expected PPEintAttr type but got {0}, make sure to use the right factory version", opaquePpeAttr);
+                            "Expected PPEintAttr type but got {0}, make sure to use the right factory version", ppeAttr);
 
             if (intPpeAttr.getMode()) {
                 const auto ppeType = getPPELayerType(intPpeAttr.getMode().getValue());
@@ -1691,10 +1691,10 @@ static void setupTaskTypeDPUEltwise(vpux::VPUMI37XX::BlobWriter& writer, vpux::V
     ::std::optional<SmallVector<int64_t>> in2QuantMult;
 
     for (auto ppeOp : op.getPpe().getOps<VPUMI37XX::PPETaskOp>()) {
-            auto opaquePpeAttr = ppeOp.getOpaquePpeAttr();
-            auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(opaquePpeAttr);
+            auto ppeAttr = ppeOp.getPpeAttr();
+            auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(ppeAttr);
             VPUX_THROW_WHEN(intPpeAttr == nullptr,
-                            "Expected PPEIntAttr type but got {0}, make sure to use the right factory version", opaquePpeAttr);
+                            "Expected PPEIntAttr type but got {0}, make sure to use the right factory version", ppeAttr);
 
             if (const auto quantMultAttr = intPpeAttr.getQuantMult()) {
                 ppeQuantMult = parseIntArrayAttr<int64_t>(quantMultAttr);
@@ -1741,6 +1741,7 @@ static void setupTaskTypeDPUEltwise(vpux::VPUMI37XX::BlobWriter& writer, vpux::V
     case MVCNN::DType_U4: {
         regs.ppe_scale.ppe_scale_bf.ppe_scale_round = ppe_task->rounding();
         // Scale is provided as a pair of integer mult and shift values.
+        // ppe_scale_mult is a I16 register; implicit casting is done
         regs.ppe_scale.ppe_scale_bf.ppe_scale_mult =
                 outputRef->quant_mult()->size() ? outputRef->quant_mult()->Get(0) : 1;
         regs.ppe_scale.ppe_scale_bf.ppe_scale_shift =
@@ -1806,6 +1807,7 @@ static void setupTaskTypeDPUMaxPool(vpux::VPUMI37XX::BlobWriter& writer, vpux::V
 
     if (hasQuantInput && hasFP16Output) {
         // Re-scale the result in mixed precision mode
+        // ppe_scale_mult is a I16 register; implicit casting is done
         regs.ppe_scale.ppe_scale_bf.ppe_scale_mult =
                 inputRef->quant_mult()->size() ? inputRef->quant_mult()->Get(0) : 1;
         regs.ppe_scale.ppe_scale_bf.ppe_scale_shift =
@@ -1857,10 +1859,10 @@ static void setupTaskTypeDPUAvgPool(vpux::VPUMI37XX::BlobWriter& writer, vpux::V
     ::std::optional<SmallVector<int64_t>> ppeQuantShift;
 
     for (auto ppeOp : op.getPpe().getOps<VPUMI37XX::PPETaskOp>()) {
-            auto opaquePpeAttr = ppeOp.getOpaquePpeAttr();
-            auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(opaquePpeAttr);
+            auto ppeAttr = ppeOp.getPpeAttr();
+            auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(ppeAttr);
             VPUX_THROW_WHEN(intPpeAttr == nullptr,
-                            "Expected PPEIntAttr type but got {0}, make sure to use the right factory version", opaquePpeAttr);
+                            "Expected PPEIntAttr type but got {0}, make sure to use the right factory version", ppeAttr);
             if (intPpeAttr.getMode()) {
                 const auto ppeType = getPPELayerType(intPpeAttr.getMode().getValue());
                 if (ppeType != MVCNN::PPELayerType_NOOP) {

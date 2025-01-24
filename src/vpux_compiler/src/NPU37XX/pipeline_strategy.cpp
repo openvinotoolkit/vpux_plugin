@@ -5,8 +5,8 @@
 
 #include "vpux/compiler/compiler.hpp"
 
-#include "intel_npu/al/config/common.hpp"
-#include "intel_npu/al/config/compiler.hpp"
+#include "intel_npu/config/common.hpp"
+#include "intel_npu/config/compiler.hpp"
 
 #include "vpux/compiler/NPU37XX/conversion.hpp"
 #include "vpux/compiler/NPU37XX/pipeline_strategy.hpp"
@@ -62,14 +62,15 @@ void PipelineStrategy37XX::buildPipeline(mlir::PassManager& pm, const intel_npu:
 
         buildDefaultHWModePipeline(pm, *options, log.nest());
     } else if (compilationMode == VPU::CompilationMode::ShaveCodeGen) {
-        buildShaveCodeGenPipeline37XX(pm, log.nest());
+        ShaveCodeGenOptions37XX emptyOptions;
+        buildShaveCodeGenPipeline(pm, emptyOptions, log.nest());
     } else {
         VPUX_THROW("Unsupported compilation mode '{0}'", compilationMode);
     }
 }
 
 void PipelineStrategy37XX::buildELFPipeline(mlir::PassManager& pm, const intel_npu::Config&,
-                                            mlir::TimingScope& rootTiming, Logger log) {
+                                            mlir::TimingScope& rootTiming, Logger log, /*useWlm*/ bool) {
     auto buildTiming = rootTiming.nest("Build compilation pipeline");
     arch37xx::buildLowerVPUIP2ELFPipeline(pm, log.nest());
 }

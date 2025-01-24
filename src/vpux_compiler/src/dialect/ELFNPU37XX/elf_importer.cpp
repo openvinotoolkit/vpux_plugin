@@ -127,8 +127,8 @@ void vpux::ELFNPU37XX::ElfImporter::createConfigureBarrierOp(mlir::OpBuilder& op
         mlir::IntegerAttr consumerCount = mlir::IntegerAttr::get(typeU8Attr, barrierCountConfig->consumer_count_);
 
         auto barrierOpValue = opsBuilder.create<VPUMI37XX::ConfigureBarrierOp>(
-                mlir::UnknownLoc::get(_ctx), VPURegMapped::IndexType::get(_ctx, idx), realId, nextSameId, producerCount,
-                consumerCount);
+                mlir::UnknownLoc::get(_ctx), VPURegMapped::IndexType::get(_ctx, idx), realId, nextSameId,
+                /*previousSameId*/ nullptr, producerCount, consumerCount);
         _barrierConfigsByRealId.push_back(std::make_pair(barrierCountConfig->real_id_, barrierOpValue));
         barrierConfigOps.push_back(barrierOpValue);
         barrierCountConfig++;
@@ -420,7 +420,9 @@ void vpux::ELFNPU37XX::ElfImporter::createSectionOpForActKernelParams(mlir::OpBu
             mlir::UnknownLoc::get(_ctx), VPURegMapped::IndexType::get(_ctx, 0),
             mlir::ValueRange(_buffers.front().second.getResult()), mlir::ValueRange(_buffers.back().second.getResult()),
             dynInputShapes, dynOutputShapes, mlir::StringAttr::get(_ctx, "Softmax"),
-            mlir::DenseIntElementsAttr::get(mlir::VectorType::get({params_size}, type8UIntAttr), params_vector_dummy));
+            mlir::DenseIntElementsAttr::get(mlir::VectorType::get({params_size}, type8UIntAttr), params_vector_dummy),
+            mlir::BoolAttr::get(_ctx, true)  // TODO: make it work in general case
+    );
 
     createSectionOp(opsBuilder, actKernelParamsSectionIdx, kernalParamsOp.getResult());
 }

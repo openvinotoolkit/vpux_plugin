@@ -115,7 +115,7 @@ void LinearScanHandler::allocated(mlir::Value val, AddressType addr) {
 
     _valOffsets.insert({val, addr});
 
-    int64_t allocatedSize = addr + getSize(val);
+    auto allocatedSize = static_cast<int64_t>(addr + getSize(val));
     _maxAllocatedSize = Byte(std::max(_maxAllocatedSize.count(), allocatedSize));
 }
 

@@ -11,9 +11,10 @@ Before you start to build Driver Compiler targets, please ensure that you have i
     - [CMake](https://cmake.org/download/) 3.13 or higher
     - Microsoft Visual Studio 2019 (recommended) or higher, version 16.3 or later
         > Notice: Windows SDK and spectre libraries are required for building OpenVINO and NPU-Plugin. Install them via Visual Studio Installer: Modify -> Individual components -> Search components: "Windows SDK" and "Spectre x64/x86 latest".
+    - SDK (install via Visual Studio or from this [link](https://developer.microsoft.com/en-us/windows/downloads/sdk-archive/)) and WDK (install for this [link](https://learn.microsoft.com/en-ie/windows-hardware/drivers/other-wdk-downloads#step-2-install-the-wdk)). Please make sure the version is match to your system.
     - Python 3.9 - 3.12
     - Git for Windows (requires installing `git lfs`)
-    - Ninja (optional, used for this documentation installation part)
+    - Ninja for installation (optional)
 
 Before you start building, please refer to the notes to avoid potential build issue.
 
@@ -42,13 +43,13 @@ All instructions are perfromed on **x64 Native Tools Command Prompt for VS XXXX*
     git submodule update --init --recursive
 
     cd C:\Users\Local_Admin\workspace (Just an example, you should use your own path.)
-    git clone https://github.com/openvinotoolkit/npu_plugin.git
-    cd npu_plugin
-    git checkout -b develop origin/develop (Just an example, you could use your own branch/tag/commit.)
+    git clone https://github.com/openvinotoolkit/npu_compiler.git
+    cd npu_compiler
+    git checkout -b master origin/master (Just an example, you could use your own branch/tag/commit.)
     git submodule update --init --recursive
 
     set OPENVINO_HOME=C:\Users\Local_Admin\workspace\openvino (need change to your own path)
-    set NPU_PLUGIN_HOME=C:\Users\Local_Admin\workspace\npu_plugin (need change to your own path)
+    set NPU_PLUGIN_HOME=C:\Users\Local_Admin\workspace\npu_compiler (need change to your own path)
     ```
     </details>
     
@@ -57,6 +58,8 @@ All instructions are perfromed on **x64 Native Tools Command Prompt for VS XXXX*
 2. Create build folder and run build commands:
 
     2.1 Build instructions
+    
+    Before build with the following instructions, please make sure `OPENVINO_HOME` and `NPU_PLUGIN_HOME` enviroment variables have been set.
 
     <details>
     <summary>Executed in x64 Native Tools Command Prompt for VS XXXX</summary>
@@ -64,7 +67,6 @@ All instructions are perfromed on **x64 Native Tools Command Prompt for VS XXXX*
     ```sh
     cd %OPENVINO_HOME%
     md build-x86_64
-    
     cd build-x86_64
     cmake ^
     -D CMAKE_BUILD_TYPE=Release ^
@@ -99,16 +101,18 @@ All instructions are perfromed on **x64 Native Tools Command Prompt for VS XXXX*
     -D ENABLE_PROXY=OFF ^
     -D ENABLE_INTEL_CPU=OFF ^
     -D ENABLE_INTEL_GPU=OFF ^
+    -D ENABLE_NPU_PLUGIN_ENGINE=OFF ^
     -D ENABLE_ZEROAPI_BACKEND=OFF ^
     -D ENABLE_DRIVER_COMPILER_ADAPTER=OFF ^
     -D ENABLE_INTEL_NPU_INTERNAL=OFF ^
+    -D ENABLE_INTEL_NPU_PROTOPIPE=OFF ^
     -D BUILD_COMPILER_FOR_DRIVER=ON ^
-    -D ENABLE_NPU_PROTOPIPE=OFF ^
+    -D ENABLE_PRIVATE_TESTS=OFF ^
     -D ENABLE_NPU_LSP_SERVER=OFF ^
     -D CMAKE_TOOLCHAIN_FILE=%OPENVINO_HOME%\cmake\toolchains\onecoreuap.toolchain.cmake ^
     ..
 
-    cmake --build . --config Release --target compilerTest profilingTest vpuxCompilerL0Test loaderTest -j8
+    cmake --build . --config Release --target npu_driver_compiler compilerTest profilingTest vpuxCompilerL0Test loaderTest -j8
     ```
     </details>
 
@@ -136,7 +140,7 @@ All instructions are perfromed on **x64 Native Tools Command Prompt for VS XXXX*
     <details>
     <summary>2.2.2 Build option list in OpenVino Project</summary>
 
-    For more details on the build options, please refer to this [OpenVino features.cmake](https://github.com/openvinotoolkit/openvino/blob/0ebff040fd22daa37612a82fdf930ffce4ebb099/cmake/features.cmake) and this [NPU features.cmake](https://github.com/openvinotoolkit/openvino/blob/0ebff040fd22daa37612a82fdf930ffce4ebb099/src/plugins/intel_npu/cmake/features.cmake) in [OpenVINO Project], which provides explanations for all the available build options.
+    For more details on the build options, please refer to [features.cmake](https://github.com/openvinotoolkit/openvino/blob/master/cmake/features.cmake) and intel NPU's [features.cmake](https://github.com/openvinotoolkit/openvino/blob/master/src/plugins/intel_npu/cmake/features.cmake) in [OpenVINO Project], which provide explanations for all the available build options.
 
     ```sh
         # Specify external repo
@@ -183,59 +187,64 @@ All instructions are perfromed on **x64 Native Tools Command Prompt for VS XXXX*
         ENABLE_AUTO
         ENABLE_AUTO_BATCH
         ENABLE_PROXY
-        ENABLE_TEMPLATE
         ENABLE_INTEL_CPU
         ENABLE_INTEL_GPU
 
-        # NPU plugin and its tools related options
+        # NPU plugin and its tools related option
+        ENABLE_NPU_PLUGIN_ENGINE
         ENABLE_ZEROAPI_BACKEND
         ENABLE_DRIVER_COMPILER_ADAPTER
         ENABLE_INTEL_NPU_INTERNAL
-        BUILD_COMPILER_FOR_DRIVER
+        ENABLE_INTEL_NPU_PROTOPIPE
     ```
     </details>
 
     <details>
     <summary>2.2.3 Build option list in NPU-Plugin Project</summary>
 
-    For more details on the build options, please refer to this [features.cmake](../../../cmake/features.cmake) file in [NPU-Plugin Project], which provides explanations for all the available build options.
+    For more details on the build options, please refer to this [features.cmake](https://github.com/openvinotoolkit/openvino/blob/master/src/plugins/intel_npu/cmake/features.cmake) file in [NPU-Plugin Project], which provides explanations for all the available build options.
 
     ```sh
-        # Build Driver Compiler Targets
+        # Build Driver Compiler targets
         BUILD_COMPILER_FOR_DRIVER
 
-        # Compiler tool
-        ENABLE_NPU_PROTOPIPE
-        ENABLE_NPU_LSP_SERVER
+        # Compiler private tests
+        ENABLE_PRIVATE_TESTS
+
+        # Debug tools
+        ENABLE_NPU_LSP_SERVER        
     ```
     </details>
 
     2.3 (Optional) Instruction notes about TBB:
 
     <details>
-    <summary>2.3.1 Default build mode</summary>
+    <summary>2.3.1 Default tbb location</summary>
 
-    Nowadays the Driver Compiler is building with TBB mode as default using `-D THREADING=TBB`.
-    
-    You can also use Sequential mode `-D THREADING=SEQ` to compile. More info about SEQ mode, please refer to this [file](https://github.com/openvinotoolkit/openvino/blob/0ebff040fd22daa37612a82fdf930ffce4ebb099/docs/dev/cmake_options_for_custom_compilation.md#options-affecting-binary-size).
+    The build instructions uses the `-DENABLE_SYSTEM_TBB=OFF` option, which means that the TBB library downloaded by [OpenVINO Project] will be used. The download path for this TBB library is `%OPENVINO_HOME%\temp\tbb`. Within the downloaded TBB folder, `%OPENVINO_HOME%\temp\tbb\bin\tbb12.dll` and `%OPENVINO_HOME%\temp\tbb\bin\tbbmalloc.dll` are required for the Release version. 
 
     </details>
 
     <details>
     <summary>2.3.2 Use different TBB version</summary>
 
-    When use TBB mode in build option, the default TBB is downloaded by [OpenVINO Project], located in `%OPENVINO_HME%\temp\tbb`.
+    If you wish to build with system TBB, you need install TBB in your local system first and then use `-DENABLE_SYSTEM_TBB=ON` option to instead of `-DENABLE_SYSTEM_TBB=OFF` option.
 
-    If you wish to build with a specific version of TBB, you can download it from [oneTBB Project] and unzip its [release package](https://github.com/oneapi-src/oneTBB/releases). Then, use the `-D ENABLE_SYSTEM_TBB=OFF -D TBBROOT=C:\Users\Local_Admin\workspace\path\to\downloaded\tbb` option to build.
-    
-    If you would like to build TBB on your own, please refer to [INSTALL.md](https://github.com/oneapi-src/oneTBB/blob/master/INSTALL.md#build-onetbb) in [oneTBB Project] and add `-D CMAKE_MSVC_RUNTIME_LIBRARY="MultiThreaded"` in build option.
+    If you wish to build with a specific version of TBB, you can download it from [oneTBB Project] and unzip its release package. Then use the `-DENABLE_SYSTEM_TBB=OFF -DTBBROOT=C:\Users\Local_Admin\workspace\path\to\downloaded\tbb` option to build.
+
+    </details>
+
+    <details>
+    <summary>2.3.3 Do not use TBB</summary>
+
+    If you wish to build without TBB (which will result in a slower build process), you need change `-D THREADING=TBB` to `-D THREADING=SEQ`. More info about SEQ mode, please refer to this [file](https://github.com/openvinotoolkit/openvino/blob/master/docs/dev/cmake_options_for_custom_compilation.md#options-affecting-binary-size).
 
     </details>
 
 3. (Optional) Prepare final Driver Compiler package for driver:
 
     <details>
-    <summary>Instructions</summary>
+    <summary>Instructions executed in x64 Native Tools Command Prompt for VS XXXX</summary>
 
     All Driver Compiler related targets have now been generated in `%OPENVINO_HOME%\bin\intel\Release` folder, where the binary npu_driver_compiler.dll can be found. The following instructions are provided to pack Driver Compiler related targets to the specified location.
 
@@ -249,11 +258,19 @@ All instructions are perfromed on **x64 Native Tools Command Prompt for VS XXXX*
     ```
     </details>
 
+
+    
 ### See also
 
-To use cmake presets and ninja to build, please see
+Follow the blow guide to build the Driver Compiler library and test targets with Ninja:
+ * `Using ninja` section of [how-to-build.md](../../../guides/how-to-build.md) of [NPU-Plugin Project].
+
+To use cmake presets to build, please see
 * [how to build Driver Compiler with Cmake Presets on Windows](./how_to_build_driver_compiler_withCmakePresets_on_windows.md)
 
+Driver compiler build is a static build, to get a static build of [NPU-Plugin Project] repo, please see
+ * [how to build static](../../../guides/how-to-build-static.md).
+
+
 [OpenVINO Project]: https://github.com/openvinotoolkit/openvino
-[NPU-Plugin Project]: https://github.com/openvinotoolkit/npu_plugin
-[oneTBB Project]: https://github.com/oneapi-src/oneTBB
+[NPU-Plugin Project]: https://github.com/openvinotoolkit/npu_compiler.git

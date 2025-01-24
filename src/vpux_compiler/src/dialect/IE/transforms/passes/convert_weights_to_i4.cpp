@@ -132,18 +132,10 @@ mlir::LogicalResult ConstRewriter::matchAndRewrite(Const::DeclareOp origOp, OpAd
 
     const auto newType = typeConverter->convertType(outputType).cast<vpux::NDTypeInterface>();
     const auto newQuantType = newType.getElementType().cast<mlir::quant::QuantizedType>();
-    const auto storageMin = newQuantType.getStorageTypeMin();
 
     _log.nest().trace("Convert content from '{0}' to '{1}'", origQuantType, newQuantType);
 
-    auto newContentAttr = origOp.getContentAttr()
-                                  .transform()
-                                  .castElemType(normalizeQuantStorageType(origQuantType))
-                                  .castElemType(getUInt32Type(getContext()))
-                                  .add(checked_cast<double>(storageMin))
-                                  .castElemType(getSInt4Type(getContext()))
-                                  .quantCast(newQuantType)
-                                  .get();
+    auto newContentAttr = origOp.getContentAttr().transform().convertElemType(newQuantType).get();
 
     rewriter.replaceOpWithNewOp<Const::DeclareOp>(origOp, newType, std::move(newContentAttr));
     return mlir::success();

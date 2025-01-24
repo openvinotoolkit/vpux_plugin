@@ -7,6 +7,7 @@
 #include "vpux/compiler/dialect/VPUIP/transforms/passes.hpp"
 
 #include "vpux/compiler/dialect/VPUIP/utils/convert_to_dma_utils.hpp"
+#include "vpux/compiler/dialect/VPUIP/utils/unroll_dma_analysis.hpp"
 #include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPURT/IR/task.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
@@ -214,6 +215,11 @@ private:
 };
 
 void UnrollUpsamplingDMAPass::safeRunOnFunc() {
+    markAnalysesPreserved<VPUIP::UnrollDMAAnalysis>();
+    auto analysis = getAnalysis<VPUIP::UnrollDMAAnalysis>();
+    if (!analysis.passNeeded(VPUIP::UnrollDMAAnalysisNeeded::UnrollUpsamplingDMAPass)) {
+        return;
+    }
     auto& ctx = getContext();
     auto func = getOperation();
     auto module = func->getParentOfType<mlir::ModuleOp>();

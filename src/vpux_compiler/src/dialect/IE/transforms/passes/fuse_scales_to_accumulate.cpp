@@ -176,10 +176,10 @@ std::optional<SmallVector<float>> FuseScalesToAccumulate::fetchScales(IE::FakeQu
     };
     std::transform(f64Scales.begin(), f64Scales.end(), std::back_inserter(f32Scales), toF32);
 
-    const auto lowAttr = outLowConst.getContentAttr().fold();
-    SmallVector<float> lowVals = lowAttr.getValues<float>();
-    const auto highAttr = outHighConst.getContentAttr().fold();
-    SmallVector<float> highVals = highAttr.getValues<float>();
+    const auto lowContent = outLowConst.getContentAttr().fold();
+    SmallVector<float> lowVals = lowContent.getValues<float>();
+    const auto highContent = outHighConst.getContentAttr().fold();
+    SmallVector<float> highVals = highContent.getValues<float>();
     VPUX_THROW_UNLESS(lowVals.size() == highVals.size(), "Sizes of low values and high values must match.");
     for (const auto& idx : irange(f32Scales.size())) {
         const auto scale = isFloatEqual(f32Scales[idx], 0.f) ? 1.f : f32Scales[idx];

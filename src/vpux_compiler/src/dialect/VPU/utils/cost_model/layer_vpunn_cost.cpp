@@ -67,43 +67,65 @@ StrategyCost LayerVPUNNCost::getStrategyCost(mlir::Operation* operation, const V
     }
 }
 
-StrategyCost LayerVPUNNCost::getSpillingWriteCost(mlir::Operation* operation,
-                                                  const VPUNNCostParameters& parameters) const {
+StrategyCost LayerVPUNNCost::getSpillingTypeCost(vpux::NDTypeInterface type,
+                                                 const std::optional<ShapeRef>& tileAxis) const {
+    StrategyCost cost = getDMACost(type, _vpuDevice, _vpunnCostModel, _numDMAPorts);
+
+    if (tileAxis.has_value() && isTiledOnLowestDim(tileAxis.value(), type.getDimsOrder())) {
+        cost = correctStrideDMACost(type, cost);
+    }
+    return cost;
+}
+
+StrategyCost LayerVPUNNCost::getSpillingWriteCost(
+        mlir::Operation* operation, const VPUNNCostParameters& parameters,
+        std::function<vpux::NDTypeInterface(const TileInfo&)> getOutputType /*nullptr*/) const {
     StrategyCost writeCost = 0;
 
+    if (getOutputType == nullptr) {
+        getOutputType = [&](const auto& tileInfo) {
+            auto outputType = mlir::cast<NDTypeInterface>(operation->getResult(0).getType());
+            auto tiledType = outputType.extractDenseTile(tileInfo.offsets, tileInfo.shape);
+            if (auto parentClusterOp = mlir::dyn_cast<VPU::ClusteredOpInterface>(operation)) {
+                auto numClusters = parentClusterOp.getOptimalNumClusters(outputType.getShape(), parameters._strategy);
+
+                tiledType = VPU::getDistributedOutputTypeFromOp(parentClusterOp, tiledType, numClusters,
+                                                                parameters._strategy);
+            }
+            return tiledType;
+        };
+    }
+
     if (!VPU::isPureViewOp(operation)) {
-        auto origParentType = operation->getResult(0).getType().cast<vpux::NDTypeInterface>();
+        auto outputType = mlir::cast<NDTypeInterface>(operation->getResult(0).getType());
 
-        const auto parentTiling =
-                parameters._tiling.empty() ? OutputTiling({TileInfo(origParentType.getShape())}) : parameters._tiling;
-
-        const auto dimOrder = origParentType.getDimsOrder();
-        const auto needCorrectDMACost = isTiledOnLowestDim(parentTiling[0].axis, dimOrder);
-        writeCost = std::accumulate(
-                std::begin(parentTiling), std::end(parentTiling), writeCost, [&](StrategyCost cost, auto& tileInfo) {
-                    auto tiledType = origParentType.extractDenseTile(tileInfo.offsets, tileInfo.shape);
-                    if (auto parentClusterOp = mlir::dyn_cast<VPU::ClusteredOpInterface>(operation)) {
-                        auto numClusters =
-                                parentClusterOp.getOptimalNumClusters(origParentType.getShape(), parameters._strategy);
-
-                        tiledType = VPU::getDistributedOutputTypeFromOp(parentClusterOp, tiledType, numClusters,
-                                                                        parameters._strategy);
-                    }
-                    auto currentTiledCost = getDMACost(tiledType, _vpuDevice, _vpunnCostModel, _numDMAPorts);
-                    if (needCorrectDMACost) {
-                        currentTiledCost = correctStrideDMACost(tiledType, currentTiledCost);
-                    }
-                    cost += currentTiledCost;
-                    return cost;
-                });
+        const auto tiling =
+                parameters._tiling.empty() ? OutputTiling({TileInfo(outputType.getShape())}) : parameters._tiling;
+        writeCost = std::accumulate(std::begin(tiling), std::end(tiling), writeCost,
+                                    [&](StrategyCost cost, auto& tileInfo) {
+                                        auto tiledType = getOutputType(tileInfo);
+                                        return cost + getSpillingTypeCost(tiledType, tiling[0].axis);
+                                    });
     }
 
     return writeCost;
 }
 
-StrategyCost LayerVPUNNCost::getSpillingReadCost(mlir::Operation* operation, const VPUNNCostParameters& parameters,
-                                                 mlir::Operation* parentOp /*nullptr*/,
-                                                 std::function<bool(mlir::Value value)> findOperand /*nullptr*/) const {
+StrategyCost LayerVPUNNCost::getSpillingReadCost(
+        mlir::Operation* operation, const VPUNNCostParameters& parameters, mlir::Value operand,
+        std::function<vpux::NDTypeInterface(const TileInfo&)> getOperandType /*nullptr*/) const {
+    return getSpillingReadCost(
+            operation, parameters, nullptr,
+            [&](mlir::Value item) {
+                return item == operand;
+            },
+            std::move(getOperandType));
+}
+
+StrategyCost LayerVPUNNCost::getSpillingReadCost(
+        mlir::Operation* operation, const VPUNNCostParameters& parameters, mlir::Operation* parentOp /*nullptr*/,
+        std::function<bool(mlir::Value value)> findOperand /*nullptr*/,
+        std::function<vpux::NDTypeInterface(const TileInfo&)> getOperandType /*nullptr*/) const {
     StrategyCost readCost = 0;
 
     VPUX_THROW_WHEN(parentOp == nullptr && findOperand == nullptr,
@@ -126,7 +148,7 @@ StrategyCost LayerVPUNNCost::getSpillingReadCost(mlir::Operation* operation, con
             };
         }
 
-        const auto operandItr = llvm::find_if(operation->getOperands(), findOperand);
+        const auto operandItr = llvm::find_if(operation->getOperands(), std::move(findOperand));
         VPUX_THROW_WHEN(operandItr == operation->getOperands().end(),
                         "Operation {0} has no common tensors with operation {1}", *parentOp, *operation);
         const size_t operandInd = std::distance(operation->getOperands().begin(), operandItr);
@@ -134,25 +156,20 @@ StrategyCost LayerVPUNNCost::getSpillingReadCost(mlir::Operation* operation, con
                                          ? OutputTiling({TileInfo(getShape(operation->getResult(0)))})
                                          : parameters._tiling;
 
-        const auto dimOrder = operation->getOperand(operandInd).getType().cast<vpux::NDTypeInterface>().getDimsOrder();
-        const auto needCorrectDMACost = isTiledOnLowestDim(childTiling[0].axis, dimOrder);
-
         MultiClusterStrategySetter mcSetter(operation, parameters._strategy);
 
-        readCost = std::accumulate(
-                std::begin(childTiling), std::end(childTiling), readCost, [&](StrategyCost cost, auto& tileInfo) {
-                    const auto childOperandsTiling = getTileTypes(operation, tileInfo);
-                    VPUX_THROW_WHEN(childOperandsTiling.size() <= operandInd,
-                                    "Incorrect number of types {0} for operands of operation {1}",
-                                    childOperandsTiling.size(), operation->getLoc());
-                    auto currentTiledCost =
-                            getDMACost(childOperandsTiling[operandInd], _vpuDevice, _vpunnCostModel, _numDMAPorts);
-                    if (needCorrectDMACost) {
-                        currentTiledCost = correctStrideDMACost(childOperandsTiling[operandInd], currentTiledCost);
-                    }
-                    cost += currentTiledCost;
-                    return cost;
-                });
+        if (getOperandType == nullptr) {
+            getOperandType = [&](const auto& tileInfo) {
+                auto tiling = getTileTypes(operation, tileInfo);
+                return tiling[operandInd];
+            };
+        }
+
+        readCost = std::accumulate(std::begin(childTiling), std::end(childTiling), readCost,
+                                   [&](StrategyCost cost, auto& tileInfo) {
+                                       const auto childOperandsTiling = getOperandType(tileInfo);
+                                       return cost + getSpillingTypeCost(childOperandsTiling, tileInfo.axis);
+                                   });
     }
 
     return readCost;
@@ -198,12 +215,6 @@ StrategyCost LayerVPUNNCost::getNCELayerCost(VPU::NCEOpInterface nceOp, const VP
     auto vpunnLayerDPUCosts = getDPUCostForNCEOp(nceOp, parameters._strategy, parameters._tiling, costParams,
                                                  vpunnStrategy, _vpunnCostModel, _log);
     _log.trace("VPUNN DPU layer costs {0}", vpunnLayerDPUCosts);
-    auto tilingBuilderOp = mlir::dyn_cast<VPU::TilingBuilderOpInterface>(nceOp.getOperation());
-    auto siblingsAnalysis = SiblingOpsAnalysis(nceOp.getOperation());
-    for (auto& outTile : parameters._tiling) {
-        auto inTiles = tilingBuilderOp.backInferTileInfo(outTile, _log);
-        tilesTypes.push_back(getTileDistributions(nceOp.getOperation(), siblingsAnalysis, outTile, inTiles));
-    }
 
     if (vpunnLayerDPUCosts.empty()) {
         _log.trace("DPU cost is empty, return COST_MAX");
@@ -212,6 +223,17 @@ StrategyCost LayerVPUNNCost::getNCELayerCost(VPU::NCEOpInterface nceOp, const VP
 
     // Accumulate DPU costs
     auto vpunnCost = std::accumulate(vpunnLayerDPUCosts.begin(), vpunnLayerDPUCosts.end(), 0);
+
+    if (!parameters._withDMAs) {
+        return vpunnCost;
+    }
+
+    auto tilingBuilderOp = mlir::dyn_cast<VPU::TilingBuilderOpInterface>(nceOp.getOperation());
+    auto siblingsAnalysis = SiblingOpsAnalysis(nceOp.getOperation());
+    for (auto& outTile : parameters._tiling) {
+        auto inTiles = tilingBuilderOp.backInferTileInfo(outTile, _log);
+        tilesTypes.push_back(getTileDistributions(nceOp.getOperation(), siblingsAnalysis, outTile, inTiles));
+    }
 
     // Add extra weights DMA costs
     const auto getSpillingReadCost = [&](NDTypeInterface srcType,
@@ -223,6 +245,7 @@ StrategyCost LayerVPUNNCost::getNCELayerCost(VPU::NCEOpInterface nceOp, const VP
     _log.trace("VPUNN weights DMA costs {0}", vpunnLayerWeightsCosts);
     vpunnCost += getWeightsDMACostForNCEOp(nceOp, parameters._tiling, vpunnLayerDPUCosts, vpunnLayerWeightsCosts,
                                            isPrefetchTilingEnabled, _log);
+
     _log.trace("VPUNN total layer cost {0}", vpunnCost);
     return vpunnCost;
 }

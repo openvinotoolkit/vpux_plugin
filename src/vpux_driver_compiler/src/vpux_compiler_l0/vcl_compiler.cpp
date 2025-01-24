@@ -11,10 +11,10 @@
 #include <openvino/util/file_util.hpp>
 #include <transformations/utils/utils.hpp>
 
-#include "intel_npu/al/config/common.hpp"
-#include "intel_npu/al/config/compiler.hpp"
-#include "intel_npu/al/config/runtime.hpp"
-#include "npu_private_properties.hpp"
+#include "intel_npu/config/common.hpp"
+#include "intel_npu/config/compiler.hpp"
+#include "intel_npu/config/runtime.hpp"
+#include "intel_npu/npu_private_properties.hpp"
 #include "vpux/compiler/compiler.hpp"
 
 #define xstr(s) str(s)

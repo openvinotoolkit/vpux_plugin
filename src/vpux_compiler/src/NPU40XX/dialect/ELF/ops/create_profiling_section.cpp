@@ -44,7 +44,7 @@ void vpux::ELF::CreateProfilingSectionOp::preserialize(elf::Writer& writer, vpux
     size_t sectionSize = 0;
     for (auto& op : block->getOperations()) {
         if (auto metadataOp = mlir::dyn_cast<VPUASM::ProfilingMetadataOp>(op)) {
-            sectionSize = metadataOp.getBinarySize();
+            sectionSize = metadataOp.getBinarySize(VPU::ArchKind::UNKNOWN);
         }
     }
 

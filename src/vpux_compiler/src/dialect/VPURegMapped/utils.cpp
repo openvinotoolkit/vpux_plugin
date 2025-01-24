@@ -2,6 +2,44 @@
 
 #include "vpux/utils/core/error.hpp"
 
+using namespace vpux;
+
+namespace {
+
+constexpr uint32_t NPU_DEFAULT_INVARIANT_COUNT = 64;
+constexpr uint32_t NPU_DEFAULT_VARIANT_COUNT = 128;
+constexpr uint32_t NPU_DEFAULT_KERNEL_RANGE_COUNT = 64;
+constexpr uint32_t NPU_DEFAULT_KERNEL_INVO_COUNT = 64;
+constexpr uint32_t NPU_DEFAULT_MEDIA_COUNT = 4;
+constexpr uint32_t NPU_DEFAULT_DMA_TASK_COUNT = 80;
+
+struct TaskListKey {
+    VPU::ArchKind archKind;
+    VPURegMapped::TaskType taskType;
+    bool operator==(const TaskListKey& other) const {
+        return (archKind == other.archKind && taskType == other.taskType);
+    }
+};
+struct TaskListKeyHash {
+    std::size_t operator()(const TaskListKey& key) const noexcept {
+        auto hashTask = std::hash<VPURegMapped::TaskType>{}(key.taskType);
+        auto hashArch = std::hash<VPU::ArchKind>{}(key.archKind);
+        // make sure the hash function is good enough for minimizing collision occurence (same output
+        // for different key values)
+        return hashTask ^ (hashArch << 3);
+    }
+};
+
+const std::unordered_map<TaskListKey, uint32_t, TaskListKeyHash> taskListsDefaultCapacityMap = {
+        {{VPU::ArchKind::NPU40XX, VPURegMapped::TaskType::DPUInvariant}, NPU_DEFAULT_INVARIANT_COUNT},
+        {{VPU::ArchKind::NPU40XX, VPURegMapped::TaskType::DPUVariant}, NPU_DEFAULT_VARIANT_COUNT},
+        {{VPU::ArchKind::NPU40XX, VPURegMapped::TaskType::ActKernelInvocation}, NPU_DEFAULT_KERNEL_INVO_COUNT},
+        {{VPU::ArchKind::NPU40XX, VPURegMapped::TaskType::ActKernelRange}, NPU_DEFAULT_KERNEL_RANGE_COUNT},
+        {{VPU::ArchKind::NPU40XX, VPURegMapped::TaskType::M2I}, NPU_DEFAULT_MEDIA_COUNT},
+        {{VPU::ArchKind::NPU40XX, VPURegMapped::TaskType::DMA}, NPU_DEFAULT_DMA_TASK_COUNT}};
+
+}  // namespace
+
 namespace vpux {
 namespace VPURegMapped {
 
@@ -48,6 +86,14 @@ std::optional<TaskBufferLayoutOp> getTaskBufferLayoutOp(mlir::Operation* op) {
     VPUX_THROW_WHEN(std::distance(taskBufferOpsRange.begin(), taskBufferOpsRange.end()) > 1,
                     "Only one VPURegMapped::TaskBufferLayoutOp should exist");
     return *(taskBufferOpsRange.begin());
+}
+
+uint32_t getDefaultTaskListCount(VPURegMapped::TaskType taskType, VPU::ArchKind archKind) {
+    auto taskListCapacityIter = taskListsDefaultCapacityMap.find({archKind, taskType});
+    VPUX_THROW_WHEN(taskListCapacityIter == taskListsDefaultCapacityMap.end(),
+                    "getDefaultTaskListCount: Unknown task type {0} for arch {1}", taskType, archKind);
+
+    return taskListCapacityIter->second;
 }
 
 }  // namespace VPURegMapped

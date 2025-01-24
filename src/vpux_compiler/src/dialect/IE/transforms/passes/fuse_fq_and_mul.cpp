@@ -64,11 +64,20 @@ bool isLegalToFuse(IE::MultiplyOp multiplyOp) {
     }
 
     auto mulConstShape = getShape(mulConstOp.getOutput());
+    auto mulOutputShape = getShape(multiplyOp.getOutput());
 
     // Only handle per-channel weight case.
-    if (mulConstShape[Dims4D::Filter::IC] != 1 || mulConstShape[Dims4D::Filter::KX] != 1 ||
-        mulConstShape[Dims4D::Filter::KY] != 1) {
-        return false;
+    if (mulConstShape.size() > 0) {
+        const auto hasNonOneDimsExceptOC = [](ShapeRef dims) {
+            return std::any_of(dims.begin() + 1, dims.end(), [](const int64_t dim) {
+                return dim != 1;
+            });
+        };
+        if ((mulConstShape[Dims4D::Filter::OC] != 1 &&
+             mulConstShape[Dims4D::Filter::OC] != mulOutputShape[Dims4D::Filter::OC]) ||
+            hasNonOneDimsExceptOC(mulConstShape)) {
+            return false;
+        }
     }
 
     return true;

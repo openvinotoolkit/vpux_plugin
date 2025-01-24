@@ -9,8 +9,6 @@
 
 #include <vpux_elf/types/vpu_extensions.hpp>
 
-#include "mlir/IR/SymbolTable.h"
-
 using namespace vpux;
 
 namespace {
@@ -28,6 +26,10 @@ private:
 
 void AddInnerSectionPaddingPass::safeRunOnFunc() {
     auto netFunc = getOperation();
+    auto moduleOp = netFunc.getOperation()->getParentOfType<mlir::ModuleOp>();
+    VPUX_THROW_UNLESS(moduleOp, "The top-level module is missing");
+    const auto arch = VPU::getArch(moduleOp);
+
     auto mainOps = to_small_vector(netFunc.getOps<ELF::MainOp>());
     VPUX_THROW_UNLESS(mainOps.size() == 1, "Expected exactly one ELF mainOp. Got {0}", mainOps.size());
     auto elfMain = mainOps[0];
@@ -43,7 +45,7 @@ void AddInnerSectionPaddingPass::safeRunOnFunc() {
         size_t offsetTracker = 0;
         for (auto wrappableOp : block->getOps<ELF::WrappableOpInterface>()) {
             const auto wrappableOperation = wrappableOp.getOperation();
-            const auto alignmentRequirement = wrappableOp.getAlignmentRequirements();
+            const auto alignmentRequirement = wrappableOp.getAlignmentRequirements(arch);
             size_t paddingRequired = offsetTracker % alignmentRequirement;
             if (paddingRequired) {
                 builder.setInsertionPoint(wrappableOperation);
@@ -51,10 +53,10 @@ void AddInnerSectionPaddingPass::safeRunOnFunc() {
                 builder.template create<ELF::PadOp>(builder.getUnknownLoc(), paddingSize, nullptr);
                 offsetTracker += paddingSize;
             }
-            offsetTracker += mlir::cast<ELF::BinaryOpInterface>(wrappableOperation).getBinarySizeCached(symRefMap);
+            offsetTracker +=
+                    mlir::cast<ELF::BinaryOpInterface>(wrappableOperation).getBinarySizeCached(symRefMap, arch);
         }
     }
-    return;
 }
 }  // namespace
 

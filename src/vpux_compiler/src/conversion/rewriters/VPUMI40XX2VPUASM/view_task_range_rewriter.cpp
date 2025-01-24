@@ -9,15 +9,18 @@
 namespace vpux {
 namespace vpumi40xx2vpuasm {
 
-mlir::LogicalResult ViewTaskRangeRewriter::symbolize(VPURegMapped::ViewTaskRangeOp op, SymbolMapper&,
-                                                     mlir::ConversionPatternRewriter& rewriter) const {
+mlir::FailureOr<SymbolizationResult> ViewTaskRangeRewriter::symbolize(VPURegMapped::ViewTaskRangeOp op,
+                                                                      SymbolMapper& mapper,
+                                                                      mlir::ConversionPatternRewriter& rewriter) const {
+    mapper[op.getResult()] = mapper[op.getFirst()];
+
     rewriter.eraseOp(op);
-    return mlir::success();
+    return SymbolizationResult();
 }
 
 llvm::SmallVector<mlir::FlatSymbolRefAttr> ViewTaskRangeRewriter::getSymbolicNames(VPURegMapped::ViewTaskRangeOp op,
                                                                                    size_t) {
-    return {findSym(op.getFirst())};
+    return {mlir::dyn_cast<mlir::FlatSymbolRefAttr>(findSym(op.getFirst()))};
 }
 
 }  // namespace vpumi40xx2vpuasm

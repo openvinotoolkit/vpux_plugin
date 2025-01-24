@@ -6,6 +6,7 @@
 
 #include "vpux/compiler/core/attributes/shape.hpp"
 #include "vpux/compiler/core/layers.hpp"
+#include "vpux/compiler/dialect/IE/utils/dynamic_shape_utils.hpp"
 #include "vpux/compiler/dialect/IE/utils/resources.hpp"
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
@@ -507,6 +508,10 @@ bool vpux::VPUIP::isLegalConvertToDMA(mlir::Operation* op, vpux::Logger log, boo
             .Case<VPU::MemPermuteOp>([&](mlir::Operation* op) {
                 log.trace("Got Permute Op at {0}.", op->getLoc());
 
+                if (IE::hasDynamicTensors(op)) {
+                    // TODO(E#105847): MemPermute with the dynamic shape ops cannot be converted to DMA
+                    return false;
+                }
                 const auto inputType = op->getOperand(0).getType().cast<vpux::NDTypeInterface>();
                 const auto outputType = op->getResult(0).getType().cast<vpux::NDTypeInterface>();
 
@@ -569,11 +574,12 @@ bool vpux::VPUIP::isLegalConvertToDMA(mlir::Operation* op, vpux::Logger log, boo
             })
             .Case<VPUIP::SwKernelOp>([&](VPUIP::SwKernelOp swKernelOp) {
                 // TODO(E#105847): dynamic shape ops cannot be converted to DMA
-                if (!swKernelOp.getDynamicInputShapes().empty() || !swKernelOp.getDynamicOutputShapes().empty()) {
+                if (!swKernelOp.getDynamicInputShapes().empty() || !swKernelOp.getDynamicOutputShapes().empty() ||
+                    VPUIP::hasDynamicShape(swKernelOp)) {
                     return false;
                 }
                 if (auto memPerm = getMemPermFromSwKernel(swKernelOp)) {
-                    // At NPU37XX: VPU::MemPermute -> VPUIP::SwKernelOp -> VPUIP::PermuteDMA
+                    // At VPUX37XX: VPU::MemPermute -> VPUIP::SwKernelOp -> VPUIP::PermuteDMA
                     VPUX_THROW_UNLESS(swKernelOp->getNumOperands() == 2,
                                       "Unexpected operand number {0} for VPUIP.SwKernelOp at '{1}'",
                                       swKernelOp->getNumOperands(), swKernelOp);
@@ -590,7 +596,7 @@ bool vpux::VPUIP::isLegalConvertToDMA(mlir::Operation* op, vpux::Logger log, boo
                     log.trace("SwKernelOp at {0} can convert to PermuteDMAOp.", op->getLoc());
                     return true;
                 } else if (getDepthToSpaceSwKernelAttr(swKernelOp).has_value()) {
-                    // At NPU37XX: VPU::DepthToSpace -> VPUIP::SwKernelOp -> VPUIP::DepthToSpaceDMA
+                    // At VPUX37XX: VPU::DepthToSpace -> VPUIP::SwKernelOp -> VPUIP::DepthToSpaceDMA
 
                     // In general, DepthToSpace has 2 operands - inputs and outputs
                     // But if a DepthToSpace SW Kernel Op has been tiled into N tiles by tile-act-shave-kernel-task
@@ -602,7 +608,7 @@ bool vpux::VPUIP::isLegalConvertToDMA(mlir::Operation* op, vpux::Logger log, boo
                     log.trace("SwKernelOp at {0} can convert to DepthToSpaceDMA.", op->getLoc());
                     return true;
                 } else if (getSpaceToDepthSwKernelAttr(swKernelOp).has_value()) {
-                    // At NPU37XX: VPU::DepthToSpace -> VPUIP::SwKernelOp -> VPUIP::DepthToSpaceDMA
+                    // At VPUX37XX: VPU::DepthToSpace -> VPUIP::SwKernelOp -> VPUIP::DepthToSpaceDMA
                     VPUX_THROW_UNLESS(swKernelOp->getNumOperands() == 2,
                                       "Unexpected operand number for VPUIP.SwKernelOp at '{0}'", swKernelOp);
 
@@ -629,7 +635,7 @@ bool vpux::VPUIP::isLegalConvertToDMA(mlir::Operation* op, vpux::Logger log, boo
                     log.trace("SwKernelOp at {0} can convert to DMA.", op->getLoc());
                     return true;
                 } else if (isTileSwKernel(swKernelOp)) {
-                    // At NPU37XX: VPU::Tile -> VPUIP::SwKernelOp -> VPUIP::PerAxisTileDMA
+                    // At VPUX37XX: VPU::Tile -> VPUIP::SwKernelOp -> VPUIP::PerAxisTileDMA
                     const auto inputType = op->getOperand(0).getType().cast<vpux::NDTypeInterface>();
                     const auto outputType = op->getResult(0).getType().cast<vpux::NDTypeInterface>();
 
@@ -819,7 +825,7 @@ bool vpux::VPUIP::isCompatibleWithMultiClusterNNDMA(VPU::DepthToSpaceOp op, vpux
     auto tileOp = IE::getTileExecutor(module);
     auto numClusters = tileOp.getCount();
 
-    // For NPU40XX all SOH are SOH-overlapped tile them now
+    // For VPUX40XX all SOH are SOH-overlapped tile them now
     // Support for overlapped buffers will be added with E#86818
     // With intermediate sliceOp there will be a spill
     if (!intermediateSliceOp &&

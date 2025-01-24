@@ -13,7 +13,7 @@ This document is written on the basis of discussions taken as part of the task o
 
 Regardless of the device version, the compilation flow has the same appearance at the dialect level. These dialects represent different levels of detail. The IR is lowered from high level abstractions to more detailed representation step-by-step during compilation. The compilation pipeline consists of the "atomic“ passes. Each pass in compilation pipeline must represent one single transformation to reach one specific goal (either IR adaptation or IR optimization). More information is available from the [Compiler HLD](https://docs.intel.com/documents/MovidiusExternal/vpu27/Common/SW/HLD/external/VPUX_NN_Compiler.html) or the [presentation](https://videoportal.intel.com/media/0_dnxf87in).
 
-It is also necessary to describe the dependence of dialects from an architectural point of view: 
+It is also necessary to describe the dependence of dialects from an architectural point of view:
 
 ![Dialect dependencies](images/dialects.png)
 
@@ -53,7 +53,7 @@ Hardware specific passes are designed to work on a particular platform. And from
 You are allowed to reuse passes from an older HW version for a newer one if the required feature is a strict superset:
 
 ```C++
-// 40XX 
+// 40XX
 void vpux::buildDefaultHWModePipeline(mlir::OpPassManager& pm, const DefaultHWOptions40XX& options, Logger log) {
     // ...
     // Use pass from previous version here
@@ -78,7 +78,7 @@ Mixed passes share a common core algorithm but utilise hardware specific informa
 #### Interface-based approach
 
 Lets say we have `StrategyManager` pass in VPU dialect that can be applied for all HW generations. At the same time, the general algorithm from this pass needs information about possible strategies that are different for different devices. So we have to store strategies separately for HW components, because, for example, for the newest device it is private information.
- 
+
 ![Interface-based approach scheme](images/interface_based.png)
 
 Following this approach, the development of a "mixed" pass is similar to a common pass. The difference here is that we have to create a concrete instance of the corresponding type in the common part, using, for example, the factory method:
@@ -120,7 +120,7 @@ void UnrollClusterTilingPass::safeRunOnFunc() {
     auto func = getOperation();
 
     auto strategy = createUnrollClusterTilingStrategy(func, _log);
-    
+
     mlir::RewritePatternSet patterns(&ctx);
     // add necessary rewriters here
     strategy.addPatterns(patterns);
@@ -136,7 +136,7 @@ where `strategy` is `IGreedilyPassStrategy` and it can be implemented in differe
 
 ```C++
 
-// 37XX 
+// 37XX
 void UnrollClusterTilingStrategy::addPatterns(mlir::RewritePatternSet& patterns) {
     auto module = _func->getParentOfType<mlir::ModuleOp>();
     auto dmaOp = IE::getAvailableExecutor(module, VPU::ExecutorKind::DMA_NN);
@@ -147,7 +147,7 @@ void UnrollClusterTilingStrategy::addPatterns(mlir::RewritePatternSet& patterns)
     patterns.add<VPUIP::arch37xx::ClusterNCERewriter>(&ctx, _log);
 }
 
-// 40XX 
+// 40XX
 void UnrollClusterTilingStrategy::addPatterns(mlir::RewritePatternSet& patterns) {
     auto module = _func->getParentOfType<mlir::ModuleOp>();
     auto dmaOp = IE::getAvailableExecutor(module, VPU::ExecutorKind::DMA_NN);
@@ -174,7 +174,7 @@ This approach also helps reducing code duplication since it doesn't require pass
 instead of, for example, duplicating the device version in the pass name:
 
 ```MLIR
-// RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=NPU40XX allow-custom-values=true" --unroll-cluster-tiling-NPU40XX  %s | FileCheck %s
+// RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=NPU40XX allow-custom-values=true" --unroll-cluster-tiling-VPUX40XX  %s | FileCheck %s
 ```
 
 More detailed information about vpux-opt can be found in the [how-to-test](../../../../guides/how-to-test.md) document.
@@ -185,7 +185,7 @@ TODO: #-86282
 
 ## Pipelines
 
-Compiler has different pipeline for different HW generation. These pipelines are stored in appropriate HW folders: [NPU37XX](../include/vpux/compiler/NPU37XX/pipelines.cpp), etc. To build a pipeline, it is also necessary to implement `IPipelineStrategy` interface for each device: 
+Compiler has different pipeline for different HW generation. These pipelines are stored in appropriate HW folders: [NPU37XX](../include/vpux/compiler/NPU37XX/pipelines.cpp), etc. To build a pipeline, it is also necessary to implement `IPipelineStrategy` interface for each device:
 
 ![Pipeline strategy class diagram](images/pipeline.png)
 
@@ -214,7 +214,7 @@ This approach also has a downside. It is not clear why this or that pass partici
 ```C++
 // Only sub-pipelines and HW-specific passages should remain in the main pipeline
 
-// 37XX 
+// 37XX
 void vpux::buildDefaultHWModePipeline(mlir::OpPassManager& pm, const DefaultHWOptions37XX& options, Logger log) {
     // ...
     IE::buildName1Pipeline(pm, log);
@@ -224,7 +224,7 @@ void vpux::buildDefaultHWModePipeline(mlir::OpPassManager& pm, const DefaultHWOp
     // ...
 }
 
-// 40XX 
+// 40XX
 void vpux::buildDefaultHWModePipeline(mlir::OpPassManager& pm, const DefaultHWOptions40XX& options, Logger log) {
     // ...
     IE::buildName1Pipeline(pm, log);
@@ -306,7 +306,7 @@ The implementation of HW passes is also duplicated for each platform. Possible w
 void StrategyManagerPass::safeRunOnFunc() {
     auto func = getOperation();
     auto module = func->getParentOfType<mlir::ModuleOp>();
-    
+
     // in case of 40XX we have to create arch40xx::StrategyGetter
     StrategyManagerImplAlgo algo {func, std::make_unique<arch37xx::StrategyGetter>();}
     algo.foo();

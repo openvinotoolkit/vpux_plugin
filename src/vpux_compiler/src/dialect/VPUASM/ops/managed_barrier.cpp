@@ -20,12 +20,12 @@ void vpux::VPUASM::ManagedBarrierOp::serialize(elf::writer::BinaryDataSection<ui
     VPUX_THROW("Should not serialize ManagedBarrierOp directly");
 }
 
-size_t vpux::VPUASM::ManagedBarrierOp::getBinarySize() {
-    return sizeof(nn_public::VpuTaskBarrierMap);
+size_t vpux::VPUASM::ManagedBarrierOp::getBinarySize(VPU::ArchKind /*arch*/) {
+    return sizeof(npu40xx::nn_public::VpuTaskBarrierMap);
 }
 
-size_t vpux::VPUASM::ManagedBarrierOp::getAlignmentRequirements() {
-    return alignof(nn_public::VpuTaskBarrierMap);
+size_t vpux::VPUASM::ManagedBarrierOp::getAlignmentRequirements(VPU::ArchKind /*arch*/) {
+    return alignof(npu40xx::nn_public::VpuTaskBarrierMap);
 }
 
 vpux::ELF::SectionFlagsAttr vpux::VPUASM::ManagedBarrierOp::getPredefinedMemoryAccessors() {

@@ -26,7 +26,7 @@ mlir::LogicalResult vpux::VPU::GreaterEqualOp::inferReturnTypes(
                                                        greatereq.getAutoBroadcast(), loc);
 
     if (mlir::succeeded(outShapeRes)) {
-        const auto outType = in1Type.changeShapeElemType(Shape(outShapeRes.value()), getBool8Type(ctx));
+        const auto outType = in1Type.changeShape(Shape(outShapeRes.value()));
         inferredReturnTypes.push_back(outType);
     }
 

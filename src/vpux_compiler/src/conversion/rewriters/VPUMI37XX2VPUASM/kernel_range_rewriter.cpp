@@ -9,8 +9,8 @@
 namespace vpux {
 namespace vpumi37xx2vpuasm {
 
-mlir::LogicalResult KernelRangeRewriter::symbolize(VPUMI37XX::ActKernelRangeOp op, SymbolMapper&,
-                                                   mlir::ConversionPatternRewriter& rewriter) const {
+mlir::FailureOr<SymbolizationResult> KernelRangeRewriter::symbolize(VPUMI37XX::ActKernelRangeOp op, SymbolMapper&,
+                                                                    mlir::ConversionPatternRewriter& rewriter) const {
     auto symName = findSym(op).getRootReference();
     auto taskLocation = findSym(op.getTaskLocation());
 
@@ -20,11 +20,11 @@ mlir::LogicalResult KernelRangeRewriter::symbolize(VPUMI37XX::ActKernelRangeOp o
     auto kernelTaskType = op.getKernelTaskType();
     auto taskIdx = mlir::TypeAttr::get(op.getType());
 
-    rewriter.create<VPUASM::ActKernelRangeOp>(op.getLoc(), symName, taskIdx, taskLocation, kernelTextAttr,
-                                              kernelEntryAttr, kernelTaskType);
+    auto newOp = rewriter.create<VPUASM::ActKernelRangeOp>(op.getLoc(), symName, taskIdx, taskLocation, kernelTextAttr,
+                                                           kernelEntryAttr, kernelTaskType);
     rewriter.eraseOp(op);
 
-    return mlir::success();
+    return SymbolizationResult(newOp);
 }
 
 }  // namespace vpumi37xx2vpuasm

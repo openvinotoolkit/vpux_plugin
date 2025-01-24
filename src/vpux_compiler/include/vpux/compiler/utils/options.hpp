@@ -12,9 +12,12 @@
 namespace vpux {
 
 using IntOption = mlir::detail::PassOptions::Option<int>;
+using Int64Option = mlir::detail::PassOptions::Option<int64_t>;
 using StrOption = mlir::detail::PassOptions::Option<std::string>;
 using BoolOption = mlir::detail::PassOptions::Option<bool>;
 using DoubleOption = mlir::detail::PassOptions::Option<double>;
+enum class WlmVpurtEnqueueMode { ENABLED = 0, DISABLED = 1 };
+enum class AllocateShaveStackFrames { ENABLED = 0, DISABLED = 1 };
 
 std::optional<int> convertToOptional(const IntOption& intOption);
 std::optional<std::string> convertToOptional(const StrOption& strOption);

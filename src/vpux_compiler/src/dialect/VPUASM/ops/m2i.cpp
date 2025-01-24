@@ -6,12 +6,10 @@
 #include <mlir/IR/BuiltinTypes.h>
 #include "vpux/compiler/dialect/VPUASM/ops.hpp"
 #include "vpux/compiler/utils/ELF/utils.hpp"
-#include "vpux/utils/core/optional.hpp"
 
 #include <npu_40xx_nnrt.hpp>
 
 using namespace vpux;
-using namespace npu40xx;
 
 //
 // M2IOp
@@ -25,12 +23,12 @@ void VPUASM::M2IOp::serialize(elf::writer::BinaryDataSection<uint8_t>&) {
 #endif
 }
 
-size_t VPUASM::M2IOp::getBinarySize() {
-    return sizeof(nn_public::VpuMediaTask);
+size_t VPUASM::M2IOp::getBinarySize(VPU::ArchKind /*arch*/) {
+    return sizeof(npu40xx::nn_public::VpuMediaTask);
 }
 
-size_t VPUASM::M2IOp::getAlignmentRequirements() {
-    return alignof(nn_public::VpuMediaTask);
+size_t VPUASM::M2IOp::getAlignmentRequirements(VPU::ArchKind /*arch*/) {
+    return alignof(npu40xx::nn_public::VpuMediaTask);
 }
 
 ELF::SectionFlagsAttr VPUASM::M2IOp::getPredefinedMemoryAccessors() {

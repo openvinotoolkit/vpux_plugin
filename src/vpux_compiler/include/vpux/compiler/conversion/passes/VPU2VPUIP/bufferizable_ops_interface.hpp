@@ -107,6 +107,8 @@ mlir::LogicalResult bufferizeOp(mlir::MLIRContext* ctx, VPU::StubOp origOp, VPU:
                                 mlir::RewriterBase& rewriter);
 mlir::LogicalResult bufferizeOp(mlir::MLIRContext* ctx, VPU::GroupSparseTensorOp origOp,
                                 VPU::GroupSparseTensorOp::Adaptor newArgs, mlir::RewriterBase& rewriter);
+mlir::LogicalResult bufferizeOp(mlir::MLIRContext* ctx, VPU::UngroupSparseTensorOp origOp,
+                                VPU::UngroupSparseTensorOp::Adaptor newArgs, mlir::RewriterBase& rewriter);
 mlir::LogicalResult bufferizeOp(mlir::MLIRContext* ctx, VPU::StorageElementTableOp origOp,
                                 VPU::StorageElementTableOp::Adaptor newArgs, mlir::RewriterBase& rewriter);
 mlir::LogicalResult bufferizeOp(mlir::MLIRContext* ctx, VPU::ShapeCastOp origOp, VPU::ShapeCastOp::Adaptor newArgs,
@@ -121,6 +123,9 @@ mlir::LogicalResult bufferizeOp(mlir::MLIRContext* ctx, VPU::ConcatOp origOp, VP
                                 mlir::RewriterBase& rewriter);
 mlir::LogicalResult bufferizeOp(mlir::MLIRContext* ctx, VPU::GatherDMAOp origOp, VPU::GatherDMAOp::Adaptor newArgs,
                                 mlir::RewriterBase& rewriter);
+mlir::LogicalResult bufferizeOp(mlir::MLIRContext* ctx, VPU::ShapeOfOp origOp, VPU::ShapeOfOp::Adaptor newArgs,
+                                mlir::RewriterBase& rewriter);
+
 template <typename ConcreteOp>
 mlir::LogicalResult bufferizeOp(mlir::MLIRContext* ctx, ConcreteOp origOp, typename ConcreteOp::Adaptor newArgs,
                                 mlir::RewriterBase& rewriter);
@@ -140,6 +145,8 @@ mlir::LogicalResult bufferizeOp(mlir::MLIRContext* ctx, VPU::NCEDepthConvolution
 mlir::LogicalResult bufferizeOp(mlir::MLIRContext* ctx, VPU::NCEInterpolateOp origOp,
                                 VPU::NCEInterpolateOp::Adaptor newArgs, mlir::RewriterBase& rewriter);
 mlir::LogicalResult bufferizeOp(mlir::MLIRContext* ctx, VPU::NCEEltwiseOp origOp, VPU::NCEEltwiseOp::Adaptor newArgs,
+                                mlir::RewriterBase& rewriter);
+mlir::LogicalResult bufferizeOp(mlir::MLIRContext* ctx, VPU::NCEReduceOp origOp, VPU::NCEReduceOp::Adaptor newArgs,
                                 mlir::RewriterBase& rewriter);
 mlir::LogicalResult bufferizeOp(mlir::MLIRContext* ctx, VPU::NCECompressConvolutionOp origOp,
                                 VPU::NCECompressConvolutionOp::Adaptor newArgs, mlir::RewriterBase& rewriter);

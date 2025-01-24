@@ -34,8 +34,9 @@ void AddELFRelocationsPass::safeRunOnFunc() {
 
         // TODO:  E#59169 consider to add interface dedicated for sections that are intended to hold program data, aka
         // should be relocateable?
-        if (!(mlir::isa<ELF::DataSectionOp>(targetSection) || mlir::isa<ELF::LogicalSectionOp>(targetSection)))
+        if (!mlir::isa<ELF::DataSectionOp, ELF::LogicalSectionOp>(targetSection)) {
             continue;
+        }
 
         auto block = sectionInterface.getBlock();
 
@@ -43,8 +44,6 @@ void AddELFRelocationsPass::safeRunOnFunc() {
             relocManager.createRelocations(relocatableOp);
         }
     }
-
-    return;
 }
 
 }  // namespace

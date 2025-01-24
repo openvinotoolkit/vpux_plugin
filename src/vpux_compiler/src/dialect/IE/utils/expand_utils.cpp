@@ -16,6 +16,214 @@
 namespace vpux {
 namespace IE {
 
+//
+// calcPadsEnd
+//
+
+Shape calcPadsEnd(ShapeRef origShape, ShapeRef extendedShape) {
+    Shape padsEnd(origShape.size());
+
+    for (auto i : irange(origShape.size())) {
+        const auto d = Dim(i);
+        padsEnd[d] = extendedShape[d] - origShape[d];
+    }
+
+    return padsEnd;
+}
+
+Shape calcPadsEnd(vpux::NDTypeInterface origType, int64_t channelAlignment) {
+    const auto origShape = origType.getShape();
+
+    auto extendedShape = origShape.toValues();
+    extendedShape[Dims4D::Act::C] = alignValUp(origShape[Dims4D::Act::C], channelAlignment);
+
+    return calcPadsEnd(origShape, extendedShape);
+}
+
+bool needsPadding(const int64_t dim) {
+    return dim != 0;
+}
+
+SmallVector<int64_t> extractMeaningfulOutput(mlir::Operation* origOp, ShapeRef outPadsEnd) {
+    SmallVector<int64_t> offsets(outPadsEnd.size(), 0);
+    auto sliceOp = origOp->getOperand(0).template getDefiningOp<IE::SliceOp>();
+    if (sliceOp != nullptr) {
+        auto sliceOffsets = parseIntArrayAttr<int64_t>(sliceOp.getStaticOffsets());
+        const auto sliceChannelOffset = sliceOffsets[Dims4D::Act::C.ind()];
+        if (sliceChannelOffset < outPadsEnd[Dims4D::Act::C]) {
+            offsets[Dims4D::Act::C.ind()] = sliceChannelOffset;
+        } else {
+            offsets[Dims4D::Act::C.ind()] = outPadsEnd[Dims4D::Act::C];
+        }
+    }
+
+    return offsets;
+}
+
+mlir::Value expandWithOffset(mlir::PatternRewriter& rewriter, mlir::Operation* origOp, IE::SliceOp sliceOp,
+                             mlir::Value expandValue, ShapeRef inPadsEnd, size_t expandDim) {
+    const auto inputType = mlir::cast<vpux::NDTypeInterface>(origOp->getOperand(0).getType());
+    const auto inputShape = inputType.getShape();
+
+    auto padBegin = mlir::SmallVector<int64_t>(inputShape.size(), 0);
+    auto padEnd = mlir::SmallVector<int64_t>(inputShape.size(), 0);
+    auto sliceOffsets = mlir::SmallVector<int64_t>(inputShape.size(), 0);
+    if (sliceOp != nullptr) {
+        sliceOffsets = parseIntArrayAttr<int64_t>(sliceOp.getStaticOffsets());
+    }
+    const auto sliceChannelOffset = sliceOffsets[Dims4D::Act::C.ind()];
+
+    if (sliceChannelOffset < inPadsEnd[Dim(expandDim)]) {
+        padBegin[expandDim] = sliceChannelOffset;
+        padEnd[expandDim] = inPadsEnd[Dim(expandDim)] - sliceChannelOffset;
+    } else {
+        padBegin[expandDim] = inPadsEnd[Dim(expandDim)];
+    }
+
+    return rewriter.createOrFold<IE::ExpandOp>(origOp->getLoc(), expandValue,
+                                               getIntArrayAttr(rewriter, ArrayRef(padBegin)),
+                                               getIntArrayAttr(rewriter, ArrayRef(padEnd)));
+}
+
+mlir::Value paddingChannel(mlir::Operation* origOp, mlir::PatternRewriter& rewriter, mlir::Value expandValue,
+                           ShapeRef padsEnd, size_t expandDim) {
+    auto sliceOp = origOp->getOperand(0).getDefiningOp<IE::SliceOp>();
+    if (sliceOp == nullptr) {
+        return rewriter.createOrFold<IE::ExpandOp>(origOp->getLoc(), expandValue, std::nullopt, padsEnd);
+    }
+
+    return expandWithOffset(rewriter, origOp, sliceOp, expandValue, padsEnd, expandDim);
+}
+
+mlir::Value paddingFilter(mlir::Operation* origOp, mlir::PatternRewriter& rewriter, mlir::Value expandValue,
+                          Shape padsEnd) {
+    auto sliceOp = origOp->getOperand(0).getDefiningOp<IE::SliceOp>();
+    if (sliceOp == nullptr) {
+        return rewriter.createOrFold<IE::ExpandOp>(origOp->getLoc(), expandValue, std::nullopt, ShapeRef(padsEnd));
+    }
+    auto firstExpand = expandWithOffset(rewriter, origOp, sliceOp, expandValue, padsEnd, Dims4D::Act::C.ind());
+
+    padsEnd[Dims4D::Filter::IC] = 0;
+    return rewriter.createOrFold<IE::ExpandOp>(origOp->getLoc(), firstExpand, std::nullopt, ShapeRef(padsEnd));
+}
+
+mlir::Value concatWithZeroConst(mlir::Location loc, mlir::Value filter, ShapeRef subInput, int64_t sliceChannelOffset,
+                                mlir::PatternRewriter& rewriter) {
+    const auto filterType = mlir::cast<vpux::NDTypeInterface>(filter.getType());
+
+    auto firstPadShape = to_small_vector(filterType.getShape());
+    auto secondPadShape = to_small_vector(filterType.getShape());
+
+    if (sliceChannelOffset <= subInput[Dims4D::Filter::IC]) {
+        firstPadShape[Dims4D::Filter::IC.ind()] = sliceChannelOffset;
+        secondPadShape[Dims4D::Filter::IC.ind()] = subInput[Dims4D::Filter::IC] - sliceChannelOffset;
+    } else {
+        firstPadShape[Dims4D::Filter::IC.ind()] = subInput[Dims4D::Filter::IC];
+        secondPadShape[Dims4D::Filter::IC.ind()] = 0;
+    }
+
+    auto const generateZeroConst = [&](ShapeRef padShape) {
+        const auto padType = filterType.changeShape(ShapeRef(padShape));
+        const auto eleType = padType.getElementType();
+
+        const auto getEleStorageType = [&]() {
+            if (const auto quantizedType = eleType.dyn_cast<mlir::quant::QuantizedType>()) {
+                return normalizeQuantStorageType(quantizedType);
+            } else {
+                return eleType;
+            }
+        };
+        const auto storageElementType = getEleStorageType();
+
+        // FIXME: this is a very weird way to create 0 of a particular type
+        auto outputBuffer = Const::Content::allocTempBuffer(padType, storageElementType, false);
+        outputBuffer.fillWithZero();
+
+        const auto dataType = mlir::cast<mlir::RankedTensorType>(padType.changeElemType(storageElementType));
+        mlir::DenseElementsAttr eleAttr;
+        const auto getDataAttr = [&](auto buffer) {
+            eleAttr = Const::createConstContent(dataType, buffer);
+        };
+        outputBuffer.mutate(getDataAttr);
+
+        return rewriter.create<Const::DeclareOp>(loc, padType, Const::ContentAttr::get(eleAttr)).getOutput();
+    };
+
+    SmallVector<mlir::Value> concatInput;
+    if (sliceChannelOffset > 0) {
+        concatInput.push_back(generateZeroConst(ShapeRef(firstPadShape)));
+    }
+    concatInput.push_back(filter);
+    if (secondPadShape[Dims4D::Filter::IC.ind()] != 0) {
+        concatInput.push_back(generateZeroConst(ShapeRef(secondPadShape)));
+    }
+    auto concatOp = rewriter.create<IE::ConcatOp>(loc, concatInput, Dims4D::Filter::IC);
+
+    return concatOp.getOutput();
+}
+
+mlir::Value padConvFilter(mlir::PatternRewriter& rewriter, mlir::Operation* origOp, const int64_t inChanPadEnd,
+                          const int64_t outChanPadEnd, const Logger& log) {
+    auto filterOperand = origOp->getOperand(1);
+    if (inChanPadEnd == 0 && outChanPadEnd == 0) {
+        return filterOperand;
+    }
+
+    auto inputOperand = origOp->getOperand(0);
+    auto inputSliceOp = inputOperand.getDefiningOp<IE::SliceOp>();
+
+    auto filterShape = mlir::cast<vpux::NDTypeInterface>(filterOperand.getType()).getShape();
+    Shape filterPadsEnd(filterShape.size(), 0);
+    filterPadsEnd[Dims4D::Filter::OC] = outChanPadEnd;
+    filterPadsEnd[Dims4D::Filter::IC] = inChanPadEnd;
+
+    auto filterOp = filterOperand.getDefiningOp();
+
+    bool isConstFilter = mlir::isa_and_nonnull<Const::DeclareOp>(filterOp);
+    if (!isConstFilter) {
+        if (auto fqOp = mlir::dyn_cast_or_null<IE::FakeQuantizeOp>(filterOp)) {
+            const auto fqInputConstOp = fqOp.getInput().getDefiningOp<Const::DeclareOp>();
+            isConstFilter = fqInputConstOp != nullptr;
+        }
+    }
+
+    // E#72287: Convert ExpandOp to const Concat in VPUIP, ExpandOp is preferred in IE for optimization.
+    const auto expandTensor = [&](mlir::Value filter, ShapeRef pad, IE::SliceOp sliceOp) {
+        auto sliceOffsets = mlir::SmallVector<int64_t>(pad.size(), 0);
+        auto sliceChannelOffset = 0;
+        if (sliceOp != nullptr) {
+            sliceOffsets = parseIntArrayAttr<int64_t>(sliceOp.getStaticOffsets());
+            sliceChannelOffset = sliceOffsets[Dims4D::Act::C.ind()];
+        }
+        return concatWithZeroConst(origOp->getLoc(), filter, pad, sliceChannelOffset, rewriter);
+    };
+
+    mlir::Value paddedFilter;
+    if (!isConstFilter && inChanPadEnd != 0 && outChanPadEnd == 0) {
+        // 1 dim expand for non-const filter
+        log.trace("Pad non-const filter in IC at '{0}'", origOp->getLoc());
+        paddedFilter = expandTensor(filterOperand, filterPadsEnd, inputSliceOp);
+
+    } else if (!isConstFilter && inChanPadEnd != 0 && outChanPadEnd != 0) {
+        // 2 dims expand for non-const filter
+        log.trace("Pad non-const filter in IC & OC at '{0}'", origOp->getLoc());
+
+        mlir::Value paddedFilter1;
+        Shape filterPadsEnd1(filterShape.size(), 0);
+        filterPadsEnd1[Dims4D::Filter::IC] = inChanPadEnd;
+        paddedFilter1 = expandTensor(filterOperand, filterPadsEnd1, inputSliceOp);
+
+        Shape filterPadsEnd2(filterShape.size(), 0);
+        filterPadsEnd2[Dims4D::Filter::OC] = outChanPadEnd;
+        paddedFilter = rewriter.createOrFold<IE::ExpandOp>(origOp->getLoc(), paddedFilter1, std::nullopt,
+                                                           ShapeRef(filterPadsEnd2));
+    } else {
+        // Const filter expand or expand on OC only
+        paddedFilter = paddingFilter(origOp, rewriter, filterOperand, std::move(filterPadsEnd));
+    }
+    return paddedFilter;
+}
+
 // With respect to eltwise ops in a chain, for example:
 //   Expand -> Add -> Slice -> Expand -> Add -> Slice
 // It will be beneficial to keep the 2nd Expand for the 2nd Add instead of folding with Slice.

@@ -29,7 +29,6 @@ class NPUReg40XX_ExecutableTaskOp<string mnemonic, list<Trait> traits = []> :
             !listconcat(
                 traits,
                 [
-                    DeclareOpInterfaceMethods<ELF_BinaryOpInterface, ["serialize", "getBinarySize"]>
                 ]
             )
         > {
@@ -44,6 +43,7 @@ def NPUReg40XX_NNDMAOp :
             [
                 DeclareOpInterfaceMethods<ELF_WrappableOpInterface>,
                 DeclareOpInterfaceMethods<ELF_RelocatableOpInterface>,
+                DeclareOpInterfaceMethods<ELF_BinaryOpInterface, ["serialize", "getBinarySize"]>,
                 Symbol,
                 IsolatedFromAbove
             ]
@@ -68,12 +68,16 @@ def NPUReg40XX_NNDMAOp :
 def NPUReg40XX_MappedInferenceOp :
         NPUReg40XX_ExecutableTaskOp<"MappedInference",
             [
+                DeclareOpInterfaceMethods<ELF_WrappableOpInterface>,
+                DeclareOpInterfaceMethods<ELF_RelocatableOpInterface>,
+                DeclareOpInterfaceMethods<ELF_BinaryOpInterface, ["serializeCached", "getBinarySize"]>
             ]
         > {
     let summary = "Task representing the MappedInference structure";
 
     let arguments = (ins
         SymbolNameAttr:$sym_name,
+        I64ArrayOfArraysAttr:$dmaCount,
         I64ArrayAttr:$dmaDDRCount,
         I64ArrayAttr:$dmaCMXCount,
         I64ArrayAttr:$invariantCount,
@@ -82,11 +86,19 @@ def NPUReg40XX_MappedInferenceOp :
         I64ArrayAttr:$actKernelInvocationsCount,
         I64Attr:$mediaCount,
         I64Attr:$barrierCount,
+        SymbolRefAttr:$mappedInferenceVersion,
         OptionalAttr<SymbolRefAttr>:$actShaveRt,
         OptionalAttr<SymbolRefArrayAttr>:$actShaveStacks,
         OptionalAttr<SymbolRefAttr>:$dmaHwpBase,
         OptionalAttr<SymbolRefAttr>:$hwpWorkpointCfg,
-        OptionalAttr<SymbolRefAttr>:$managedMappedInference
+        OptionalAttr<SymbolRefAttr>:$managedMappedInference,
+        OptionalAttr<SymbolRefArrayOfArraysAttr>:$dmaTasks,
+        OptionalAttr<SymbolRefArrayAttr>:$invariantTasks,
+        OptionalAttr<SymbolRefArrayAttr>:$variantTasks,
+        OptionalAttr<SymbolRefArrayAttr>:$actKernelRanges,
+        OptionalAttr<SymbolRefArrayAttr>:$actKernelInvocations,
+        OptionalAttr<SymbolRefAttr>:$mediaTasks,
+        OptionalAttr<SymbolRefAttr>:$barrierTasks
     );
 }
 
@@ -97,11 +109,14 @@ def NPUReg40XX_MappedInferenceOp :
 def NPUReg40XX_ConfigureBarrierOp :
         NPUReg40XX_ExecutableTaskOp<"ConfigureBarrier",
             [
+                DeclareOpInterfaceMethods<ELF_WrappableOpInterface>,
+                DeclareOpInterfaceMethods<ELF_BinaryOpInterface, ["serialize", "getBinarySize"]>
             ]
         > {
     let summary = "A task to configure the setup for a barrier";
 
     let arguments = (ins
+        SymbolNameAttr:$sym_name,
         VPURegMapped_RegisterMappedAttr:$barrier_descriptor
     );
 }
@@ -114,6 +129,7 @@ def NPUReg40XX_ActShaveRtOp :
         NPUReg40XX_ExecutableTaskOp<"ActShaveRt",
             [
                 DeclareOpInterfaceMethods<ELF_WrappableOpInterface>,
+                DeclareOpInterfaceMethods<ELF_BinaryOpInterface, ["serialize", "getBinarySize"]>,
                 Symbol
             ]
         > {
@@ -138,12 +154,13 @@ def NPUReg40XX_ActKernelRangeOp :
             [
                 DeclareOpInterfaceMethods<ELF_WrappableOpInterface>,
                 DeclareOpInterfaceMethods<ELF_RelocatableOpInterface>,
+                DeclareOpInterfaceMethods<ELF_BinaryOpInterface, ["serialize", "getBinarySize"]>,
                 Symbol
             ]> {
     let summary = "Activation Kernel Range";
     let arguments = (ins
         SymbolNameAttr:$sym_name,
-        VPURegMapped_RegisterMappedAttr:$act_range_descriptor,
+        ActKernelRangeDescriptorAttr:$act_range_descriptor,
 
         OptionalAttr<SymbolRefAttr>:$task_location,
         OptionalAttr<SymbolRefAttr>:$kernel_text,
@@ -160,14 +177,16 @@ def NPUReg40XX_ActKernelInvocationOp :
             [
                 DeclareOpInterfaceMethods<ELF_WrappableOpInterface>,
                 DeclareOpInterfaceMethods<ELF_RelocatableOpInterface>,
+                DeclareOpInterfaceMethods<ELF_BinaryOpInterface, ["serialize", "getBinarySize"]>,
                 Symbol
             ]> {
     let summary = "Activation Kernel Invocation";
     let arguments = (ins
         SymbolNameAttr:$sym_name,
-        VPURegMapped_RegisterMappedAttr:$act_invo_descriptor,
+        ActKernelInvocationDescriptorAttr:$act_invo_descriptor,
 
         OptionalAttr<SymbolRefAttr>:$task_location,
+        OptionalAttr<SymbolRefAttr>:$next_link,
         SymbolRefAttr:$kernel_range,
         OptionalAttr<SymbolRefAttr>:$kernel_data,
         SymbolRefAttr:$kernel_params,
@@ -183,6 +202,7 @@ def NPUReg40XX_DPUInvariantOp :
         NPUReg40XX_ExecutableTaskOp<"DPUInvariant", [
                 DeclareOpInterfaceMethods<ELF_WrappableOpInterface>,
                 DeclareOpInterfaceMethods<ELF_RelocatableOpInterface>,
+                DeclareOpInterfaceMethods<ELF_BinaryOpInterface, ["serialize", "getBinarySize"]>,
                 Symbol
         ]> {
 
@@ -192,7 +212,7 @@ def NPUReg40XX_DPUInvariantOp :
         SymbolNameAttr:$sym_name,
         VPUASM_IndexTypeAttr:$task_index,
 
-        VPURegMapped_RegisterMappedAttr:$dpu_invariant_descriptor,
+        DPUInvariantDescriptorAttr:$dpu_invariant_descriptor,
 
         OptionalAttr<SymbolRefAttr>:$task_location,
         SymbolRefAttr:$input,
@@ -207,6 +227,7 @@ def NPUReg40XX_DPUInvariantOp :
         OptionalAttr<SymbolRefAttr>:$output,
         OptionalAttr<SymbolRefAttr>:$output_sparsity_map,
         OptionalAttr<SymbolRefAttr>:$profiling_data,
+        UnitAttr:$is_zero_offset_weights_table,
 
         VPUIP_NCETaskTypeAttr:$nce_task_type,
         UnitAttr:$is_continued
@@ -222,6 +243,7 @@ def NPUReg40XX_DPUVariantOp :
         NPUReg40XX_ExecutableTaskOp<"DPUVariant", [
                 DeclareOpInterfaceMethods<ELF_WrappableOpInterface>,
                 DeclareOpInterfaceMethods<ELF_RelocatableOpInterface>,
+                DeclareOpInterfaceMethods<ELF_BinaryOpInterface, ["serialize", "getBinarySize"]>,
                 Symbol
         ]> {
 
@@ -232,7 +254,7 @@ def NPUReg40XX_DPUVariantOp :
         OptionalAttr<SymbolRefAttr>:$next_link,
         VPUASM_IndexTypeAttr:$task_index,
 
-        VPURegMapped_RegisterMappedAttr:$dpu_variant_descriptor,
+        DPUVariantDescriptorAttr:$dpu_variant_descriptor,
 
         OptionalAttr<SymbolRefAttr>:$task_location,
         SymbolRefAttr:$invariant_task_location,
@@ -253,6 +275,7 @@ def NPUReg40XX_M2IOp :
             [
                 DeclareOpInterfaceMethods<ELF_WrappableOpInterface>,
                 DeclareOpInterfaceMethods<ELF_RelocatableOpInterface>,
+                DeclareOpInterfaceMethods<ELF_BinaryOpInterface, ["serialize", "getBinarySize"]>,
                 Symbol
             ]
         > {
@@ -265,9 +288,33 @@ def NPUReg40XX_M2IOp :
         SymbolRefAttr:$output_buff,
         OptionalAttr<SymbolRefAttr>:$profiling_data,
         OptionalAttr<SymbolRefAttr>:$next_link,
-        VPURegMapped_RegisterMappedAttr:$m2i_descriptor
+        M2IDescriptorAttr:$m2i_descriptor
     );
 
+}
+
+//
+// NNRTConfigOp
+//
+
+def NPUReg40XX_NNrtConfigOp :
+        NPUReg40XX_ExecutableTaskOp<"NNrtConfig",
+            [
+                DeclareOpInterfaceMethods<ELF_WrappableOpInterface>,
+                DeclareOpInterfaceMethods<ELF_RelocatableOpInterface>,
+                DeclareOpInterfaceMethods<ELF_BinaryOpInterface, ["serializeCached", "getBinarySize"]>
+            ]
+        > {
+    let summary = "Task representing the NNRTConfig structure inside managed mapped inference";
+
+    let arguments = (ins
+        SymbolNameAttr:$sym_name,
+        UnitAttr:$isActKernelInvocations,
+        OptionalAttr<SymbolRefAttr>:$actShaveRt,
+        OptionalAttr<SymbolRefArrayAttr>:$actShaveStacks,
+        OptionalAttr<SymbolRefAttr>:$dmaHwpBase,
+        OptionalAttr<SymbolRefAttr>:$hwpWorkpointCfg
+    );
 }
 
 //
@@ -277,6 +324,9 @@ def NPUReg40XX_M2IOp :
 def NPUReg40XX_ManagedMappedInferenceOp :
         NPUReg40XX_ExecutableTaskOp<"ManagedMappedInference",
             [
+                DeclareOpInterfaceMethods<ELF_WrappableOpInterface>,
+                DeclareOpInterfaceMethods<ELF_RelocatableOpInterface>,
+                DeclareOpInterfaceMethods<ELF_BinaryOpInterface, ["serializeCached", "getBinarySize"]>
             ]
         > {
     let summary = "Task representing the ManagedMappedInference structure";
@@ -290,11 +340,22 @@ def NPUReg40XX_ManagedMappedInferenceOp :
         I64Attr:$taskConfigsCount,
         I64Attr:$bootsrapWorkItemsCount,
         I64Attr:$bootstrapTaskCount,
+        I64Attr:$barrierConfigurationTasksCount,
+        I64Attr:$barriersReprogrammingCount,
+        I64Attr:$barrierConfigurationStride,
         UI8Attr:$actshv_used,
         UI8Attr:$dpu_used,
         UI8Attr:$media_used,
         UI8Attr:$dma_from_ddr_used,
-        UI8Attr:$dma_from_cmx_used
+        UI8Attr:$dma_from_cmx_used,
+        SymbolRefAttr:$nnrtConfig,
+        SymbolRefAttr:$mappedInferenceVersion,
+        OptionalAttr<SymbolRefArrayOfArraysAttr>:$dmaTasks,
+        OptionalAttr<SymbolRefAttr>:$workItems,
+        OptionalAttr<SymbolRefAttr>:$barrierTasks,
+        OptionalAttr<SymbolRefAttr>:$bootstrapTasks,
+        OptionalAttr<SymbolRefAttr>:$barrierConfigurationTasks,
+        OptionalAttr<SymbolRefAttr>:$numOfBarrierReprogrammings
     );
 }
 
@@ -305,11 +366,14 @@ def NPUReg40XX_ManagedMappedInferenceOp :
 def NPUReg40XX_ManagedBarrierOp :
         NPUReg40XX_ExecutableTaskOp<"ManagedBarrier",
             [
+                DeclareOpInterfaceMethods<ELF_WrappableOpInterface>,
+                DeclareOpInterfaceMethods<ELF_BinaryOpInterface, ["serialize", "getBinarySize"]>
             ]
         > {
     let summary = "A task to configure the setup for a managed barrier";
 
     let arguments = (ins
+        SymbolNameAttr:$sym_name,
         VPURegMapped_RegisterMappedAttr:$barrier_descriptor
     );
 }
@@ -321,12 +385,18 @@ def NPUReg40XX_ManagedBarrierOp :
 def NPUReg40XX_WorkItemOp :
         NPUReg40XX_ExecutableTaskOp<"WorkItem",
             [
+                DeclareOpInterfaceMethods<ELF_WrappableOpInterface>,
+                DeclareOpInterfaceMethods<ELF_RelocatableOpInterface>,
+                DeclareOpInterfaceMethods<ELF_BinaryOpInterface, ["serialize", "getBinarySize"]>
             ]
         > {
     let summary = "A task to configure the work item";
 
     let arguments = (ins
-        VPURegMapped_RegisterMappedAttr:$work_item_descriptor
+        SymbolNameAttr:$sym_name,
+        VPURegMapped_RegisterMappedAttr:$work_item_descriptor,
+        VPURegMapped_TaskTypeAttr:$task_type,
+        SymbolRefAttr:$first_task
     );
 }
 
@@ -337,8 +407,8 @@ def NPUReg40XX_WorkItemOp :
 def MappedInferenceVersionOp :
         NPUReg40XX_Op<"MappedInferenceVersion",
             [
-                DeclareOpInterfaceMethods<ELF_BinaryOpInterface, ["serialize", "getBinarySize"]>,
                 DeclareOpInterfaceMethods<ELF_WrappableOpInterface>,
+                DeclareOpInterfaceMethods<ELF_BinaryOpInterface, ["serialize", "getBinarySize"]>,
                 Symbol
             ]
         > {
@@ -354,8 +424,4 @@ def MappedInferenceVersionOp :
     let assemblyFormat = [{
         `(` $major `_` $minor `_` $patch `)`
         attr-dict}];
-
-    let builders = [
-        OpBuilder<(ins)>
-        ];
 }

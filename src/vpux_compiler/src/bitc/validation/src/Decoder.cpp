@@ -83,10 +83,10 @@ Decoder::Impl::Impl(const std::vector<uint8_t>&& bits, BitCompactorConfig config
 void Decoder::Impl::verify_config() {
     if (config_.arch_type == ArchType::NPU27) {
         if (config_.mode_fp16_enable) {
-            throw std::logic_error{"FP16 is not supported when using NPU37XX"};
+            throw std::logic_error{"FP16 is not supported when using NPU27"};
         }
         if (!config_.weight_compress_enable) {
-            throw std::logic_error{"NPU37XX doesn't support activation compression"};
+            throw std::logic_error{"NPU27 doesn't support activation compression"};
         }
     }
 }

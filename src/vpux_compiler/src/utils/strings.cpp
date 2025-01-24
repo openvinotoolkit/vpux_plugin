@@ -4,7 +4,6 @@
 //
 
 #include "vpux/compiler/utils/strings.hpp"
-#include "vpux/utils/IE/prefix.hpp"
 #include "vpux/utils/core/error.hpp"
 #include "vpux/utils/profiling/location.hpp"
 
@@ -84,6 +83,15 @@ std::string encodeLocationAsString(mlir::ArrayRef<std::string> locationParts) {
     return ostr.str();
 }
 
+std::string getLayerTypeFromMeta(mlir::DictionaryAttr meta) {
+    VPUX_THROW_WHEN(meta.empty(), "Missing location metadata.");
+    auto typeAttr = meta.get("type");
+    VPUX_THROW_UNLESS(typeAttr, "Location metadata is expected to provide type: {0}", meta);
+    auto stringAttr = typeAttr.dyn_cast<mlir::StringAttr>();
+    VPUX_THROW_UNLESS(stringAttr, "type is supposed to be StringAttr: {0}", typeAttr);
+    return stringAttr.getValue().str();
+}
+
 }  // namespace
 
 /**
@@ -104,24 +112,31 @@ std::string encodeLocationAsString(mlir::ArrayRef<std::string> locationParts) {
  *
  * @see MLIR_ProfilingUtils unit tests
  */
-
 std::string vpux::stringifyPrimaryLocation(mlir::Location location) {
     auto partsAndMeta = getPrimaryLocationComponents(location);
-    mlir::SmallVector<std::string> locParts = partsAndMeta.first;
-    mlir::DictionaryAttr meta = partsAndMeta.second;
+    auto locParts = partsAndMeta.first;
+    auto meta = partsAndMeta.second;
 
     VPUX_THROW_WHEN(locParts.empty(), "No primary location components: {0}", location);
 
     mlir::SmallVector<std::string> parts{locParts[0]};
 
-    if (!meta.empty()) {
-        auto typeAttr = meta.get("type");
-        VPUX_THROW_UNLESS(typeAttr, "Location metadata is expected to provide type: {0}", meta);
-        auto stringAttr = typeAttr.dyn_cast<mlir::StringAttr>();
-        VPUX_THROW_UNLESS(stringAttr, "type is supposed to be StringAttr: {0}", typeAttr);
-        parts.push_back("t_" + stringAttr.getValue().str());
+    if (!meta.empty()) {  // sync_dma, etc.
+        parts.push_back("t_" + getLayerTypeFromMeta(meta));
     }
     parts.append(locParts.begin() + 1, locParts.end());
 
     return encodeLocationAsString(parts);
+}
+
+/**
+ * Retrieves the original OV layer type from the task's location.
+ */
+std::string vpux::getLayerTypeFromLocation(mlir::Location location) {
+    auto partsAndMeta = getPrimaryLocationComponents(location);
+    auto meta = partsAndMeta.second;
+    if (meta.empty()) {  // sync_dma, etc.
+        return "<Unknown>";
+    }
+    return getLayerTypeFromMeta(meta);
 }

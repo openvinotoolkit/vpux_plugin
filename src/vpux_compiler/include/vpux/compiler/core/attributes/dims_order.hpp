@@ -192,6 +192,8 @@ inline bool operator!=(DimsOrder order1, DimsOrder order2) {
     return order1.code() != order2.code();
 }
 
+std::optional<Dim> getHighestNonTrivialDim(ShapeRef shape, const DimsOrder& dimOrder);
+
 }  // namespace vpux
 
 //

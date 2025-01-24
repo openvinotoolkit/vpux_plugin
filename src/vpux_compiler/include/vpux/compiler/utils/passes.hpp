@@ -19,12 +19,17 @@ namespace vpux {
 //
 // Default number of tasks per block when control graph split is enabled
 //
-#define CONTROL_GRAPH_SPLIT_BLOCK_SIZE 10000
+#define CONTROL_GRAPH_SPLIT_BLOCK_SIZE 5000
 
 //
 // Default threshold for number of virtual barriers for workload management optimization
 //
 #define VIRTUAL_BARRIER_THRESHOLD_WLM 3000
+
+//
+// Default threshold for number of clustered op for op tiling cache optimization
+//
+#define CLUSTERED_OP_THRESHOLD_FOR_TILING_CACHE 100
 
 //
 // Default file names to dump and read manual strategies from

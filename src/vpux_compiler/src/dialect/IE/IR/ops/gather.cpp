@@ -25,7 +25,7 @@ mlir::FailureOr<int64_t> extractAxis(mlir::Location loc, IE::GatherOpAdaptor gat
             return errorAt(loc, "Only constant input is supported for axis");
         }
 
-        if (const auto attr = axisConst.getContentAttr(); !attr.isSplat()) {
+        if (const auto& attr = axisConst.getContentAttr(); !attr.isSplat()) {
             return errorAt(loc, "Axis value must be a scalar");
         }
 
@@ -124,7 +124,7 @@ mlir::LogicalResult ConvertConstToAttr::matchAndRewrite(IE::GatherOp gatherOp, m
         return mlir::failure();
     }
 
-    if (const auto attr = axisConst.getContentAttr(); !attr.isSplat()) {
+    if (const auto& attr = axisConst.getContentAttr(); !attr.isSplat()) {
         return mlir::failure();
     }
 

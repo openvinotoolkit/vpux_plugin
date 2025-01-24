@@ -49,10 +49,10 @@ void reindexEnqueueOps(llvm::SmallVector<VPURegMapped::EnqueueOp> enquOps) {
 void addBootstrapBarriers(mlir::MLIRContext* ctx, mlir::func::FuncOp netFunc) {
     int64_t bootstrapID = 0;
     mlir::Value first;
-    int64_t nBarrs = VPUIP::getNumAvailableBarriers(netFunc);
+    int64_t numberOfAvailablePhysicalBarriers = VPUIP::getNumAvailableBarriers(netFunc);
     auto mpi = VPUMI40XX::getMPI(netFunc);
     auto builder = mlir::OpBuilder(mpi.getOperation());
-    std::vector<bool> initialized(nBarrs, false);
+    std::vector<bool> initialized(numberOfAvailablePhysicalBarriers, false);
     for (auto op : netFunc.getOps<VPUMI40XX::ConfigureBarrierOp>()) {
         auto trivialIndexType = VPURegMapped::IndexType::get(ctx, checked_cast<uint32_t>(bootstrapID));
         auto pid = op.getId();
@@ -63,7 +63,7 @@ void addBootstrapBarriers(mlir::MLIRContext* ctx, mlir::func::FuncOp netFunc) {
         if (bootstrapID == 0) {
             first = bootsTrapTask;
         }
-        if (bootstrapID == nBarrs) {
+        if (bootstrapID == numberOfAvailablePhysicalBarriers) {
             break;
         }
         ++bootstrapID;
@@ -71,7 +71,8 @@ void addBootstrapBarriers(mlir::MLIRContext* ctx, mlir::func::FuncOp netFunc) {
     }
     if (first) {
         mpi.getBootstrapTasksMutable().assign(first);
-        mpi.setBootstrapTasksCountAttr(builder.getI64IntegerAttr(std::min(nBarrs, bootstrapID)));
+        mpi.setBootstrapTasksCountAttr(
+                builder.getI64IntegerAttr(std::min(numberOfAvailablePhysicalBarriers, bootstrapID)));
     }
 }
 

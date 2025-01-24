@@ -15,6 +15,8 @@
 
 namespace vpux {
 
+constexpr int64_t PERMUTE_TO_POOLING_THRESHOLD = 32 * 16 * 224;
+
 MemShape applyPerm(MemShapeRef memShape, mlir::AffineMap memPerm);
 
 SmallVector<int64_t> getPermutateDims(MemShapeRef inShape, mlir::AffineMap memPerm);
@@ -33,7 +35,7 @@ mlir::FailureOr<VPU::DistributionInfoAttr> applyPermutationOnDistributionInfoAtt
                                                                                   DimsOrder srcOrder,
                                                                                   DimsOrder dstOrder, ShapeRef srcShape,
                                                                                   ShapeRef dstShape) {
-    auto inDistribution = VPU::DistributionInfo::getClassFromAttr(inDistributedType.getDistribution());
+    const auto inDistribution = VPU::DistributionInfo::getClassFromAttr(inDistributedType.getDistribution());
 
     auto distributionInfoOrFailure = applyPermutationOnDistributionInfo(inDistributedType, inDistribution, memPerm,
                                                                         srcOrder, dstOrder, srcShape, dstShape);
@@ -45,7 +47,7 @@ mlir::FailureOr<VPU::DistributionInfoAttr> applyPermutationOnDistributionInfoAtt
 }
 
 mlir::FailureOr<VPU::DistributionInfo> applyPermutationOnDistributionInfo(vpux::NDTypeInterface inType,
-                                                                          VPU::DistributionInfo& inDistribution,
+                                                                          const VPU::DistributionInfo& inDistribution,
                                                                           mlir::AffineMap memPerm, DimsOrder srcOrder,
                                                                           DimsOrder dstOrder, ShapeRef srcShape,
                                                                           ShapeRef dstShape);
@@ -61,4 +63,8 @@ IE::LayerWithPermuteInterface getFusableLayerWithPermuteInterface(mlir::Operatio
 
 NDTypeInterface inferNewTypeWithMemPerm(NDTypeInterface oldType, mlir::AffineMap memPerm, const DimsOrder& dstOrder);
 
+std::optional<IE::PermuteCastOp> tryToFindPermuteCastOp(mlir::Location loc, mlir::Value input, DimsOrder outOrder,
+                                                        ShapeRef outShape, mlir::PatternRewriter& rewriter);
+
+Dim inferDimAfterPermutation(Dim dim, DimsOrder srcOrder, DimsOrder dstOrder, mlir::AffineMap perm);
 }  // namespace vpux

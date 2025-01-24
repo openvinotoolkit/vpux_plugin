@@ -7,6 +7,7 @@
 #include <llvm/Support/raw_ostream.h>
 #include <mlir/IR/Value.h>
 
+#include "vpux/compiler/core/types/quantile_float/types.hpp"
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/IE/utils/broadcast_utils.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
@@ -181,8 +182,7 @@ mlir::LogicalResult WeightsDequantizeStructureInfo::initializeStructure(IE::Conv
     // Retrieve non-const input properties
     const auto inputBlock = mlir::dyn_cast_or_null<mlir::BlockArgument>(convertOp.getInput());
     if (inputBlock != nullptr) {
-        trueElemTypeOfWeights = mlir::cast<mlir::ShapedType>(inputBlock.getType()).getElementType();
-        log.trace("Got block argument input: {0}", trueElemTypeOfWeights);
+        log.trace("Got block argument input: {0}", inputBlock);
     } else {
         log.trace("Match failed: Got ConvertOp without Const or BlockArgument input");
         return mlir::failure();
@@ -227,22 +227,10 @@ mlir::LogicalResult WeightsDequantizeStructureInfo::initializeStructure(IE::Conv
 mlir::LogicalResult WeightsDequantizeStructureInfo::initializeStructure(Const::DeclareOp& declareOp) {
     opChain.push_back(declareOp.getOperation());
 
-    const auto inputAttr = declareOp.getContentAttr();
+    const auto& inputAttr = declareOp.getContentAttr();
     inputValue = declareOp.getOutput();
 
     const auto baseContentElemType = inputAttr.getBaseContent().getShapedType().getElementType();
-    trueElemTypeOfWeights = baseContentElemType;
-
-    // since U4 and I4 aren't fully supported, they are represented through
-    // CastElemType transforms
-    for (const auto& attr : inputAttr.getTransformations()) {
-        if (auto convert = attr.dyn_cast_or_null<Const::CastElemTypeAttr>()) {
-            if (const auto elemType = convert.getElemType(); elemType.isInteger(4)) {
-                trueElemTypeOfWeights = elemType;
-                break;
-            }
-        }
-    }
 
     // Note: reject non-floating-point inputs as the semantics of the
     // transformation expects weights of FP type. in case of explicit Convert,
@@ -318,10 +306,6 @@ mlir::Value WeightsDequantizeStructureInfo::getInput() const {
     return inputValue;
 }
 
-mlir::Type WeightsDequantizeStructureInfo::getTrueElemTypeOfWeights() const {
-    return trueElemTypeOfWeights;
-}
-
 void WeightsDequantizeStructureInfo::cleanUpCurrentWdChain(mlir::PatternRewriter& rewriter) const {
     // traverse bottom-up to remove as many operations as possible
     for (auto first = opChain.rbegin(), last = opChain.rend(); first != last; ++first) {
@@ -337,13 +321,19 @@ NDTypeInterface WeightsDequantizeStructureInfo::getInputType() const {
     return mlir::cast<NDTypeInterface>(inputValue.getType());
 }
 
-int64_t WeightsDequantizeStructureInfo::getQuantizationLevels() const {
+mlir::Type getTrueElemTypeOfWeights(Const::DeclareOp op) {
+    return mlir::cast<NDTypeInterface>(op.getContentAttr().getBaseContent().getType()).getElementType();
+}
+mlir::Type getTrueElemTypeOfWeights(IE::ConvertOp op) {
+    return mlir::cast<NDTypeInterface>(op.getInput().getType()).getElementType();
+}
+
+int64_t getQuantizationLevels(mlir::Type inputElemType) {
     // Note: universally use fixed quantization levels. For activations, we
     // cannot know real values, so it's impossible to adjust this anyhow. For
     // weights, we do not need to know real values, because it does not affect
     // accuracy (or, should not, at least).
-    const auto inputElemType = this->getTrueElemTypeOfWeights();
-    if (inputElemType.isInteger(4)) {
+    if (inputElemType.isInteger(4) || mlir::isa<vpux::type::NF4Type>(inputElemType)) {
         return 16;
     }
     if (inputElemType.isInteger(8)) {

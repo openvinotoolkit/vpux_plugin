@@ -33,10 +33,21 @@ bool isSupportedHWPostOp(mlir::Operation* mainOp, mlir::Operation* postOp, const
             // TODO: remove option after E#83187
             .Case<IE::ClampOp>([&](IE::ClampOp clampOp) {
                 const auto isQuantized = vpux::VPU::checkForQuantization(mainOp, postOp);
-                if (clampOp != nullptr) {
-                    const auto minVal = clampOp.getMinAttr().getValueAsDouble();
-                    if (!isDoubleEqual(minVal, 0.0) && !isQuantized) {
-                        logCb(llvm::formatv("{0} is not quantized and does not have 0 as minVal at `{1}`",
+                const auto minVal = clampOp.getMinAttr().getValueAsDouble();
+                if (!isDoubleEqual(minVal, 0.0) && !isQuantized) {
+                    logCb(llvm::formatv("{0} is not quantized and does not have 0 as minVal at `{1}`",
+                                        postOp->getName(), postOp->getLoc()));
+                    return false;
+                }
+                // Disable MaxPool fused with Clamp since it is not fully supported by firmware.
+                // Tracking Number: E#145636
+                if (mlir::isa<IE::MaxPoolOp>(mainOp)) {
+                    const auto maxVal = clampOp.getMaxAttr().getValueAsDouble();
+                    const auto maxValueFP16 = checked_cast<double>(std::numeric_limits<vpux::type::float16>::max());
+                    // Given upper bound as fp16 max value, keep fusing Clamp into MaxPool to pass CI
+                    // Tracking Number: E#146652
+                    if ((!isDoubleEqual(maxVal, maxValueFP16))) {
+                        logCb(llvm::formatv("{0} at `{1}` cannot be fused into MaxPool due to lack of firmware support",
                                             postOp->getName(), postOp->getLoc()));
                         return false;
                     }

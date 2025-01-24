@@ -6,6 +6,7 @@
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 
 #include "vpux/compiler/dialect/IE/transforms/passes.hpp"
+#include "vpux/compiler/dialect/IE/utils/dynamic_shape_utils.hpp"
 #include "vpux/compiler/dialect/const/utils/utils.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 
@@ -123,15 +124,17 @@ mlir::LogicalResult OptDynamicEltwiseWithShapeOf::matchAndRewrite(IE::ShapeOfOp 
             return mlir::failure();
         }
         const auto inElemType = inputOperand.getType().cast<vpux::NDTypeInterface>().getElementType();
-
         auto shapedType = mlir::RankedTensorType::get({outputRank}, inElemType);
-        auto shapeValues = SmallVector<int64_t>(outputRank);
-        const auto dynamicResize = [](int64_t dim) -> int64_t {
-            return dim != mlir::ShapedType::kDynamic ? dim : -1;
-        };
-        llvm::transform(outShape, std::begin(shapeValues), dynamicResize);
+
         auto outBounds = vpux::getBounds(output);
-        const auto shapeTensor = Const::createConst(rewriter, shapeOfOp->getLoc(), shapedType, ArrayRef(shapeValues));
+        mlir::Value shapeTensor;
+        if (inElemType.isSignedInteger(32)) {
+            auto shapeValues = IE::replaceDynamicDimsWithValue<int32_t>(to_small_vector(outShape), -1);
+            shapeTensor = Const::createConst(rewriter, shapeOfOp->getLoc(), shapedType, ArrayRef(shapeValues));
+        } else {
+            auto shapeValues = IE::replaceDynamicDimsWithValue<int64_t>(to_small_vector(outShape), -1);
+            shapeTensor = Const::createConst(rewriter, shapeOfOp->getLoc(), shapedType, ArrayRef(shapeValues));
+        }
 
         const auto reshapeLoc = appendLoc(shapeOfOp->getLoc(), "dynamic_reshape");
         auto reshapeResult = rewriter.create<IE::DynamicReshapeOp>(

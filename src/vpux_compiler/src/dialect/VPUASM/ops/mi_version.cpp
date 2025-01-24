@@ -20,11 +20,11 @@ void vpux::VPUASM::MappedInferenceVersionOp::serialize(elf::writer::BinaryDataSe
 #endif
 }
 
-size_t vpux::VPUASM::MappedInferenceVersionOp::getBinarySize() {
+size_t vpux::VPUASM::MappedInferenceVersionOp::getBinarySize(VPU::ArchKind) {
     return sizeof(MIVersionNote);
 }
 
-size_t vpux::VPUASM::MappedInferenceVersionOp::getAlignmentRequirements() {
+size_t vpux::VPUASM::MappedInferenceVersionOp::getAlignmentRequirements(VPU::ArchKind) {
     return alignof(MIVersionNote);
 }
 
@@ -35,8 +35,4 @@ std::optional<ELF::SectionSignature> vpux::VPUASM::MappedInferenceVersionOp::get
 
 bool vpux::VPUASM::MappedInferenceVersionOp::hasMemoryFootprint() {
     return true;
-}
-
-void vpux::VPUASM::MappedInferenceVersionOp::build(mlir::OpBuilder& builder, mlir::OperationState& state) {
-    build(builder, state, "MappedInferenceVersion");
 }

@@ -8,6 +8,7 @@
 #include "vpux/compiler/dialect/IE/utils/resources.hpp"
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
 #include "vpux/compiler/dialect/VPUIP/interfaces/dma_descriptor_generator.hpp"
+#include "vpux/compiler/dialect/VPUIP/utils/unroll_dma_analysis.hpp"
 #include "vpux/compiler/dialect/VPURT/IR/attributes.hpp"
 #include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPURT/IR/task.hpp"
@@ -519,8 +520,12 @@ private:
 };
 
 void UnrollSpaceToDepthDMAPass::safeRunOnFunc() {
+    markAnalysesPreserved<VPUIP::UnrollDMAAnalysis>();
+    auto analysis = getAnalysis<VPUIP::UnrollDMAAnalysis>();
+    if (!analysis.passNeeded(VPUIP::UnrollDMAAnalysisNeeded::UnrollSpaceToDepthDMAPass)) {
+        return;
+    }
     auto& ctx = getContext();
-
     auto func = getOperation();
     auto module = func->getParentOfType<mlir::ModuleOp>();
     auto dmaOp = IE::getAvailableExecutor(module, VPU::ExecutorKind::DMA_NN);

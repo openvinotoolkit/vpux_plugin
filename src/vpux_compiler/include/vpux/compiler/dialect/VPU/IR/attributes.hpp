@@ -161,7 +161,7 @@ PaddingAttr getPaddingAttr(mlir::MLIRContext* ctx, const PadInfo& pad);
 PadInfo toPadInfo(PaddingAttr attr);
 
 //
-// OpaquePPEAttr
+// PPEAttr
 //
 
 VPU::PPEMode getPPEMode(VPU::EltwiseType type);

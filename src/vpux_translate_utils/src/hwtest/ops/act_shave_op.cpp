@@ -11,19 +11,37 @@ namespace hwtest {
 
 namespace {
 
-VPUIP::KernelInfo getKernelInfo(nb::ActivationLayer activation, mlir::MLIRContext* ctx) {
-    const auto padSizeAttr = getIntAttr(ctx, /*padSize*/ 0);
-    const auto axisParamAttr = getIntAttr(ctx, activation.axis);
+uint64_t packAsI32intoU64(int64_t val1, int64_t val2) {
+    static constexpr uint64_t bitWidth = sizeof(uint32_t) * CHAR_BIT;
+    auto v1 = checked_cast<uint32_t>(val1);
+    auto v2 = checked_cast<uint32_t>(val2);
+    uint64_t patch = (static_cast<uint64_t>(v2) << bitWidth) | (static_cast<uint64_t>(v1));
+    return patch;
+}
 
+VPUIP::KernelInfo getKernelInfo(nb::ActivationLayer activation, mlir::MLIRContext* ctx) {
     switch (activation.activationType) {
     case nb::ActivationType::HSwish:
         return VPUIP::KernelInfo{SmallVector<mlir::Attribute>{}, {"activation_hswish"}};
     case nb::ActivationType::Sigmoid:
         return VPUIP::KernelInfo{SmallVector<mlir::Attribute>{}, {"activation_sigmoid"}};
-    case nb::ActivationType::Softmax:
-        return VPUIP::KernelInfo{SmallVector<mlir::Attribute>{axisParamAttr, padSizeAttr}, {"softmax"}};
+    case nb::ActivationType::Softmax: {
+        SmallVector<uint64_t> storage;
+        storage.push_back(packAsI32intoU64(activation.axis, /*padSize*/ 0));
+        storage.push_back(packAsI32intoU64(/*mode*/ 0, /*nDims*/ 0));
+        const auto paramsAttr = getIntArrayAttr(ctx, storage);
+        const auto newAttrs = SmallVector<mlir::Attribute>{paramsAttr};
+        return VPUIP::KernelInfo{SmallVector<mlir::Attribute>{newAttrs}, {"softmax"}};
+    }
     case nb::ActivationType::round_trip_b8h8_to_fp16:
         return VPUIP::KernelInfo{SmallVector<mlir::Attribute>{}, {"round_trip_b8h8_to_fp16"}};
+    case nb::ActivationType::sau_sumx_fp16_to_fp32:
+        return VPUIP::KernelInfo{SmallVector<mlir::Attribute>{}, {"sau_sumx_fp16_to_fp32"}};
+    case nb::ActivationType::cmu_perm_x8:
+    case nb::ActivationType::cmu_perm: {
+        const auto permBlendParamAttr = getIntAttr(ctx, activation.permBlend);
+        return VPUIP::KernelInfo{SmallVector<mlir::Attribute>{permBlendParamAttr}, {"cmu_perm"}};
+    }
     case nb::ActivationType::PopulateWeightTable: {
         const auto baseAttr = getIntAttr(ctx, activation.weightsOffset.value_or(0));
         const auto stepAttr = getIntAttr(ctx, activation.weightsPtrStep.value_or(0));

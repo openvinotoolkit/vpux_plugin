@@ -156,4 +156,13 @@ def VPU_PPEAttrInterface : AttrInterface<"PPEAttr"> {
     let cppNamespace = "vpux::VPU";
 }
 
+def VPU_MPEEngineAttrInterface : AttrInterface<"MPEEngineAttr"> {
+    let description = [{
+        Interface MPEEngine attributes. The interface doesn't contain any method since it is used only to
+        mark other attributes for further casting.
+    }];
+
+    let cppNamespace = "vpux::VPU";
+}
+
 #endif

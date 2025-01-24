@@ -55,7 +55,8 @@ bool UnrollFullyConnected::checkConcat(IE::ConcatOp concat) const {
     const auto concatOutput = concat.getOutput();
     const auto outputShape = getShape(concatOutput);
     const auto isConcatInputCompatible = [&](const mlir::Value in) -> bool {
-        if (in.getDefiningOp<IE::FakeQuantizeOp>() == nullptr) {
+        if (in.getDefiningOp<IE::FakeQuantizeOp>() == nullptr &&
+            in.getDefiningOp<IE::DynamicDequantizeOp>() == nullptr) {
             nestedLog.trace("Concat input does not have FakeQuantize producer: input = {1}.", in);
             return false;
         }
@@ -133,8 +134,12 @@ bool UnrollFullyConnected::isReshapeTranspose(mlir::Operation* op) const {
     if (!maybeMap.has_value()) {
         return false;
     }
-    const SmallVector<unsigned> expectedMap = {2, 0, 1};
-    return maybeMap.value() == mlir::AffineMap::getPermutationMap(expectedMap, transpose.getContext());
+    const auto permutation =
+            to_small_vector(DimsOrder::fromAffineMap(maybeMap.value()).toPermutation() | transformed([](Dim d) {
+                                return static_cast<unsigned>(d.ind());
+                            }));
+    const SmallVector<SmallVector<unsigned>> expectedMap = {{2, 0, 1}, {1, 0, 2}};
+    return std::find(expectedMap.begin(), expectedMap.end(), permutation) != expectedMap.end();
 }
 
 bool UnrollFullyConnected::isReshapeOnly(mlir::Operation* op) const {
@@ -362,19 +367,29 @@ bool isBeneficialToUseReduceSumForAccumulate(IE::FullyConnectedOp origOp) {
 
 bool UnrollFullyConnected::isUnrollingBeneficial(IE::FullyConnectedOp origOp, mlir::ValueRange concatInputs) const {
     auto nestedLog = _log.nest();
-    auto fqParent = concatInputs.front().getDefiningOp<IE::FakeQuantizeOp>();
-    const auto levels = fqParent.getLevels();
+    if (auto fqParent = concatInputs.front().getDefiningOp<IE::FakeQuantizeOp>()) {
+        const auto levels = fqParent.getLevels();
 
-    if (!levels.has_value()) {
-        nestedLog.trace("FakeQuantize parent at loc {0} does not have 'levels' attribute.", fqParent->getLoc());
-        return false;
+        if (!levels.has_value()) {
+            nestedLog.trace("FakeQuantize parent at loc {0} does not have 'levels' attribute.", fqParent->getLoc());
+            return false;
+        }
+
+        // Worse performance observed for unrolled MatMul when weights elem type is larger than 4 bits
+        constexpr int64_t MAX_QUANT_LEVELS = 16;
+        if (levels.value() > MAX_QUANT_LEVELS) {
+            nestedLog.trace("Quantized element type has more than 4bits.");
+            return false;
+        }
     }
 
-    // Worse performance observed for unrolled MatMul when weights elem type is larger than 4 bits
-    constexpr int64_t MAX_QUANT_LEVELS = 16;
-    if (levels.value() > MAX_QUANT_LEVELS) {
-        nestedLog.trace("Quantized element type has more than 4bits.");
-        return false;
+    if (auto dynamicDequant = concatInputs.front().getDefiningOp<IE::DynamicDequantizeOp>()) {
+        auto inputType = mlir::dyn_cast<vpux::NDTypeInterface>(dynamicDequant.getInput().getType());
+        if (auto uniformType = mlir::dyn_cast<mlir::quant::UniformQuantizedType>(inputType.getElementType())) {
+            if (!uniformType.isSigned() || uniformType.getStorageTypeIntegralWidth() != 4) {
+                return false;
+            }
+        }
     }
 
     const auto fcInputShape = getShape(origOp.getInput());

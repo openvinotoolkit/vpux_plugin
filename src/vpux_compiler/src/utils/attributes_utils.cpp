@@ -23,7 +23,7 @@ mlir::FailureOr<int64_t> getConstValue(mlir::Value input) {
         return mlir::failure();
     }
 
-    if (const auto attr = op.getContentAttr(); !attr.isSplat()) {
+    if (const auto& attr = op.getContentAttr(); !attr.isSplat()) {
         return mlir::failure();
     }
 

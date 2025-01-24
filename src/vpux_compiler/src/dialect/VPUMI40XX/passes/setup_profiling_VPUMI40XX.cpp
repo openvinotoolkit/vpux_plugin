@@ -9,7 +9,6 @@
 #include "vpux/compiler/dialect/VPUMI40XX/ops.hpp"
 #include "vpux/compiler/dialect/VPUMI40XX/passes.hpp"
 #include "vpux/compiler/dialect/VPUMI40XX/utils.hpp"
-#include "vpux/compiler/dialect/const/ops.hpp"
 
 #include <mlir/IR/Builders.h>
 

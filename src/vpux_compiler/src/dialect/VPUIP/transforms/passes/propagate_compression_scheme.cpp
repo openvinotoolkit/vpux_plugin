@@ -163,7 +163,7 @@ void PropagateSparsityCompression::safeRunOnFunc() {
     auto func = getOperation();
 
     func.walk([&](Const::DeclareOp constOp) {
-        const auto contentAttr = constOp.getContentAttr();
+        const auto& contentAttr = constOp.getContentAttr();
         const auto transformations = contentAttr.getTransformations();
         if (transformations.empty()) {
             return;

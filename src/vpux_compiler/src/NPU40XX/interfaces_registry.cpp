@@ -12,6 +12,7 @@
 #include "vpux/compiler/NPU37XX/dialect/VPUIP/IR/ops_interfaces.hpp"
 #include "vpux/compiler/NPU37XX/dialect/VPUIPDPU/ops_interfaces.hpp"
 #include "vpux/compiler/NPU40XX/conversion/passes/VPU2VPUIP/bufferizable_op_interface.hpp"
+#include "vpux/compiler/NPU40XX/dialect/VPU/IR/ops_interfaces.hpp"
 #include "vpux/compiler/NPU40XX/dialect/VPUIP/IR/ops_interfaces.hpp"
 #include "vpux/compiler/NPU40XX/dialect/VPUIPDPU/ops_interfaces.hpp"
 
@@ -29,6 +30,8 @@ void InterfacesRegistry40XX::registerInterfaces(mlir::DialectRegistry& registry)
     // NB: arch37xx::LayerWithPermuteInterfaceForIE can be re-used for 40XX
     VPU::arch37xx::registerLayerWithPermuteInterfaceForIE(registry);
     VPU::arch37xx::registerNCEOpInterface(registry);
+    // NB: arch40xx::registerClusterBroadcastingOpInterfaces uses its own logic
+    VPU::arch40xx::registerClusterBroadcastingOpInterfaces(registry);
     // NB: arch37xx::AlignedChannelsOpModel can be re-used for 40XX
     VPUIP::arch37xx::registerAlignedChannelsOpInterfaces(registry);
     // NB: arch40xx::AlignedWorkloadChannelsOp uses itself logic

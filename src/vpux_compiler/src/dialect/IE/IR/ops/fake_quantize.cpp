@@ -5,6 +5,7 @@
 
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 
+#include "vpux/compiler/core/types/quantile_float/types.hpp"
 #include "vpux/compiler/dialect/IE/utils/fake_quantize_utils.hpp"
 #include "vpux/compiler/dialect/IE/utils/shape_infer.hpp"
 #include "vpux/compiler/dialect/IE/utils/transpose_op_utils.hpp"
@@ -22,7 +23,7 @@ mlir::LogicalResult vpux::IE::FakeQuantizeOp::verify() {
         if (!lowFpType.has_value()) {
             return errorAt(*this, "Missing both levels and low precision floating type");
         }
-        if (!lowFpType->isa<mlir::Float8E4M3FNType>() && !lowFpType->isa<mlir::Float8E5M2Type>()) {
+        if (!lowFpType->isa<mlir::Float8E4M3FNType, mlir::Float8E5M2Type, vpux::type::QuantileFloatType>()) {
             return errorAt(*this, "Unsupported low floating point type {0}", *lowFpType);
         }
     } else {

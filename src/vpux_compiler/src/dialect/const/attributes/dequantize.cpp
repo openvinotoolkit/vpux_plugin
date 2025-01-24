@@ -106,7 +106,3 @@ Const::Content vpux::Const::DequantizeAttr::transform(vpux::Const::Content& inpu
 
     return output;
 }
-
-Const::ContentSetup vpux::Const::ContentSetup::dequantize() {
-    return addTransformation(Const::DequantizeAttr::get(getContext()));
-}

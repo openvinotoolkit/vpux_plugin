@@ -28,14 +28,14 @@ def AssignPhysicalBarriers : PassBase<"assign-physical-barriers", "vpux::Functio
             "Number of physical barriers, available for use"
         >,
         Option<
-            "wlmEnableOpt", "wlm-enable",
-            "bool", "",
-            "In case of WLM assign PID_x only if there is topological dependency to previous usage of this PID_x"
-        >,
-        Option<
             "colorBinEnableOpt", "color-bin-enable",
             "bool", "",
             "Enable color bin physical barrier assignment algorithm"
+        >,
+        Option<
+            "virtualBarrierThresholdforWlmOpt", "wlm-barriers-threshold",
+            "int", "",
+            "Threshold for WLM optimization"
         >
     ];
 }
@@ -181,14 +181,14 @@ def ReduceExceedingActiveCountBarriers : PassBase<"reduce-exceeding-active-count
             "Number of producer and consumer slots per barrier, available for use"
         >,
         Option<
-            "wlmEnableOpt", "wlm-enable",
-            "bool", "",
-            "In case of WLM assign PID_x only if there is topological dependency to previous usage of this PID_x"
-        >,
-        Option<
             "unevenVariantSplit", "enable-uneven-variant-split",
             "bool", "",
             "Enable uneven variant split"
+        >,
+        Option<
+            "shareWaitAndUpdateBarriersOpt", "share-wait-and-update-barriers",
+            "bool", "",
+            "Enforce sharing wait and update barriers between tasks on same FIFO"
         >
     ];
 }

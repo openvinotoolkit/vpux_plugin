@@ -77,7 +77,6 @@ void ConvertPrecisionToFP16Pass::safeRunOnModule() {
     target.addLegalOp<IE::LessOp>();
     target.addLegalOp<IE::LessEqualOp>();
     target.addLegalOp<IE::GreaterOp>();
-    target.addLegalOp<IE::GreaterEqualOp>();
     target.addLegalOp<IE::NotEqualOp>();
     // AssignOp & ReadValueOp represent inputs/outputs. Cannot convert their type internally.
     target.addLegalOp<IE::AssignOp>();
@@ -86,6 +85,7 @@ void ConvertPrecisionToFP16Pass::safeRunOnModule() {
     target.addLegalOp<IE::BitwiseOrOp>();
     target.addLegalOp<IE::BitwiseXorOp>();
     target.addLegalOp<IE::BitwiseNotOp>();
+    target.addLegalOp<IE::RangeOp>();
     target.addLegalOp<IE::ReduceL2Op>();
     target.addLegalOp<IE::InverseOp>();
     target.addDynamicallyLegalOp<mlir::func::FuncOp>([&](mlir::func::FuncOp funcOp) {

@@ -112,7 +112,8 @@ void updateCallOp(mlir::ModuleOp module) {
         SmallVector<mlir::Type> resultTypes;
         for (auto result : callOp.getResults()) {
             auto resType = result.getType().dyn_cast<mlir::MemRefType>();
-            VPUX_THROW_WHEN(resType == nullptr, "Only MemRefType is supported for now");
+            // TODO: E#140551 add support for VPUIP.SparseBuffer, possibly use allocateBuffers()
+            VPUX_THROW_WHEN(resType == nullptr, "Only MemRefType is supported for now, got {0}", result.getType());
 
             auto outParam = builder.create<mlir::memref::AllocOp>(callOp.getLoc(), resType);
             outParams.push_back(outParam);

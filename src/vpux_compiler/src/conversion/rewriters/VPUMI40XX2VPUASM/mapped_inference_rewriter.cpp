@@ -6,6 +6,7 @@
 #include "vpux/compiler/conversion/rewriters/VPUMI40XX2VPUASM/mapped_inference_rewriter.hpp"
 #include "vpux/compiler/dialect/IE/utils/resources.hpp"
 #include "vpux/compiler/dialect/VPUASM/ops.hpp"
+#include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
 #include "vpux/compiler/dialect/VPUMI40XX/utils.hpp"
 #include "vpux/compiler/utils/analysis.hpp"
 
@@ -17,8 +18,8 @@ llvm::SmallVector<mlir::FlatSymbolRefAttr> MappedInferenceRewriter::getSymbolicN
     return {mlir::FlatSymbolRefAttr::get(getContext(), "MappedInference")};
 }
 
-mlir::LogicalResult MappedInferenceRewriter::symbolize(VPUMI40XX::MappedInferenceOp op, SymbolMapper&,
-                                                       mlir::ConversionPatternRewriter& rewriter) const {
+mlir::FailureOr<SymbolizationResult> MappedInferenceRewriter::symbolize(
+        VPUMI40XX::MappedInferenceOp op, SymbolMapper& mapper, mlir::ConversionPatternRewriter& rewriter) const {
     mlir::MLIRContext* ctx = rewriter.getContext();
     auto result = op.getResult();
 
@@ -85,16 +86,45 @@ mlir::LogicalResult MappedInferenceRewriter::symbolize(VPUMI40XX::MappedInferenc
     mlir::ArrayAttr actShaveStacksAttr = actShaveStacks.size() ? mlir::ArrayAttr::get(ctx, actShaveStacks) : nullptr;
     mlir::SymbolRefAttr dmaHwpBase = op.getDmaHwpBase() ? findSym(op.getDmaHwpBase()) : nullptr;
     mlir::SymbolRefAttr workpointCfg = op.getHwpWorkpointCfg() ? findSym(op.getHwpWorkpointCfg()) : nullptr;
+    mlir::SymbolRefAttr mappedInferenceVersion =
+            op.getMappedInferenceVersion() ? findSym(op.getMappedInferenceVersion()) : nullptr;
+
+    mlir::FlatSymbolRefAttr managedMPISymRef;
+    auto managedMPISymName = mlir::StringAttr::get(rewriter.getContext(), symName.str() + std::string("_managed"));
+    if (op.getWorkItemCount()) {
+        managedMPISymRef = mlir::FlatSymbolRefAttr::get(managedMPISymName);
+    }
+
+    auto newOp = rewriter.create<VPUASM::MappedInferenceOp>(
+            op.getLoc(), symName, dmasAttr, invariantTasksAttr, variantTasksAttr, actKernelRangesAttr,
+            actKernelInvocationsAttr, mediaTasksAttr, barrierTasksAttr, actShaveRtAttr, actShaveStacksAttr,
+            managedMPISymRef, op.getDmaCountAttr(), op.getInvariantCountAttr(), op.getVariantCountAttr(),
+            op.getActKernelRangesCountAttr(), op.getActKernelInvocationsCountAttr(), op.getMediaCountAttr(),
+            op.getBarrierCountAttr(), dmaHwpBase, workpointCfg, mappedInferenceVersion);
+    mapper[result] = moveOpToSection(newOp.getOperation(), *_sectionMap, rewriter);
+    if (newOp.getManagedMappedInference().has_value()) {
+        newOp.setManagedMappedInferenceAttr(
+                ELF::cloneSectionSymbol(mapper[result], newOp.getManagedMappedInference().value()));
+    }
 
     // TODO: E#100357
-    mlir::FlatSymbolRefAttr managedMPISymRef;
+
     if (op.getWorkItemCount()) {
+        auto nnrtConfigSymName =
+                mlir::StringAttr::get(rewriter.getContext(), symName.str() + std::string("_nnrtConfigManaged"));
+        auto nnRtConfigSymRef = mlir::FlatSymbolRefAttr::get(nnrtConfigSymName);
+        bool isActKernelInvocation = op.getActKernelInvocationsCount() ? true : false;
+        auto nnRtConfig =
+                rewriter.create<VPUASM::NNrtConfigOp>(op.getLoc(), nnrtConfigSymName, isActKernelInvocation,
+                                                      actShaveRtAttr, actShaveStacksAttr, dmaHwpBase, workpointCfg);
+        auto fullNNRtConfigSectionName = moveOpToSection(nnRtConfig.getOperation(), *_sectionMap, rewriter);
+
         llvm::SmallVector<llvm::SmallVector<mlir::Attribute>> managedDmas;
         for (auto tileDmas : llvm::enumerate(op.getDmaTasks())) {
             auto& newList = managedDmas.emplace_back();
             for (auto dma : llvm::enumerate(tileDmas.value())) {
                 auto dmaTask = mlir::cast<VPUMI40XX::NNDMAOp>(dma.value().getDefiningOp());
-                if (!dmaTask.isHardLinked())
+                if (!dmaTask.getTaskLink().has_value())
                     continue;
 
                 auto dmaName = findSym(dma.value());
@@ -109,7 +139,6 @@ mlir::LogicalResult MappedInferenceRewriter::symbolize(VPUMI40XX::MappedInferenc
         mlir::ArrayAttr managedDmasAttr =
                 managedDmasAttrVec.size() ? mlir::ArrayAttr::get(ctx, managedDmasAttrVec) : nullptr;
 
-        auto managedMPISymName = mlir::StringAttr::get(rewriter.getContext(), symName.str() + std::string("_managed"));
         auto workItems = findSym(op.getWorkItemTasks());
 
         auto workItemCount = 0;
@@ -163,32 +192,37 @@ mlir::LogicalResult MappedInferenceRewriter::symbolize(VPUMI40XX::MappedInferenc
             }
         }
 
+        // All attributes which needed for new WLM execution flow with initial barrier programming
+        // If we do not have barrier configuration tasks -> we have old flow
+        mlir::SymbolRefAttr barriersReprogrammings =
+                op.getNumOfBarrierReprogrammings() ? findSym(op.getNumOfBarrierReprogrammings()) : nullptr;
+        mlir::SymbolRefAttr barrierConfigurationDescs =
+                op.getBarrierConfigurationTasks() ? findSym(op.getBarrierConfigurationTasks()) : nullptr;
+        auto barrierConfigurationCount = op.getBarrierConfigurationTasksCount().value_or(0);
+        size_t barrierReprogrammingCount = 0;
+        size_t barrierConfigurationStride = 0;
+        if (barrierConfigurationDescs != nullptr) {
+            auto numberOfAvailablePhysicalBarriers = VPUIP::getNumAvailableBarriers(op);
+            barrierConfigurationStride = barrierConfigurationCount / numberOfAvailablePhysicalBarriers;
+            barrierReprogrammingCount = numberOfAvailablePhysicalBarriers;
+        }
+
         uint8_t actshv_used = fillBits(activeShaves);
         auto managedMPI = rewriter.create<VPUASM::ManagedMappedInferenceOp>(
                 op.getLoc(), managedMPISymName, managedDmasAttr, workItems, barrierTasksAttr, bootstrapItems,
-                op.getDmaCountAttr(), workItemCount, op.getBarrierCount(), finalBarrierId, bootstrapTasksCount,
-                bootstrapWorkItemTasksCount, actshv_used, dpu_used, media_used, dma_from_ddr_used, dma_from_cmx_used);
+                nnRtConfigSymRef, barrierConfigurationDescs, barriersReprogrammings, op.getDmaCountAttr(),
+                workItemCount, op.getBarrierCount(), finalBarrierId, bootstrapTasksCount, bootstrapWorkItemTasksCount,
+                barrierConfigurationCount, barrierReprogrammingCount, barrierConfigurationStride, actshv_used, dpu_used,
+                media_used, dma_from_ddr_used, dma_from_cmx_used, mappedInferenceVersion);
+        moveOpToSection(managedMPI.getOperation(), *_sectionMap, rewriter);
 
-        managedMPISymRef = mlir::FlatSymbolRefAttr::get(managedMPISymName);
-        rewriter.setInsertionPoint(managedMPI);
+        managedMPI.setNnrtConfigAttr(
+                ELF::cloneSectionSymbol(fullNNRtConfigSectionName, managedMPI.getNnrtConfigAttr()));
     }
-
-    rewriter.create<VPUASM::MappedInferenceOp>(
-            op.getLoc(), symName, dmasAttr, invariantTasksAttr, variantTasksAttr, actKernelRangesAttr,
-            actKernelInvocationsAttr, mediaTasksAttr, barrierTasksAttr, actShaveRtAttr, actShaveStacksAttr,
-            managedMPISymRef, op.getDmaCountAttr(), op.getInvariantCountAttr(), op.getVariantCountAttr(),
-            op.getActKernelRangesCountAttr(), op.getActKernelInvocationsCountAttr(), op.getMediaCountAttr(),
-            op.getBarrierCountAttr(), dmaHwpBase, workpointCfg);
-
-    // Create MappedInferenceVersionOp as well
-    rewriter.create<VPUASM::MappedInferenceVersionOp>(op.getLoc());
-
-    // Also create PlatformInfoOp here, as it is related
-    rewriter.create<VPUASM::PlatformInfoOp>(op.getLoc());
 
     rewriter.eraseOp(op);
 
-    return mlir::success();
+    return SymbolizationResult();
 }
 
 }  // namespace vpumi40xx2vpuasm

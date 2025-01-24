@@ -31,20 +31,20 @@ struct ConstData {
     //! case, the data is *not* owned by this object.
     static ConstData fromRawBuffer(const void* ptr, std::size_t byteSize);
 
-    //! @brief Returns whether this data is "external". This usually means that
-    //! it comes from "outside" of the compiler.
-    bool hasExternalOrigin() const {
-        return _kind == DataKind::External;
+    //! @brief Returns whether this data is "mutable". Thus far, the object is
+    //! mutable if it owns its data (i.e. the data is allocated internally).
+    bool isMutable() const {
+        return _delete != nullptr;
     }
 
     template <typename T = char>
     ArrayRef<T> data() const {
         assert(_size % sizeof(T) == 0 && "Casting to a type that could not be represented");
-        return ArrayRef(reinterpret_cast<T*>(_ptr), _size / sizeof(T));
+        return ArrayRef(reinterpret_cast<const T*>(_ptr), _size / sizeof(T));
     }
     template <typename T = char>
-    MutableArrayRef<T> mutableData() const {
-        assert(!hasExternalOrigin() && "This data is read-only");
+    MutableArrayRef<T> mutableData() {
+        assert(isMutable() && "This data is read-only");
         assert(_size % sizeof(T) == 0 && "Casting to a type that could not be represented");
         return MutableArrayRef(reinterpret_cast<T*>(_ptr), _size / sizeof(T));
     }
@@ -57,8 +57,7 @@ struct ConstData {
     ConstData(ConstData&& x)
             : _ptr(std::exchange(x._ptr, nullptr)),
               _size(std::exchange(x._size, 0)),
-              _delete(std::exchange(x._delete, nullptr)),
-              _kind(std::exchange(x._kind, DataKind::Internal)) {
+              _delete(std::exchange(x._delete, nullptr)) {
     }
     ConstData& operator=(const ConstData&) = delete;
     ConstData& operator=(ConstData&& x) {
@@ -76,20 +75,14 @@ struct ConstData {
         swap(x._ptr, y._ptr);
         swap(x._size, y._size);
         swap(x._delete, y._delete);
-        swap(x._kind, y._kind);
     }
 
 private:
-    enum DataKind : std::uint8_t {
-        Internal,  // this object owns the data
-        External,  // owner is something else
-    };
     using DeleterFn = void (*)(void*, std::size_t);
 
     void* _ptr = nullptr;
     std::size_t _size = 0;
     DeleterFn _delete = nullptr;
-    DataKind _kind = DataKind::Internal;
 
     static ConstData allocateBytes(std::size_t byteSize);
 };

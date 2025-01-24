@@ -17,43 +17,6 @@ using namespace vpux;
 //
 
 void vpux::VPUMI37XX::KernelParamsOp::serialize(elf::writer::BinaryDataSection<uint8_t>& binDataSection) {
-    std::vector<uint8_t> inputDimsVector, outputDimsVector;
-    std::vector<uint8_t> inputStridesVector, outputStridesVector;
-    const auto inputMemrefVals = getInputs();
-    const auto outputMemrefVals = getOutputs();
-
-    auto insertDimsIntoVector = [](std::vector<uint8_t>& dimsVector, mlir::Value val) {
-        const auto shape = getShape(val);
-        const auto inOrderDims = DimsOrder::fromValue(val);
-        const auto memShape = inOrderDims.toMemoryOrder(shape);
-
-        for (auto& memDim : memShape | reversed) {
-            auto dim = checked_cast<int32_t>(memDim);
-            ArrayRef<uint8_t> valueAsArray(reinterpret_cast<const uint8_t*>(&dim), sizeof(dim));
-            dimsVector.insert(dimsVector.end(), valueAsArray.begin(), valueAsArray.end());
-        }
-    };
-
-    auto insertStridesIntoVector = [](std::vector<uint8_t>& stridesVector, mlir::Value val) {
-        const auto strides = getMemStrides(val);
-        for (auto&& stride : strides | reversed) {
-            ArrayRef<uint8_t> valueAsArray(reinterpret_cast<const uint8_t*>(&stride), sizeof(stride));
-            stridesVector.insert(stridesVector.end(), valueAsArray.begin(), valueAsArray.end());
-        }
-    };
-
-    // input Dims & Strides
-    for (const auto inputMemrefVal : inputMemrefVals) {
-        insertDimsIntoVector(inputDimsVector, inputMemrefVal);
-        insertStridesIntoVector(inputStridesVector, inputMemrefVal);
-    }
-
-    // output Dims & Strides
-    for (const auto outputMemrefVal : outputMemrefVals) {
-        insertDimsIntoVector(outputDimsVector, outputMemrefVal);
-        insertStridesIntoVector(outputStridesVector, outputMemrefVal);
-    }
-
     auto params = getKernelParams();
 
     auto dense_elem_data = params.getValues<uint8_t>();
@@ -63,17 +26,56 @@ void vpux::VPUMI37XX::KernelParamsOp::serialize(elf::writer::BinaryDataSection<u
     // serialize actual kernel params
     binDataSection.appendData(data_vector.data(), data_vector.size());
 
-    // serialize IO dims/strides
-    binDataSection.appendData(inputDimsVector.data(), inputDimsVector.size());
-    binDataSection.appendData(inputStridesVector.data(), inputStridesVector.size());
-    binDataSection.appendData(outputDimsVector.data(), outputDimsVector.size());
-    binDataSection.appendData(outputStridesVector.data(), outputStridesVector.size());
+    // serialize IO dims/strides - only when shave kernel is not MLIR-compiled
+    if (!getIsCompiled()) {
+        std::vector<uint8_t> inputDimsVector, outputDimsVector;
+        std::vector<uint8_t> inputStridesVector, outputStridesVector;
+        const auto inputMemrefVals = getInputs();
+        const auto outputMemrefVals = getOutputs();
+
+        auto insertDimsIntoVector = [](std::vector<uint8_t>& dimsVector, mlir::Value val) {
+            const auto shape = getShape(val);
+            const auto inOrderDims = DimsOrder::fromValue(val);
+            const auto memShape = inOrderDims.toMemoryOrder(shape);
+
+            for (auto& memDim : memShape | reversed) {
+                auto dim = checked_cast<int32_t>(memDim);
+                ArrayRef<uint8_t> valueAsArray(reinterpret_cast<const uint8_t*>(&dim), sizeof(dim));
+                dimsVector.insert(dimsVector.end(), valueAsArray.begin(), valueAsArray.end());
+            }
+        };
+
+        auto insertStridesIntoVector = [](std::vector<uint8_t>& stridesVector, mlir::Value val) {
+            const auto strides = getMemStrides(val);
+            for (auto&& stride : strides | reversed) {
+                ArrayRef<uint8_t> valueAsArray(reinterpret_cast<const uint8_t*>(&stride), sizeof(stride));
+                stridesVector.insert(stridesVector.end(), valueAsArray.begin(), valueAsArray.end());
+            }
+        };
+
+        // input Dims & Strides
+        for (const auto inputMemrefVal : inputMemrefVals) {
+            insertDimsIntoVector(inputDimsVector, inputMemrefVal);
+            insertStridesIntoVector(inputStridesVector, inputMemrefVal);
+        }
+
+        // output Dims & Strides
+        for (const auto outputMemrefVal : outputMemrefVals) {
+            insertDimsIntoVector(outputDimsVector, outputMemrefVal);
+            insertStridesIntoVector(outputStridesVector, outputMemrefVal);
+        }
+
+        binDataSection.appendData(inputDimsVector.data(), inputDimsVector.size());
+        binDataSection.appendData(inputStridesVector.data(), inputStridesVector.size());
+        binDataSection.appendData(outputDimsVector.data(), outputDimsVector.size());
+        binDataSection.appendData(outputStridesVector.data(), outputStridesVector.size());
+    }
 }
 
 size_t vpux::VPUMI37XX::KernelParamsOp::getBinarySize() {
-    auto params = getKernelParams();
-    auto dense_elem_data = params.getValues<uint8_t>();
-    auto data_vector = std::vector<uint8_t>(dense_elem_data.begin(), dense_elem_data.end());
+    if (getIsCompiled()) {
+        return getParamsStructSize();
+    }
 
     const auto inputMemrefVals = getInputs();
     const auto outputMemrefVals = getOutputs();
@@ -94,7 +96,7 @@ size_t vpux::VPUMI37XX::KernelParamsOp::getBinarySize() {
         outputStridesSize += sizeof(int64_t) * getMemStrides(outputMemrefVal).size();
     }
 
-    return data_vector.size() + inputDimsSize + outputDimsSize + inputStridesSize + outputStridesSize;
+    return getParamsStructSize() + inputDimsSize + outputDimsSize + inputStridesSize + outputStridesSize;
 }
 
 size_t vpux::VPUMI37XX::KernelParamsOp::getParamsStructSize() {
@@ -111,7 +113,7 @@ size_t vpux::VPUMI37XX::KernelParamsOp::getOffsetOfWithinOperation(mlir::Value) 
 
 // The parameter structs for the sw layers must be 64Byte aligned as an ActShave requirement
 size_t vpux::VPUMI37XX::KernelParamsOp::getAlignmentRequirements() {
-    return ELFNPU37XX::VPUX_SHAVE_ALIGNMENT;
+    return ELFNPU37XX::VPUX_DEFAULT_ALIGNMENT;
 }
 
 vpux::VPURT::BufferSection vpux::VPUMI37XX::KernelParamsOp::getMemorySpace() {

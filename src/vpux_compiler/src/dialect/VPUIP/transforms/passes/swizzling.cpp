@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+#include "vpux/compiler/core/aliases_info.hpp"
 #include "vpux/compiler/dialect/IE/utils/resources.hpp"
 #include "vpux/compiler/dialect/VPUIP/IR/attributes.hpp"
 #include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
@@ -79,10 +80,12 @@ private:
     void updateConstantTypeForSwizzling(Const::DeclareOp decOp, mlir::Operation* cstLoadOp, int64_t swizzlingKey,
                                         DeviceInfo& deviceInfo);
     ValuesSet getSwizzledOperandsFromFlagsMap(VPUIP::NCEClusterTaskOp nceOp, OpsInfo& opsInfo);
-    bool canSwizzleWeights(VPUIP::NCEClusterTaskOp nceOp, DeviceInfo& deviceInfo, OpsInfo& opsInfo);
-    bool canSwizzleActivation(VPUIP::NCEClusterTaskOp nceOp, DeviceInfo& deviceInfo, OpsInfo& opsInfo);
+    bool canSwizzleWeights(VPUIP::NCEClusterTaskOp nceOp, DeviceInfo& deviceInfo, OpsInfo& opsInfo,
+                           AliasesInfo& aliasesInfo);
+    bool canSwizzleActivation(VPUIP::NCEClusterTaskOp nceOp, DeviceInfo& deviceInfo, OpsInfo& opsInfo,
+                              AliasesInfo& aliasesInfo);
     bool checkCMXUsage(VPUIP::NCEClusterTaskOp, const ValuesSet& newBufsToSwizzle, DeviceInfo& deviceInfo,
-                       OpsInfo& opsInfo);
+                       OpsInfo& opsInfo, AliasesInfo& aliasesInfo);
 };
 
 void adjustReturnTypesForInputChain(mlir::Value value, int64_t swizzlingKey, VPU::ArchKind archKind) {
@@ -182,7 +185,7 @@ mlir::LogicalResult Swizzling::initialize(mlir::MLIRContext* ctx) {
 // Check if for a given operation adding swizzling for provided buffers will not cause in increase
 // of memory demand beyond CMX size
 bool Swizzling::checkCMXUsage(VPUIP::NCEClusterTaskOp nceOp, const ValuesSet& newBufsToSwizzle, DeviceInfo& deviceInfo,
-                              OpsInfo& opsInfo) {
+                              OpsInfo& opsInfo, AliasesInfo& aliasesInfo) {
     VPUX_THROW_WHEN(nceOp == nullptr, "Unsupported type {0} to check the memory with swizzling.", nceOp->getName());
 
     ValuesSet operands(nceOp->getOperands().begin(), nceOp->getOperands().end());
@@ -190,6 +193,7 @@ bool Swizzling::checkCMXUsage(VPUIP::NCEClusterTaskOp nceOp, const ValuesSet& ne
     SmallVector<std::pair<int64_t, int64_t>> buffSizeAndAlignment;
 
     auto registeredSwizzledOperands = getSwizzledOperandsFromFlagsMap(nceOp, opsInfo);
+    ValuesSet rootBuffs;
     for (auto operand : operands) {
         bool bufferSwizzled = false;
 
@@ -201,7 +205,16 @@ bool Swizzling::checkCMXUsage(VPUIP::NCEClusterTaskOp nceOp, const ValuesSet& ne
             bufferSwizzled = true;
         }
 
-        auto totalSize = operand.getType().cast<vpux::NDTypeInterface>().getTotalAllocSize().count();
+        // Since 'weights', 'weights sparsity map', and 'weights table' could be fused into a single root buffer
+        // check if they refer to the same buffer here to avoid redundant computations
+        auto rootBuff = *aliasesInfo.getRoots(operand).begin();
+        if (rootBuffs.find(rootBuff) != rootBuffs.end()) {
+            continue;
+        }
+        rootBuffs.insert(rootBuff);
+
+        auto rootBuffType = mlir::cast<NDTypeInterface>(rootBuff.getType());
+        auto totalSize = rootBuffType.getTotalAllocSize().count();
 
         if (bufferSwizzled) {
             buffSizeAndAlignment.push_back(
@@ -241,7 +254,8 @@ bool Swizzling::checkCMXUsage(VPUIP::NCEClusterTaskOp nceOp, const ValuesSet& ne
 // 1. Are weights constant <- These buffers are swizzled as part of activation swizzling
 //                            so avoid double swizzling here
 // 2. isSizeAlignmentRequired <- This case will be enabled with E#48057
-bool Swizzling::canSwizzleWeights(VPUIP::NCEClusterTaskOp nceOp, DeviceInfo& deviceInfo, OpsInfo& opsInfo) {
+bool Swizzling::canSwizzleWeights(VPUIP::NCEClusterTaskOp nceOp, DeviceInfo& deviceInfo, OpsInfo& opsInfo,
+                                  AliasesInfo& aliasesInfo) {
     auto isTiled = nceOp->getResult(0).getType().dyn_cast<VPUIP::DistributedBufferType>() != nullptr;
     auto isFused = nceOp->hasAttr(vpux::ConstantFusing::constantsFused);
     auto weights = nceOp.getWeights();
@@ -382,7 +396,7 @@ bool Swizzling::canSwizzleWeights(VPUIP::NCEClusterTaskOp nceOp, DeviceInfo& dev
     }
 
     // Check if adding constants swizzling will not increase operation memory demand beyond CMX size
-    if (!checkCMXUsage(nceOp, operands, deviceInfo, opsInfo)) {
+    if (!checkCMXUsage(nceOp, operands, deviceInfo, opsInfo, aliasesInfo)) {
         _log.nest().trace("Do not enable weights swizzling because of increase in memory demand beyond CMX size");
         return false;
     }
@@ -552,7 +566,8 @@ mlir::DenseSet<mlir::Value> Swizzling::getSwizzledOperandsFromFlagsMap(VPUIP::NC
     return swizzledOperands;
 }
 
-bool Swizzling::canSwizzleActivation(VPUIP::NCEClusterTaskOp nceOp, DeviceInfo& deviceInfo, OpsInfo& opsInfo) {
+bool Swizzling::canSwizzleActivation(VPUIP::NCEClusterTaskOp nceOp, DeviceInfo& deviceInfo, OpsInfo& opsInfo,
+                                     AliasesInfo& aliasesInfo) {
     mlir::Value nceDataResult = nceOp.getOutput();
     mlir::Value maybeNceSMResult = nullptr;
 
@@ -618,7 +633,7 @@ bool Swizzling::canSwizzleActivation(VPUIP::NCEClusterTaskOp nceOp, DeviceInfo& 
     }
 
     // Check if adding activation swizzling will not increase operation memory demand beyond CMX size
-    if (!checkCMXUsage(nceOp, outputBuffs, deviceInfo, opsInfo)) {
+    if (!checkCMXUsage(nceOp, outputBuffs, deviceInfo, opsInfo, aliasesInfo)) {
         _log.nest().trace("Do not enable activation swizzling because of increase in memory demand beyond CMX size");
         return false;
     }
@@ -626,7 +641,7 @@ bool Swizzling::canSwizzleActivation(VPUIP::NCEClusterTaskOp nceOp, DeviceInfo& 
     // Check if adding activation swizzling on output of this op will not increase memory demand
     // beyond CMX size of user operations
     for (auto userTask : userTasks) {
-        if (!checkCMXUsage(userTask, nceResults, deviceInfo, opsInfo)) {
+        if (!checkCMXUsage(userTask, nceResults, deviceInfo, opsInfo, aliasesInfo)) {
             _log.nest().trace("Do not enable activation swizzling because of increase in memory demand beyond CMX size "
                               "of user task - '{0}'",
                               userTask->getLoc());
@@ -740,6 +755,7 @@ void Swizzling::activationBufferSwizzling(mlir::OpBuilder& builder, VPUIP::NCECl
 
 // TODO: #71565
 void Swizzling::safeRunOnFunc() {
+    auto& aliasesInfo = getAnalysis<AliasesInfo>();
     auto func = getOperation();
     auto module = func->getParentOfType<mlir::ModuleOp>();
 
@@ -776,14 +792,14 @@ void Swizzling::safeRunOnFunc() {
     // - output_sparisty_map
     func->walk([&](VPUIP::NCEClusterTaskOp nceOp) {
         opsInfo.opsSwizzlingFlagsMap[nceOp] = OpSwizzlingFlags();
-        if (_enableWeightSwizzling && canSwizzleWeights(nceOp, deviceInfo, opsInfo)) {
+        if (_enableWeightSwizzling && canSwizzleWeights(nceOp, deviceInfo, opsInfo, aliasesInfo)) {
             opsInfo.opsSwizzlingFlagsMap[nceOp].weightInput = true;
         }
     });
 
     if (_enableActivationSwizzling) {
         func->walk([&](VPUIP::NCEClusterTaskOp nceOp) {
-            if (canSwizzleActivation(nceOp, deviceInfo, opsInfo)) {
+            if (canSwizzleActivation(nceOp, deviceInfo, opsInfo, aliasesInfo)) {
                 opsInfo.opsSwizzlingFlagsMap[nceOp].activationOutput = true;
             }
         });

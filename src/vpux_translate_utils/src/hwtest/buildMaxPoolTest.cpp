@@ -221,7 +221,8 @@ void buildMaxPool(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp mod
         auto wtTblDataVals = mlir::DenseElementsAttr::get(wtTblDataDdrValueType, wtTblDataValues);
         auto wtTblDataDdr = funcBuilder.create<Const::DeclareOp>(
                 builder.getUnknownLoc(), wtTblDataDdrType,
-                Const::ContentAttr::transform(wtTblDataVals).reorder(DimsOrder::NHWC).get());
+                Const::ContentAttr::get(wtTblDataVals,
+                                        Const::ContentSetup(wtTblDataDdrValueType).reorder(DimsOrder::NHWC)));
 
         // weights table cmx tensor
 
@@ -246,6 +247,14 @@ void buildMaxPool(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp mod
         }
     }
 
+    mlir::UnitAttr isSmallKernelOptimized = nullptr;
+    if (supportsSmallKernelOpt(arch, filterSize[vpux::Dims4D::Kernel::X.ind()],
+                               strideVec[vpux::Dims4D::Strides::X.ind()], inputShape[vpux::Dims4D::Act::C.ind()],
+                               INPUT0_CMX_OFFSET, getElemTypeSize(inputType).count(),
+                               getElemTypeSize(inputType).count(), VPUIP::NCETaskType::MAXPOOL)) {
+        isSmallKernelOptimized = mlir::UnitAttr::get(ctx);
+    }
+
     // NCE Task
     auto filtersize = getIntArrayAttr(builder, filterSize);
     auto strides = getIntArrayAttr(builder, strideVec);
@@ -258,15 +267,16 @@ void buildMaxPool(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp mod
             funcBuilder, mlir::ValueRange(barrier0.getBarrier()), mlir::ValueRange(barrier1.getBarrier()),
             mlir::NameLoc::get(mlir::StringAttr::get(ctx, taskName)), input0Cmx.getOperation()->getResult(0),
             mlir::Value(), wtTblValue,
-            /*instruction_table_list*/ nullptr, /*spr_lookup_table*/ nullptr,
-            parentInput0Cmx.getOperation()->getResult(0), parentOutput0Cmx.getOperation()->getResult(0),
-            output0Cmx.getOperation()->getResult(0),
+            /*spr_lookup_table*/ nullptr, parentInput0Cmx.getOperation()->getResult(0),
+            parentOutput0Cmx.getOperation()->getResult(0), output0Cmx.getOperation()->getResult(0),
             profilingParams.dpuProfilingEnabled ? dpuProfOutput0Cmx.getOperation()->getResult(0) : nullptr,
             VPUIP::NCETaskType::MAXPOOL, filtersize, strides, kernelPadding,
             /*is_continued*/ nullptr, /*sp_pattern*/ nullptr, /*is_segmented*/ nullptr,
-            /*out_channel_offset*/ nullptr, /*input_channels_compression*/ nullptr, /*is_superdense*/ nullptr,
+            /*out_channel_offset*/ nullptr, /*input_channels_compression*/ nullptr,
+            /*is_zero_offset_weights_table=*/nullptr, /*is_superdense*/ nullptr,
             /*is_inplace*/ nullptr, /*input_se_size*/ nullptr, /*output_se_size*/ nullptr,
-            /*is_permute_quantize*/ nullptr, /*is_small_kernel_optimized*/ nullptr);
+            /*is_permute_quantize*/ nullptr, isSmallKernelOptimized);
+
     if (profilingParams.dpuProfilingEnabled) {
         auto profAttr = VPUIP::DpuProfilingMetadataAttr::get(
                 ctx, /*bufferId*/ getIntAttr(ctx, 0),
@@ -279,6 +289,7 @@ void buildMaxPool(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp mod
     int64_t clampHigh = std::numeric_limits<int32_t>::max();
     if (auto outElemQType = outputType.template dyn_cast<mlir::quant::QuantizedType>()) {
         const auto zps = extractScalesAndZeroPoints(outputType).second;
+
         clampLow = outElemQType.getStorageTypeMin() - zps.front();
         clampHigh = outElemQType.getStorageTypeMax() - zps.front();
     }

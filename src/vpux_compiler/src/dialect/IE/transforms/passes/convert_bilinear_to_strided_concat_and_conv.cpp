@@ -614,7 +614,8 @@ void ConvertBilinearToStridedConcatAndConvPass::safeRunOnFunc() {
     mlir::ConversionTarget target(ctx);
     target.addDynamicallyLegalOp<IE::InterpolateOp>([&](IE::InterpolateOp op) {
         if (_interpolateAsSEOp) {
-            if (VPU::NCEInterpolateOp::isSupported(op, logCb, /*checkLayout=*/false, /*checkChannelAlignment=*/false)) {
+            if (VPU::NCEInterpolateOp::isSupported(op, logCb, /*checkLayout=*/false, /*checkChannelAlignment=*/false,
+                                                   /*checkBatch=*/false)) {
                 return true;
             }
         }
@@ -692,7 +693,7 @@ void ConvertBilinearToStridedConcatAndConvPass::safeRunOnFunc() {
                     // Deeplab-v3 WA: SHAVE implementation may be better for some big bilinear interpolates
                     // Current solution will produce some extra DMAs as we need do padding by slice-concat, which may
                     // cause some performance loss especially for big interpolates. In future, SEP may help to solve
-                    // this issue. Details see ticket: E43217 The scaleW 4 and scaleH 4 is more efficient on NPU37XX
+                    // this issue. Details see ticket: E43217 The scaleW 4 and scaleH 4 is more efficient on VPUX37XX.
                     // Details see ticket: E56905
                     return (scaleW > 4 && scaleH > 4);
                 } else if ((coordMode == IE::InterpolateCoordMode::PYTORCH_HALF_PIXEL) ||
@@ -739,7 +740,8 @@ void ConvertBilinearToStridedConcatAndConvPass::safeRunOnFunc() {
     mlir::ConversionTarget smallChannelTarget(ctx);
     smallChannelTarget.addDynamicallyLegalOp<IE::InterpolateOp>([&](IE::InterpolateOp op) {
         if (_interpolateAsSEOp) {
-            if (VPU::NCEInterpolateOp::isSupported(op, logCb, /*checkLayout=*/false, /*checkChannelAlignment=*/false)) {
+            if (VPU::NCEInterpolateOp::isSupported(op, logCb, /*checkLayout=*/false, /*checkChannelAlignment=*/false,
+                                                   /*checkBatch=*/false)) {
                 return true;
             }
         }

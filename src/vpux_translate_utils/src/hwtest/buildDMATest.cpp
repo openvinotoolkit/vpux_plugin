@@ -88,7 +88,7 @@ void buildDMA(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp module,
     SmallVector<int64_t> outShape(output.shape.begin(), output.shape.end());
 
     if (testArchitecture == vpux::VPU::ArchKind::NPU40XX) {
-        VPUX_THROW_UNLESS(dmaParams.engine == 0, "buildDMA: DMA on NPU40XX should have 1 engine");
+        VPUX_THROW_UNLESS(dmaParams.engine == 0, "buildDMA: DMA on vpu4 should have 1 engine");
     }
 
     VPUX_THROW_UNLESS(!inShape.empty(), "buildDMA: Input rank is 0");
@@ -322,9 +322,14 @@ void buildDMA(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp module,
 
     funcbuilder.create<mlir::func::ReturnOp>(builder.getUnknownLoc(), funcOutput);
 
+    // Set WLM status attribute based on the test descriptor
+    auto wlmStatus =
+            testDesc.getWLMParams().isWLMPartialEnabled ? VPUIP::WlmStatus::ENABLED : VPUIP::WlmStatus::DISABLED;
+    VPUIP::setWlmStatus(module, wlmStatus);
+
     mlir::PassManager pmBuilderEnd(module->getName(), mlir::OpPassManager::Nesting::Implicit);
     // assign physical barriers instead of virtual barriers
-    pmBuilderEnd.addPass(VPURT::createAssignPhysicalBarriersPass(false, false, std::nullopt, log));
+    pmBuilderEnd.addPass(VPURT::createAssignPhysicalBarriersPass(false, std::nullopt, log));
     pmBuilderEnd.addPass(VPURT::createBarrierSimulationPass(log));
 
     VPUX_THROW_UNLESS(mlir::succeeded(pmBuilderEnd.run(module)), "Compilation failed");

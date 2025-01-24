@@ -7,12 +7,10 @@
 #include "vpux/compiler/dialect/VPUASM/ops.hpp"
 #include "vpux/compiler/dialect/VPUASM/utils.hpp"
 #include "vpux/compiler/utils/ELF/utils.hpp"
-#include "vpux/utils/core/mem_size.hpp"
 
 #include <npu_40xx_nnrt.hpp>
 
 using namespace vpux;
-using namespace npu40xx;
 
 //
 // NNDMAOp
@@ -27,12 +25,12 @@ void vpux::VPUASM::NNDMAOp::serialize(elf::writer::BinaryDataSection<uint8_t>&) 
     return;
 }
 
-size_t vpux::VPUASM::NNDMAOp::getBinarySize() {
-    return sizeof(nn_public::VpuDMATask);
+size_t vpux::VPUASM::NNDMAOp::getBinarySize(VPU::ArchKind /*arch*/) {
+    return sizeof(npu40xx::nn_public::VpuDMATask);
 }
 
-size_t vpux::VPUASM::NNDMAOp::getAlignmentRequirements() {
-    return alignof(nn_public::VpuDMATask);
+size_t vpux::VPUASM::NNDMAOp::getAlignmentRequirements(VPU::ArchKind /*arch*/) {
+    return alignof(npu40xx::nn_public::VpuDMATask);
 }
 
 vpux::ELF::SectionFlagsAttr vpux::VPUASM::NNDMAOp::getPredefinedMemoryAccessors() {

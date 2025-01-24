@@ -13,16 +13,16 @@ llvm::SmallVector<mlir::FlatSymbolRefAttr> ActShaveRtRewriter::getSymbolicNames(
     return {mlir::FlatSymbolRefAttr::get(getContext(), "ActShaveRt")};
 }
 
-mlir::LogicalResult ActShaveRtRewriter::symbolize(VPUMI40XX::ActShaveRtOp op, SymbolMapper&,
-                                                  mlir::ConversionPatternRewriter& rewriter) const {
+mlir::FailureOr<SymbolizationResult> ActShaveRtRewriter::symbolize(VPUMI40XX::ActShaveRtOp op, SymbolMapper&,
+                                                                   mlir::ConversionPatternRewriter& rewriter) const {
     auto result = op.getResult();
     auto symName = findSym(result).getRootReference();
 
-    rewriter.create<VPUASM::ActShaveRtOp>(op.getLoc(), symName, op.getKernelPathAttr());
+    auto newOp = rewriter.create<VPUASM::ActShaveRtOp>(op.getLoc(), symName, op.getKernelPathAttr());
 
     rewriter.eraseOp(op);
 
-    return mlir::success();
+    return SymbolizationResult(newOp);
 }
 
 }  // namespace vpumi40xx2vpuasm

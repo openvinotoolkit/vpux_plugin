@@ -5,8 +5,6 @@
 
 #include <vpux_elf/writer.hpp>
 #include "vpux/compiler/NPU40XX/dialect/ELF/ops.hpp"
-#include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
-#include "vpux/compiler/utils/ELF/utils.hpp"
 
 void vpux::ELF::PadOp::serialize(elf::writer::BinaryDataSection<uint8_t>& binDataSection) {
     auto padSize = getPaddingSize();
@@ -18,6 +16,6 @@ void vpux::ELF::PadOp::serialize(elf::writer::BinaryDataSection<uint8_t>& binDat
     binDataSection.appendData(padding.data(), padSize);
 }
 
-size_t vpux::ELF::PadOp::getBinarySize() {
+size_t vpux::ELF::PadOp::getBinarySize(VPU::ArchKind) {
     return getPaddingSize();
 }

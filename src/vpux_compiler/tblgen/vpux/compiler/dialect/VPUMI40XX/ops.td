@@ -8,6 +8,7 @@
 
 include "vpux/compiler/core/attributes.td"
 include "vpux/compiler/core/ops_interfaces.td"
+include "vpux/compiler/core/types.td"
 include "vpux/compiler/dialect/VPUMI40XX/dialect.td"
 include "vpux/compiler/dialect/VPUMI40XX/attributes.td"
 include "vpux/compiler/dialect/VPUMI40XX/ops_interfaces.td"
@@ -40,7 +41,7 @@ class VPUMI40XX_ExecutableTaskOp<string mnemonic, list<Trait> traits = []> :
                 traits,
                 [
                     DeclareOpInterfaceMethods<DotInterface, ["getNodeColor", "printAttributes", "getEdgeDirection"]>,
-                    DeclareOpInterfaceMethods<VPURegMapped_TaskOpInterface, ["supportsHardLink"]>,
+                    DeclareOpInterfaceMethods<VPURegMapped_TaskOpInterface, ["supportsTaskLink"]>,
                     VPUMI40XX_SingleOutputAsIndexOp
                 ]
             )
@@ -56,6 +57,7 @@ def VPUMI40XX_ConfigureBarrierOp :
             [
                 DeclareOpInterfaceMethods<DotInterface, ["getNodeColor", "printAttributes", "getEdgeDirection"]>,
                 VPUMI40XX_SingleOutputAsIndexOp,
+                AttrSizedOperandSegments
             ]
         > {
     let summary = "A task to configure the setup for a barrier";
@@ -68,6 +70,7 @@ def VPUMI40XX_ConfigureBarrierOp :
         Variadic<VPURegMapped_IndexType>:$dependencies,
         UI8Attr:$id,
         SI64Attr:$next_same_id,
+        Optional<VPURegMapped_IndexType>:$previousSameId,
         OptionalAttr<UI8Attr>:$producer_count,
         OptionalAttr<UI8Attr>:$consumer_count,
         UnitAttr:$isFinalBarrier
@@ -102,6 +105,7 @@ def VPUMI40XX_ConfigureBarrierOp :
         attr-dict
         (`(` $dependencies^ `:` type($dependencies) `)`)?
         `<` $id `,` $next_same_id `>`
+        (`previousSameId` `(` $previousSameId^ `:` type($previousSameId) `)`)?
         `->` type(results)
     }];
 }
@@ -109,6 +113,7 @@ def VPUMI40XX_ConfigureBarrierOp :
 //
 // MappedInferenceOp
 //
+
 def VPUMI40XX_MappedInferenceOp :
         VPUMI40XX_Op<"MappedInference",
             [
@@ -131,7 +136,7 @@ def VPUMI40XX_MappedInferenceOp :
         Optional<VPURegMapped_IndexType>:$workItemTasks,
         Optional<VPURegMapped_IndexType>:$bootstrapTasks,
         Optional<AnyTypeOf<[VPURegMapped_IndexType, AnyMemRef]>>:$actShaveRt,
-        Variadic<AnyMemRef>:$actShaveStacks,
+        Variadic<VPURegMapped_IndexType>:$actShaveStacks,
         Optional<MemRefOf<[UI32]>>:$dmaHwpBase,
         Optional<MemRefOf<[UI32]>>:$hwpWorkpointCfg,
         I64ArrayOfArraysAttr:$dmaCount,
@@ -144,7 +149,11 @@ def VPUMI40XX_MappedInferenceOp :
         OptionalAttr<I64Attr>:$workItemCount,
         OptionalAttr<I64Attr>:$bootstrapTasksCount,
         OptionalAttr<I64Attr>:$bootsrapWorkItemsCount,
-        OptionalAttr<I64Attr>:$finalBarrierId
+        OptionalAttr<I64Attr>:$finalBarrierId,
+        Optional<AnyMemRef>:$barrierConfigurationTasks,
+        OptionalAttr<I64Attr>:$barrierConfigurationTasksCount,
+        Optional<AnyMemRef>:$numOfBarrierReprogrammings,
+        Optional<VPURegMapped_IndexType>:$mappedInferenceVersion
     );
 
     let results = (outs
@@ -175,6 +184,8 @@ def VPUMI40XX_MappedInferenceOp :
         (`actShaveStacks` `(` $actShaveStacks^ `:` type($actShaveStacks) `)`)?
         (`dmaHwpBase` `(` $dmaHwpBase^ `:` type($dmaHwpBase) `)`)?
         (`hwpWorkpointCfg` `(` $hwpWorkpointCfg^ `:` type($hwpWorkpointCfg) `)`)?
+        (`barrierConfigurationTasks` `(` $barrierConfigurationTasks^ `:` type($barrierConfigurationTasks) `)` )?
+        (`numOfBarrierReprogrammings` `(` $numOfBarrierReprogrammings^ `:` type($numOfBarrierReprogrammings) `)` )?
         `dmaCount` `(` $dmaCount `)`
         `invariantCount` `(` $invariantCount `)`
         `variantCount` `(` $variantCount `)`
@@ -186,6 +197,8 @@ def VPUMI40XX_MappedInferenceOp :
         (`bootstrapTasksCount` `(` $bootstrapTasksCount^ `)`)?
         (`bootsrapWorkItemsCount` `(` $bootsrapWorkItemsCount^ `)`)?
         (`finalBarrierId` `(` $finalBarrierId^ `)`)?
+        (`barrierConfigurationTasksCount` `(` $barrierConfigurationTasksCount^ `)`)?
+        (`mappedInferenceVersion` `(` $mappedInferenceVersion^ `:` type($mappedInferenceVersion) `)` )?
         `->` type(results)
     }];
 }
@@ -314,6 +327,33 @@ def VPUMI40XX_ActShaveRtOp :
 }
 
 //
+// ShaveStackFrameOp
+//
+
+def VPUMI40XX_ShaveStackFrameOp :
+        VPUMI40XX_Op<"ActShaveRtStack",
+            [
+                VPUMI40XX_SingleOutputAsIndexOp,
+                DeclarationOp
+            ]
+        > {
+    let summary = "Declaration of Act Shave stack frames buffers";
+
+    let arguments = (ins
+        UI64Attr:$stackSize
+    );
+
+    let results = (outs
+        VPURegMapped_IndexType:$index
+    );
+
+    let assemblyFormat = [{
+        attr-dict `stackSize` `(` $stackSize `)` `->` type(results)
+    }];
+
+}
+
+//
 // DeclareKernelTextOp
 //
 
@@ -411,7 +451,6 @@ def VPUMI40XX_KernelParamsOp :
         For dynamic shapes, the parameters `dynamicInputShapes` and `dynamicOutputShapes` are utilized.
         If a shape does not need to be dynamic, the corresponding parameter can be omitted. The shape is resolved via kernel_params for this case.
 
-        Currently, support for dynamic shapes is limited to scenarios with a single input or output.
         The rank of these shapes is inferred from the bounds and layout; dynamic rank is not supported.
 
         For instance, consider a ReLu operation with the following specifications:
@@ -439,7 +478,8 @@ def VPUMI40XX_KernelParamsOp :
         DenseI32ArrayAttr:$dynamicOutputShapesSize,
         StrAttr:$kernel_type,
         ElementsAttr:$kernel_params,
-        UnitAttr:$is_output_broadcasted
+        UnitAttr:$is_output_broadcasted,
+        UnitAttr:$isJitCompiled
     );
 
     let results = (outs
@@ -578,7 +618,14 @@ def VPUMI40XX_DPUVariantOp :
         Optional<VPURegMapped_IndexType>:$previousTask,
         VPURegMapped_IndexType:$Invariant,
         Optional<MemRefOf<[F16, BF16, quant_QuantizedType]>>:$weights,
+
         Optional<MemRefOf<[SI32]>>:$weight_table,
+        Optional<MemRefOf<[SI32]>>:$weight_table_data_ptr,
+        Optional<MemRefOf<[SI32]>>:$weight_table_sp_ptr,
+        Optional<MemRefOf<[F32, F8E5M2, F8E4M3FN]>>:$weight_table_scale,
+        Optional<MemRefOf<[F32]>>:$weight_table_bias,
+        Optional<MemRefOf<[I8, I4]>>:$weight_zero_points,
+
         VPUIP_NCETaskTypeAttr:$nce_task_type,
         I64ArrayAttr:$inStart,
         I64ArrayAttr:$inEnd,
@@ -589,7 +636,8 @@ def VPUMI40XX_DPUVariantOp :
         DefaultValuedAttr<UI64Attr, "0">:$cluster_id,
         OptionalAttr<DPUHaloRegionArrayAttr>: $haloRegions,
         OptionalAttr<IntAttr>:$workload_id,
-        UnitAttr:$lut_read
+        UnitAttr:$lut_read,
+        UnitAttr:$force_inv_read
     );
 
     let extraClassDefinition = [{
@@ -604,6 +652,11 @@ def VPUMI40XX_DPUVariantOp :
         `calls` `(` $Invariant `:` type($Invariant) `)`
         (`weights` `(` $weights^ `:` type($weights) `)`)?
         (`weight_table` `(` $weight_table^ `:` type($weight_table) `)`)?
+        (`weight_table_data_ptr` `(` $weight_table_data_ptr^ `:` type($weight_table_data_ptr) `)`)?
+        (`weight_table_sp_ptr` `(` $weight_table_sp_ptr^ `:` type($weight_table_sp_ptr) `)`)?
+        (`weight_table_scale` `(` $weight_table_scale^ `:` type($weight_table_scale) `)`)?
+        (`weight_table_bias` `(` $weight_table_bias^ `:` type($weight_table_bias) `)`)?
+        (`weight_zero_points` `(` $weight_zero_points^ `:` type($weight_zero_points) `)`)?
         attr-dict
         `->` type($index)
     }];
@@ -638,16 +691,28 @@ def VPUMI40XX_DPUInvariantOp :
         Optional<MemRefOf<[I32]>>:$input_storage_element_table,
         Optional<MemRefOf<[F16, BF16, quant_QuantizedType]>>:$weights,
         Optional<MemRefOf<[I1]>>:$weights_sparsity_map,
+
         Optional<MemRefOf<[SI32]>>:$weight_table,
+        Optional<MemRefOf<[SI32]>>:$weight_table_data_ptr,
+        Optional<MemRefOf<[SI32]>>:$weight_table_sp_ptr,
+        Optional<MemRefOf<[F32, F8E5M2, F8E4M3FN]>>:$weight_table_scale,
+        Optional<MemRefOf<[F32]>>:$weight_table_bias,
+        Optional<MemRefOf<[I8, I4]>>:$weight_zero_points,
+
         Optional<MemRefOf<[UI16]>>:$spr_lookup_table,
 
         Variadic<MemRefOf<[F16, F32, BF16, quant_QuantizedType]>>:$output_buffs,
         Variadic<MemRefOf<[I1]>>:$output_sparsity_map_buffs,
         Optional<MemRefOf<[UI64]>>:$profiling_data,
 
+        Optional<MemRefOf<[F16, BF16, quant_QuantizedType]>>:$max_per_xy,
+        Optional<MemRefOf<[F16, BF16, quant_QuantizedType]>>:$min_per_xy,
+        Variadic<MemRefOf<[F16, BF16, quant_QuantizedType]>>:$min_max_per_tensor,
+
         VPUIP_NCETaskTypeAttr:$nce_task_type,
         OptionalAttr<VPU_EltwiseTypeAttr>:$eltwise_type,
         VPU_MPEModeAttr:$mpe_frequent_mode,
+        OptionalAttr<VPU_MPEEngineAttr>:$mpe_engine,
 
         OptionalAttr<I64ArrayAttr>:$kernel_size,
         OptionalAttr<I64ArrayAttr>:$kernel_strides,
@@ -655,6 +720,7 @@ def VPUMI40XX_DPUInvariantOp :
         UnitAttr:$is_continued,
         OptionalAttr<IntAttr>:$cm_sp_pattern,
         UnitAttr:$input_channels_compression,
+        UnitAttr:$is_zero_offset_weights_table,
         OptionalAttr<IntAttr>:$out_channel_offset,
         UnitAttr:$is_superdense,
         OptionalAttr<BoolAttr>:$is_inplace,
@@ -683,8 +749,7 @@ def VPUMI40XX_DPUInvariantOp :
 
     let extraClassDeclaration = [{
         std::size_t getBarrierHitsCount() {
-            auto users = getResult().getUsers();
-            return static_cast<std::size_t>(std::count_if(std::begin(users), std::end(users), [](auto user) { return mlir::isa<vpux::VPUMI40XX::DPUVariantOp>(user); }));
+            return 1;
         }
     }];
 
@@ -704,10 +769,18 @@ def VPUMI40XX_DPUInvariantOp :
         (`weights` `(` $weights^  `:` type($weights) `)`)?
         (`weights_sparsity_map` `(` $weights_sparsity_map^ `:` type($weights_sparsity_map) `)`)?
         (`weight_table` `(` $weight_table^ `:` type($weight_table) `)`)?
+        (`weight_table_data_ptr` `(` $weight_table_data_ptr^ `:` type($weight_table_data_ptr) `)`)?
+        (`weight_table_sp_ptr` `(` $weight_table_sp_ptr^ `:` type($weight_table_sp_ptr) `)`)?
+        (`weight_table_scale` `(` $weight_table_scale^ `:` type($weight_table_scale) `)`)?
+        (`weight_table_bias` `(` $weight_table_bias^ `:` type($weight_table_bias) `)`)?
+        (`weight_zero_points` `(` $weight_zero_points^ `:` type($weight_zero_points) `)`)?
         (`spr_lookup_table` `(` $spr_lookup_table^ `:` type($spr_lookup_table) `)`)?
         (`outputs` `(` $output_buffs^ `:` type($output_buffs) `)`)?
         (`output_sparsity_maps` `(` $output_sparsity_map_buffs^ `:` type($output_sparsity_map_buffs) `)`)?
         (`profiling_data` `(` $profiling_data^ `:` type($profiling_data) `)`)?
+        (`max_per_xy` `(` $max_per_xy^ `:` type($max_per_xy) `)`)?
+        (`min_per_xy` `(` $min_per_xy^ `:` type($min_per_xy) `)`)?
+        (`min_max_per_tensor` `(` $min_max_per_tensor^ `:` type($min_max_per_tensor) `)`)?
         (`waits` `(` $waitBarriers^ `:` type($waitBarriers) `)`)?
         (`updates` `(` $updateBarriers^ `:` type($updateBarriers) `)`)?
         (`enqueueBarrier` `(` $enqueueBarrier^ `:` type($enqueueBarrier) `)`)?
@@ -794,7 +867,8 @@ def VPUMI40XX_M2IOp :
         Variadic<VPURegMapped_IndexType>:$waitBarriers,
         Variadic<VPURegMapped_IndexType>:$updateBarriers,
         UI64Attr:$start_after,
-        UI64Attr:$clean_after
+        UI64Attr:$clean_after,
+        Optional<VPURegMapped_IndexType>:$enqueueBarrier
     );
 
     let results = (outs
@@ -810,13 +884,8 @@ def VPUMI40XX_M2IOp :
         (`profiling_data` `(` $profiling_data^ `:` type($profiling_data) `)`)?
         (`waits` `(` $waitBarriers^ `:` type($waitBarriers) `)`)?
         (`updates` `(` $updateBarriers^ `:` type($updateBarriers) `)`)?
+        (`enqueueBarrier` `(` $enqueueBarrier^ `:` type($enqueueBarrier) `)`)?
         `->` type(results)
-    }];
-
-    let extraClassDeclaration = [{
-        mlir::Value getEnqueueBarrier() {
-            return nullptr;
-        }
     }];
 
     let extraClassDefinition = [{
@@ -911,6 +980,57 @@ def OpRanges : VPUMI40XX_Op<"OpRanges", [
     }];
 
     let hasVerifier = 1;
+}
+
+//
+// PlatformInfoOp
+//
+
+def VPUMI40XX_PlatformInfoOp :
+        VPUMI40XX_Op<"PlatformInfo", []> {
+    let summary = "Represents an op describing various platform information, such as arch, revision, etc.";
+
+    let description = [{
+        PlatformInfoOp is an operation that is meant to encapsulate various information about the NPU. For
+        the moment, this information is limited to the archKind (taken from the module), but can
+        easily be extended with other information such as SKU info, etc.
+    }];
+
+    let results = (outs
+        VPURegMapped_IndexType:$index
+    );
+
+    let assemblyFormat = [{
+        attr-dict
+        `->` type($index)
+    }];
+}
+
+
+//
+// MappedInferenceVersionOp
+//
+
+def VPUMI40XX_MappedInferenceVersionOp :
+        VPUMI40XX_Op<"MappedInferenceVersion", []> {
+
+    let summary = "Represents a versioning mechanism for Mapped Inference";
+
+    let arguments = (ins
+        UI32Attr:$major,
+        UI32Attr:$minor,
+        UI32Attr:$patch
+    );
+
+    let results = (outs
+        VPURegMapped_IndexType:$index
+    );
+
+    let assemblyFormat = [{
+        `(` $major `_` $minor `_` $patch `)`
+        attr-dict
+        `->` type(results)
+        }];
 }
 
 #endif

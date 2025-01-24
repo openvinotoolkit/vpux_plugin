@@ -133,8 +133,9 @@ mlir::LogicalResult ConvertUpsamplingToStridedConcatPass::UpsamplingOpConverter:
         auto padWidthAttr = getIntArrayAttr(rewriter, SmallVector<int64_t>{0, upsamplingFactorVectorTmp[0] - 1});
         auto padAttr = IE::UpsamplingPadAttr::get(rewriter.getContext(), padChannelAttr, padHeightAttr, padWidthAttr);
 
-        auto newUpsample = rewriter.create<IE::UpsamplingOp>(origOp->getLoc(), upsamplingResult,
-                                                             origOp.getUpsamplingFactor(), padAttr);
+        auto newUpsample =
+                rewriter.create<IE::UpsamplingOp>(origOp->getLoc(), upsamplingResult, origOp.getUpsamplingFactor(),
+                                                  padAttr, origOp.getOutputChannelsAttr());
         upsamplingResult = newUpsample.getOutput();
     }
     auto isZero = [](auto val) {
@@ -144,9 +145,9 @@ mlir::LogicalResult ConvertUpsamplingToStridedConcatPass::UpsamplingOpConverter:
         auto padBeginAttr = getIntArrayAttr(rewriter, padingLAtt);
         auto padEndAttr = getIntArrayAttr(rewriter, padingRAtt);
         auto zeroFpAttr = getFPAttr(rewriter, 0.0f);
-        auto padingOp =
-                rewriter.create<IE::PadOp>(takeOpLoc(origOp, "pad_out"), upsamplingResult, nullptr, nullptr, nullptr,
-                                           padBeginAttr, padEndAttr, zeroFpAttr, IE::PadMode::CONSTANT);
+        auto padingOp = rewriter.create<IE::PadOp>(takeOpLoc(origOp, "pad_out"), upsamplingResult, nullptr, nullptr,
+                                                   nullptr, padBeginAttr, padEndAttr, zeroFpAttr, IE::PadMode::CONSTANT,
+                                                   origOp.getOutputChannelsAttr());
         upsamplingResult = padingOp.getOutput();
     }
 

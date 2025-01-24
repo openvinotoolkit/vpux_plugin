@@ -69,7 +69,7 @@ public:
         info.setInput(0, DimsOrder::NHWC);
         info.setInput(1, DimsOrder::OYXI);
 
-        // FIXME [E#87197]: NPU37XX ODU supports reordering of the output tensor, so we could use any layout here.
+        // FIXME [E#E#87197]: NPU37XX ODU supports reordering of the output tensor, so we could use any layout here.
         // But right now current behavior of AdjustLayouts and OptimizeReorder passes might introduce extra Reorders in
         // that case. We need to update the passes to properly handle various Reorder propagation and fusing cases prior
         // enabling ODU permutation feature in NPU37XX.
@@ -213,7 +213,8 @@ private:
         auto W = mvnShape[Dims4D::Act::W];
         auto H = mvnShape[Dims4D::Act::H];
         auto C = mvnShape[Dims4D::Act::C];
-        auto minSize = 256 * 1024;  // ad hoc threshold
+        // Experimental value, refer to E#148629 for more information
+        auto minSize = 32 * 1024;
         if ((W * H < minSize) || (C % 32)) {
             // running small instances through MVN-decomposition degrades perf
             return false;
@@ -399,6 +400,13 @@ void redirectLayoutOpInterfacesForVPU(mlir::DialectRegistry& registry) {
         VPU::SubtractOp::attachInterface<vpux::VPU::SameAnyDimsOrderOpModelForSW>(*ctx);
         VPU::DivideOp::attachInterface<vpux::VPU::SameAnyDimsOrderOpModelForSW>(*ctx);
         VPU::InverseOp::attachInterface<vpux::VPU::SameAnyDimsOrderOpModelForSW>(*ctx);
+        VPU::DynamicDequantizeOp::attachInterface<vpux::VPU::SameAnyDimsOrderOpModelForSW>(*ctx);
+        VPU::GreaterEqualOp::attachInterface<vpux::VPU::SameAnyDimsOrderOpModelForSW>(*ctx);
+        VPU::LessOp::attachInterface<vpux::VPU::SameAnyDimsOrderOpModelForSW>(*ctx);
+        VPU::LessEqualOp::attachInterface<vpux::VPU::SameAnyDimsOrderOpModelForSW>(*ctx);
+        VPU::NotEqualOp::attachInterface<vpux::VPU::SameAnyDimsOrderOpModelForSW>(*ctx);
+        VPU::GreaterOp::attachInterface<vpux::VPU::SameAnyDimsOrderOpModelForSW>(*ctx);
+        VPU::EqualOp::attachInterface<vpux::VPU::SameAnyDimsOrderOpModelForSW>(*ctx);
 
         VPU::StridedSliceOp::attachInterface<vpux::VPU::SameInOutAnyDimsOrderOpModelForSW>(*ctx);
         VPU::LRNOp::attachInterface<vpux::VPU::SameInOutAnyDimsOrderOpModelForSW>(*ctx);
@@ -426,12 +434,6 @@ void redirectLayoutOpInterfacesForVPU(mlir::DialectRegistry& registry) {
         VPU::BitwiseOrOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
         VPU::BitwiseXorOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
         VPU::BitwiseNotOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
-        VPU::LessOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
-        VPU::LessEqualOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
-        VPU::NotEqualOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
-        VPU::GreaterOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
-        VPU::GreaterEqualOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
-        VPU::EqualOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
         VPU::LogicalNotOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
         VPU::ScaleShiftOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
         VPU::GatherTreeOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
@@ -460,6 +462,7 @@ void redirectLayoutOpInterfacesForVPU(mlir::DialectRegistry& registry) {
         VPU::SpaceToBatch::attachInterface<vpux::VPU::DefaultDimsOrderOpModelForSW>(*ctx);
         VPU::BatchToSpace::attachInterface<vpux::VPU::DefaultDimsOrderOpModelForSW>(*ctx);
         VPU::ReorgYoloOp::attachInterface<vpux::VPU::DefaultDimsOrderOpModelForSW>(*ctx);
+        VPU::RangeOp::attachInterface<vpux::VPU::DefaultDimsOrderOpModelForSW>(*ctx);
         VPU::NonZeroOp::attachInterface<vpux::VPU::DefaultDimsOrderOpModelForSW>(*ctx);
         VPU::DynamicReshapeOp::attachInterface<vpux::VPU::DefaultDimsOrderOpModelForSW>(*ctx);
 
@@ -591,6 +594,12 @@ void redirectLayoutOpInterfacesForIE(mlir::DialectRegistry& registry) {
         IE::CumSumOp::attachInterface<vpux::VPU::SameAnyDimsOrderOpModelForSW>(*ctx);
         IE::DivideOp::attachInterface<vpux::VPU::SameAnyDimsOrderOpModelForSW>(*ctx);
         IE::InverseOp::attachInterface<vpux::VPU::SameAnyDimsOrderOpModelForSW>(*ctx);
+        IE::GreaterEqualOp::attachInterface<vpux::VPU::SameAnyDimsOrderOpModelForSW>(*ctx);
+        IE::LessOp::attachInterface<vpux::VPU::SameAnyDimsOrderOpModelForSW>(*ctx);
+        IE::LessEqualOp::attachInterface<vpux::VPU::SameAnyDimsOrderOpModelForSW>(*ctx);
+        IE::NotEqualOp::attachInterface<vpux::VPU::SameAnyDimsOrderOpModelForSW>(*ctx);
+        IE::GreaterOp::attachInterface<vpux::VPU::SameAnyDimsOrderOpModelForSW>(*ctx);
+        IE::EqualOp::attachInterface<vpux::VPU::SameAnyDimsOrderOpModelForSW>(*ctx);
 
         IE::StridedSliceOp::attachInterface<vpux::VPU::SameInOutAnyDimsOrderOpModelForSW>(*ctx);
         IE::LRNOp::attachInterface<vpux::VPU::SameInOutAnyDimsOrderOpModelForSW>(*ctx);
@@ -617,12 +626,6 @@ void redirectLayoutOpInterfacesForIE(mlir::DialectRegistry& registry) {
         IE::BitwiseOrOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
         IE::BitwiseXorOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
         IE::BitwiseNotOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
-        IE::LessOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
-        IE::LessEqualOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
-        IE::NotEqualOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
-        IE::GreaterOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
-        IE::GreaterEqualOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
-        IE::EqualOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
         IE::LogicalNotOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
         IE::GatherTreeOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
         IE::FullyConnectedOp::attachInterface<vpux::VPU::SameInOutDefaultDimsOrderOpModelForSW>(*ctx);
@@ -648,6 +651,7 @@ void redirectLayoutOpInterfacesForIE(mlir::DialectRegistry& registry) {
         IE::GatherNDOp::attachInterface<vpux::VPU::DefaultDimsOrderOpModelForSW>(*ctx);
         IE::SpaceToBatch::attachInterface<vpux::VPU::DefaultDimsOrderOpModelForSW>(*ctx);
         IE::ReorgYoloOp::attachInterface<vpux::VPU::DefaultDimsOrderOpModelForSW>(*ctx);
+        IE::RangeOp::attachInterface<vpux::VPU::DefaultDimsOrderOpModelForSW>(*ctx);
         IE::NonZeroOp::attachInterface<vpux::VPU::DefaultDimsOrderOpModelForSW>(*ctx);
         IE::DynamicReshapeOp::attachInterface<vpux::VPU::DefaultDimsOrderOpModelForSW>(*ctx);
         IE::DynamicTileOp::attachInterface<vpux::VPU::DefaultDimsOrderOpModelForSW>(*ctx);

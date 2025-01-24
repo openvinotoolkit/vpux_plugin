@@ -116,83 +116,96 @@ void ConvertFuncArgsToDeclarationsPass::safeRunOnModule() {
     vpux::IE::CNNNetworkOp::getFromModule(moduleOp, cnnOp, netFunc);
 
     replaceArgs(netFunc, buildNewDecl);
+    SmallVector<mlir::func::FuncOp> funcOps;
+    funcOps.push_back(netFunc);
 
-    mlir::DenseMap<mlir::func::FuncOp, ArgToBufferDeclarationMap> funcToDeclChains;
-    netFunc.walk([&](mlir::func::CallOp callOp) {
-        const auto isPureViewLike = [](mlir::Operation* op) {
-            return mlir::isa<mlir::ViewLikeOpInterface>(op) && !mlir::isa<VPUIP::LayerOpInterface>(op);
-        };
+    const auto isPureViewLike = [](mlir::Operation* op) {
+        return mlir::isa<mlir::ViewLikeOpInterface>(op) && !mlir::isa<VPUIP::LayerOpInterface>(op);
+    };
 
-        const auto getDeclaration = [&](mlir::Value val) {
-            auto funcBlockArg = mlir::cast<mlir::BlockArgument>(val);
+    const auto getDeclaration = [&](mlir::func::CallOp callOp, mlir::Value val) {
+        auto funcBlockArg = mlir::cast<mlir::BlockArgument>(val);
 
-            auto callOperand = callOp.getOperand(funcBlockArg.getArgNumber());
-            auto producerOp = callOperand.getDefiningOp();
-            SmallVector<mlir::Operation*> viewOps;
-            while (producerOp != nullptr && isPureViewLike(producerOp)) {
-                viewOps.push_back(producerOp);
-                producerOp = mlir::cast<mlir::ViewLikeOpInterface>(producerOp).getViewSource().getDefiningOp();
-            }
-
-            auto originDeclOp = mlir::dyn_cast_or_null<VPURT::DeclareBufferOp>(producerOp);
-            VPUX_THROW_WHEN(originDeclOp == nullptr, "Could not find declare buffer op for CallOp '{0}' operand '{1}'",
-                            callOp, callOperand);
-
-            return BufferDeclarationChain{std::move(viewOps), originDeclOp};
-        };
-
-        auto func = getCalledFunction(callOp);
-        if (funcToDeclChains.contains(func)) {
-            for (const auto& arg : func.getArguments()) {
-                if (!funcToDeclChains[func].contains(arg.getArgNumber())) {
-                    continue;
-                }
-
-                auto declChain = getDeclaration(arg);
-                VPUX_THROW_UNLESS(
-                        funcToDeclChains[func][arg.getArgNumber()] == declChain,
-                        "Declaration chain for argument at idx '{0}' of CallOp with callee '{1}' is not equal "
-                        "to the chain of the first call of the same function.",
-                        arg.getArgNumber(), func.getName());
-            }
-            return;
+        auto callOperand = callOp.getOperand(funcBlockArg.getArgNumber());
+        auto producerOp = callOperand.getDefiningOp();
+        SmallVector<mlir::Operation*> viewOps;
+        while (producerOp != nullptr && isPureViewLike(producerOp)) {
+            viewOps.push_back(producerOp);
+            producerOp = mlir::cast<mlir::ViewLikeOpInterface>(producerOp).getViewSource().getDefiningOp();
         }
 
-        ArgToBufferDeclarationMap declChainsMap;
-        const auto buildDeclaration = [&](mlir::OpBuilder& argBuilder, mlir::Value val, VPURT::BufferSection, int64_t) {
-            auto originDeclChain = getDeclaration(val);
-            auto funcBlockArg = mlir::cast<mlir::BlockArgument>(val);
-            declChainsMap[funcBlockArg.getArgNumber()] = originDeclChain;
+        auto originDeclOp = mlir::dyn_cast_or_null<VPURT::DeclareBufferOp>(producerOp);
+        VPUX_THROW_WHEN(originDeclOp == nullptr, "Could not find declare buffer op for CallOp '{0}' operand '{1}'",
+                        callOp, callOperand);
 
-            // clang-format off
-            // Clone full chain of pure view like ops to get correct offset in the "child" function after ConvertViewOpsToDeclarations
-            // For example:
-            // main:
-            // %0 = VPURT.DeclareBuffer <NetworkInput> [0] <0> -> memref<1x10x10x12xf16, @DDR>
-            // %1 = VPUIP.SubView %0 [0, 1] [1, 8] : memref<1x10f16, @DDR> to memref<1x8xf16, {order = #NC, strides = [10, 1]}, @DDR>
-            //
-            // foo1:
-            // original argument is %arg1: memref<1x8xf16, {order = #NC, strides = [10, 1]}, @DDR>
-            // when clone only DeclareBufferOp:
-            // %0 = VPURT.DeclareBuffer <NetworkInput> [0] <0> -> memref<1x10x10x12xf16, @DDR>
-            // %1 = VPUIP.SubView %0 [0, 2] [1, 6] : memref<1x8xf16, {order = #NC, strides = [10, 1]}, @DDR> to memref<1x6xf16, {order = #NC, strides = [10, 1]}, @DDR>
-            //
-            // After ConvertViewOpsToDeclarations offset is 2, but shoud be 3 = 1("main" offset) + 2("foo1" offset)
-            // clang-format on
+        return BufferDeclarationChain{std::move(viewOps), originDeclOp};
+    };
 
-            auto resValue = argBuilder.clone(*originDeclChain.declBuffOp.getOperation())->getResult(0);
-            for (auto& currViewOp : originDeclChain.viewOps | reversed) {
-                mlir::IRMapping mapper;
-                mapper.map(mlir::cast<mlir::ViewLikeOpInterface>(currViewOp).getViewSource(), resValue);
-                resValue = argBuilder.clone(*currViewOp, mapper)->getResult(0);
-            }
+    mlir::DenseMap<mlir::func::FuncOp, ArgToBufferDeclarationMap> funcToDeclChains;
 
-            return resValue;
-        };
+    while (!funcOps.empty()) {
+        SmallVector<mlir::func::FuncOp> nextLevelFuncOps;
+        for (auto& funcOp : funcOps) {
+            funcOp.walk([&](mlir::func::CallOp callOp) {
+                auto func = getCalledFunction(callOp);
 
-        replaceArgs(func, buildDeclaration);
-        funcToDeclChains[func] = std::move(declChainsMap);
-    });
+                if (funcToDeclChains.contains(func)) {
+                    for (const auto& arg : func.getArguments()) {
+                        if (!funcToDeclChains[func].contains(arg.getArgNumber())) {
+                            continue;
+                        }
+
+                        auto declChain = getDeclaration(callOp, arg);
+                        VPUX_THROW_UNLESS(
+                                funcToDeclChains[func][arg.getArgNumber()] == declChain,
+                                "Declaration chain for argument at idx '{0}' of CallOp with callee '{1}' is not equal "
+                                "to the chain of the first call of the same function.",
+                                arg.getArgNumber(), func.getName());
+                    }
+                    return;
+                }
+
+                ArgToBufferDeclarationMap declChainsMap;
+                const auto buildDeclaration = [&](mlir::OpBuilder& argBuilder, mlir::Value val, VPURT::BufferSection,
+                                                  int64_t) {
+                    auto originDeclChain = getDeclaration(callOp, val);
+                    auto funcBlockArg = mlir::cast<mlir::BlockArgument>(val);
+                    declChainsMap[funcBlockArg.getArgNumber()] = originDeclChain;
+
+                    // clang-format off
+                    // Clone full chain of pure view like ops to get correct offset in the "child" function after ConvertViewOpsToDeclarations
+                    // For example:
+                    // main:
+                    // %0 = VPURT.DeclareBuffer <NetworkInput> [0] <0> -> memref<1x10x10x12xf16, @DDR>
+                    // %1 = VPUIP.SubView %0 [0, 1] [1, 8] : memref<1x10f16, @DDR> to memref<1x8xf16, {order = #NC, strides = [10, 1]}, @DDR>
+                    //
+                    // foo1:
+                    // original argument is %arg1: memref<1x8xf16, {order = #NC, strides = [10, 1]}, @DDR>
+                    // when clone only DeclareBufferOp:
+                    // %0 = VPURT.DeclareBuffer <NetworkInput> [0] <0> -> memref<1x10x10x12xf16, @DDR>
+                    // %1 = VPUIP.SubView %0 [0, 2] [1, 6] : memref<1x8xf16, {order = #NC, strides = [10, 1]}, @DDR> to memref<1x6xf16, {order = #NC, strides = [10, 1]}, @DDR>
+                    //
+                    // After ConvertViewOpsToDeclarations offset is 2, but shoud be 3 = 1("main" offset) + 2("foo1" offset)
+                    // clang-format on
+
+                    auto resValue = argBuilder.clone(*originDeclChain.declBuffOp.getOperation())->getResult(0);
+                    for (auto& currViewOp : originDeclChain.viewOps | reversed) {
+                        mlir::IRMapping mapper;
+                        mapper.map(mlir::cast<mlir::ViewLikeOpInterface>(currViewOp).getViewSource(), resValue);
+                        resValue = argBuilder.clone(*currViewOp, mapper)->getResult(0);
+                    }
+
+                    return resValue;
+                };
+
+                replaceArgs(func, buildDeclaration);
+                funcToDeclChains[func] = std::move(declChainsMap);
+                nextLevelFuncOps.push_back(func);
+            });
+        }
+
+        funcOps = std::move(nextLevelFuncOps);
+    }
 }
 
 }  // namespace

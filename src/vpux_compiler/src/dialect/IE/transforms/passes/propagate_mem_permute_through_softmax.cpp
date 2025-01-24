@@ -128,7 +128,18 @@ mlir::LogicalResult InsertMemPermuteBeforeAndAfterSoftmax::matchAndRewrite(IE::S
     const auto inOrder = DimsOrder::fromValue(softMaxOp.getInput());
 
     // Check the Axis memory position, if it's on the last dimension, the SW kernel is more efficient.
-    if (VPU::hasMultiBranches(softMaxOp) || vpux::IE::isSoftMaxAxisInLastMemDim(softMaxOp)) {
+    if (vpux::IE::isSoftMaxAxisInLastMemDim(softMaxOp)) {
+        return mlir::failure();
+    }
+
+    mlir::DenseSet<mlir::Operation*> nonMemPermuteUser;
+    for (auto user : softMaxOp->getUsers()) {
+        if (!mlir::isa<IE::MemPermuteOp>(user)) {
+            nonMemPermuteUser.insert(user);
+        }
+    }
+    // Has more than one non mempermute user, skip this to avoid the potential performance regression.
+    if (nonMemPermuteUser.size() > 1) {
         return mlir::failure();
     }
 

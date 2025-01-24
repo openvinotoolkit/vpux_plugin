@@ -3,13 +3,12 @@
 # SPDX-License-Identifier: Apache 2.0
 #
 
-file(GLOB_RECURSE SRC_FILES *.cpp)
 set(TARGET_NAME "npu_compiler_dialect_vpuip")
-add_mlir_dialect_library(${TARGET_NAME}
-    STATIC
-        ${SRC_FILES}
-    EXCLUDE_FROM_LIBMLIR
-    DISABLE_INSTALL
+
+file(GLOB_RECURSE SRC_FILES *.cpp)
+add_npu_library(${TARGET_NAME}
+    ${SRC_FILES}
+    DIALECT_LIB
     LINK_LIBS PRIVATE
         npu_compiler_act_kernels
         npu_compiler_core
@@ -20,16 +19,8 @@ add_mlir_dialect_library(${TARGET_NAME}
         flatbuffers
         npu_elf
         openvino::npu_al
-        npu_compiler_dialect_vpurt)
-add_dependencies(${TARGET_NAME} MLIRVPUXIncGenList)
-target_include_directories(${TARGET_NAME}
-    SYSTEM PRIVATE
-        $<BUILD_INTERFACE:${MLIR_INCLUDE_DIRS}>
-        ${VPUNN_INCLUDE_DIRS}
-        ${VPU_COMPILER_BIN_INCLUDE_DIR})
-target_include_directories(${TARGET_NAME}
-    PRIVATE
-        ${VPU_COMPILER_SRC_INCLUDE_DIR})
-add_src_target(${TARGET_NAME})
-enable_warnings_as_errors(${TARGET_NAME} WIN_STRICT)
+        npu_compiler_dialect_vpurt
+    SYSTEM_INCLUDES
+        ${VPUNN_INCLUDE_DIRS})
+
 ov_add_version_defines(${VPUX_COMPILER_VERSION_FILE} ${TARGET_NAME})

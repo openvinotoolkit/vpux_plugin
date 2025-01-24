@@ -10,9 +10,11 @@
 
 #include "vpux/compiler/NPU40XX/dialect/ELF/ops.hpp"
 #include "vpux/compiler/NPU40XX/dialect/ELF/ops_interfaces.hpp"
-#include "vpux/compiler/dialect/ELFNPU37XX/metadata.hpp"
+
 #include "vpux/compiler/dialect/VPURegMapped/attributes.hpp"
 #include "vpux/compiler/dialect/VPURegMapped/types.hpp"
+
+#include "vpux/compiler/dialect/VPUMI40XX/attributes.hpp"
 
 #include <mlir/Dialect/Func/IR/FuncOps.h>
 #include <mlir/Dialect/Quant/QuantOps.h>

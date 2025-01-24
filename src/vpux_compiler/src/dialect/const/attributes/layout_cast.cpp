@@ -82,7 +82,3 @@ bool vpux::Const::LayoutCastAttr::inferOutputSplat(bool inputIsSplat, vpux::NDTy
 Const::Content vpux::Const::LayoutCastAttr::transform(vpux::Const::Content& input) const {
     return Const::Content::moveBuffer(inferOutputType(input.getType()), std::move(input));
 }
-
-Const::ContentSetup vpux::Const::ContentSetup::layoutCast(DimsOrder dstOrder) {
-    return addTransformation(Const::LayoutCastAttr::get(mlir::AffineMapAttr::get(dstOrder.toAffineMap(getContext()))));
-}

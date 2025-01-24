@@ -5,9 +5,10 @@
 
 #pragma once
 
+#include "vpux/compiler/core/type_interfaces.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/attributes.hpp"
+
 #include <mlir/IR/Types.h>
-#include "vpux/compiler/core/layers.hpp"
-#include "vpux/compiler/utils/infer_output_shape.hpp"
 
 namespace vpux {
 

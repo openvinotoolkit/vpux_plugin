@@ -7,45 +7,19 @@
 
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/IE/transforms/passes.hpp"
-
+#include "vpux/compiler/dialect/IE/utils/expand_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/auto_padding_utils.hpp"
 #include "vpux/utils/core/checked_cast.hpp"
 #include "vpux/utils/core/func_ref.hpp"
 #include "vpux/utils/core/numeric.hpp"
 namespace vpux {
 
-//
-// calcPadsEnd
-//
-
-Shape calcPadsEnd(ShapeRef origShape, ShapeRef extendedShape);
-Shape calcPadsEnd(vpux::NDTypeInterface origType, int64_t channelAlignment);
-
-mlir::Value expandWithOffset(mlir::PatternRewriter& rewriter, mlir::Operation* origOp, IE::SliceOp sliceOp,
-                             mlir::Value expandValue, ShapeRef inPadsEnd, size_t expandDim);
-mlir::Value paddingChannel(mlir::Operation* origOp, mlir::PatternRewriter& rewriter, mlir::Value expandValue,
-                           ShapeRef filterPadsEnd, size_t expandDim);
-mlir::Value paddingFilter(mlir::Operation* origOp, mlir::PatternRewriter& rewriter, mlir::Value expandValue,
-                          Shape filterPadsEnd);
-SmallVector<int64_t> extractMeaningfulOutput(mlir::Operation* origOp, ShapeRef outPadsEnd);
-
-//
-// generalRewrite
-//
-
-//
-// Max/Avg Pooling and Convolution Ops should be handled there
-//
-// opCreator - function, which should place back operation, which being proceed, with new expanded input
-// calcOutputSliceOffset - function, calcualte output slice offset, it's different for Conv and per-channel ops
-//
+namespace IE {
 
 mlir::LogicalResult generalRewrite(mlir::Operation* origOp, mlir::PatternRewriter& rewriter,
                                    FuncRef<mlir::Operation*(mlir::Value, int64_t)> opCreator,
                                    FuncRef<SmallVector<int64_t>(mlir::Operation*, Shape)> calcOutputSliceOffset,
-                                   Logger log);
-
-namespace IE {
+                                   FuncRef<void()> autopadAttributeModifier, Logger log);
 
 //
 // MaxPoolRewriter
@@ -117,11 +91,17 @@ mlir::LogicalResult EltwiseRewriter<ConcreteOp>::matchAndRewrite(ConcreteOp orig
                                                                  mlir::PatternRewriter& rewriter) const {
     _log.trace("[{0}] Got eltwise layer at '{1}'", this->getDebugName(), origOp->getLoc());
 
+    const auto autopadModifier = [&]() {
+        rewriter.modifyOpInPlace(origOp, [&] {
+            origOp.setOutputChannels(getShape(origOp.getResult())[Dims4D::Act::C]);
+        });
+    };
+
     const auto opCreator = [&](mlir::Value expandedInput1, int64_t outChanPadEnd) -> mlir::Operation* {
         mlir::Value expandedInput2;
         if (origOp.getInput1() == origOp.getInput2()) {
             expandedInput2 = expandedInput1;
-        } else if (outChanPadEnd == 0 && !VPU::hasOnlyOutPadding(getModuleOp(origOp))) {
+        } else if (outChanPadEnd == 0 && !VPU::canAutopadOutput(origOp)) {
             expandedInput2 = origOp.getInput2();
         } else {
             _log.trace("Expand second input tensor");
@@ -130,11 +110,11 @@ mlir::LogicalResult EltwiseRewriter<ConcreteOp>::matchAndRewrite(ConcreteOp orig
             const auto extendedShape = getShape(expandedInput1);
             VPUX_THROW_UNLESS(origShape.size() == extendedShape.size(), "Got non equal shapes in EltwiseRewriter");
 
-            const auto padsEnd = calcPadsEnd(origShape, extendedShape);
+            const auto padsEnd = IE::calcPadsEnd(origShape, extendedShape);
 
             auto sliceOp = origOp.getInput1().template getDefiningOp<IE::SliceOp>();
             expandedInput2 =
-                    expandWithOffset(rewriter, origOp, sliceOp, origOp.getInput2(), padsEnd, Dims4D::Act::C.ind());
+                    IE::expandWithOffset(rewriter, origOp, sliceOp, origOp.getInput2(), padsEnd, Dims4D::Act::C.ind());
         }
 
         const Shape outPadBefore(checked_cast<size_t>(origOp.getType().getRank()), 0);
@@ -143,23 +123,20 @@ mlir::LogicalResult EltwiseRewriter<ConcreteOp>::matchAndRewrite(ConcreteOp orig
         outPadAfter[Dims4D::Act::C] = outChanPadEnd;
 
         const auto ndType = origOp.getType().template cast<vpux::NDTypeInterface>();
-        auto outChanBeforeAttr = origOp.getOutputChannelsAttr();
-        auto inChanAutoPadAttr = origOp.getInputChannelsAttr();
 
-        if (VPU::hasOnlyOutPadding(getModuleOp(origOp))) {
+        auto outChanBeforeAttr = origOp.getOutputChannelsAttr();
+        if (VPU::canAutopadOutput(origOp)) {
             outChanBeforeAttr = vpux::getIntAttr(origOp.getContext(), ndType.getShape()[Dims4D::Act::C]);
         }
-        if (VPU::hasOnlyInPadding(getModuleOp(origOp))) {
-            inChanAutoPadAttr = vpux::getIntAttr(origOp.getContext(), getShape(origOp.getInput1())[Dims4D::Act::C]);
-        }
+
         const auto newOutputType = ndType.pad(outPadBefore, outPadAfter);
 
         return rewriter.create<ConcreteOp>(origOp.getLoc(), newOutputType, expandedInput1, expandedInput2,
                                            origOp.getAutoBroadcast(), origOp.getPostOpAttr(), origOp.getClampAttr(),
-                                           outChanBeforeAttr, inChanAutoPadAttr);
+                                           outChanBeforeAttr, origOp.getInputChannelsAttr());
     };
 
-    return generalRewrite(origOp, rewriter, opCreator, extractMeaningfulOutput, _log.nest());
+    return generalRewrite(origOp, rewriter, opCreator, IE::extractMeaningfulOutput, autopadModifier, _log.nest());
 }
 
 //
@@ -224,6 +201,22 @@ public:
     }
 
     mlir::LogicalResult matchAndRewrite(IE::PadOp origOp, mlir::PatternRewriter& rewriter) const final;
+
+private:
+    Logger _log;
+};
+
+//
+// AvgPoolRewriter
+//
+
+class AvgPoolRewriter final : public mlir::OpRewritePattern<IE::AvgPoolOp> {
+public:
+    AvgPoolRewriter(mlir::MLIRContext* ctx, Logger log): mlir::OpRewritePattern<IE::AvgPoolOp>(ctx), _log(log) {
+        setDebugName("AvgPoolRewriter");
+    }
+
+    mlir::LogicalResult matchAndRewrite(IE::AvgPoolOp origOp, mlir::PatternRewriter& rewriter) const final;
 
 private:
     Logger _log;

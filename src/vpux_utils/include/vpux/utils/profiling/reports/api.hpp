@@ -27,4 +27,6 @@ std::vector<LayerInfo> getLayerProfilingInfoHook(const std::vector<uint8_t>& dat
 std::vector<LayerInfo> getLayerProfilingInfoHook(const uint8_t* profData, size_t profSize,
                                                  const std::vector<uint8_t>& blob);
 
+std::vector<LayerInfo> getLayerInfo(const std::vector<TaskInfo>& taskInfo);
+
 }  // namespace vpux::profiling

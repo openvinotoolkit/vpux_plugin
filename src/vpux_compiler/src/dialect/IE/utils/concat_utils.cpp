@@ -5,6 +5,7 @@
 
 #include "vpux/compiler/dialect/IE/utils/concat_utils.hpp"
 #include "vpux/compiler/dialect/IE/utils/slice_utils.hpp"
+#include "vpux/compiler/dialect/const/utils/utils.hpp"
 
 namespace vpux {
 namespace IE {
@@ -100,10 +101,11 @@ mlir::Value createPaddingConstForConcat(ArrayRef<int64_t> constShape, mlir::Loca
     const auto origElemType = inputType.getElementType();
     const auto padDataStorageType =
             mlir::RankedTensorType::get(constShape, mlir::Float32Type::get(rewriter.getContext()));
-    const auto padDataStorage = mlir::DenseElementsAttr::get(padDataStorageType, static_cast<float>(padValue));
+    const auto padDataStorage = Const::createConstContent(padDataStorageType, ArrayRef(static_cast<float>(padValue)));
 
     const auto padDataType = mlir::RankedTensorType::get(constShape, origElemType);
-    auto padDataAttr = Const::ContentAttr::transform(padDataStorage).castElemType(origElemType).get();
+    auto padDataAttr =
+            Const::ContentAttr::get(padDataStorage, Const::ContentSetup(padDataStorageType).castElemType(origElemType));
 
     auto constant = rewriter.create<Const::DeclareOp>(loc, padDataType, std::move(padDataAttr));
 

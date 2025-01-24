@@ -320,11 +320,13 @@ std::vector<int32_t> computeSpatialSEPtrs(mlir::MLIRContext* ctx, ShapeRef dataS
         return (pixelOffset + channelOffset) * elemSize.count();
     };
 
-    const auto outputOffsets =
-            (offsetsAttr != nullptr) ? parseIntArrayAttr<int64_t>(offsetsAttr) : SmallVector<int64_t>({0, 0, 0, 0});
+    const auto outputOffsets = (offsetsAttr != nullptr && !offsetsAttr.empty())
+                                       ? parseIntArrayAttr<int64_t>(offsetsAttr)
+                                       : SmallVector<int64_t>({0, 0, 0, 0});
 
     const auto startH = outputOffsets[Dims4D::Act::H.ind()];
     const auto startW = outputOffsets[Dims4D::Act::W.ind()];
+
     const auto sizeH = outputShape[Dims4D::Act::H];
     const auto sizeW = outputShape[Dims4D::Act::W];
 
@@ -1526,5 +1528,150 @@ std::vector<int32_t> VPU::SERollAttr::computeSEOffsets(ShapeRef dataShape, Strid
 }
 
 std::optional<VPU::SETileInfo> VPU::SERollAttr::getTileInfo() const {
+    return VPU::SETileInfo{getOffsets(), getSizes()};
+}
+
+//
+// SEDilatedConvAttr (SEAttrInterface)
+//
+
+mlir::LogicalResult VPU::SEDilatedConvAttr::verify(llvm::function_ref<mlir::InFlightDiagnostic()> emitError,
+                                                   mlir::ArrayAttr dilation, mlir::ArrayAttr kernelStride,
+                                                   [[maybe_unused]] mlir::ArrayAttr kernelSize,
+                                                   [[maybe_unused]] mlir::ArrayAttr dataOffset,
+                                                   [[maybe_unused]] mlir::ArrayAttr dataSizes,
+                                                   [[maybe_unused]] mlir::ArrayAttr offsetsAttr,
+                                                   [[maybe_unused]] mlir::ArrayAttr sizesAttr) {
+    auto [dilateY, dilateX] = DilationUtils::extractDilationFactors(dilation);
+    auto [strideY, strideX] = DilationUtils::extractDilationStrides(kernelStride);
+
+    if (dilateX < 2 && dilateY < 2) {
+        return printTo(emitError(), "Dilation has no effect, factors are < 2");
+    }
+
+    if (strideX > 1 || strideY > 1) {
+        return printTo(emitError(), "Non-trivial strides are not supported");
+    }
+
+    return mlir::success();
+}
+
+//                                                 EXAMPLE SUB-GRAPH
+
+//
+//                          NOTE: We use HxW and YxX format to align with other SEAttrs.
+//
+
+//
+//      Input                     Subviews                     Sub-convolution        Outputs     Re-constructed Output
+//
+//                              N = 4  (Dy * Dx)               N = 4  (Dy * Dx)
+//
+//     Size = 8x8         Size = 8x8        Size = 8x7                              Size = 2x2       Size = 4x4
+//   Dilation = 2,2      Offset = 0,0      Offset = 0,1
+//                                                              4x4        4x4
+//  1 2 1 2 1 2 1 2     1 2 1 2 1 2 1 2    2 1 2 1 2 1 2      1 1 1 1    2 2 2 2     1 1  2 2         1 2 1 2
+//  3 4 3 4 3 4 3 4     3 4 3 4 3 4 3 4    4 3 4 3 4 3 4      1 1 1 1    2 2 2 2     1 1  2 2         3 4 3 4
+//  1 2 1 2 1 2 1 2     1 2 1 2 1 2 1 2    2 1 2 1 2 1 2      1 1 1 1    2 2 2 2                      1 2 1 2
+//  3 4 3 4 3 4 3 4     3 4 3 4 3 4 3 4    4 3 4 3 4 3 4      1 1 1 1    2 2 2 2     3 3  4 4         3 4 3 4
+//  1 2 1 2 1 2 1 2     1 2 1 2 1 2 1 2    2 1 2 1 2 1 2                             3 3  4 4
+//  3 4 3 4 3 4 3 4     3 4 3 4 3 4 3 4    4 3 4 3 4 3 4        4x4        4x4
+//  1 2 1 2 1 2 1 2     1 2 1 2 1 2 1 2    2 1 2 1 2 1 2      3 3 3 3    4 4 4 4
+//  3 4 3 4 3 4 3 4     3 4 3 4 3 4 3 4    4 3 4 3 4 3 4      3 3 3 3    4 4 4 4
+//                                                            3 3 3 3    4 4 4 4
+//      Kernel            Size = 7x8        Size = 7x7        3 3 3 3    4 4 4 4
+//                       Offset = 1,0      Offset = 1,1
+//    Size = 3x3
+//                      3 4 3 4 3 4 3 4    4 3 4 3 4 3 4
+//      1 2 3           1 2 1 2 1 2 1 2    2 1 2 1 2 1 2
+//      4 5 6           3 4 3 4 3 4 3 4    4 3 4 3 4 3 4
+//      7 8 9           1 2 1 2 1 2 1 2    2 1 2 1 2 1 2
+//                      3 4 3 4 3 4 3 4    4 3 4 3 4 3 4
+//                      1 2 1 2 1 2 1 2    2 1 2 1 2 1 2
+//                      3 4 3 4 3 4 3 4    4 3 4 3 4 3 4
+
+// Calculate output shape given an input shape.
+// In this case, we calculate the output shape assuming `dataSizes` always extends
+// the shape to the extents of the input shape. This means we may include
+// an extra column or row of elements that we don't need to generate the output.
+// This is done to make things simpler to reason about but potentially could be
+// more efficient.
+Shape VPU::SEDilatedConvAttr::inferOutputShape(ShapeRef inputShape) const {
+    auto [dilateY, dilateX] = DilationUtils::extractDilationFactors(getDilation());
+    auto [offsetN, offsetC, offsetY, offsetX] = DilationUtils::extractDilationDataOffsets(getDataOffset());
+
+    const auto rowCount = inputShape[Dims4D::Act::H];
+    const auto colCount = inputShape[Dims4D::Act::W];
+    const auto dataRowCount = (rowCount - offsetY + dilateY - 1) / dilateY;
+    const auto dataColCount = (colCount - offsetX + dilateX - 1) / dilateX;
+
+    Shape outputShape(inputShape.toValues());
+    outputShape[Dims4D::Act::H] = dataRowCount;
+    outputShape[Dims4D::Act::W] = dataColCount;
+    return outputShape;
+}
+
+// Calculate input shape given an output shape.
+Shape VPU::SEDilatedConvAttr::backInferInputShape(ShapeRef outputShape) const {
+    // TODO (E#134656): When we want to use more efficient slicing of input, we will need to involve dataSizes
+    // in the calculation.
+    auto [dilateY, dilateX] = DilationUtils::extractDilationFactors(getDilation());
+    auto [offsetN, offsetC, offsetH, offsetW] = DilationUtils::extractDilationDataOffsets(getDataOffset());
+
+    Shape inputShape(outputShape.toValues());
+
+    inputShape[Dims4D::Act::H] = (outputShape[Dims4D::Act::H] * dilateY) - (-offsetH + dilateY - 1);
+    inputShape[Dims4D::Act::W] = (outputShape[Dims4D::Act::W] * dilateX) - (-offsetW + dilateX - 1);
+
+    return inputShape;
+}
+
+Shape VPU::SEDilatedConvAttr::backInferInputCoord(ShapeRef outputCoord, [[maybe_unused]] ShapeRef inputShape) const {
+    auto [dilateY, dilateX] = DilationUtils::extractDilationFactors(getDilation());
+    auto [offsetN, offsetC, offsetH, offsetW] = DilationUtils::extractDilationDataOffsets(getDataOffset());
+
+    Shape inputCoord(outputCoord.toValues());
+
+    // TODO (E#134656): When we want to use more efficient slicing of input, we will need to involve dataSizes
+    // in the calculation.
+
+    // TODO (E#134656): Handle padding and stride
+    inputCoord[Dims4D::Act::H] = outputCoord[Dims4D::Act::H] * dilateY + offsetH;
+    inputCoord[Dims4D::Act::W] = outputCoord[Dims4D::Act::W] * dilateX + offsetW;
+
+    return inputCoord;
+}
+
+VPU::SEAttr VPU::SEDilatedConvAttr::extractTile(ShapeRef outputTileOffset, ShapeRef outputTileShape,
+                                                ShapeRef inputShape, Shape& inputTileOffset,
+                                                Shape& inputTileShape) const {
+    inputTileOffset = backInferInputCoord(outputTileOffset, inputShape);
+    inputTileShape = backInferInputShape(outputTileShape);
+
+    auto dataOffsets = getIntArrayAttr(getContext(), SmallVector<int64_t>(inputShape.size(), 0));
+    Shape relativeOffsets;  // Unused, just zero it out.
+    auto dataSizes = getIntArrayAttr(getContext(), inputTileShape);
+
+    auto attr = VPU::SEDilatedConvAttr::get(getContext(), getDilation(), getKernelStride(), getKernelSize(),
+                                            dataOffsets, dataSizes,
+                                            /* offsets = */ getIntArrayAttr(getContext(), relativeOffsets),
+                                            /* sizes = */ getIntArrayAttr(getContext(), Shape(outputTileShape.raw())))
+                        .cast<VPU::SEAttr>();
+
+    return attr;
+}
+
+std::vector<int32_t> VPU::SEDilatedConvAttr::computeSEOffsets(ShapeRef dataShape,
+                                                              [[maybe_unused]] StridesRef dataStrides, Byte elemSize,
+                                                              int64_t seSize) const {
+    const auto outputShape = inferOutputShape(dataShape);
+
+    return computeSpatialSEPtrs(getContext(), dataShape, outputShape, elemSize, seSize, getOffsets(),
+                                [&](ShapeRef outputCoord, ShapeRef inputShape) -> Shape {
+                                    return backInferInputCoord(outputCoord, inputShape);
+                                });
+}
+
+std::optional<VPU::SETileInfo> VPU::SEDilatedConvAttr::getTileInfo() const {
     return VPU::SETileInfo{getOffsets(), getSizes()};
 }

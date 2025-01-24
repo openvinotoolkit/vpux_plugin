@@ -26,8 +26,12 @@ namespace {
 template <typename ConcreteOp>
 class EltwiseFakeQuantizeFusion final : public mlir::OpRewritePattern<IE::FakeQuantizeOp> {
 public:
-    EltwiseFakeQuantizeFusion(mlir::MLIRContext* ctx, const FuncRef<float(float, float)> compute, Logger log)
-            : mlir::OpRewritePattern<IE::FakeQuantizeOp>(ctx), _compute(compute), _log(log) {
+    EltwiseFakeQuantizeFusion(mlir::MLIRContext* ctx, const FuncRef<float(float, float)> compute, Logger log,
+                              const bool adaptiveStrippingEnabled = false)
+            : mlir::OpRewritePattern<IE::FakeQuantizeOp>(ctx),
+              _compute(compute),
+              _log(log),
+              _adaptiveStrippingEnabled(adaptiveStrippingEnabled) {
         this->setDebugName("EltwiseFakeQuantizeFusion");
     }
 
@@ -37,6 +41,7 @@ public:
 private:
     FuncRef<float(float, float)> _compute;
     Logger _log;
+    bool _adaptiveStrippingEnabled;
 };
 
 template <typename ConcreteOp>
@@ -86,10 +91,10 @@ mlir::LogicalResult EltwiseFakeQuantizeFusion<ConcreteOp>::matchAndRewrite(IE::F
         return mlir::failure();
     }
 
-    auto inLowContentAttr = inLowConst.getContentAttr();
-    auto inHighContentAttr = inHighConst.getContentAttr();
-    auto outLowContentAttr = outLowConst.getContentAttr();
-    auto outHighContentAttr = outHighConst.getContentAttr();
+    const auto& inLowContentAttr = inLowConst.getContentAttr();
+    const auto& inHighContentAttr = inHighConst.getContentAttr();
+    const auto& outLowContentAttr = outLowConst.getContentAttr();
+    const auto& outHighContentAttr = outHighConst.getContentAttr();
     if (!inLowContentAttr.isSplat() || !inHighContentAttr.isSplat() || !outLowContentAttr.isSplat() ||
         !outHighContentAttr.isSplat()) {
         _log.nest().trace("Got non scalar FakeQuantize parameters at '{0}'", fakeQuantizeOp->getLoc());
@@ -127,7 +132,7 @@ mlir::LogicalResult EltwiseFakeQuantizeFusion<ConcreteOp>::matchAndRewrite(IE::F
         return mlir::failure();
     }
 
-    auto concreteScalarInputContentAttr = concreteScalarInputDeclareOp.getContentAttr();
+    const auto& concreteScalarInputContentAttr = concreteScalarInputDeclareOp.getContentAttr();
     if (!concreteScalarInputContentAttr.isSplat()) {
         _log.nest().trace("Constant Concrete input must be scalar at '{0}'", fakeQuantizeOp.getLoc());
         return mlir::failure();
@@ -145,10 +150,10 @@ mlir::LogicalResult EltwiseFakeQuantizeFusion<ConcreteOp>::matchAndRewrite(IE::F
             _log.nest().trace("Got non constant parameters of FakeQuantize '{0}'", concreteScalarInputFqOp->getLoc());
             return mlir::failure();
         }
-        auto concreteFQInLowContentAttr = concreteFQInLowConst.getContentAttr();
-        auto concreteFQInHighContentAttr = concreteFQInHighConst.getContentAttr();
-        auto concreteFQOutLowContentAttr = concreteFQOutLowConst.getContentAttr();
-        auto concreteFQOutHighContentAttr = concreteFQOutHighConst.getContentAttr();
+        const auto& concreteFQInLowContentAttr = concreteFQInLowConst.getContentAttr();
+        const auto& concreteFQInHighContentAttr = concreteFQInHighConst.getContentAttr();
+        const auto& concreteFQOutLowContentAttr = concreteFQOutLowConst.getContentAttr();
+        const auto& concreteFQOutHighContentAttr = concreteFQOutHighConst.getContentAttr();
         if (!concreteFQInLowContentAttr.isSplat() || !concreteFQInHighContentAttr.isSplat() ||
             !concreteFQOutLowContentAttr.isSplat() || !concreteFQOutHighContentAttr.isSplat()) {
             _log.nest().trace("Got non scalar fake quantize range '{0}'", concreteScalarInputFqOp->getLoc());
@@ -162,6 +167,21 @@ mlir::LogicalResult EltwiseFakeQuantizeFusion<ConcreteOp>::matchAndRewrite(IE::F
         float fLevels = checked_cast<float>(levels.value());
         concreteScalarInputValue = fakeQuantize(concreteScalarInputValue, concreteInLowValue, concreteInHighValue,
                                                 concreteOutLowValue, concreteOutHighValue, fLevels);
+    }
+
+    // TODO(E#129083): Remove this condition and _adaptiveStrippingEnabled
+    //                 when adaptive-stripping is enabled by default.
+    // In case of cst-FQ-Mul, fusing Mul-FQ will generate redundant DQ-Q pair.
+    // This pair can be optimized by adaptive-stripping.
+    //   (FuseOutstandingDequant removes DQ, and ConvertToMixedPrecision removes Q)
+    // But if adaptive-stripping is disabled, it's better to not fuse Mul,
+    //   and Mul will convert into GroupConv and fuse any redundant DQ and Q.
+    if (mlir::isa<IE::MultiplyOp>(concreteParentOp) && concreteScalarInputFqOp != nullptr &&
+        !_adaptiveStrippingEnabled) {
+        _log.nest().trace("Do not fuse Mul-FQ when adaptive-stripping disabled "
+                          "and Multiply's constant input has FakeQuantize '{0}'",
+                          concreteScalarInputFqOp->getLoc());
+        return mlir::failure();
     }
 
     auto oldInLowValue = inLowContentAttr.fold().getSplatValue<float>();
@@ -187,12 +207,14 @@ mlir::LogicalResult EltwiseFakeQuantizeFusion<ConcreteOp>::matchAndRewrite(IE::F
 
 class EltwiseFakeQuantizeFusionPass final : public IE::EltwiseFakeQuantizeFusionBase<EltwiseFakeQuantizeFusionPass> {
 public:
-    explicit EltwiseFakeQuantizeFusionPass(Logger log) {
+    explicit EltwiseFakeQuantizeFusionPass(const bool adaptiveStrippingEnabled, Logger log)
+            : _adaptiveStrippingEnabled(adaptiveStrippingEnabled) {
         Base::initLogger(log, Base::getArgumentName());
     }
 
 private:
     void safeRunOnFunc() final;
+    bool _adaptiveStrippingEnabled;
 };
 
 void EltwiseFakeQuantizeFusionPass::safeRunOnFunc() {
@@ -206,7 +228,8 @@ void EltwiseFakeQuantizeFusionPass::safeRunOnFunc() {
     patterns.add<EltwiseFakeQuantizeFusion<IE::AddOp>>(&ctx, std::minus<float>(), _log);
     patterns.add<EltwiseFakeQuantizeFusion<IE::SubtractOp>>(&ctx, std::plus<float>(), _log);
     // TODO: E#129083
-    // patterns.add<EltwiseFakeQuantizeFusion<IE::MultiplyOp>>(&ctx, std::divides<float>(), _log);
+    patterns.add<EltwiseFakeQuantizeFusion<IE::MultiplyOp>>(&ctx, std::divides<float>(), _log,
+                                                            _adaptiveStrippingEnabled);
     patterns.add<EltwiseFakeQuantizeFusion<IE::DivideOp>>(&ctx, std::multiplies<float>(), _log);
 
     auto func = getOperation();
@@ -217,6 +240,7 @@ void EltwiseFakeQuantizeFusionPass::safeRunOnFunc() {
 
 }  // namespace
 
-std::unique_ptr<mlir::Pass> vpux::IE::createEltwiseFakeQuantizeFusionPass(Logger log) {
-    return std::make_unique<EltwiseFakeQuantizeFusionPass>(log);
+std::unique_ptr<mlir::Pass> vpux::IE::createEltwiseFakeQuantizeFusionPass(const bool adaptiveStrippingEnabled,
+                                                                          Logger log) {
+    return std::make_unique<EltwiseFakeQuantizeFusionPass>(adaptiveStrippingEnabled, log);
 }

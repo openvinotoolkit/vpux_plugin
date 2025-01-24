@@ -32,7 +32,7 @@ using namespace vpux;
 
 mlir::Operation* vpux::Const::ConstDialect::materializeConstant(mlir::OpBuilder& builder, mlir::Attribute value,
                                                                 mlir::Type type, mlir::Location loc) {
-    if (!mlir::isa<Const::EphemeralContentAttr>(value)) {
+    if (!mlir::isa<Const::ContentAttr>(value)) {
         (void)errorAt(loc, "Can't materialize Constant from Attribute '{0}'", value);
         return nullptr;
     }
@@ -42,8 +42,7 @@ mlir::Operation* vpux::Const::ConstDialect::materializeConstant(mlir::OpBuilder&
         return nullptr;
     }
 
-    return builder.create<Const::DeclareOp>(
-            loc, type, static_cast<Const::ContentAttr>(mlir::cast<Const::EphemeralContentAttr>(value)));
+    return builder.create<Const::DeclareOp>(loc, type, mlir::cast<Const::ContentAttr>(value));
 }
 
 //
@@ -147,6 +146,22 @@ mlir::LogicalResult vpux::Const::DeclareOp::verify() {
     const auto op = getOperation();
     const auto attrType = getContentAttr().getType();
     const auto opType = getType().cast<vpux::NDTypeInterface>();
+
+    auto emitError = [&]() {
+        return op->emitError();
+    };
+
+    // For ContentAttr using dense resource additionaly
+    // verify that dense resource. This can't be done as part
+    // of ContentAttr::verify during IR parsing since dense resource
+    // value won't be accessible at that time.
+    auto contentAttr = getContentAttr();
+    if (auto denseResource = mlir::dyn_cast<mlir::DenseResourceElementsAttr>(contentAttr.getBaseContent())) {
+        if (mlir::failed(ContentAttr::verifyDenseResource(emitError, denseResource, contentAttr.isSplat()))) {
+            return mlir::failure();
+        }
+    }
+
     // For type with swizzling skip the shape check as the content
     // might have been flattened to accomodate swizzled buffer.
     if (!vpux::getSwizzlingSchemeAttr(opType)) {
@@ -210,16 +225,29 @@ mlir::LogicalResult vpux::Const::DeclareOp::verifySymbolUses(mlir::SymbolTableCo
     return emitOpError(formatv("symbol '{0}' does not point to a valid 'const.Rodata' op", symName));
 }
 
-vpux::Const::ContentAttr vpux::Const::DeclareOp::getContentAttr() const {
+const vpux::Const::ContentAttr& vpux::Const::DeclareOp::getContentAttr() const {
     // Note: getProperties() is not 'const' in MLIR...
-    return const_cast<Const::DeclareOp&>(*this).getProperties().getContent();
+    return const_cast<Const::DeclareOp&>(*this).getProperties().content;
 }
 
-void vpux::Const::DeclareOp::build(mlir::OpBuilder&, mlir::OperationState& state, mlir::Type outputType,
-                                   Const::ContentAttr&& content) {
-    auto& props = state.getOrAddProperties<Properties>();
-    props.content = std::move(content);
+namespace {
+template <typename ContentAttrT>
+void genericDeclareOpBuild(mlir::OpBuilder&, mlir::OperationState& state, mlir::Type outputType,
+                           ContentAttrT&& content) {
+    auto& props = state.getOrAddProperties<Const::DeclareOp::Properties>();
+    props.content = std::forward<ContentAttrT>(content);
     state.addTypes(ArrayRef{outputType});
+}
+}  // namespace
+
+void vpux::Const::DeclareOp::build(mlir::OpBuilder& builder, mlir::OperationState& state, mlir::Type outputType,
+                                   const Const::ContentAttr& content) {
+    genericDeclareOpBuild(builder, state, outputType, content);
+}
+
+void vpux::Const::DeclareOp::build(mlir::OpBuilder& builder, mlir::OperationState& state, mlir::Type outputType,
+                                   Const::ContentAttr&& content) {
+    genericDeclareOpBuild(builder, state, outputType, std::move(content));
 }
 
 //

@@ -48,7 +48,7 @@ void vpux::ELF::CreateMetadataSectionOp::preserialize(elf::Writer& writer, vpux:
         VPUX_THROW_UNLESS(!isMetadataSerialized, "There should be only 1 metadata op in an ELF metadata section");
         if (auto metadata_op = mlir::dyn_cast<vpux::VPUASM::NetworkMetadataOp>(op)) {
             isMetadataSerialized = true;
-            sectionSize = metadata_op.getBinarySize();
+            sectionSize = metadata_op.getBinarySize(VPU::ArchKind::UNKNOWN);
         }
     }
     VPUX_THROW_UNLESS(isMetadataSerialized, "No metadata defined in the ELF metadata section");

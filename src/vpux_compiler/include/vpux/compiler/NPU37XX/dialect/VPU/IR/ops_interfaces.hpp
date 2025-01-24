@@ -12,5 +12,6 @@ void registerLayerWithPermuteInterfaceForIE(mlir::DialectRegistry& registry);
 void registerLayoutInfoOpInterfaces(mlir::DialectRegistry& registry);
 void registerDDRAccessOpModelInterface(mlir::DialectRegistry& registry);
 void registerNCEOpInterface(mlir::DialectRegistry& registry);
+void registerClusterBroadcastingOpInterfaces(mlir::DialectRegistry& registry);
 
 }  // namespace vpux::VPU::arch37xx

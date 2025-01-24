@@ -29,7 +29,6 @@ void vpux::VPUMI37XX::PerformanceMetricsOp::serialize(elf::writer::BinaryDataSec
 
     auto operation = getOperation();
     auto mainModule = operation->getParentOfType<mlir::ModuleOp>();
-    auto memRes = IE::getUsedMemory(mainModule);
     // Here we must get AF from NCE res (a TileResourceOp) as the AF attribute is attached to tile op
     mainModule.walk([&](IE::TileResourceOp res) {
         const auto execKind = VPU::getKindValue<VPU::ExecutorKind>(res);

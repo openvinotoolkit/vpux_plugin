@@ -40,5 +40,3 @@ void vpux::details::throwFormat(const char* file, int line, const std::string& m
 }
 
 template void vpux::details::throwFormat<vpux::Exception>(const char* file, int line, const std::string& message);
-template void vpux::details::throwFormat<vpux::WlmRollbackException>(const char* file, int line,
-                                                                     const std::string& message);

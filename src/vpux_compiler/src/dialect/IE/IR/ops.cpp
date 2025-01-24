@@ -21,6 +21,17 @@ bool IE::isActShaveKernel(mlir::Operation* operation) {
     return VPU::NCEInvariant::isSupported(operation, Logger::global()).failed();
 }
 
+void IE::IEDialect::setupExtraInterfaces(mlir::DialectRegistry& registry) {
+    // Unary plus converts a stateless lambda to a plain old function pointer.
+    // Type of lambda:
+    // IE::IEDialect::setupExtraInterfaces(mlir::DialectRegistry&)::{lambda(mlir::MLIRContext*, IE::IEDialect*)}
+    // Type of +lambda:
+    // void (*)(mlir::MLIRContext*, IE::IEDialect*)
+    registry.addExtension(+[](mlir::MLIRContext* ctx, IE::IEDialect*) {
+        IE::TransposeOp::attachInterface<ShapeBoundOp>(*ctx);
+    });
+}
+
 //
 // Generated
 //

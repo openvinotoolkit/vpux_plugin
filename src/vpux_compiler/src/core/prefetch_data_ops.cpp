@@ -25,10 +25,16 @@ void PrefetchDataOps::init() {
         // store cycle cost for ops
         _operationCycleCost[op.op_] = op.cycleEnd_ - op.cycleBegin_;
 
-        if (op.isDataOp()) {
-            // store data ops
-            _dataOpIdx.insert(op.op_);
-        } else if (op.queueType.execKind != VPU::ExecutorKind::DMA_NN) {
+        if (op.queueType.execKind == VPU::ExecutorKind::DMA_NN) {
+            if (op.isSpillWrite() || op.isSpillRead()) {
+                ++_dynamicSpillCount;
+            }
+            ++_dmaCount;
+            if (op.isDataOp()) {
+                // store data ops
+                _dataOpIdx.insert(op.op_);
+            }
+        } else {
             // store compute executor type ops
             _computeExecutorKindOpIdx.insert(op.op_);
         }
@@ -491,9 +497,17 @@ void PrefetchDataOps::reorderToPrefetch(ArrayRef<CycleInfo> sortedOpCycles) {
     }
 }
 
-void PrefetchDataOps::enableDataOpPrefetching() {
+bool PrefetchDataOps::enableDataOpPrefetching() {
     // store information about ops
     init();
+
+    // avoid regenerating schedule with prefetching if dominated by dynamic spills to save compile time
+    // large number of dynamic spills suggests sub-optimal strategy and optimization
+    // performant execution requires schedule and DMA optimization
+    if (_dynamicSpillCount > _dynamicSpillMinCount && _dynamicSpillCount > _dmaCount * _dynamicSpillRatio) {
+        _log.info("Dynamic spills dominate schedule, optimizations needed for prefetching");
+        return false;
+    }
 
     // re-schedule operations where data ops and compute DMA ops have their own FIFOs
     // schedule data ops optimally just before the compute if possible, this may create stalls
@@ -513,4 +527,6 @@ void PrefetchDataOps::enableDataOpPrefetching() {
     auto newOpOrder = getNewOrder();
     // reorder IR to new order
     reorderToPrefetch(newOpOrder);
+
+    return true;
 }

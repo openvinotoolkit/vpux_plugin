@@ -19,8 +19,8 @@ llvm::SmallVector<mlir::FlatSymbolRefAttr> DeclareConstBufferRewriter::getSymbol
     return {mlir::FlatSymbolRefAttr::get(symName)};
 }
 
-mlir::LogicalResult DeclareConstBufferRewriter::symbolize(Const::DeclareOp op, SymbolMapper&,
-                                                          mlir::ConversionPatternRewriter& rewriter) const {
+mlir::FailureOr<SymbolizationResult> DeclareConstBufferRewriter::symbolize(
+        Const::DeclareOp op, SymbolMapper&, mlir::ConversionPatternRewriter& rewriter) const {
     mlir::MLIRContext* ctx = getContext();
 
     auto result = op.getResult();
@@ -45,11 +45,11 @@ mlir::LogicalResult DeclareConstBufferRewriter::symbolize(Const::DeclareOp op, S
 
     auto bufferType = VPUASM::BufferType::get(ctx, memLocation, memref, traits);
 
-    rewriter.create<VPUASM::ConstBufferOp>(op.getLoc(), symName, bufferType, op.getContentAttr());
+    auto newOp = rewriter.create<VPUASM::ConstBufferOp>(op.getLoc(), symName, bufferType, op.getContentAttr());
 
     rewriter.eraseOp(op);
 
-    return mlir::success();
+    return SymbolizationResult(newOp);
 }
 
 }  // namespace vpumi37xx2vpuasm

@@ -16,6 +16,7 @@ namespace vpux::VPURT::arch40xx {
 
 std::unique_ptr<mlir::Pass> createInsertSyncTasksPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createOptimizeSyncTasksPass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createFindWlmEnqueueBarrierPass(Logger log = Logger::global());
 
 //
 // Generated

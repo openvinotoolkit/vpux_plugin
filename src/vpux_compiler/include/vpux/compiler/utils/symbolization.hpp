@@ -5,14 +5,34 @@
 
 #pragma once
 
+#include "vpux/compiler/NPU40XX/dialect/ELF/ops.hpp"
 #include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
+#include "vpux/compiler/utils/ELF/utils.hpp"
+#include "vpux/utils/core/range.hpp"
 
 #include <mlir/Transforms/DialectConversion.h>
+#include "mlir/IR/Region.h"
 
 #include <initializer_list>
 #include <utility>
 
 namespace vpux {
+
+struct SymbolizationResult {
+    mlir::Operation* newOp = nullptr;
+    const mlir::SmallVector<mlir::StringAttr> refsToUpdate;
+
+    // default SymbolizationResult is used in rewriters for cases where no movement of op into section is needed
+    // e.g. original op is simply removed
+    SymbolizationResult() = default;
+
+    SymbolizationResult(mlir::Operation* op): newOp(op) {
+    }
+
+    SymbolizationResult(mlir::Operation* op, mlir::SmallVector<mlir::StringAttr>& attributes)
+            : newOp(op), refsToUpdate(std::move(attributes)) {
+    }
+};
 
 // A sub-specialization of the default OpConversionPattern, dedicated for symbolization conversions.
 // An opConversion pattern has hooks for type system conversions. Symbolization pattern is a form of type conversion
@@ -30,19 +50,28 @@ class SymbolizationPattern : public mlir::OpConversionPattern<SourceOp> {
 public:
     using BaseOpT = SourceOp;
     using OpAdaptor = typename mlir::OpConversionPattern<SourceOp>::OpAdaptor;
-    using SymbolMapper = typename llvm::DenseMap<mlir::Value, mlir::FlatSymbolRefAttr>;
+    using SymbolMapper = typename llvm::DenseMap<mlir::Value, mlir::SymbolRefAttr>;
+    using SectionMapper = typename std::unordered_map<ELF::SectionSignature, ELF::ElfSectionInterface>;
     SymbolizationPattern(mlir::func::FuncOp parentFunc, mlir::TypeConverter& typeConverter, SymbolMapper& mapper,
-                         mlir::MLIRContext* ctx)
-            : mlir::OpConversionPattern<SourceOp>(typeConverter, ctx), _parentFunc(parentFunc), _mapper(&mapper) {
+                         SectionMapper& sectionMap, mlir::MLIRContext* ctx)
+            : mlir::OpConversionPattern<SourceOp>(typeConverter, ctx),
+              _sectionMap(&sectionMap),
+              _parentFunc(parentFunc),
+              _mapper(&mapper) {
     }
 
-    virtual mlir::LogicalResult symbolize(SourceOp op, SymbolMapper& mapper,
-                                          mlir::ConversionPatternRewriter& rewriter) const = 0;
+    virtual mlir::FailureOr<SymbolizationResult> symbolize(SourceOp op, SymbolMapper& mapper,
+                                                           mlir::ConversionPatternRewriter& rewriter) const = 0;
 
     virtual llvm::SmallVector<mlir::FlatSymbolRefAttr> getSymbolicNames(SourceOp op, size_t counter) = 0;
 
+    // E-141619:
+    // initialize function is called when adding every single rewrite pattern to a pattern set
+    // instead of adding all symbols here try to process operation as soon as we see it for the 1st time
     void initialize() {
-        for (auto [counter, op] : _parentFunc.getOps<SourceOp>() | indexed) {
+        auto elfMains = to_small_vector(_parentFunc.getOps<ELF::MainOp>());
+        for (auto [counter, op] :
+             (elfMains.empty() ? _parentFunc.getOps<SourceOp>() : elfMains[0].getOps<SourceOp>()) | indexed) {
             auto symbolicNames = getSymbolicNames(op, counter);
             VPUX_THROW_WHEN(symbolicNames.size() != op->getNumResults(),
                             "Op must define as many symbolic names as it has results");
@@ -54,12 +83,19 @@ public:
         }
     }
 
+    std::pair<mlir::ArrayAttr, mlir::ArrayAttr> processDynamicShapes(mlir::MLIRContext* context,
+                                                                     mlir::OperandRangeRange inputShapes,
+                                                                     mlir::OperandRangeRange outputShapes) const;
+
 protected:
-    mlir::FlatSymbolRefAttr findSym(mlir::Value val) const;
+    mlir::SymbolRefAttr findSym(mlir::Value val) const;
 
 private:
     mlir::LogicalResult matchAndRewrite(SourceOp op, OpAdaptor newArgs,
                                         mlir::ConversionPatternRewriter& rewriter) const final;
+
+protected:
+    SectionMapper* _sectionMap;
 
 private:
     mlir::func::FuncOp _parentFunc;
@@ -67,13 +103,75 @@ private:
 };
 
 template <typename SourceOp>
-mlir::LogicalResult SymbolizationPattern<SourceOp>::matchAndRewrite(SourceOp op, OpAdaptor,
-                                                                    mlir::ConversionPatternRewriter& rewriter) const {
-    return symbolize(op, *_mapper, rewriter);
+std::pair<mlir::ArrayAttr, mlir::ArrayAttr> SymbolizationPattern<SourceOp>::processDynamicShapes(
+        mlir::MLIRContext* context, mlir::OperandRangeRange inputShapes, mlir::OperandRangeRange outputShapes) const {
+    SmallVector<SmallVector<mlir::Attribute>> inputShapeSyms(inputShapes.size());
+    SmallVector<SmallVector<mlir::Attribute>> outputShapeSyms(outputShapes.size());
+
+    auto placeholderSymbol = mlir::SymbolRefAttr::get(context, "placeholder_symbol");
+
+    // Lambda to process shape values and fill the corresponding symbol vectors
+    auto processShapeValues = [&](auto shapeValues, auto& shapeSyms) {
+        for (auto [idx, values] : llvm::enumerate(shapeValues)) {
+            SmallVector<mlir::Attribute> symVals;
+            if (!values.empty()) {
+                for (auto val : values) {
+                    symVals.push_back(findSym(val));
+                }
+            } else {
+                symVals.push_back(placeholderSymbol);
+            }
+
+            shapeSyms[idx] = std::move(symVals);
+        }
+    };
+
+    processShapeValues(inputShapes, inputShapeSyms);
+    processShapeValues(outputShapes, outputShapeSyms);
+
+    // Lambda to flatten nested vectors
+    auto flattenShapeSyms = [](const auto& nestedSyms) {
+        SmallVector<mlir::Attribute> flatSyms;
+        for (const auto& symVec : nestedSyms) {
+            flatSyms.append(symVec.begin(), symVec.end());
+        }
+        return flatSyms;
+    };
+
+    // Create the final ArrayAttr
+    mlir::ArrayAttr inputsShapeAttr = mlir::ArrayAttr::get(context, flattenShapeSyms(inputShapeSyms));
+    mlir::ArrayAttr outputsShapeAttr = mlir::ArrayAttr::get(context, flattenShapeSyms(outputShapeSyms));
+
+    return {inputsShapeAttr, outputsShapeAttr};
 }
 
 template <typename SourceOp>
-mlir::FlatSymbolRefAttr SymbolizationPattern<SourceOp>::findSym(mlir::Value val) const {
+mlir::LogicalResult SymbolizationPattern<SourceOp>::matchAndRewrite(SourceOp op, OpAdaptor,
+                                                                    mlir::ConversionPatternRewriter& rewriter) const {
+    auto sym = symbolize(op, *_mapper, rewriter);
+    if (mlir::failed(sym)) {
+        return mlir::failure();
+    }
+
+    auto symRes = sym.value();
+    if (!symRes.newOp) {
+        return mlir::success();
+    }
+
+    auto symbol = moveOpToSection(symRes.newOp, *_sectionMap, rewriter);
+    if (symbol != mlir::SymbolRefAttr()) {
+        (*_mapper)[op.getResult()] = symbol;
+    }
+    for (auto& attr : symRes.refsToUpdate) {
+        symRes.newOp->setAttr(
+                attr, ELF::cloneSectionSymbol(symbol, mlir::cast<mlir::SymbolRefAttr>(symRes.newOp->getAttr(attr))));
+    }
+
+    return mlir::success();
+}
+
+template <typename SourceOp>
+mlir::SymbolRefAttr SymbolizationPattern<SourceOp>::findSym(mlir::Value val) const {
     auto it = _mapper->find(val);
 
     VPUX_THROW_WHEN(it == _mapper->end(), "Could not find symbol name entry for {0}, val {1}",

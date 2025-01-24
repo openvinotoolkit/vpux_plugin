@@ -1,10 +1,11 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
 #include "vpux/compiler/dialect/VPUIP/transforms/passes.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
+#include "vpux/compiler/dialect/const/utils/utils.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 #include "vpux/compiler/utils/types.hpp"
 
@@ -46,19 +47,18 @@ private:
 
 private:
     mlir::Value applyPadding(const int64_t padAxis, const int64_t padValue, ArrayRef<int64_t> inSubViewOffsets,
-                             const PaddingContext& padCtx, mlir::OpBuilder& builder) const;
+                             const PaddingContext& padCtx, mlir::Type expectedElemType, mlir::OpBuilder& builder) const;
 
-    std::pair<int64_t, int64_t> getMaxExpandConstShapeForFp16AndU8(mlir::func::FuncOp func, Logger log);
-    std::pair<Const::DeclareOp, Const::DeclareOp> getZeroConstOpsForFp16AndU8(mlir::func::FuncOp func,
-                                                                              mlir::MLIRContext& ctx,
-                                                                              mlir::OpBuilder& builder);
+    std::array<int64_t, 4> getMaxExpandConstShapes(mlir::func::FuncOp func, Logger log);
+    std::array<Const::DeclareOp, 4> getZeroConstOps(mlir::func::FuncOp func, mlir::MLIRContext& ctx,
+                                                    mlir::OpBuilder& builder);
 
     Dim getPadDim(vpux::NDTypeInterface inType, vpux::NDTypeInterface outType);
 };
 
 mlir::Value ConvertExpandPass::applyPadding(const int64_t padAxis, const int64_t padValue,
                                             ArrayRef<int64_t> inSubViewOffsets, const PaddingContext& padCtx,
-                                            mlir::OpBuilder& builder) const {
+                                            mlir::Type expectedElemType, mlir::OpBuilder& builder) const {
     const auto& location = padCtx._loc;
     const auto& inShape = padCtx._inShape;
     const auto& expandedBuffer = padCtx._expandedBuffer;
@@ -86,15 +86,19 @@ mlir::Value ConvertExpandPass::applyPadding(const int64_t padAxis, const int64_t
             builder.create<VPUIP::SubViewOp>(appendLoc(location, "_constant_subview_{0}_{1}", padAxis, padValue),
                                              constantOp, constSubviewOffset, constSubviewShape);
 
-    // Step 2: Create Reshape Op to match concat shape
-    const auto shapeType = constSubView.getType().cast<vpux::NDTypeInterface>();
-    const auto newShapeType = shapeType.changeShape(subViewShape);
+    // Step 2: Create Reshape Op to match concat shape with expected type
+    const auto shapeType = mlir::cast<NDTypeInterface>(constSubView.getType());
+    auto newShapeType = shapeType.changeShape(subViewShape);
+    if (isFloat8Quantized(expectedElemType)) {
+        // Reinterpret the constant from fp8 to quant.uniform<fp8:...>
+        newShapeType = newShapeType.changeElemType(expectedElemType);
+    }
     auto reshapeOp =
             builder.create<VPUIP::GenericReshapeOp>(appendLoc(location, "_constant_reshape_{0}_{1}", padAxis, padValue),
                                                     newShapeType, constSubView.getResult());
 
-    // Step 3: Creat PermuteCast Op to match concat layout
-    const auto expandOutBufferType = expandedBuffer.getType().cast<NDTypeInterface>();
+    // Step 3: Create PermuteCast Op to match concat layout
+    const auto expandOutBufferType = mlir::cast<NDTypeInterface>(expandedBuffer.getType());
     const auto newLayoutType = newShapeType.changeDimsOrder(expandOutBufferType.getDimsOrder());
     const auto dstOrderAttr =
             mlir::AffineMapAttr::get(expandOutBufferType.getDimsOrder().toAffineMap(reshapeOp.getContext()));
@@ -112,60 +116,97 @@ mlir::Value ConvertExpandPass::applyPadding(const int64_t padAxis, const int64_t
     return subViewCopy.getOutput();
 }
 
-std::pair<int64_t, int64_t> ConvertExpandPass::getMaxExpandConstShapeForFp16AndU8(mlir::func::FuncOp func, Logger log) {
+std::array<int64_t, 4> ConvertExpandPass::getMaxExpandConstShapes(mlir::func::FuncOp func, Logger log) {
     int64_t maxFP16ShapeSize = 0;
     int64_t maxINT8ShapeSize = 0;
+    int64_t maxFP8E4M3FNShapeSize = 0;
+    int64_t maxFP8E5M2ShapeSize = 0;
 
     func->walk([&](VPUIP::ExpandOp origOp) {
         auto inShape = getShape(origOp.getInput());
         auto outShape = getShape(origOp.getOutput());
         VPUX_THROW_UNLESS(outShape.totalSize() > inShape.totalSize(),
                           "Unexpect Expand input shape '{0}' output shape '{1}'", inShape, outShape);
-        const auto inputType = origOp.getInput().getType().cast<vpux::NDTypeInterface>();
+
         auto diffShapeSize = outShape.totalSize() - inShape.totalSize();
-        if (inputType.getElementType().isa<mlir::Float16Type>()) {
+
+        const auto elemType = mlir::cast<vpux::NDTypeInterface>(origOp.getInput().getType()).getElementType();
+        if (mlir::isa<mlir::Float16Type>(elemType)) {
             maxFP16ShapeSize = std::max(checked_cast<int64_t>(diffShapeSize), maxFP16ShapeSize);
-        } else if (inputType.getElemTypeSize().count() == 8) {
-            maxINT8ShapeSize = std::max(checked_cast<int64_t>(diffShapeSize), maxINT8ShapeSize);
+
+        } else if (const auto qType = mlir::dyn_cast<mlir::quant::QuantizedType>(elemType)) {
+            const auto storageType = qType.getStorageType();
+            if (storageType.isInteger(8)) {
+                maxINT8ShapeSize = std::max(checked_cast<int64_t>(diffShapeSize), maxINT8ShapeSize);
+            } else if (storageType.isFloat8E4M3FN()) {
+                maxFP8E4M3FNShapeSize = std::max(checked_cast<int64_t>(diffShapeSize), maxFP8E4M3FNShapeSize);
+            } else if (storageType.isFloat8E5M2()) {
+                maxFP8E5M2ShapeSize = std::max(checked_cast<int64_t>(diffShapeSize), maxFP8E5M2ShapeSize);
+            } else {
+                log.trace("Unexpected Expand '{0}' with quantized input storage type '{1}'", origOp->getLoc(),
+                          storageType);
+            }
+
         } else {
-            log.trace("Unexpected Expand '{0}' with input type '{1}'", origOp->getLoc(), inputType.getElementType());
+            log.trace("Unexpected Expand '{0}' with input type '{1}'", origOp->getLoc(), elemType);
         }
-        log.trace("Found Expand Operation '{0}' inshape '{1}' outshape '{2}', FP16 constant maxShapeSize is '{3}', "
-                  "INT8 constant maxShapeSize is '{4}'",
-                  origOp->getLoc(), inShape, outShape, maxFP16ShapeSize, maxINT8ShapeSize);
+
+        log.trace("Found Expand Operation '{0}' with inshape: '{1}', outshape: '{2}', type: '{3}'", origOp->getLoc(),
+                  inShape, outShape, elemType);
     });
 
-    return std::make_pair(maxFP16ShapeSize, maxINT8ShapeSize);
+    log.trace("Expand constant sizes:\n - FP16: {0}\n - INT8: {1}\n - FP8E4M3FN: {2}\n - FP8E5M2: {3}",
+              maxFP16ShapeSize, maxINT8ShapeSize, maxFP8E4M3FNShapeSize, maxFP8E5M2ShapeSize);
+
+    return {maxFP16ShapeSize, maxINT8ShapeSize, maxFP8E4M3FNShapeSize, maxFP8E5M2ShapeSize};
 }
 
-std::pair<Const::DeclareOp, Const::DeclareOp> ConvertExpandPass::getZeroConstOpsForFp16AndU8(mlir::func::FuncOp func,
-                                                                                             mlir::MLIRContext& ctx,
-                                                                                             mlir::OpBuilder& builder) {
-    const auto constantShapeSize = getMaxExpandConstShapeForFp16AndU8(func, _log);
+std::array<Const::DeclareOp, 4> ConvertExpandPass::getZeroConstOps(mlir::func::FuncOp func, mlir::MLIRContext& ctx,
+                                                                   mlir::OpBuilder& builder) {
+    const auto constantShapeSize = getMaxExpandConstShapes(func, _log);
     Const::DeclareOp constantFP16Op = nullptr;
-    Const::DeclareOp constantQuantizeOp = nullptr;
-    if (constantShapeSize.first != 0) {
-        const auto dataFP16StorageType =
-                mlir::RankedTensorType::get({constantShapeSize.first}, mlir::Float16Type::get(&ctx));
-        const auto denseFP16ElementVal =
-                mlir::DenseElementsAttr::get(dataFP16StorageType, checked_cast<vpux::type::float16>(0.f));
+    Const::DeclareOp constantINT8Op = nullptr;
+    Const::DeclareOp constantFP8E4M3FNOp = nullptr;
+    Const::DeclareOp constantFP8E5M2Op = nullptr;
 
-        constantFP16Op = builder.create<Const::DeclareOp>(mlir::UnknownLoc::get(&ctx),
-                                                          vpux::convertToMemRef(dataFP16StorageType),
+    const auto loc = mlir::NameLoc::get(mlir::StringAttr::get(&ctx, "global_expand_const"));
+    if (const auto size = constantShapeSize[0]; size != 0) {
+        const auto dataFP16StorageType = mlir::RankedTensorType::get({size}, mlir::Float16Type::get(&ctx));
+        const vpux::type::float16 value = 0.f;
+        const auto denseFP16ElementVal = Const::createConstContent(dataFP16StorageType, ArrayRef(value));
+
+        constantFP16Op = builder.create<Const::DeclareOp>(loc, vpux::convertToMemRef(dataFP16StorageType),
                                                           Const::ContentAttr::get(denseFP16ElementVal));
     }
 
-    if (constantShapeSize.second != 0) {
-        const auto dataQuantizeStorageType = mlir::RankedTensorType::get(constantShapeSize.second, getUInt8Type(&ctx));
-        const auto denseINT8ElementVal =
-                mlir::DenseElementsAttr::get(dataQuantizeStorageType, checked_cast<uint8_t>(0));
+    if (const auto size = constantShapeSize[1]; size != 0) {
+        const auto dataQuantizeStorageType = mlir::RankedTensorType::get({size}, getUInt8Type(&ctx));
+        constexpr auto value = uint8_t(0);
+        const auto denseINT8ElementVal = Const::createConstContent(dataQuantizeStorageType, ArrayRef(value));
 
-        constantQuantizeOp = builder.create<Const::DeclareOp>(mlir::UnknownLoc::get(&ctx),
-                                                              vpux::convertToMemRef(dataQuantizeStorageType),
-                                                              Const::ContentAttr::get(denseINT8ElementVal));
+        constantINT8Op = builder.create<Const::DeclareOp>(loc, vpux::convertToMemRef(dataQuantizeStorageType),
+                                                          Const::ContentAttr::get(denseINT8ElementVal));
     }
 
-    return std::make_pair(constantFP16Op, constantQuantizeOp);
+    if (const auto size = constantShapeSize[2]; size != 0) {
+        const auto dataQuantizeStorageType = mlir::RankedTensorType::get({size}, mlir::Float8E4M3FNType::get(&ctx));
+        const type::float8_e4m3 value = 0.f;
+        const auto denseFP8E4M3FNElementVal = Const::createConstContent(dataQuantizeStorageType, ArrayRef(value));
+
+        constantFP8E4M3FNOp = builder.create<Const::DeclareOp>(loc, vpux::convertToMemRef(dataQuantizeStorageType),
+                                                               Const::ContentAttr::get(denseFP8E4M3FNElementVal));
+    }
+
+    if (const auto size = constantShapeSize[3]; size != 0) {
+        const auto dataQuantizeStorageType = mlir::RankedTensorType::get({size}, mlir::Float8E5M2Type::get(&ctx));
+        const type::float8_e5m2 value = 0.f;
+        const auto denseFP8E5M2ElementVal = Const::createConstContent(dataQuantizeStorageType, ArrayRef(value));
+
+        constantFP8E5M2Op = builder.create<Const::DeclareOp>(loc, vpux::convertToMemRef(dataQuantizeStorageType),
+                                                             Const::ContentAttr::get(denseFP8E5M2ElementVal));
+    }
+
+    return {constantFP16Op, constantINT8Op, constantFP8E4M3FNOp, constantFP8E5M2Op};
 }
 
 Dim ConvertExpandPass::getPadDim(vpux::NDTypeInterface inType, vpux::NDTypeInterface outType) {
@@ -196,7 +237,7 @@ void ConvertExpandPass::safeRunOnFunc() {
 
     mlir::OpBuilder builder(&func.getBody().front().front());
 
-    // For Expand(FP16) and Expand(INT8) with PadsBegin, replace the op with concat a const op
+    // For Expand(FP16), Expand(FP8) and Expand(INT8) with PadsBegin, replace the op with concat a const op
     //     input                input      const
     //       |                    \          /
     //     Expand         =>         Concat
@@ -206,7 +247,7 @@ void ConvertExpandPass::safeRunOnFunc() {
     // For Expand(U8) without PadsBegin, the op will be replaced by single DMA directly in later
     // pass(ConvertToDMA). The DMA solution does not support PadsBegin.
 
-    auto constOp = getZeroConstOpsForFp16AndU8(func, ctx, builder);
+    auto constOps = getZeroConstOps(func, ctx, builder);
 
     func->walk([&](VPUIP::ExpandOp origOp) {
         _log.trace("Found Expand Operation '{0}'", origOp.getLoc());
@@ -218,27 +259,31 @@ void ConvertExpandPass::safeRunOnFunc() {
         auto padBeginCheck = llvm::any_of(parseIntArrayAttr<int64_t>(origOp.getPadsBegin()), [](auto padValue) {
             return padValue != 0;
         });
-        if (!elemType.isa<mlir::Float16Type>() && !padBeginCheck) {
+        if (!mlir::isa<mlir::Float16Type>(elemType) && !isFloat8Quantized(elemType) && !padBeginCheck) {
             _log.nest().trace(
-                    "ExpandOp type should with FP16 precision or INT8 precision with PadsBegin, but got '{0}'",
+                    "ExpandOp type should have float precision or integral precision with PadsBegin, but got '{0}'",
                     elemType);
             return;
         }
 
-        mlir::Value constOutput;
-        if (elemType.isa<mlir::quant::QuantizedType>() && constOp.second != nullptr) {
-            constOutput = constOp.second.getOutput();
-        } else if (elemType.isa<mlir::Float16Type>() && constOp.first != nullptr) {
-            constOutput = constOp.first.getOutput();
-        } else {
-            _log.nest().trace("unsupported ExpandOp type : '{0}'", elemType);
-            return;
+        mlir::Value constOutput = nullptr;
+        if (mlir::isa<mlir::Float16Type>(elemType)) {
+            constOutput = constOps[0].getOutput();
+        } else if (const auto qElemType = mlir::dyn_cast<mlir::quant::QuantizedType>(elemType)) {
+            const auto storageType = qElemType.getStorageType();
+            if (storageType.isInteger(8)) {
+                constOutput = constOps[1].getOutput();
+            } else if (storageType.isFloat8E4M3FN()) {
+                constOutput = constOps[2].getOutput();
+            } else if (storageType.isFloat8E5M2()) {
+                constOutput = constOps[3].getOutput();
+            }
         }
+        VPUX_THROW_WHEN(constOutput == nullptr, "Missing constant definition for ExpandOp type : '{0}'", elemType);
 
         mlir::OpBuilder builder(origOp.getOperation());
-        auto newMemRefOutputType = outputType;
         auto expandedBuffer =
-                builder.create<mlir::memref::AllocOp>(origOp->getLoc(), newMemRefOutputType.cast<mlir::MemRefType>());
+                builder.create<mlir::memref::AllocOp>(origOp->getLoc(), mlir::cast<mlir::MemRefType>(outputType));
 
         const auto nonZeroAxisPredicate = [](const int64_t dim) -> bool {
             return dim > 0;
@@ -256,7 +301,7 @@ void ConvertExpandPass::safeRunOnFunc() {
         if (padBeginAxisIter != padsBegin.end()) {
             const auto padBeginAxis = std::distance(padsBegin.begin(), padBeginAxisIter);
             const auto padValue = padsBegin[padBeginAxis];
-            const auto padOut = applyPadding(padBeginAxis, padValue, subViewOffsets, padCtx, builder);
+            const auto padOut = applyPadding(padBeginAxis, padValue, subViewOffsets, padCtx, elemType, builder);
             concatInputs.push_back(padOut);
             subViewOffsets[padBeginAxis] += padValue;
         }
@@ -282,7 +327,7 @@ void ConvertExpandPass::safeRunOnFunc() {
         if (padEndAxisIter != padsEnd.end()) {
             const auto padEndAxis = std::distance(padsEnd.begin(), padEndAxisIter);
             const auto padValue = padsEnd[padEndAxis];
-            const auto padOut = applyPadding(padEndAxis, padValue, subViewOffsets, padCtx, builder);
+            const auto padOut = applyPadding(padEndAxis, padValue, subViewOffsets, padCtx, elemType, builder);
             concatInputs.push_back(padOut);
         }
 

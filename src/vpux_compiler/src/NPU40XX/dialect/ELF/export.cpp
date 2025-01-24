@@ -79,7 +79,7 @@ void serializeTo(uint8_t* storage, MainOp elfMain, Logger log, elf::Writer& elfW
 
     log.trace("Serializing '{0}' ops", CreateMetadataSectionOp::getOperationName());
     for (auto createMetadataSectionOp : elfMain.getOps<CreateMetadataSectionOp>()) {
-        auto metadataPtr = vpux::ELFNPU37XX::constructMetadata(elfMain->getParentOfType<mlir::ModuleOp>(), log);
+        auto metadataPtr = vpux::ELFNPU37XX::constructMetadata(elfMain->getParentOfType<mlir::ModuleOp>(), log.nest());
         auto& metadata = *metadataPtr;
         createMetadataSectionOp.serialize(elfWriter, sectionMap, symbolMap, metadata);
     }
@@ -129,7 +129,7 @@ std::vector<uint8_t> exportToELF(mlir::ModuleOp module, Logger log) {
 }
 
 BlobView exportToELF(mlir::ModuleOp module, BlobAllocator& allocator, Logger log) {
-    log.setName("ELF BackEnd");
+    log.setName("ELF Backend - Export");
 
     // Associate the respective mlir::Operation* of
     //   DataSectionOp/LogicalSectionOp/CreateSymbolSectionOp/CreateRelocationSectionOp

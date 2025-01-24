@@ -66,6 +66,7 @@ def Const_DeclareOp :
 
     let skipDefaultBuilders = 1;
     let builders = [
+        OpBuilder<(ins "mlir::Type":$outputType, "const vpux::Const::ContentAttr&":$content)>,
         OpBuilder<(ins "mlir::Type":$outputType, "vpux::Const::ContentAttr&&":$content)>
     ];
 
@@ -78,8 +79,8 @@ def Const_DeclareOp :
             setNameFn(getResult(), "cst");
         }
 
-        vpux::Const::ContentAttr getContentAttr() const;
-        vpux::Const::ContentSetup transformContentAttr() const {
+        const vpux::Const::ContentAttr& getContentAttr() const;
+        auto transformContentAttr() const {
             return getContentAttr().transform();
         }
         vpux::Const::Content getContent() const {
@@ -128,11 +129,21 @@ def Const_DataOp :
     }];
 
     let arguments = (ins SymbolNameAttr:$sym_name);
-    let regions = (region AnyRegion:$body);
+    let regions = (region SizedRegion<1>:$body);
 
     let assemblyFormat = [{
         $sym_name $body attr-dict
     }];
+
+    // we need a custom builder to add a single empty block
+    let skipDefaultBuilders = 1;
+    let builders = [
+        OpBuilder<(ins "mlir::StringRef":$sym_name), [{
+            $_state.getOrAddProperties<Properties>().sym_name = $_builder.getStringAttr(sym_name);
+            auto region = $_state.addRegion();
+            region->push_back(new mlir::Block());
+        }]>
+    ];
 }
 
 def IsNotSymElementsAttr : AttrConstraint<
@@ -217,9 +228,19 @@ def Const_BundleDataOp :
     }];
 
     let arguments = (ins SymbolNameAttr:$sym_name);
-    let regions = (region AnyRegion:$body);
+    let regions = (region SizedRegion<1>:$body);
 
     let assemblyFormat = "$sym_name $body attr-dict";
+
+    // we need a custom builder to add a single empty block
+    let skipDefaultBuilders = 1;
+    let builders = [
+        OpBuilder<(ins "mlir::StringRef":$sym_name), [{
+            $_state.getOrAddProperties<Properties>().sym_name = $_builder.getStringAttr(sym_name);
+            auto region = $_state.addRegion();
+            region->push_back(new mlir::Block());
+        }]>
+    ];
 }
 
 def Const_RodataBundleOp :

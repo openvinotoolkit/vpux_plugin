@@ -5,8 +5,19 @@
 
 #include "vpux/compiler/NPU37XX/dialect/IE/impl/convert_quantize_ops_to_nce_ops_strategy.hpp"
 #include "vpux/compiler/dialect/IE/transforms/passes/convert_quantize_ops_to_nce_ops.hpp"
+#include "vpux/compiler/dialect/const/utils/utils.hpp"
 
 using namespace vpux;
+
+namespace {
+// cst -> dequant case.
+// When a dequantize operation has a constant producer, execute dequantization on activation shaves.
+// ConvertQuantizeOpsToNCEOps must skip such dequantize operations.
+// Mark them legal.
+bool hasConstProducer(IE::DequantizeOp dequantOp) {
+    return mlir::isa_and_nonnull<Const::DeclareOp>(dequantOp.getInput().getDefiningOp());
+}
+};  // namespace
 
 namespace vpux::IE::arch37xx {
 
@@ -14,28 +25,20 @@ mlir::Value buildDwWeights(const mlir::Location& loc, const int64_t OC, const ml
                            mlir::PatternRewriter& rewriter) {
     const auto ctx = rewriter.getContext();
     if (auto quantizeType = elementType.dyn_cast<mlir::quant::UniformQuantizedType>()) {
-        const std::vector<vpux::type::float16> vals(OC, 1.f);
         const auto baseType = mlir::RankedTensorType::get({OC, 1, 1, 1}, mlir::Float16Type::get(ctx));
-        const auto baseAttr = mlir::DenseElementsAttr::get(baseType, ArrayRef(vals));
+        const auto baseAttr = Const::createConstContent(baseType, ArrayRef(vpux::type::float16(1.f)));
         const auto contentAttr = Const::ContentAttr::get(baseAttr);
-        auto quantWeightsConstAttr = contentAttr.transform()
-                                             .castElemType(normalizeQuantStorageType(quantizeType))
-                                             .quantCast(quantizeType)
-                                             .get();
+        auto quantWeightsConstAttr = contentAttr.transform().castElemType(quantizeType).get();
         const auto weightsType = contentAttr.getType().cast<vpux::NDTypeInterface>().changeElemType(quantizeType);
         return rewriter.create<Const::DeclareOp>(loc, weightsType, std::move(quantWeightsConstAttr));
     }
     if (elementType.isF16()) {
-        const std::vector<vpux::type::float16> vals(OC, 1.f);
         const auto baseType = mlir::RankedTensorType::get({OC, 1, 1, 1}, mlir::Float16Type::get(ctx));
-        const auto baseAttr = mlir::DenseElementsAttr::get(baseType, ArrayRef(vals));
-        return rewriter.create<Const::DeclareOp>(loc, baseType, Const::ContentAttr::get(baseAttr));
+        return Const::createConst(rewriter, loc, baseType, ArrayRef(vpux::type::float16(1.f)));
     }
     if (elementType.isF32()) {
-        const std::vector<float> vals(OC, 1.f);
         const auto baseType = mlir::RankedTensorType::get({OC, 1, 1, 1}, mlir::Float32Type::get(ctx));
-        const auto baseAttr = mlir::DenseElementsAttr::get(baseType, ArrayRef(vals));
-        return rewriter.create<Const::DeclareOp>(loc, baseType, Const::ContentAttr::get(baseAttr));
+        return Const::createConst(rewriter, loc, baseType, ArrayRef(1.f));
     }
     VPUX_THROW("buildDwWeights: other types are not supported");
 }
@@ -263,17 +266,25 @@ void ConvertQuantizeOpsToNceOpsStrategy::prepareAvgPool(mlir::ConversionTarget& 
     // E#98802 avgpool is faster than add for big input size.
     // avgpool support rank >= 3, and currently convert shape to 4D does not support avgpool, so here limit to rank = 4
 
+    // Dummy AvgPool's numerical stability is preferred for low-precision floating-point quantization (FP8),
+    // eltwise Add with self could shift values further away from 0.0 causing precision loss.
+
     toAvgPoolTarget.addDynamicallyLegalOp<IE::QuantizeOp>([&](IE::QuantizeOp quantizeOp) {
         auto inType = quantizeOp.getInput().getType().cast<vpux::NDTypeInterface>();
         auto inRank = inType.getRank();
+
         return isLegalQuantizeOp(quantizeOp, _canUseCMajor) || inRank != 4 ||
-               inType.getTotalAllocSize() <= vpux::VPU::getTotalCMXSize(quantizeOp);
+               (inType.getTotalAllocSize() <= vpux::VPU::getTotalCMXSize(quantizeOp) &&
+                !vpux::isFloat8Quantized(quantizeOp.getDstElemType()));
     });
     toAvgPoolTarget.addDynamicallyLegalOp<IE::DequantizeOp>([&](IE::DequantizeOp dequantizeOp) {
         auto inType = dequantizeOp.getInput().getType().cast<vpux::NDTypeInterface>();
         auto inRank = inType.getRank();
+
         return isLegalDequantizeOp(dequantizeOp) || inRank != 4 ||
-               inType.getTotalAllocSize() <= vpux::VPU::getTotalCMXSize(dequantizeOp);
+               (inType.getTotalAllocSize() <= vpux::VPU::getTotalCMXSize(dequantizeOp) &&
+                !vpux::isFloat8Quantized(inType.getElementType())) ||
+               hasConstProducer(dequantizeOp);
     });
     toAvgPoolTarget.addLegalOp<IE::AvgPoolOp>();
 
@@ -288,7 +299,7 @@ void ConvertQuantizeOpsToNceOpsStrategy::prepareEltwise(mlir::ConversionTarget& 
         return IE::isLegalQuantizeOp(quantizeOp, _canUseCMajor);
     });
     toEltwiseTarget.addDynamicallyLegalOp<IE::DequantizeOp>([&](IE::DequantizeOp dequantizeOp) {
-        return IE::isLegalDequantizeOp(dequantizeOp);
+        return IE::isLegalDequantizeOp(dequantizeOp) || hasConstProducer(dequantizeOp);
     });
     toEltwiseTarget.addLegalOp<IE::AndOp>();
     toEltwiseTarget.addLegalOp<IE::AddOp>();
@@ -314,7 +325,7 @@ void ConvertQuantizeOpsToNceOpsStrategy::prepareQuantToDw(mlir::ConversionTarget
     quantToDwTarget.addDynamicallyLegalOp<IE::DequantizeOp>([&](IE::DequantizeOp dequantizeOp) {
         const auto isPerChannelQuantized = isPerChannelQuantizedType(dequantizeOp.getInput());
         auto outElemmentType = dequantizeOp.getOutput().getType().cast<vpux::NDTypeInterface>().getElementType();
-        return !isPerChannelQuantized || !outElemmentType.isF16();
+        return !isPerChannelQuantized || !outElemmentType.isF16() || hasConstProducer(dequantizeOp);
     });
 
     quantToDwTarget.addLegalOp<Const::DeclareOp>();

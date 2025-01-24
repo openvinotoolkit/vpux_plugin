@@ -91,6 +91,14 @@ mlir::LogicalResult ActShaveRewriter::matchAndRewrite(IE::ReorderOp origOp, mlir
         const auto propagatingOrder = DimsOrder::fromValue(origOp.getOutput());
 
         auto orderInfo = iface.getLayoutInfo();
+        const auto producerInputRank = orderInfo.getInput(0).numDims();
+        const auto propagatingRank = propagatingOrder.numDims();
+        if (producerInputRank != propagatingRank) {
+            return matchFailed(_log.nest(), rewriter, producer,
+                               "Producer input rank {0} does not match propagating rank {1}", producerInputRank,
+                               propagatingOrder);
+        }
+
         orderInfo.setInput(0, propagatingOrder);
         iface.inferLayoutInfo(orderInfo, /*seOpsEnabled=*/false, /*seExperimentalOpsEnabled=*/false);
         if (orderInfo.getInput(0) != propagatingOrder || orderInfo.getOutput(0) != propagatingOrder) {

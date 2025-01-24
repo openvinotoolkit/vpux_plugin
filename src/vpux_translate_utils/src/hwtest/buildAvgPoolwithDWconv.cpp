@@ -138,12 +138,12 @@ void buildAvgpoolWithDwConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::Mo
             wt_data_valss = mlir::DenseElementsAttr::get(wtData_ddr_valueType, ArrayRef<uint8_t>(wt_vec));
         }
     }
-    auto wt_data_attr_setup = Const::ContentAttr::transform(wt_data_valss);
+    Const::ContentSetup wt_data_attr_setup(wt_data_valss.getType());
     if (auto qty = weightsType.dyn_cast<mlir::quant::QuantizedType>()) {
-        wt_data_attr_setup = wt_data_attr_setup.quantCast(qty);
+        wt_data_attr_setup = wt_data_attr_setup.castElemType(qty);
     }
 
-    auto wt_data_attr = wt_data_attr_setup.reorder(DimsOrder::NHWC).get();
+    auto wt_data_attr = Const::ContentAttr::get(wt_data_valss, wt_data_attr_setup.reorder(DimsOrder::NHWC));
     auto weight = funcbuilder.create<Const::DeclareOp>(loc, weightData_ddr_type2, std::move(wt_data_attr));
 
     auto weight_data_ddr = VPUIP::alignDepthWiseWeightsTensor(funcbuilder, loc, weight.getResult());
@@ -218,7 +218,9 @@ void buildAvgpoolWithDwConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::Mo
     auto wtTbl_data_values = ArrayRef<int32_t>(wtTbl_data_values_vec);
     auto wtTbl_data_vals = mlir::DenseElementsAttr::get(wtTblData_ddr_valueType, wtTbl_data_values);
     auto weightTbl_data_ddr = funcbuilder.create<Const::DeclareOp>(
-            loc, weightTblData_ddr_type, Const::ContentAttr::transform(wtTbl_data_vals).reorder(DimsOrder::NHWC).get());
+            loc, weightTblData_ddr_type,
+            Const::ContentAttr::get(wtTbl_data_vals,
+                                    Const::ContentSetup(wtTblData_ddr_valueType).reorder(DimsOrder::NHWC)));
 
     // weights table cmx tensor
 
@@ -242,7 +244,7 @@ void buildAvgpoolWithDwConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::Mo
     auto nceTask = VPURT::wrapIntoTaskOp<VPUIP::NCEClusterTaskOp>(
             funcbuilder, mlir::ValueRange(barrier0.getBarrier()), mlir::ValueRange(barrier1.getBarrier()), loc,
             outputcmx_type, inputcmx.getOperation()->getResult(0), wtData_cmx.getOperation()->getResult(0),
-            wtTbl_cmx.getOperation()->getResult(0), /*instruction_table_list*/ nullptr, /*spr_lookup_table*/ nullptr,
+            wtTbl_cmx.getOperation()->getResult(0), /*spr_lookup_table*/ nullptr,
             parent_inputcmx.getOperation()->getResult(0), parent_outputcmx.getOperation()->getResult(0),
             outputcmx.getOperation()->getResult(0), VPUIP::NCETaskType::DWCONV, filtersize, strides, kernel_padding,
             nullptr,

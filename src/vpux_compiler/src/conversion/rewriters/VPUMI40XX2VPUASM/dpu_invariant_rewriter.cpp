@@ -32,12 +32,12 @@ mlir::Value extractValueForTile(mlir::ValueRange values, uint32_t tileIdx) {
 namespace vpux {
 namespace vpumi40xx2vpuasm {
 
-mlir::LogicalResult DPUInvariantRewriter::symbolize(VPUMI40XX::DPUInvariantOp op, SymbolMapper&,
-                                                    mlir::ConversionPatternRewriter& rewriter) const {
+mlir::FailureOr<SymbolizationResult> DPUInvariantRewriter::symbolize(VPUMI40XX::DPUInvariantOp op, SymbolMapper&,
+                                                                     mlir::ConversionPatternRewriter& rewriter) const {
     auto symName = findSym(op).getRootReference();
     auto taskLocation = findSym(op.getTaskLocation());
 
-    auto optionalSym = [&](mlir::Value val) -> mlir::FlatSymbolRefAttr {
+    auto optionalSym = [&](mlir::Value val) -> mlir::SymbolRefAttr {
         auto sym = val ? findSym(val) : nullptr;
         return sym;
     };
@@ -49,6 +49,12 @@ mlir::LogicalResult DPUInvariantRewriter::symbolize(VPUMI40XX::DPUInvariantOp op
     auto weightsSym = optionalSym(op.getWeights());
     auto weightsSparsityMapSym = optionalSym(op.getWeightsSparsityMap());
     auto weightTableSym = optionalSym(op.getWeightTable());
+    auto weightTableDataPtrSym = optionalSym(op.getWeightTableDataPtr());
+    auto weightTableSpPtrSym = optionalSym(op.getWeightTableSpPtr());
+    auto weightTableScaleSym = optionalSym(op.getWeightTableScale());
+    auto weightTableBiasSym = optionalSym(op.getWeightTableBias());
+    auto weightZeroPointsSym = optionalSym(op.getWeightZeroPoints());
+
     auto sprLookupTableSym = optionalSym(op.getSprLookupTable());
 
     auto tileIdx = op.getIndex().getType().cast<VPURegMapped::IndexType>().getTileIdx();
@@ -67,6 +73,19 @@ mlir::LogicalResult DPUInvariantRewriter::symbolize(VPUMI40XX::DPUInvariantOp op
     auto outputSparsityMapSym = optionalSym(outputSparsityMap);
 
     auto profilingDataSym = optionalSym(op.getProfilingData());
+
+    auto maxPerXYSym = optionalSym(op.getMaxPerXy());
+    auto minPerXYSym = optionalSym(op.getMinPerXy());
+
+    mlir::ArrayAttr minMaxPerTensorAttr = nullptr;
+    if (!op.getMinMaxPerTensor().empty()) {
+        llvm::SmallVector<mlir::Attribute> minMaxPerTensorSyms(op.getMinMaxPerTensor().size());
+        for (auto [index, minMaxTensor] : llvm::enumerate(op.getMinMaxPerTensor())) {
+            auto minMaxSym = findSym(minMaxTensor);
+            minMaxPerTensorSyms[index] = minMaxSym;
+        }
+        minMaxPerTensorAttr = mlir::ArrayAttr::get(rewriter.getContext(), minMaxPerTensorSyms);
+    }
 
     auto waitAttr = vectorizeBarriers(op.getWaitBarriers());
     auto updateAttr = vectorizeBarriers(op.getUpdateBarriers());
@@ -128,14 +147,15 @@ mlir::LogicalResult DPUInvariantRewriter::symbolize(VPUMI40XX::DPUInvariantOp op
 
     auto invariant = rewriter.create<VPUASM::DPUInvariantOp>(
             op.getLoc(), symName, taskIdx, taskLocation, inputSym, inputSparsityMapSym, inputSETableSym, weightsSym,
-            weightsSparsityMapSym, weightTableSym, sprLookupTableSym, outputSym, outputSparsityMapSym, profilingDataSym,
-            outTypeContAttr, waitAttr, updateAttr, op.getNceTaskTypeAttr(), op.getEltwiseTypeAttr(),
-            op.getMpeFrequentModeAttr(), op.getKernelSizeAttr(), op.getKernelStridesAttr(), op.getKernelPaddingAttr(),
-            op.getIsContinuedAttr(), op.getCmSpPatternAttr(), op.getInputChannelsCompressionAttr(),
+            weightsSparsityMapSym, weightTableSym, weightTableDataPtrSym, weightTableSpPtrSym, weightTableScaleSym,
+            weightTableBiasSym, weightZeroPointsSym, sprLookupTableSym, outputSym, outputSparsityMapSym,
+            profilingDataSym, maxPerXYSym, minPerXYSym, minMaxPerTensorAttr, outTypeContAttr, waitAttr, updateAttr,
+            op.getNceTaskTypeAttr(), op.getEltwiseTypeAttr(), op.getMpeFrequentModeAttr(), op.getMpeEngineAttr(),
+            op.getKernelSizeAttr(), op.getKernelStridesAttr(), op.getKernelPaddingAttr(), op.getIsContinuedAttr(),
+            op.getCmSpPatternAttr(), op.getInputChannelsCompressionAttr(), op.getIsZeroOffsetWeightsTableAttr(),
             op.getOutChannelOffsetAttr(), op.getIsSuperdenseAttr(), op.getIsInplaceAttr(), op.getInputSeSizeAttr(),
             op.getOutputSeSizeAttr(), op.getIsPermuteQuantizeAttr(), op.getIsSmallKernelOptimizedAttr(),
             op.getStartAfterAttr(), op.getCleanAfterAttr(), variantsInGroupAttr, firstVariantAttr, lastVariantAttr);
-
     {
         auto& ppeRegion = invariant.getPpe();
         ppeRegion.emplaceBlock();
@@ -151,7 +171,7 @@ mlir::LogicalResult DPUInvariantRewriter::symbolize(VPUMI40XX::DPUInvariantOp op
 
     rewriter.eraseOp(op);
 
-    return mlir::success();
+    return SymbolizationResult(invariant);
 }
 
 }  // namespace vpumi40xx2vpuasm

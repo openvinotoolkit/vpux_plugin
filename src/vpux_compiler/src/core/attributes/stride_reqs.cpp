@@ -269,7 +269,16 @@ bool vpux::StrideReqsRef::checkStrides(MemStridesRef memStrides, Bit elemSize, M
         } else {
             const auto prevMemDim = MemDim(ind + 1);
 
-            if (strideVal < memStrides[prevMemDim] * memShape[prevMemDim] - elemSize) {
+            // Check the stride if below the compact stride value
+            // For StridedSlice operation, there are extreme cases where last value of Output is the last value of Input
+            // eg: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9] shape==10, stride==3, stridedSlice output is [0, 3, 6, 9]
+            // Compact stride value should be memStrides[prevMemDim] * (memShape[prevMemDim] - 1) + elemSize
+            if (strideVal != Bit(0) && strideVal < memStrides[prevMemDim] * (memShape[prevMemDim] - 1) + elemSize) {
+                return false;
+            }
+
+            // To handle abnormal case where shape==0, track ticket E#144962
+            if (strideVal == Bit(0) && strideVal < memStrides[prevMemDim] * memShape[prevMemDim]) {
                 return false;
             }
         }

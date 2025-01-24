@@ -27,7 +27,7 @@ public:
     explicit PrefetchDataOps(scheduledOps& initialSchedule, AsyncDepsInfo& depsInfo);
 
 public:
-    void enableDataOpPrefetching();
+    bool enableDataOpPrefetching();
 
 private:
     struct CycleInfo {
@@ -123,6 +123,11 @@ private:
     bool _prefetchOpsDefined = false;
     // for compute op prefetch DMAs until next X compute executor kind op cycle begin
     const size_t _advanceComputeExecutorKindOpsForPrefetch = 2;
+    // ratio for number of dynamic spills to all DMAs to enable prefetching
+    const double _dynamicSpillRatio = 0.3;
+    const size_t _dynamicSpillMinCount = 1200;
+    size_t _dmaCount = 0;
+    size_t _dynamicSpillCount = 0;
     // used to represent a stall
     const size_t _cycleInfoStallDummyOp = std::numeric_limits<size_t>::max();
     // FIFO or pipeline storage

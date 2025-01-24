@@ -26,7 +26,7 @@ mlir::LogicalResult vpux::IE::GreaterEqualOp::inferReturnTypeComponents(
             IE::broadcastEltwiseShape(in1Type.getShape(), in2Type.getShape(), greatereq.getAutoBroadcast(), loc);
 
     if (mlir::succeeded(outShapeRes)) {
-        inferredReturnShapes.emplace_back(outShapeRes.value(), getBool8Type(ctx));
+        inferredReturnShapes.emplace_back(outShapeRes.value(), in1Type.getElementType());
     }
 
     return outShapeRes;

@@ -90,6 +90,10 @@ mlir::LogicalResult configureFpPPE(const Logger&, PPEConfig::FpPPE& config, VPUI
         } else if (dpuTaskType == VPUIP::NCETaskType::MAXPOOL) {
             config.biasAdd.biasStatic = 0.0f;
             config.scaleMult.scaleStatic = 1.0f;
+        } else if (dpuTaskType == VPUIP::NCETaskType::REDUCEMEAN ||
+                   dpuTaskType == VPUIP::NCETaskType::REDUCESUMSQUARE) {
+            config.biasAdd.biasStatic = 0.0f;
+            config.scaleMult.scaleStatic = 1.0f;
         }
 
         if ((ppeTask.fixedFunction.ppeMode == VPU::PPEMode::LRELU) ||
@@ -394,11 +398,10 @@ mlir::FailureOr<PPETask> vpux::VPUIPDPU::arch40xx::PPE::evalPPETasks(const Logge
     PPETask ppeTask{};
 
     for (auto ppeTaskOp : ppeRegion.getOps<VPUASM::PPETaskOp>()) {
-        auto opaquePpeAttr = ppeTaskOp.getOpaquePpeAttr();
-        auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(opaquePpeAttr);
+        auto ppeAttr = ppeTaskOp.getPpeAttr();
+        auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(ppeAttr);
         VPUX_THROW_WHEN(intPpeAttr == nullptr,
-                        "Expected PPEIntAttr type but got {0}, make sure to use the right factory version",
-                        opaquePpeAttr);
+                        "Expected PPEIntAttr type but got {0}, make sure to use the right factory version", ppeAttr);
 
         if (intPpeAttr.getMode()) {
             const auto ppeMode = intPpeAttr.getMode().getValue();

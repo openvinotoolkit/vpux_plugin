@@ -45,7 +45,7 @@ mlir::OpFoldResult vpux::IE::SubtractOp::fold(FoldAdaptor adaptor) {
         return nullptr;
     }
 
-    const auto attr = mlir::dyn_cast_or_null<Const::EphemeralContentAttr>(operands[1]);
+    const auto attr = mlir::dyn_cast_or_null<Const::ContentAttr>(operands[1]);
     if (attr == nullptr || !attr.isSplat()) {
         return nullptr;
     }

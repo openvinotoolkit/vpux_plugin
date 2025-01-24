@@ -13,6 +13,7 @@
 #include "vpux/compiler/dialect/IE/utils/shape_infer.hpp"
 #include "vpux/compiler/dialect/VPU/utils/generate_tiling.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_invariant.hpp"
+#include "vpux/compiler/utils/error.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 #include "vpux/utils/core/numeric.hpp"
 
@@ -166,13 +167,13 @@ QuantizeCast  QuantizeCast
 bool ExpandEltwisePattern::init() {
     auto log = _log.nest();
     // only support eltwise ops with same input and output layouts
-    auto eltwiseOutputLayout = _eltwiseOp->getResult(0).getType().cast<vpux::NDTypeInterface>().getDimsOrder();
+    auto eltwiseOutputLayout = mlir::cast<vpux::NDTypeInterface>(_eltwiseOp->getResult(0).getType()).getDimsOrder();
     for (auto operand : _eltwiseOp->getOperands()) {
-        if (operand.getDefiningOp() && mlir::isa<Const::DeclareOp>(operand.getDefiningOp())) {
+        if (mlir::isa_and_nonnull<Const::DeclareOp>(operand.getDefiningOp())) {
             continue;
         }
 
-        auto inputLayout = operand.getType().cast<vpux::NDTypeInterface>().getDimsOrder();
+        auto inputLayout = mlir::cast<vpux::NDTypeInterface>(operand.getType()).getDimsOrder();
         if (inputLayout != eltwiseOutputLayout) {
             _log.trace("Unsupported eltwise input and output layout");
             return false;
@@ -232,7 +233,7 @@ bool ExpandEltwisePattern::init() {
             Op1   Op2
        Here will introduce an extra slice
     */
-    if (!_expandInputs.empty() && !_nonExpandInputs.empty() && _sliceOutputs.size() == 0) {
+    if (!_expandInputs.empty() && !_nonExpandInputs.empty() && _sliceOutputs.empty()) {
         // If there is no slice output(s), that means no need expand after shapecast. The exception is if users are
         // eltwise, like expand -> add -> add, continue the optimization.
         for (auto user : _eltwiseOp->getResult(0).getUsers()) {
@@ -269,7 +270,7 @@ bool ExpandEltwisePattern::init() {
         //  For example: input 1: "tensor<1x3x32x32xf16>", input 2: "dense<1.0> : tensor<1x1x1x1xf16>"
         // 2. Constant input without last padWithZero == unExpand activation
         if (mlir::isa<IE::MultiplyOp, IE::SubtractOp, IE::AddOp>(_eltwiseOp) && baseContentNum.value() != 1) {
-            auto contentAttr = constDeclare.getContentAttr();
+            const auto& contentAttr = constDeclare.getContentAttr();
             if (contentAttr.getTransformations().empty()) {
                 return false;
             }
@@ -309,6 +310,46 @@ bool ExpandEltwisePattern::init() {
         return false;
     }
     _newExpandedShape = newExpandedShapeResult.value();
+
+    // If it is legal to adjust the eltwise shape to avoid expansion
+    // there is a chance to avoid spilling by keeping the same shape as the producer
+    // A typical pattern: AlignedChannelsOp -> ViewLikeOp -> ExpandOp (channel) -> EltwiseOp
+    for (auto input : _expandInputs) {
+        auto producerOp = input.getInput().getDefiningOp();
+        while (mlir::isa_and_nonnull<IE::ViewLikeOpInterface>(producerOp) && producerOp->getResult(0).hasOneUse()) {
+            producerOp = producerOp->getOperand(0).getDefiningOp();
+        }
+
+        if (mlir::isa_and_nonnull<IE::AlignedChannelsOpInterface>(producerOp)) {
+            auto outType = mlir::cast<NDTypeInterface>(producerOp->getResult(0).getType());
+            auto outShape = outType.getShape();
+
+            auto alignIface = mlir::cast<IE::AlignedChannelsOpInterface>(_eltwiseOp);
+            const auto sizeToAlignChannel = alignIface.getInputChannelAlignment();
+            auto module = producerOp->getParentOfType<mlir::ModuleOp>();
+            const auto numCluster = IE::getTileExecutor(module).getCount();
+            // There are two restrictions to ensure this updated shape is always the best solution:
+            // 1. The shape meets functional requirements:
+            //    Since operations with AlignedChannelsOpInterface are not always NCE tasks and vary with the platform
+            //    the shape should be checked with a 4D tensor where N equals 1 and channels are aligned
+            // 2. Workload efficiency:
+            //    - Ensure H is evenly divisible by "number of clusters * VPU_SPATIAL_ALIGNMENT" to avoid uneven splits
+            //    - Ensure W is evenly divisible by "VPU_SPATIAL_ALIGNMENT" to avoid inefficient workloads
+            //    - Ensure the spatial size (H * W) is larger than the channel size
+            bool isShapeFunctional = outShape.size() == 4 && outShape[Dims4D::Act::N] == 1 &&
+                                     outShape[Dims4D::Act::C] % sizeToAlignChannel == 0;
+            bool isWorkloadEfficient =
+                    outShape[Dims4D::Act::H] % (numCluster * VPU::NCEInvariant::VPU_SPATIAL_ALIGNMENT) == 0 &&
+                    outShape[Dims4D::Act::W] % VPU::NCEInvariant::VPU_SPATIAL_ALIGNMENT == 0 &&
+                    outShape[Dims4D::Act::C] <= outShape[Dims4D::Act::H] * outShape[Dims4D::Act::W];
+
+            if (isShapeFunctional && isWorkloadEfficient) {
+                _newExpandedShape = Shape(outShape.raw());
+                break;
+            }
+        }
+    }
+
     return true;
 }
 
@@ -431,7 +472,7 @@ mlir::LogicalResult ExpandEltwisePattern::rewrite() {
                     "Unexpect Op {0} at {1} has constant input. Cannot ensure it has right reshape logic.",
                     _eltwiseOp->getName(), _eltwiseOp->getLoc());
     for (auto constDeclare : _constInputs) {
-        auto contentAttr = constDeclare.getContentAttr();
+        const auto& contentAttr = constDeclare.getContentAttr();
         Const::ContentAttr newContentAttr;
 
         auto newConstOutputType = constDeclare.getOutput().getType().cast<vpux::NDTypeInterface>();
@@ -457,8 +498,8 @@ mlir::LogicalResult ExpandEltwisePattern::rewrite() {
             // The remaining attribution, such as "const.Reorder", should keep the same.
             // To avoid conflict between "const.Reshape" and "const.broadcast", set the "const.Reshape" with ones
             // and update shape with "const.broadcast".
-            auto baseContent = contentAttr.getBaseContent();
-            auto newContentAttrSetup = Const::ContentAttr::transform(baseContent);
+            const auto& baseContent = contentAttr.getBaseContent();
+            Const::ContentSetup newContentAttrSetup(baseContent.getType());
             auto newConstantShape = Shape(newConstOutputType.getShape().size(), int64_t(1));
             for (auto attr : contentAttr.getTransformations()) {
                 if (!attr.isa<Const::PadWithZeroAttr, Const::BroadcastAttr, Const::ReshapeAttr>()) {
@@ -492,9 +533,9 @@ mlir::LogicalResult ExpandEltwisePattern::rewrite() {
             const auto broadcastDim = constOutShape[Dims4D::Act::N] > 1 ? Dims4D::Act::N : Dims4D::Act::C;
             newConstantShape[broadcastDim] = _newExpandedShape[Dims4D::Act::C];
             newConstOutputType = newConstOutputType.changeShape(newConstantShape);
-            newContentAttr = newContentAttrSetup.broadcast(broadcastDim, _newExpandedShape[Dims4D::Act::C])
-                                     .reshape(newConstantShape)
-                                     .get();
+            newContentAttr = Const::ContentAttr::get(
+                    baseContent, newContentAttrSetup.broadcast(broadcastDim, _newExpandedShape[Dims4D::Act::C])
+                                         .reshape(newConstantShape));
         }
         builder.setInsertionPoint(_eltwiseOp);
         auto newConstDeclare =
@@ -642,7 +683,7 @@ bool ExpandPoolingPattern::init() {
 
     // save the original shape and generate new shape
     auto expandInputOp = *getExpandInputs().begin();
-    auto unExpandedShape = expandInputOp.getInput().getType().cast<vpux::NDTypeInterface>().getShape().toValues();
+    auto unExpandedShape = mlir::cast<vpux::NDTypeInterface>(expandInputOp.getInput().getType()).getShape().toValues();
     setUnExpandedShape(unExpandedShape);
 
     mlir::FailureOr<Shape> newExpandedShapeResult =
@@ -676,8 +717,8 @@ private:
 };
 
 template <class PoolingOp>
-mlir::LogicalResult ExpandPoolingRewriter<PoolingOp>::matchAndRewrite(PoolingOp layerOp, mlir::PatternRewriter&) const {
-    _log.trace("[{0}] Got '{1}' at '{2}'", this->getDebugName(), layerOp->getName(), layerOp->getLoc());
+mlir::LogicalResult ExpandPoolingRewriter<PoolingOp>::matchAndRewrite(PoolingOp layerOp,
+                                                                      mlir::PatternRewriter& rewriter) const {
     const auto supportedPooling = [](PoolingOp layerOp) {
         const auto kernels = parseIntArrayAttr<int64_t>(layerOp.getKernelSize());
         const auto padStart = parseIntArrayAttr<int64_t>(layerOp.getPadsBegin());
@@ -686,8 +727,8 @@ mlir::LogicalResult ExpandPoolingRewriter<PoolingOp>::matchAndRewrite(PoolingOp 
 
         mlir::Value input = layerOp.getInput();
         mlir::Value output = layerOp.getOutput();
-        auto inputLayout = input.getType().cast<vpux::NDTypeInterface>().getDimsOrder();
-        auto outputLayout = output.getType().cast<vpux::NDTypeInterface>().getDimsOrder();
+        const auto inputLayout = mlir::cast<vpux::NDTypeInterface>(input.getType()).getDimsOrder();
+        const auto outputLayout = mlir::cast<vpux::NDTypeInterface>(output.getType()).getDimsOrder();
         // input and output layer need to be same
         if (inputLayout != outputLayout) {
             return false;
@@ -712,15 +753,19 @@ mlir::LogicalResult ExpandPoolingRewriter<PoolingOp>::matchAndRewrite(PoolingOp 
         return mlir::failure();
     }
 
-    auto pattern = ExpandPoolingPattern(layerOp.getOperation(), _log);
+    _log.debug("[{0}] Got '{1}' at '{2}'", this->getDebugName(), layerOp->getName(), layerOp->getLoc());
+    auto nestedLog = _log.nest();
+    auto pattern = ExpandPoolingPattern(layerOp.getOperation(), nestedLog);
     if (!pattern.init()) {
-        return mlir::failure();
+        return matchFailed(nestedLog, rewriter, layerOp, "Unsupported Expand - Pooling pattern.");
     }
     if (pattern.opCostReduced()) {
+        nestedLog.debug("Pattern rewrite is beneficial. Applying it.");
         return pattern.rewrite();
     }
 
-    return mlir::failure();
+    return matchFailed(nestedLog, rewriter, layerOp,
+                       "New pattern has higher cost than original one; will not be applied.");
 }
 
 class ExpandSingleChannelPoolingPattern final : public ExpandPoolingPattern {

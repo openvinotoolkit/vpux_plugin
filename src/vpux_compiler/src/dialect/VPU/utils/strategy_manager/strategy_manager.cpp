@@ -68,6 +68,10 @@ void StrategyManager::assignMultiClusterStrategy(bool enableMultiClusterForSWLay
                 .Case<NCEMaxPoolOp>([&](NCEMaxPoolOp origOp) {
                     const auto inputBatch = getShape(origOp.getInput())[Dims4D::Act::N];
                     if (inputBatch > VPU::NCEInvariant::SUPPORTED_BATCH_SIZE) {
+                        const auto isSOBSupported =
+                                origOp.checkStrategyCompatibility(VPU::MultiClusterStrategy::SplitOverBatch, _numTiles);
+                        VPUX_THROW_WHEN(!isSOBSupported,
+                                        "NCEMaxPoolOp has unsupported batch size and cannot be assigned SOB strategy");
                         setLayerStrategy(VPU::MultiClusterStrategy::SplitOverBatch, origOp.getOperation());
                     } else {
                         auto bestStrategy = _costModel.getOptimalLayerStrategy(
@@ -78,6 +82,11 @@ void StrategyManager::assignMultiClusterStrategy(bool enableMultiClusterForSWLay
                 .Case<NCEAveragePoolOp>([&](NCEAveragePoolOp origOp) {
                     const auto inputBatch = getShape(origOp.getInput())[Dims4D::Act::N];
                     if (inputBatch > VPU::NCEInvariant::SUPPORTED_BATCH_SIZE) {
+                        const auto isSOBSupported =
+                                origOp.checkStrategyCompatibility(VPU::MultiClusterStrategy::SplitOverBatch, _numTiles);
+                        VPUX_THROW_WHEN(
+                                !isSOBSupported,
+                                "NCEAveragePoolOp has unsupported batch size and cannot be assigned SOB strategy");
                         setLayerStrategy(VPU::MultiClusterStrategy::SplitOverBatch, origOp.getOperation());
                     } else {
                         auto bestStrategy = _costModel.getOptimalLayerStrategy(
@@ -103,6 +112,11 @@ void StrategyManager::assignMultiClusterStrategy(bool enableMultiClusterForSWLay
                     }
                     const auto inputBatch = getShape(origOp.getInput())[Dims4D::Act::N];
                     if (inputBatch > VPU::NCEInvariant::SUPPORTED_BATCH_SIZE) {
+                        const auto isSOBSupported =
+                                origOp.checkStrategyCompatibility(VPU::MultiClusterStrategy::SplitOverBatch, _numTiles);
+                        VPUX_THROW_WHEN(
+                                !isSOBSupported,
+                                "NCEConvolutionOp has unsupported batch size and cannot be assigned SOB strategy");
                         setLayerStrategy(VPU::MultiClusterStrategy::SplitOverBatch, origOp.getOperation());
                     }
                 })
@@ -123,6 +137,10 @@ void StrategyManager::assignMultiClusterStrategy(bool enableMultiClusterForSWLay
                     }
                     const auto inputBatch = getShape(origOp.getInput())[Dims4D::Act::N];
                     if (inputBatch > VPU::NCEInvariant::SUPPORTED_BATCH_SIZE) {
+                        const auto isSOBSupported =
+                                origOp.checkStrategyCompatibility(VPU::MultiClusterStrategy::SplitOverBatch, _numTiles);
+                        VPUX_THROW_WHEN(!isSOBSupported, "NCECompressConvolutionOp has unsupported batch size and "
+                                                         "cannot be assigned SOB strategy");
                         setLayerStrategy(VPU::MultiClusterStrategy::SplitOverBatch, origOp.getOperation());
                     }
                 })

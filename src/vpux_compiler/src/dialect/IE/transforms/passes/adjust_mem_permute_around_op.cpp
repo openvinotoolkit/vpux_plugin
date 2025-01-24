@@ -346,6 +346,122 @@ mlir::LogicalResult AdjustForConvert::matchAndRewrite(IE::ConvertOp origOp, mlir
 }
 
 //
+// AdjustForSoftmax
+//
+// This pattern tries to move the PermuteCast after Softmax when the previous op is Eltwise
+// It will give the chance to enable vertical fusion between Eltwise and SoftMax.
+// Note that this pattern can be removed after we can support PermuteCast for vertical fusion E#106960
+class AdjustForSoftmax final : public mlir::OpRewritePattern<IE::SoftMaxOp> {
+public:
+    AdjustForSoftmax(mlir::MLIRContext* ctx, Logger log): mlir::OpRewritePattern<IE::SoftMaxOp>(ctx), _log(log) {
+        setDebugName("AdjustForSoftmax");
+    }
+
+public:
+    mlir::LogicalResult matchAndRewrite(IE::SoftMaxOp origOp, mlir::PatternRewriter& rewriter) const final;
+
+private:
+    Logger _log;
+};
+
+/*
+Convert subgraph:
+
+   src1   src2            src1           src2
+     \    /                 \             /
+    Eltwise                (ShapeCast) (ShapeCast)
+       |                       \       /
+   (ShapeCast)                  Eltwise
+       |                           |
+   PermuteCast     =>           SoftmaxOp
+       |                           |
+    SoftmaxOp                  PermuteCast
+       |                           |
+   AffineReshape              AffineReshape
+*/
+mlir::LogicalResult AdjustForSoftmax::matchAndRewrite(IE::SoftMaxOp origOp, mlir::PatternRewriter& rewriter) const {
+    _log.trace("[{0}] Got '{1}' at '{2}'", this->getDebugName(), origOp->getName(), origOp->getLoc());
+    auto permuteCastOp = origOp->getOperand(0).getDefiningOp<IE::PermuteCastOp>();
+    if (permuteCastOp == nullptr || !permuteCastOp->hasOneUse()) {
+        return matchFailed(rewriter, origOp, "no compatible permute op found before {0} at {1}", origOp->getName(),
+                           origOp->getLoc());
+    }
+    // check whether memshape is consistent after the permute
+    // e.g. for memshape [1,12,512,1] and [1,12,1,512], though there's no actual
+    // mempermute, the softmax axis is not consistent at the last memory dimension
+    if (getMemShape(permuteCastOp.getInput()) != getMemShape(permuteCastOp.getResult())) {
+        return matchFailed(rewriter, origOp, "the memshape should be consistent after permute for {0} at {1}",
+                           origOp->getName(), origOp->getLoc());
+    }
+
+    auto eltwiseOp = permuteCastOp->getOperand(0).getDefiningOp();
+    if (eltwiseOp == nullptr) {
+        return matchFailed(rewriter, origOp, "no compatible eltwise op found before {0} at {1}", origOp->getName(),
+                           origOp->getLoc());
+    }
+    bool hasShapeCastBetween = false;
+    if (mlir::isa<IE::ShapeCastOp>(eltwiseOp) && eltwiseOp->hasOneUse()) {
+        eltwiseOp = eltwiseOp->getOperand(0).getDefiningOp();
+        hasShapeCastBetween = true;
+    }
+    if (!eltwiseOp->hasTrait<IE::EltwiseOp>() || !eltwiseOp->hasOneUse()) {
+        return matchFailed(rewriter, origOp, "no compatible eltwise op found before {0} at {1}", origOp->getName(),
+                           origOp->getLoc());
+    }
+
+    _log.trace("[{0}] start to move PermuteCast for {1} at {2}", this->getDebugName(), origOp->getName(),
+               origOp->getLoc());
+    auto ctx = rewriter.getContext();
+    // check whether the original softmax axis is optimal (the inner most dimension in memory)
+    // if so, move the premute after and change the softmax to the correct axis under new order
+    const auto axis = origOp.getAxisInd();
+    const auto origMemOrder = DimsOrder::fromValue(origOp->getResult(0));
+    const auto origMemOrderVec = to_small_vector(origMemOrder.toPermutation() | transformed([](Dim dim) {
+                                                     return checked_cast<int64_t>(dim.ind());
+                                                 }));
+    if (axis != origMemOrderVec.back()) {
+        return matchFailed(rewriter, origOp, "the axis is not optimal for {0} at {1}", origOp->getName(),
+                           origOp->getLoc());
+    }
+
+    // get optimal order for softmax with new mem order
+    const auto newMemOrder = DimsOrder::fromValue(eltwiseOp->getResult(0));
+    const auto newMemOrderVec = to_small_vector(newMemOrder.toPermutation() | transformed([](Dim dim) {
+                                                    return checked_cast<int64_t>(dim.ind());
+                                                }));
+    const auto optimalAxisAttr = getIntAttr(ctx, newMemOrderVec.back());
+
+    // if there's shapecast between eltwise and softmax, we need to propagate the shapecast before the eltwise by
+    // adding shapecast for all inputs of the eltwise, and update the eltwise for the new inputs
+    rewriter.startOpModification(eltwiseOp);
+    if (hasShapeCastBetween) {
+        auto shapeCastOp = mlir::dyn_cast<IE::ShapeCastOp>(*eltwiseOp->getResult(0).getUsers().begin());
+        if (shapeCastOp == nullptr) {
+            return matchFailed(rewriter, shapeCastOp, "unexpected op (should be Shapecast) found: {0} at {1}",
+                               shapeCastOp->getName(), shapeCastOp->getLoc());
+        }
+        rewriter.setInsertionPoint(eltwiseOp);
+        for (auto& eltwiseOpOperand : eltwiseOp->getOpOperands()) {
+            auto newShapeCastOp = rewriter.create<IE::ShapeCastOp>(shapeCastOp->getLoc(), eltwiseOpOperand.get(),
+                                                                   shapeCastOp.getShapeAttr());
+            eltwiseOpOperand.set(newShapeCastOp.getResult());
+        }
+        vpux::inferReturnTypes(eltwiseOp, vpux::InferShapedTypeMode::ALL);
+    }
+    rewriter.setInsertionPointAfter(eltwiseOp);
+    auto newSoftMaxOp =
+            rewriter.create<IE::SoftMaxOp>(origOp->getLoc(), eltwiseOp->getResult(0), optimalAxisAttr, nullptr);
+    auto newPermuteCastOp =
+            rewriter.create<IE::PermuteCastOp>(permuteCastOp->getLoc(), newSoftMaxOp.getOutput(),
+                                               permuteCastOp.getDstOrderAttr(), permuteCastOp.getMemPermAttr());
+
+    rewriter.replaceOp(origOp, newPermuteCastOp);
+    rewriter.finalizeOpModification(eltwiseOp);
+
+    return mlir::success();
+}
+
+//
 // AdjustMemPermuteAroundOpPass
 //
 
@@ -366,6 +482,7 @@ void AdjustMemPermuteAroundOpPass::safeRunOnFunc() {
     patterns.add<AdjustForEltwise>(&ctx, _log);
     patterns.add<AdjustForTile>(&ctx, _log);
     patterns.add<AdjustForConvert>(&ctx, _log);
+    patterns.add<AdjustForSoftmax>(&ctx, _log);
     IE::MemPermuteOp::getCanonicalizationPatterns(patterns, &ctx);
 
     auto func = getOperation();

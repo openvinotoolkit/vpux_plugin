@@ -34,6 +34,17 @@ struct DefaultHWOptions : public IE::DefaultHWOptionsDialectBase, virtual vpux::
     BoolOption enableFusePermuteQuantizeExpand{*this, "fuse-permute-quantize-expand",
                                                llvm::cl::desc("Enable fuse-permute-quantize-expand pass"),
                                                llvm::cl::init(true)};
+    BoolOption mergeUnrolledMatmul{*this, "merge-unrolled-matmul", llvm::cl::desc("Enable merging urolled Matmul ops"),
+                                   llvm::cl::init(true)};
+
+    BoolOption enableRuntimeDequant{*this, "enable-runtime-dequant",
+                                    llvm::cl::desc("Enable runtime dequantization of asymmetricly quantized weight"),
+                                    llvm::cl::init(true)};
+    Int64Option runtimeDequantizationLimit{
+            *this, "runtime-dequantization-limit",
+            llvm::cl::desc("Lower limit on weight size for runtime dequantization"
+                           "Weights smaller than the limit will be statically dequantized"),
+            llvm::cl::init(524'288)};  // 512kb
 };
 
 //

@@ -55,6 +55,7 @@ void vpux::IE::buildAdjustForVPUPipeline(mlir::OpPassManager& pm, const AdjustFo
     pm.addPass(IE::createConvertGroupTransposedConvToTransposedConvPass(
             /*enableSEPTransposedConv=*/isOptionEnabled(options.enableSEPtrsOperations), log));
     pm.addPass(IE::createConvertGroupConvToConvPass(log));
+    pm.addPass(IE::createConvertLargeConvToMultiConvWithAddPass(log));
     pm.addPass(IE::createConvertUpsamplingToStridedConcatPass(log));
     pm.addPass(IE::createMergeWeightsSharedConvPass(log));
     pm.addPass(IE::createConvertReflectPadToSliceAndConcatPass(
@@ -88,6 +89,12 @@ void vpux::IE::buildOperationConversionPipeline(mlir::OpPassManager& pm, const I
     pm.addPass(IE::createMergeParallelFullyConnectedPass(log));
     pm.addPass(IE::createUnrollGroupQuantizePass(log));
     pm.addPass(IE::createUnrollFullyConnectedPass(log, options.accumulateMatmulWithDPU));
+    pm.addPass(IE::createConvertDynamicDequantizeToDequantizePass(log));
+    pm.addPass(IE::createMoveMultiplyPostOpPass(log));
+    pm.addPass(IE::createSwapOperationWithGatherPass(log));
+    if (options.mergeUnrolledMatmul) {
+        pm.addPass(IE::createMergeFullyConnectedPass(log));
+    }
     if (options.fuseScalesToAccumulate) {
         pm.addPass(IE::createFuseScalesToAccumulatePass(log));
     }

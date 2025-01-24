@@ -4,10 +4,12 @@
 //
 
 #include "vpux/compiler/dialect/const/utils/utils.hpp"
+#include "vpux/compiler/dialect/const/attributes/content.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 
+#include <mlir/IR/BuiltinAttributes.h>
 #include <mlir/IR/SymbolTable.h>
 
 namespace vpux::Const {
@@ -35,12 +37,12 @@ mlir::Value createZerosConstImpl(mlir::OpBuilder& builder, mlir::Location loc, T
         const auto quantizedTensorType = ensureRankedTensor(quantizedType);
         const auto zeroPoint = uniformElemType.getZeroPoint();
         if (uniformElemType.isSigned()) {
-            denseElementVal = mlir::DenseElementsAttr::get(quantizedTensorType, checked_cast<int8_t>(zeroPoint));
+            denseElementVal = createConstContent(quantizedTensorType, ArrayRef(checked_cast<int8_t>(zeroPoint)));
         } else {
-            denseElementVal = mlir::DenseElementsAttr::get(quantizedTensorType, checked_cast<uint8_t>(zeroPoint));
+            denseElementVal = createConstContent(quantizedTensorType, ArrayRef(checked_cast<uint8_t>(zeroPoint)));
         }
     } else {
-        denseElementVal = wrapData(ensureRankedTensor(type), 0.f);
+        denseElementVal = createConstContent(ensureRankedTensor(type), ArrayRef(0.f));
     }
 
     VPUX_THROW_WHEN(
@@ -63,16 +65,30 @@ mlir::Value createZerosConst(mlir::OpBuilder& builder, mlir::Location loc, mlir:
 mlir::Value createFloatConst(mlir::OpBuilder& builder, mlir::Location loc, mlir::RankedTensorType type,
                              ArrayRef<float> values) {
     const auto constShape = type.getShape();
+    const auto shapeTotalSize = vpux::details::calcTotalShapeSize(constShape);
+    VPUX_THROW_UNLESS(values.size() == 1 || shapeTotalSize == checked_cast<int64_t>(values.size()),
+                      "Create float Const failed with unexpect data size");
+
+    const auto denseElementVal = createConstContent(type, values);
+    VPUX_THROW_UNLESS(denseElementVal != nullptr, "Incompatible data type {0}, only float16 or float32 are supported",
+                      type.getElementType());
+
+    return builder.create<Const::DeclareOp>(loc, type, Const::ContentAttr::get(denseElementVal)).getOutput();
+}
+
+Const::ContentAttr createFloatContentAttr(mlir::OpBuilder&, mlir::Location, mlir::RankedTensorType type,
+                                          ArrayRef<float> values) {
+    const auto constShape = type.getShape();
     const auto shapeTotalSize =
             std::accumulate(constShape.begin(), constShape.end(), int64_t(1), std::multiplies<int64_t>());
     VPUX_THROW_UNLESS(values.size() == 1 || shapeTotalSize == checked_cast<int64_t>(values.size()),
                       "Create float Const failed with unexpect data size");
 
-    const auto denseElementVal = wrapData(type, values);
+    const auto denseElementVal = createConstContent(type, values);
     VPUX_THROW_UNLESS(denseElementVal != nullptr, "Incompatible data type {0}, only float16 or float32 are supported",
                       type.getElementType());
 
-    return builder.create<Const::DeclareOp>(loc, type, Const::ContentAttr::get(denseElementVal)).getOutput();
+    return Const::ContentAttr::get(denseElementVal);
 }
 
 bool hasNegativeValues(const Const::Content& content) {
@@ -92,27 +108,40 @@ mlir::Value buildWeightsConst(mlir::OpBuilder& builder, mlir::Location loc, mlir
     const auto origElemType = type.getElementType();
 
     mlir::Type filterElemType = mlir::Float16Type::get(ctx);
-    if (auto qInputElemType = origElemType.dyn_cast<mlir::quant::QuantizedType>()) {
+    if (const auto qInputElemType = mlir::dyn_cast<mlir::quant::QuantizedType>(origElemType)) {
         const auto scale = 1.0f;
         const auto zeroPoint = 0;
-        filterElemType = mlir::quant::UniformQuantizedType::get(0, getUInt8Type(ctx), mlir::Float16Type::get(ctx),
-                                                                scale, zeroPoint, std::numeric_limits<uint8_t>::min(),
-                                                                std::numeric_limits<uint8_t>::max());
+
+        if (vpux::isFloat8Quantized(qInputElemType)) {
+            filterElemType = mlir::quant::UniformQuantizedType::get(
+                    /*flags=*/0, /*storageType=*/qInputElemType.getStorageType(),
+                    /*expressedType=*/mlir::Float16Type::get(ctx),
+                    /*scale=*/scale, /*zeroPoint=*/zeroPoint, /*storageTypeMin=*/qInputElemType.getStorageTypeMin(),
+                    /*storageTypeMax=*/qInputElemType.getStorageTypeMax());
+
+        } else if (qInputElemType.getStorageType().isInteger(8)) {
+            filterElemType = mlir::quant::UniformQuantizedType::get(
+                    0, getUInt8Type(ctx), mlir::Float16Type::get(ctx), scale, zeroPoint,
+                    std::numeric_limits<uint8_t>::min(), std::numeric_limits<uint8_t>::max());
+
+        } else {
+            VPUX_THROW("Unsupported quantized storage type: {0}", qInputElemType.getStorageType());
+        }
     }
 
     const auto dataType = mlir::RankedTensorType::get(type.getShape(), mlir::Float32Type::get(ctx));
-    const auto dataAttr = mlir::DenseElementsAttr::get(dataType, values);
+    const auto dataAttr = createConstContent(dataType, values);
 
-    auto contentAttrSetup = Const::ContentAttr::transform(dataAttr);
+    Const::ContentSetup contentAttrSetup(dataType);
     VPUX_THROW_WHEN(!(mlir::isa<mlir::quant::QuantizedType, mlir::Float16Type>(origElemType)), "Unsupported type {0}",
                     origElemType);
     if (auto qElemType = filterElemType.dyn_cast<mlir::quant::QuantizedType>()) {
-        contentAttrSetup = contentAttrSetup.castElemType(getUInt8Type(ctx)).quantCast(qElemType);
+        contentAttrSetup = contentAttrSetup.castElemType(qElemType);
     } else if (origElemType.isa<mlir::Float16Type>()) {
         contentAttrSetup = contentAttrSetup.castElemType(mlir::Float16Type::get(ctx));
     }
     contentAttrSetup = contentAttrSetup.reorder(mlir::cast<NDTypeInterface>(type).getDimsOrder());
-    auto contentAttr = contentAttrSetup.get();
+    auto contentAttr = Const::ContentAttr::get(dataAttr, std::move(contentAttrSetup));
 
     return builder.create<Const::DeclareOp>(loc, contentAttr.getType(), std::move(contentAttr)).getOutput();
 }

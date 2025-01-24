@@ -9,6 +9,7 @@
 #include "vpux/compiler/dialect/IE/utils/scale_shift_utils.hpp"
 #include "vpux/compiler/dialect/const/attributes/content.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
+#include "vpux/compiler/dialect/const/utils/utils.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 
@@ -73,21 +74,21 @@ mlir::LogicalResult ConvertScaleShiftToDWPass::ScaleShiftOpConverter::matchAndRe
     const SmallVector<int64_t> weightShape = {outShape[Dims4D::Act::C], 1, kernelSize, kernelSize};
     mlir::Value weights;
 
-    auto createConstOp = [&](SmallVector<int64_t> shape, vpux::type::float16 value) -> Const::DeclareOp {
+    auto createConstOp = [&](SmallVector<int64_t> shape, vpux::type::float16 value) -> mlir::Value {
         const auto elemType = origOp.getOutput().getType().cast<vpux::NDTypeInterface>().getElementType();
         auto shape1x1x1x1 = SmallVector<int64_t>(shape.size(), 1);
         const auto dataStorageType = mlir::RankedTensorType::get(shape1x1x1x1, elemType);
-        const auto dataType = mlir::RankedTensorType::get(shape, elemType);
 
-        const auto denseElementVal = mlir::DenseElementsAttr::get(dataStorageType, value);
-        auto contentAttrSetup = Const::ContentAttr::transform(denseElementVal);
-
-        for (auto dim : enumerate(shape)) {
-            if (dim.value() > 1) {
-                contentAttrSetup = contentAttrSetup.broadcast(Dim(dim.index()), dim.value());
-            }
-        }
-        return rewriter.create<Const::DeclareOp>(origOp.getLoc(), dataType, contentAttrSetup.get());
+        return Const::createConst(rewriter, origOp.getLoc(), dataStorageType, ArrayRef(value),
+                                  [&](Const::ContentSetup& contentAttrSetup) {
+                                      for (auto dim : enumerate(shape)) {
+                                          if (dim.value() > 1) {
+                                              contentAttrSetup =
+                                                      contentAttrSetup.broadcast(Dim(dim.index()), dim.value());
+                                          }
+                                      }
+                                      return std::move(contentAttrSetup);
+                                  });
     };
 
     if (origOp.getWeights() != nullptr) {
@@ -96,8 +97,7 @@ mlir::LogicalResult ConvertScaleShiftToDWPass::ScaleShiftOpConverter::matchAndRe
         auto dwConvFilter = rewriter.create<IE::ReshapeOp>(origOp->getLoc(), multiply, nullptr, false, weightShapeAttr);
         weights = dwConvFilter.getOutput();
     } else {
-        auto dwConvFilter = createConstOp(weightShape, 1.0f);
-        weights = dwConvFilter.getOutput();
+        weights = createConstOp(weightShape, 1.0f);
         auto inputFq = origOp.getInput().getDefiningOp<IE::FakeQuantizeOp>();
         if (inputFq != nullptr) {
             // the created FQ is artificial, levels are set to 255 in correlation with FQ range from 0.0f to 254.0f (255
@@ -111,9 +111,21 @@ mlir::LogicalResult ConvertScaleShiftToDWPass::ScaleShiftOpConverter::matchAndRe
         }
     }
 
-    rewriter.replaceOpWithNewOp<IE::GroupConvolutionOp>(origOp, origOp.getInput(), weights, origOp.getBiases(),
-                                                        stridesAttr, padBeginAttr, padEndAttr, dilationsAttr, groupAttr,
-                                                        nullptr, nullptr, nullptr, nullptr);
+    // if ScaleShift has biases with a shape 1x1x1x1 it should be expanded to output channels
+    mlir::Value biases = origOp.getBiases();
+    if (biases != nullptr) {
+        auto origBiasShape = getShape(biases).toValues();
+        if (origBiasShape[Dims4D::Act::C] == 1) {
+            const SmallVector<int64_t> biasShape = {1, outShape[Dims4D::Act::C], kernelSize, kernelSize};
+            const auto biaseShapeAttr = getIntArrayAttr(origOp.getContext(), biasShape);
+            auto dwConvBias = rewriter.create<IE::ReshapeOp>(origOp->getLoc(), biases, nullptr, false, biaseShapeAttr);
+            biases = dwConvBias.getOutput();
+        }
+    }
+
+    rewriter.replaceOpWithNewOp<IE::GroupConvolutionOp>(origOp, origOp.getInput(), weights, biases, stridesAttr,
+                                                        padBeginAttr, padEndAttr, dilationsAttr, groupAttr, nullptr,
+                                                        nullptr, nullptr, nullptr);
 
     return mlir::success();
 }

@@ -4,11 +4,16 @@
 //
 
 #include "vpux/compiler/NPU37XX/dialect/VPU/transforms/passes.hpp"
+#include "vpux/compiler/core/layers.hpp"
+#include "vpux/compiler/core/type_interfaces.hpp"
+#include "vpux/compiler/dialect/IE/utils/quantization.hpp"
 #include "vpux/compiler/dialect/IE/utils/reshape_utils.hpp"
 #include "vpux/compiler/dialect/IE/utils/resources.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_matmul_utils.hpp"
+#include "vpux/compiler/dialect/VPU/utils/ppe_version_config.hpp"
+#include "vpux/compiler/utils/factors.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 
 using namespace vpux;
@@ -200,23 +205,13 @@ mlir::LogicalResult AdjustShapeForSoftmax::matchAndRewrite(VPU::SoftMaxOp softma
     return mlir::success();
 }
 
-std::optional<Dim> getHighestNonOneDim(ShapeRef shape, DimsOrder order) {
-    for (auto i : irange(order.numDims())) {
-        auto dim = order.dimAt(i);
-        if (shape[dim] > 1) {
-            return dim;
-        }
-    }
-    return std::nullopt;
-}
-
 mlir::LogicalResult adjustForMultiShaveOptGeneric(Shape& shape, const DimsOrder& order, const int64_t numActShaves) {
     // only support NCHW and NHWC layout
     if (order != DimsOrder::NCHW && order != DimsOrder::NHWC) {
         return mlir::failure();
     }
 
-    const auto origTileDim = getHighestNonOneDim(shape, order);
+    const auto origTileDim = getHighestNonTrivialDim(shape, order);
     // impossible to adjust for shape 1x1x1x1
     if (!origTileDim.has_value()) {
         return mlir::failure();
@@ -283,6 +278,17 @@ mlir::LogicalResult AdjustShapeForGelu::matchAndRewrite(VPU::GeluOp geluOp, mlir
     const auto numActShaves = IE::getTotalNumOfEngines(geluOp, VPU::ExecutorKind::SHAVE_ACT);
     const auto multiShaveOpt = adjustForMultiShaveOpt(shape, origIOOrder, numActShaves);
     if (mlir::failed(multiShaveOpt)) {
+        return mlir::failure();
+    }
+
+    auto dimN = origIOOrder.dimAt(0);
+    auto nonNDims = irange(static_cast<size_t>(1), origIOOrder.numDims());
+    auto anyNonNDimIsGreaterThanShaveNum = llvm::any_of(nonNDims, [&](int64_t idx) {
+        return origIOShape[origIOOrder.dimAt(idx)] >= numActShaves;
+    });
+    if (origIOShape[dimN] == 1 && anyNonNDimIsGreaterThanShaveNum) {
+        _log.nest(1).trace("MultiShaveOpt is not required since some dim can support multi shave tiling at {1}",
+                           geluOp->getLoc());
         return mlir::failure();
     }
 
@@ -595,7 +601,7 @@ mlir::LogicalResult AdjustShapeForNCEPermute::matchAndRewrite(VPU::NCEPermuteOp 
     auto newOutputType = origOutputType.changeShape(targetShape);
     auto newNCEPermuteOp = rewriter.create<VPU::NCEPermuteOp>(
             origOp->getLoc(), newOutputType, inShapeCast.getResult(), origOp.getExpandedChannelsAttr(),
-            origOp.getDstElemTypeAttr(), origOp.getDstOrderAttr(), origOp.getOpaquePpeAttr(),
+            origOp.getDstElemTypeAttr(), origOp.getDstOrderAttr(), origOp.getPpeAttr(),
             origOp.getMultiClusterStrategyAttr());
 
     // Reshape output
@@ -709,7 +715,8 @@ mlir::LogicalResult AdjustShapeForNCEMatMul::matchAndRewrite(VPU::NCEMatMulOp or
 
     auto newMatMulOp = rewriter.create<VPU::NCEMatMulOp>(
             origOp.getLoc(), outputType, newInput.getOutput(), origOp.getWeights(), origOp.getWeightsTable(),
-            origOp.getStridesAttr(), origOp.getPadAttr(), origOp.getOpaquePpeAttr(), origOp.getRawFilterShapeAttr(),
+            origOp.getStridesAttr(), origOp.getPadAttr(), origOp.getPpeAttr(), origOp.getMpeEngineAttr(),
+            origOp.getRawFilterShapeAttr(),
             /* multiClusterStrategyAttr = */ nullptr);
 
     const auto outShape = getShape(origOp.getOutput()).toValues();
@@ -721,6 +728,113 @@ mlir::LogicalResult AdjustShapeForNCEMatMul::matchAndRewrite(VPU::NCEMatMulOp or
 
     rewriter.replaceOpWithNewOp<VPU::AffineReshapeOp>(
             origOp, newMatMulOp.getOutput(), getIntArrayOfArray(ctx, outDimMapping), getIntArrayAttr(ctx, outShape));
+
+    return mlir::success();
+}
+
+//
+// AdjustShapeForNCEAvgPool
+//
+
+class AdjustShapeForNCEAvgPool final : public mlir::OpRewritePattern<VPU::NCEAveragePoolOp> {
+public:
+    AdjustShapeForNCEAvgPool(mlir::MLIRContext* ctx, Logger log)
+            : mlir::OpRewritePattern<VPU::NCEAveragePoolOp>(ctx), _log(log) {
+        this->setDebugName("AdjustShapeForNCEAvgPool");
+    }
+
+private:
+    mlir::LogicalResult matchAndRewrite(VPU::NCEAveragePoolOp origOp, mlir::PatternRewriter& rewriter) const final;
+
+private:
+    Logger _log;
+};
+
+bool isEltwisePooling(VPU::NCEAveragePoolOp poolingOp) {
+    const auto inputType = mlir::cast<NDTypeInterface>(poolingOp.getInput().getType());
+    const auto outputType = mlir::cast<NDTypeInterface>(poolingOp.getOutput().getType());
+    if (inputType.getDimsOrder() != outputType.getDimsOrder()) {
+        return false;
+    }
+
+    const auto kernelSize = parseIntArrayAttr<int64_t>(poolingOp.getKernelSize());
+    const auto strides = parseIntArrayAttr<int64_t>(poolingOp.getStrides());
+
+    const auto paddingAttr = poolingOp.getPad();
+    const auto padTop = paddingAttr.getTop().getValue().getSExtValue();
+    const auto padBottom = paddingAttr.getBottom().getValue().getSExtValue();
+    const auto padLeft = paddingAttr.getLeft().getValue().getSExtValue();
+    const auto padRight = paddingAttr.getRight().getValue().getSExtValue();
+    auto noPadding = (padTop == 0 && padBottom == 0 && padLeft == 0 && padRight == 0);
+
+    const auto isOne = [](const int64_t val) -> bool {
+        return val == 1;
+    };
+
+    return llvm::all_of(kernelSize, isOne) && llvm::all_of(strides, isOne) && noPadding;
+}
+
+mlir::LogicalResult AdjustShapeForNCEAvgPool::matchAndRewrite(VPU::NCEAveragePoolOp origOp,
+                                                              mlir::PatternRewriter& rewriter) const {
+    if (!isEltwisePooling(origOp)) {
+        return mlir::failure();
+    }
+
+    if (IE::isPerAxisQuant(origOp.getInput()) || IE::isPerAxisQuant(origOp.getInput())) {
+        return mlir::failure();
+    }
+
+    _log.trace("[{0}] Got '{1}' at '{2}'", getDebugName(), origOp->getName(), origOp->getLoc());
+
+    auto ctx = origOp->getContext();
+
+    const auto inputShape = getShape(origOp.getInput());
+    if (inputShape.size() != 4) {
+        return matchFailed(rewriter, origOp, "Only NCE AveragePoolOp with a 4D shape is supported");
+    }
+
+    auto needToAdjustShape = inputShape[Dims4D::Act::N] > 1;
+    if (!needToAdjustShape) {
+        return matchFailed(rewriter, origOp, "No need for shape adjustment for NCE AveragePoolOp");
+    }
+
+    auto totalShapeSize = inputShape.totalSize();
+    if (totalShapeSize % VPU::NCEInvariant::VPU_CHANNEL_ALIGNMENT != 0) {
+        return mlir::failure();
+    }
+
+    const auto remainingShapeSize = totalShapeSize / VPU::NCEInvariant::VPU_CHANNEL_ALIGNMENT;
+    const auto factorsList = vpux::getFactorsList(remainingShapeSize);
+    if (factorsList.empty()) {
+        return matchFailed(rewriter, origOp, "Failed to get factors list for {0}", remainingShapeSize);
+    }
+
+    auto newInShape = inputShape.toValues();
+    newInShape[Dims4D::Act::N] = 1;
+    newInShape[Dims4D::Act::C] = VPU::NCEInvariant::VPU_CHANNEL_ALIGNMENT;
+    newInShape[Dims4D::Act::H] = factorsList.back().first;
+    newInShape[Dims4D::Act::W] = factorsList.back().second;
+
+    _log.debug("Adjust shape for {0} to shape {1}", origOp, newInShape);
+
+    // Reshape input
+    auto inShapeCast =
+            rewriter.create<VPU::ShapeCastOp>(origOp->getLoc(), origOp.getInput(), getIntArrayAttr(ctx, newInShape));
+
+    // Create new pooling
+    auto origOutputType = mlir::cast<NDTypeInterface>(origOp.getOutput().getType());
+    auto newOutputType = origOutputType.changeShape(newInShape);
+    auto newPoolOp = rewriter.create<VPU::NCEAveragePoolOp>(
+            origOp->getLoc(), newOutputType, inShapeCast.getResult(), origOp.getKernelSizeAttr(),
+            origOp.getStridesAttr(), origOp.getPadAttr(), origOp.getPpeAttr(), origOp.getMultiClusterStrategyAttr(),
+            origOp.getOutputChannelsAttr());
+
+    // Reshape output
+    auto origOutputShape = getShape(origOp.getOutput());
+    auto outShapeCast = rewriter.create<VPU::ShapeCastOp>(origOp->getLoc(), newPoolOp.getOutput(),
+                                                          getIntArrayAttr(ctx, origOutputShape));
+
+    rewriter.replaceOp(origOp, outShapeCast.getResult());
 
     return mlir::success();
 }
@@ -768,6 +882,7 @@ void AdjustForOptimizedLayersPass::safeRunOnFunc() {
 
     patterns.add<AdjustShapeForNCEPermute>(&ctx, _log);
     patterns.add<AdjustShapeForNCEMatMul>(&ctx, _log);
+    patterns.add<AdjustShapeForNCEAvgPool>(&ctx, _log);
 
     if (mlir::failed(applyPatternsAndFoldGreedily(func, std::move(patterns), getDefaultGreedyRewriteConfig()))) {
         signalPassFailure();

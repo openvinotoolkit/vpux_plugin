@@ -58,7 +58,8 @@ bool isLegalOpToConvertToSliceAndConv(IE::InterpolateOp op, LogCb logCb) {
     const auto outShape = getShape(op.getOutput());
     const auto inputType = op.getInput().getType().cast<vpux::NDTypeInterface>();
 
-    if (!VPU::NCEInterpolateOp::isSupported(op, logCb, /*checkLayout=*/false, /*checkChannelAlignment=*/false)) {
+    if (!VPU::NCEInterpolateOp::isSupported(op, logCb, /*checkLayout=*/false, /*checkChannelAlignment=*/false,
+                                            /*checkBatch=*/false)) {
         return false;
     }
 
@@ -222,7 +223,7 @@ mlir::LogicalResult SplitBilinerIntoHAndWPass::BilinearInterpolateOpConverter::m
             appendLoc(loc, "_interpolateOnH"), interpolateHOutputType, origOp.getInput(), origOp.getSizes(),
             origOp.getScales(), origOp.getAxes(), newSizesAttrAttr, newScalesAttrAttr, origOp.getAxesAttrAttr(),
             origOp.getTileOffsetAttrAttr(), origOp.getInitialInputDimsAttrAttr(), origOp.getInitialOutputDimsAttrAttr(),
-            origOp.getAttr());
+            origOp.getAttr(), origOp.getOutputChannelsAttr());
 
     auto interpOnWLoc = appendLoc(loc, "_interpolateOnW");
 

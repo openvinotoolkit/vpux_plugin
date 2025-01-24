@@ -81,26 +81,42 @@ def VPURegMapped_TaskOpInterface : OpInterface<"TaskOpInterface"> {
             }]
         >,
         InterfaceMethod<
-            "Set the state of the op to specify that it's previous task hard links to this task",
-            "void", "enableHardLink", (ins ), [{}], [{
-                $_op.getOperation()->setAttr("HardLinkedAttrName", mlir::UnitAttr::get($_op.getOperation()->getContext()));
+            "Link the op to previous task in FIFO",
+            "void", "linkToPreviousTask", (ins ), [{}], [{
+                auto ctx = $_op.getOperation()->getContext();
+                auto previousTaskIndex = mlir::cast<vpux::VPURegMapped::IndexType>($_op.getPreviousTask().getType());
+                auto index = vpux::VPURegMapped::IndexTypeAttr::get(ctx, previousTaskIndex);
+                $_op.getOperation()->setAttr("taskLinkAttrName", index);
             }]
         >,
         InterfaceMethod<
-            "Disable the hardLinked state of this task",
-            "void", "disableHardLink", (ins), [{}], [{
-                $_op.getOperation()->removeAttr("HardLinkedAttrName");
+            "Link the op to given task",
+            "void", "linkToTask", (ins "vpux::VPURegMapped::IndexTypeAttr":$task), [{}], [{
+                $_op.getOperation()->setAttr("taskLinkAttrName", task);
             }]
         >,
         InterfaceMethod<
-            "Returns true if this op is hard-linked by it's previous task",
-            "bool", "isHardLinked", (ins) , [{}], [{
-                return $_op.getOperation()->hasAttr("HardLinkedAttrName");
+            "Unlink the op if it was linked to a task. Do nothing otherwise.",
+            "void", "unlinkFromTask", (ins), [{}], [{
+                if (!$_op.getTaskLink().has_value()) {
+                    return;
+                }
+                $_op.getOperation()->removeAttr("taskLinkAttrName");
             }]
         >,
         InterfaceMethod<
-            "Returns true if the underlying Op supports hard linking capabilities",
-            "bool", "supportsHardLink", (ins), [{}], [{
+            "Returns index of a task the op is linked to or empty optional otherwise.",
+            "std::optional<vpux::VPURegMapped::IndexType>", "getTaskLink", (ins) , [{}], [{
+                auto operation = $_op.getOperation();
+                if (!operation->hasAttr("taskLinkAttrName")) {
+                    return std::nullopt;
+                }
+                return mlir::cast<vpux::VPURegMapped::IndexTypeAttr>(operation->getAttr("taskLinkAttrName")).getIndex();
+            }]
+        >,
+        InterfaceMethod<
+            "Returns true if the op supports task linking",
+            "bool", "supportsTaskLink", (ins), [{}], [{
                 return false;
             }]
         >

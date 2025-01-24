@@ -38,23 +38,9 @@ bool vpux::VPU::isNCEEltwiseSupported(mlir::Operation* op, vpux::NDTypeInterface
         }
     } else if (input1ElemType.isa<mlir::quant::UniformQuantizedType>() &&
                input2ElemType.isa<mlir::quant::UniformQuantizedType>()) {
-        auto qInput1 = input1ElemType.cast<mlir::quant::UniformQuantizedType>();
-        auto qInput2 = input2ElemType.cast<mlir::quant::UniformQuantizedType>();
-
-        if (qInput1.getExpressedType() != qInput2.getExpressedType() ||
-            qInput1.getStorageType() != qInput2.getStorageType() || qInput1.isSigned() != qInput2.isSigned()) {
-            logCb(formatv("Mismatch in inputs quantization parameters"));
-            return false;
-        }
-
-        if (!allowDifferentZp && qInput1.getZeroPoint() != qInput2.getZeroPoint()) {
-            logCb(formatv("Mismatch in inputs zero points"));
-            return false;
-        }
-
-        if (!allowDifferentScales &&
-            !isFloatEqual(static_cast<float>(qInput1.getScale()), static_cast<float>(qInput2.getScale()))) {
-            logCb(formatv("Mismatch in inputs quantization scales"));
+        const auto eltwiseType = vpux::VPU::decodeNceEltwiseType(op);
+        if (!isSupportedEltwiseQuantization(input1ElemType, input2ElemType, allowDifferentScales, allowDifferentZp,
+                                            eltwiseType, logCb)) {
             return false;
         }
     } else {
@@ -91,4 +77,20 @@ bool vpux::VPU::isNCEEltwiseSupported(mlir::Operation* op, vpux::NDTypeInterface
     }
 
     return true;
+}
+
+VPU::EltwiseType VPU::decodeNceEltwiseType(mlir::Operation* operation) {
+    if (auto nceEltwise = mlir::dyn_cast<VPU::NCEEltwiseOp>(operation)) {
+        return nceEltwise.getOpType();
+    } else if (mlir::isa<VPU::DesparsifyOp>(operation)) {
+        return VPU::EltwiseType::ADD;
+    } else if (mlir::isa<IE::AddOp>(operation)) {
+        return VPU::EltwiseType::ADD;
+    } else if (mlir::isa<IE::SubtractOp>(operation)) {
+        return VPU::EltwiseType::SUBTRACT;
+    } else if (mlir::isa<IE::MultiplyOp>(operation)) {
+        return VPU::EltwiseType::MULTIPLY;
+    }
+
+    VPUX_THROW("Unsupported NCE eltwise type: {0}", operation->getName());
 }

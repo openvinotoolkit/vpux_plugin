@@ -160,6 +160,36 @@ DistributionMode vpux::VPU::getSWInputTensorDistributionMode(VPU::AccumulateOp a
     }
 }
 
+DistributionMode vpux::VPU::getSWInputTensorDistributionMode(VPU::DynamicDequantizeOp dynamicDequantizeOp,
+                                                             VPU::MultiClusterStrategy strategy,
+                                                             vpux::NDTypeInterface inputType) {
+    // Scale and Zp of DynamicDequantizeOp may need broadcast
+    // Broadcast dim can't be segmented.
+    auto isTileAtBroadCastAxis = [&](vpux::Dim tileAxis) {
+        const auto outputShape = getShape(dynamicDequantizeOp->getResult(0));
+        const auto inputShape = inputType.getShape();
+        VPUX_THROW_UNLESS(inputShape.size() == outputShape.size(),
+                          "Input tensor rank {0} is mismatched with Output tensor rank {1}", inputShape.size(),
+                          outputShape.size());
+        return (outputShape[tileAxis] != inputShape[tileAxis]) && (inputShape[tileAxis] == 1);
+    };
+
+    switch (strategy) {
+    case VPU::MultiClusterStrategy::SplitOverWidth:
+        return isTileAtBroadCastAxis(Dims4D::Act::W) ? DistributionMode::DUPLICATED : DistributionMode::SEGMENTED;
+    case VPU::MultiClusterStrategy::SplitOverHeight:
+        return isTileAtBroadCastAxis(Dims4D::Act::H) ? DistributionMode::DUPLICATED : DistributionMode::SEGMENTED;
+    case VPU::MultiClusterStrategy::SplitOverKernel:
+        return isTileAtBroadCastAxis(Dims4D::Act::C) ? DistributionMode::DUPLICATED : DistributionMode::SEGMENTED;
+    case VPU::MultiClusterStrategy::Clustering:
+        return DistributionMode::DUPLICATED;
+    default:
+        VPUX_THROW("{0} is an invalid multi-cluster strategy, unable to determine the distribution mode for the "
+                   "activation tensor",
+                   strategy);
+    }
+}
+
 DistributionMode vpux::VPU::getSWInputTensorDistributionMode(VPU::DetectionOutputSortOp /*op*/,
                                                              VPU::MultiClusterStrategy strategy,
                                                              vpux::NDTypeInterface /*inputType*/) {
@@ -282,6 +312,40 @@ DistributionMode vpux::VPU::getSWInputTensorDistributionMode(VPU::GatherOp op, V
     }
 }
 
+DistributionMode vpux::VPU::getSWInputTensorDistributionMode(VPU::GatherElementsOp, VPU::MultiClusterStrategy strategy,
+                                                             vpux::NDTypeInterface) {
+    // GatherElementsOp with 4D Input, Indices, and Output. The data structures for inputs and indices must adhere to
+    // the following configurations:
+    // [1, DataBeforeAxisRange, IndicesRange, DataAfterAxisRange]
+    // If 'SplitOverKernel' and 'SplitOverWidth' are enabled, the input and indices are split.
+    switch (strategy) {
+    case VPU::MultiClusterStrategy::SplitOverKernel:
+    case VPU::MultiClusterStrategy::SplitOverWidth:
+        return DistributionMode::SEGMENTED;
+    case VPU::MultiClusterStrategy::Clustering:
+        return DistributionMode::DUPLICATED;
+    default:
+        VPUX_THROW("{0} is an invalid multi-cluster strategy, unable to determine the distribution mode for the "
+                   "activation tensor",
+                   strategy);
+    }
+}
+
+DistributionMode vpux::VPU::getSWInputTensorDistributionMode(VPU::RMSOp op, VPU::MultiClusterStrategy strategy,
+                                                             vpux::NDTypeInterface inputType) {
+    const auto isInputTensor = inputType.getShape() == getShape(op.getInput());
+
+    switch (strategy) {
+    case VPU::MultiClusterStrategy::SplitOverKernel:
+    case VPU::MultiClusterStrategy::SplitOverHeight:
+        return isInputTensor ? DistributionMode::SEGMENTED : DistributionMode::DUPLICATED;
+    default:
+        VPUX_THROW("{0} is an invalid multi-cluster strategy, unable to determine the distribution mode for the "
+                   "activation tensor",
+                   strategy);
+    }
+}
+
 DistributionMode vpux::VPU::getSWInputTensorDistributionMode(VPU::ClusteredOpInterface clusteredOp,
                                                              VPU::MultiClusterStrategy strategy,
                                                              vpux::NDTypeInterface inputType) {
@@ -290,10 +354,11 @@ DistributionMode vpux::VPU::getSWInputTensorDistributionMode(VPU::ClusteredOpInt
                 return getSWInputTensorDistributionMode(interpolateOp, strategy, inputType);
             })
             .Case<VPU::MultiplyOp, VPU::DivideOp, VPU::PowerOp, VPU::MaximumOp, VPU::MinimumOp, VPU::GreaterOp,
-                  VPU::LessOp, VPU::EqualOp, VPU::AndOp, VPU::SubtractOp, VPU::AddOp, VPU::FloorOp, VPU::FakeQuantizeOp,
-                  VPU::SelectOp, VPU::RoundOp, VPU::SinOp, VPU::CosOp, VPU::ExpOp>([&](mlir::Operation* eltwiseOp) {
-                return getSWInputTensorDistributionMode(eltwiseOp, strategy, inputType);
-            })
+                  VPU::LessOp, VPU::EqualOp, VPU::AndOp, VPU::SubtractOp, VPU::AddOp, VPU::FloorOp, VPU::CeilingOp,
+                  VPU::FakeQuantizeOp, VPU::SelectOp, VPU::RoundOp, VPU::SinOp, VPU::CosOp, VPU::ExpOp, VPU::MishOp>(
+                    [&](mlir::Operation* eltwiseOp) {
+                        return getSWInputTensorDistributionMode(eltwiseOp, strategy, inputType);
+                    })
             .Case<VPU::PReluOp>([&](VPU::PReluOp preluOp) {
                 return getSWInputTensorDistributionMode(preluOp, strategy, inputType);
             })
@@ -319,6 +384,15 @@ DistributionMode vpux::VPU::getSWInputTensorDistributionMode(VPU::ClusteredOpInt
                 return getSWInputTensorDistributionMode(op, strategy, inputType);
             })
             .Case<VPU::GatherOp>([&](VPU::GatherOp op) {
+                return getSWInputTensorDistributionMode(op, strategy, inputType);
+            })
+            .Case<VPU::GatherElementsOp>([&](VPU::GatherElementsOp op) {
+                return getSWInputTensorDistributionMode(op, strategy, inputType);
+            })
+            .Case<VPU::DynamicDequantizeOp>([&](VPU::DynamicDequantizeOp dynamicDequantizeOp) {
+                return getSWInputTensorDistributionMode(dynamicDequantizeOp, strategy, inputType);
+            })
+            .Case<VPU::RMSOp>([&](VPU::RMSOp op) {
                 return getSWInputTensorDistributionMode(op, strategy, inputType);
             })
             .Default([&](mlir::Operation*) {
@@ -507,6 +581,40 @@ SmallVector<int64_t> vpux::VPU::getSWInputTensorNumTiles(VPU::AccumulateOp accum
     }
 }
 
+SmallVector<int64_t> vpux::VPU::getSWInputTensorNumTiles(VPU::DynamicDequantizeOp dynamicDequantizeOp,
+                                                         int64_t numClustersAvailableForCompilation,
+                                                         VPU::MultiClusterStrategy strategy,
+                                                         vpux::NDTypeInterface inputType) {
+    const auto distributionMode = VPU::getSWInputTensorDistributionMode(dynamicDequantizeOp, strategy, inputType);
+    if (distributionMode == VPU::DistributionMode::DUPLICATED) {
+        return {1, 1, 1, 1};
+    }
+
+    switch (strategy) {
+    case VPU::MultiClusterStrategy::Clustering:
+        return {1, 1, 1, 1};
+    case VPU::MultiClusterStrategy::SplitOverHeight: {
+        const auto height = inputType.getShape()[Dims4D::Act::H];
+        const auto clusters = std::min(numClustersAvailableForCompilation, height);
+        return {1, 1, clusters, 1};
+    }
+    case VPU::MultiClusterStrategy::SplitOverWidth: {
+        const auto width = inputType.getShape()[Dims4D::Act::W];
+        const auto clusters = std::min(numClustersAvailableForCompilation, width);
+        return {1, 1, 1, clusters};
+    }
+    case VPU::MultiClusterStrategy::SplitOverKernel: {
+        const auto channels = inputType.getShape()[Dims4D::Act::C];
+        const auto clusters = std::min(numClustersAvailableForCompilation, channels);
+        return {1, clusters, 1, 1};
+    }
+    default:
+        VPUX_THROW("{0} is an invalid multi-cluster strategy, unable to determine the number of tiles for the "
+                   "activation tensor",
+                   strategy);
+    }
+}
+
 SmallVector<int64_t> vpux::VPU::getSWInputTensorNumTiles(VPU::DetectionOutputSortOp /*op*/,
                                                          int64_t numClustersAvailableForCompilation,
                                                          VPU::MultiClusterStrategy strategy,
@@ -585,6 +693,52 @@ SmallVector<int64_t> vpux::VPU::getSWInputTensorNumTiles(VPU::GatherOp op, int64
     }
 }
 
+SmallVector<int64_t> vpux::VPU::getSWInputTensorNumTiles(VPU::GatherElementsOp,
+                                                         int64_t numClustersAvailableForCompilation,
+                                                         VPU::MultiClusterStrategy strategy, vpux::NDTypeInterface) {
+    // GatherElementsOp with 4D Input, Indices, and Output. The data structures for inputs and indices must adhere to
+    // the following configurations:
+    // [1, DataBeforeAxisRange, IndicesRange, DataAfterAxisRange]
+    // If 'SplitOverKernel' and 'SplitOverWidth' are enabled:
+    //      - The Input/Indice are split, maintaining consistency with the 'C' or 'W'
+    switch (strategy) {
+    case VPU::MultiClusterStrategy::SplitOverKernel: {
+        return SmallVector<int64_t>{1, numClustersAvailableForCompilation, 1, 1};
+    case VPU::MultiClusterStrategy::SplitOverWidth:
+        return SmallVector<int64_t>{1, 1, 1, numClustersAvailableForCompilation};
+    case VPU::MultiClusterStrategy::Clustering:
+        return {1, 1, 1, 1};
+    default:
+        VPUX_THROW("{0} is an invalid multi-cluster strategy, unable to determine the number of tiles for the "
+                   "activation tensor",
+                   strategy);
+    }
+    }
+}
+
+SmallVector<int64_t> vpux::VPU::getSWInputTensorNumTiles(VPU::RMSOp op, int64_t numClustersAvailableForCompilation,
+                                                         VPU::MultiClusterStrategy strategy,
+                                                         vpux::NDTypeInterface inputType) {
+    const auto distributionMode = VPU::getSWInputTensorDistributionMode(op, strategy, inputType);
+
+    switch (strategy) {
+    case VPU::MultiClusterStrategy::SplitOverHeight: {
+        return distributionMode == VPU::DistributionMode::DUPLICATED
+                       ? SmallVector<int64_t>{1, 1, 1, 1}
+                       : SmallVector<int64_t>{1, 1, numClustersAvailableForCompilation, 1};
+    }
+    case VPU::MultiClusterStrategy::SplitOverKernel: {
+        return distributionMode == VPU::DistributionMode::DUPLICATED
+                       ? SmallVector<int64_t>{1, 1, 1, 1}
+                       : SmallVector<int64_t>{1, numClustersAvailableForCompilation, 1, 1};
+    }
+    default:
+        VPUX_THROW("{0} is an invalid multi-cluster strategy, unable to determine the number of tiles for the "
+                   "activation tensor",
+                   strategy);
+    }
+}
+
 SmallVector<int64_t> vpux::VPU::getSWInputTensorNumTiles(VPU::ClusteredOpInterface clusteredOp,
                                                          int64_t numClustersAvailableForCompilation,
                                                          VPU::MultiClusterStrategy strategy,
@@ -595,11 +749,10 @@ SmallVector<int64_t> vpux::VPU::getSWInputTensorNumTiles(VPU::ClusteredOpInterfa
             })
             .Case<VPU::MultiplyOp, VPU::DivideOp, VPU::PowerOp, VPU::MaximumOp, VPU::MinimumOp, VPU::PReluOp,
                   VPU::GreaterOp, VPU::LessOp, VPU::EqualOp, VPU::AndOp, VPU::SubtractOp, VPU::AddOp, VPU::FloorOp,
-                  VPU::FakeQuantizeOp, VPU::SelectOp, VPU::RoundOp, VPU::SinOp, VPU::CosOp, VPU::ExpOp>(
-                    [&](mlir::Operation* eltwiseOp) {
-                        return getSWInputTensorNumTiles(eltwiseOp, numClustersAvailableForCompilation, strategy,
-                                                        inputType);
-                    })
+                  VPU::CeilingOp, VPU::FakeQuantizeOp, VPU::SelectOp, VPU::RoundOp, VPU::SinOp, VPU::CosOp, VPU::ExpOp,
+                  VPU::MishOp>([&](mlir::Operation* eltwiseOp) {
+                return getSWInputTensorNumTiles(eltwiseOp, numClustersAvailableForCompilation, strategy, inputType);
+            })
             .Case<VPU::AccumulateOp>([&](VPU::AccumulateOp accumulateOp) {
                 return getSWInputTensorNumTiles(accumulateOp, numClustersAvailableForCompilation, strategy, inputType);
             })
@@ -623,6 +776,16 @@ SmallVector<int64_t> vpux::VPU::getSWInputTensorNumTiles(VPU::ClusteredOpInterfa
                 return getSWInputTensorNumTiles(op, numClustersAvailableForCompilation, strategy, inputType);
             })
             .Case<VPU::GatherOp>([&](VPU::GatherOp op) {
+                return getSWInputTensorNumTiles(op, numClustersAvailableForCompilation, strategy, inputType);
+            })
+            .Case<VPU::GatherElementsOp>([&](VPU::GatherElementsOp op) {
+                return getSWInputTensorNumTiles(op, numClustersAvailableForCompilation, strategy, inputType);
+            })
+            .Case<VPU::DynamicDequantizeOp>([&](VPU::DynamicDequantizeOp dynamicDequantizeOp) {
+                return getSWInputTensorNumTiles(dynamicDequantizeOp, numClustersAvailableForCompilation, strategy,
+                                                inputType);
+            })
+            .Case<VPU::RMSOp>([&](VPU::RMSOp op) {
                 return getSWInputTensorNumTiles(op, numClustersAvailableForCompilation, strategy, inputType);
             })
             .Default([&](mlir::Operation*) {

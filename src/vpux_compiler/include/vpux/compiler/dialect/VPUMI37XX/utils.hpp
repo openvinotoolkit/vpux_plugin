@@ -4,12 +4,6 @@
 //
 
 #include "vpux/compiler/dialect/VPUMI37XX/ops.hpp"
-#include "vpux/compiler/dialect/VPUMI37XX/types.hpp"
-#include "vpux/compiler/utils/logging.hpp"
-#include "vpux/utils/core/checked_cast.hpp"
-#include "vpux/utils/core/error.hpp"
-#include "vpux/utils/core/format.hpp"
-#include "vpux/utils/core/numeric.hpp"
 
 #include <mlir/Dialect/MemRef/IR/MemRef.h>
 #include <mlir/IR/Value.h>

@@ -119,8 +119,3 @@ Const::Content vpux::Const::BroadcastAttr::transform(vpux::Const::Content& input
 
     return output;
 }
-
-Const::ContentSetup vpux::Const::ContentSetup::broadcast(Dim axis, int64_t value) {
-    return addTransformation(
-            Const::BroadcastAttr::get(getIntAttr(getContext(), axis.ind()), getIntAttr(getContext(), value)));
-}

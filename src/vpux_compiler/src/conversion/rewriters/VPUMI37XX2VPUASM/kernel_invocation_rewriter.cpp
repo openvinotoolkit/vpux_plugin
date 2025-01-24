@@ -9,8 +9,8 @@
 namespace vpux {
 namespace vpumi37xx2vpuasm {
 
-mlir::LogicalResult KernelInvocationRewriter::symbolize(VPUMI37XX::ActKernelInvocationOp op, SymbolMapper&,
-                                                        mlir::ConversionPatternRewriter& rewriter) const {
+mlir::FailureOr<SymbolizationResult> KernelInvocationRewriter::symbolize(
+        VPUMI37XX::ActKernelInvocationOp op, SymbolMapper&, mlir::ConversionPatternRewriter& rewriter) const {
     auto symName = findSym(op).getRootReference();
     auto taskLocation = findSym(op.getTaskLocation());
 
@@ -37,18 +37,19 @@ mlir::LogicalResult KernelInvocationRewriter::symbolize(VPUMI37XX::ActKernelInvo
 
     auto kernelData = findSym(oldKernelRange.getKernelArgsIndex());
 
-    mlir::FlatSymbolRefAttr profilingData;
+    mlir::SymbolRefAttr profilingData;
     if (op.getProfilingData()) {
         profilingData = findSym(op.getProfilingData());
     }
 
-    rewriter.create<VPUASM::ActKernelInvocationOp>(
-            op.getLoc(), symName, taskIdx, taskLocation, kernelRange, kernelData, kernelParamsSym, waitAttr, updateAttr,
-            profilingData, op.getTileAttr(), op.getStartAfterAttr(), op.getCleanAfterAttr(), kernelIndexAttr);
+    auto newOp = rewriter.create<VPUASM::ActKernelInvocationOp>(
+            op.getLoc(), symName, taskIdx, taskLocation, /* next_link */ nullptr, kernelRange, kernelData,
+            kernelParamsSym, waitAttr, updateAttr, profilingData, op.getTileAttr(), op.getStartAfterAttr(),
+            op.getCleanAfterAttr(), kernelIndexAttr);
 
     rewriter.eraseOp(op);
 
-    return mlir::success();
+    return SymbolizationResult(newOp);
 }
 
 }  // namespace vpumi37xx2vpuasm

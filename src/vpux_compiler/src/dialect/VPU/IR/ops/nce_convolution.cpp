@@ -170,9 +170,13 @@ mlir::LogicalResult vpux::VPU::NCEConvolutionOp::inferReturnTypes(
 
     const auto& outputShapeNG = conv.get_output_partial_shape(0);
 
-    const auto outputShape = to_small_vector(outputShapeNG.get_shape() | transformed([](size_t val) {
-                                                 return checked_cast<int64_t>(val);
-                                             }));
+    auto outputShape = to_small_vector(outputShapeNG.get_shape() | transformed([](size_t val) {
+                                           return checked_cast<int64_t>(val);
+                                       }));
+
+    if (op.getOutputChannels().has_value()) {
+        outputShape[Dims4D::Act::C.ind()] = op.getOutputChannels().value();
+    }
 
     auto inputType = mlir::cast<vpux::NDTypeInterface>(op.getInput().getType());
     auto outputType =
@@ -211,10 +215,6 @@ vpux::InputTiling vpux::VPU::NCEConvolutionOp::backInferTileInfo(const vpux::Til
     inputTiling.tiles[1].shape[Dims4D::Filter::OC] = outputTile.shape[Dims4D::Act::C];
 
     inputTiling.tiles.push_back(VPU::getWeightsTableTile(this, outputTile));
-
-    if (getInstructionListTable() != nullptr) {
-        inputTiling.tiles.push_back(VPU::getInstructionListTableTile(this, outputTile));
-    }
 
     return inputTiling;
 }
@@ -419,13 +419,6 @@ vpux::NDTypeInterface vpux::VPU::NCEConvolutionOp::getDistributedTypeForOpOperan
         return getDistributedTypeFromInput(clusteredOp, origOp.getWeightsTable(), weightsTableTensorDistributionMode,
                                            weightsTableTensorNumTiles, weightAlignmentAttr, strategy,
                                            hasExplicitDistributedAttr, siblingsAnalysis);
-    } else if (operand.get() == origOp.getInstructionListTable()) {
-        auto instructionListTableDistributionMode = getInstructionListTableTensorDistributionMode(strategy);
-        auto instructionListTableNumTiles =
-                getIntArrayAttr(origOp.getContext(), getInstructionListTableTensorNumTiles(strategy));
-        return getDistributedTypeFromInput(clusteredOp, origOp.getInstructionListTable(),
-                                           instructionListTableDistributionMode, instructionListTableNumTiles, nullptr,
-                                           strategy, hasExplicitDistributedAttr, siblingsAnalysis);
     }
     VPUX_THROW("Failed to compute distributed type for op {0}", clusteredOp);
     return nullptr;

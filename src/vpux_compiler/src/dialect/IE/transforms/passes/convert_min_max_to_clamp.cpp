@@ -61,18 +61,70 @@ mlir::LogicalResult MinMaxConverter<ConcreteOp>::matchAndRewrite(ConcreteOp orig
     if (scalarOperand.getType().template cast<vpux::NDTypeInterface>().getNumElements() != 1) {
         return mlir::failure();
     }
-
+    float scalarValue = 0.0f;
     auto scalarInputConst = scalarOperand.template getDefiningOp<Const::DeclareOp>();
+
     if (scalarInputConst == nullptr) {
-        _log.trace("Only constant input is supported for scalar_input'{0}'", origOp->getLoc());
-        return mlir::failure();
+        IE::FakeQuantizeOp fqOp = scalarOperand.template getDefiningOp<IE::FakeQuantizeOp>();
+        if (fqOp == nullptr) {
+            _log.trace("Only constant input is supported for scalar_input'{0}'", origOp->getLoc());
+            return mlir::failure();
+        }
+
+        auto fqScalarInputConst = fqOp.getInput().template getDefiningOp<Const::DeclareOp>();
+        if (fqScalarInputConst == nullptr) {
+            _log.trace("Only constant input is supported for scalar_input'{0}'", fqOp->getLoc());
+            return mlir::failure();
+        }
+        if (!fqOp.getLevels().has_value()) {
+            _log.nest().trace("FakeQuantize without levels at '{0}'", fqOp->getLoc());
+            return mlir::failure();
+        }
+        auto concreteScalarInputContentAttr = fqScalarInputConst.getContentAttr();
+        if (!concreteScalarInputContentAttr.isSplat()) {
+            _log.nest().trace("Constant Concrete input must be scalar at '{0}'", fqOp.getLoc());
+            return mlir::failure();
+        }
+        auto inputVal = concreteScalarInputContentAttr.fold().template getSplatValue<float>();
+        auto inLowConst = fqOp.getInputLow().getDefiningOp<Const::DeclareOp>();
+        auto inHighConst = fqOp.getInputHigh().getDefiningOp<Const::DeclareOp>();
+        auto outLowConst = fqOp.getOutputLow().getDefiningOp<Const::DeclareOp>();
+        auto outHighConst = fqOp.getOutputHigh().getDefiningOp<Const::DeclareOp>();
+
+        if (inLowConst == nullptr || inHighConst == nullptr || outLowConst == nullptr || outHighConst == nullptr) {
+            _log.nest().trace("Got non constant parameters of FakeQuantize at '{0}'", fqOp->getLoc());
+            return mlir::failure();
+        }
+
+        const auto inLowConstContent = inLowConst.getContent();
+        const auto inHighConstContent = inHighConst.getContent();
+        const auto outLowConstContent = outLowConst.getContent();
+        const auto outHighConstContent = outHighConst.getContent();
+
+        if (!inLowConstContent.isSplat() || !inHighConstContent.isSplat() || !outLowConstContent.isSplat() ||
+            !outHighConstContent.isSplat()) {
+            _log.nest().trace("Got non scalar fake quantize range '{0}'", fqOp->getLoc());
+            return mlir::failure();
+        }
+
+        const auto inLowConstContentVal = inLowConstContent.getSplatValue<float>();
+        const auto inHighConstContentVal = inHighConstContent.getSplatValue<float>();
+        const auto outLowConstContentVal = outLowConstContent.getSplatValue<float>();
+        const auto outHighConstContentVal = outHighConstContent.getSplatValue<float>();
+
+        auto levels = fqOp.getLevels();
+        float fLevels = checked_cast<float>(levels.value());
+
+        scalarValue = vpux::fakeQuantize(inputVal, inLowConstContentVal, inHighConstContentVal, outLowConstContentVal,
+                                         outHighConstContentVal, fLevels);
+    } else {
+        if (const auto& attr = scalarInputConst.getContentAttr(); !attr.isSplat()) {
+            _log.trace("Only splat input is supported for 'scalar_input' '{0}'", origOp->getLoc());
+            return mlir::failure();
+        }
+        auto scalarInputContent = scalarInputConst.getContent();
+        scalarValue = scalarInputContent.template getSplatValue<float>();
     }
-    if (const auto attr = scalarInputConst.getContentAttr(); !attr.isSplat()) {
-        _log.trace("Only splat input is supported for 'scalar_input' '{0}'", origOp->getLoc());
-        return mlir::failure();
-    }
-    auto scalarInputContent = scalarInputConst.getContent();
-    auto scalarValue = scalarInputContent.template getSplatValue<float>();
 
     mlir::FloatAttr clampMax;
     mlir::FloatAttr clampMin;
@@ -100,23 +152,11 @@ void ConvertMinMaxToClampPass::safeRunOnFunc() {
     auto& ctx = getContext();
     auto func = getOperation();
 
-    mlir::ConversionTarget target(ctx);
-
-    target.addLegalOp<IE::ClampOp>();
-
-    target.addDynamicallyLegalOp<IE::MaximumOp, IE::MinimumOp>([&](mlir::Operation* op) {
-        for (auto operand : op->getOperands()) {
-            if (operand.getType().cast<vpux::NDTypeInterface>().getNumElements() == 1)
-                return false;
-        }
-        return true;
-    });
-
     mlir::RewritePatternSet patterns(&ctx);
     patterns.add<MinMaxConverter<IE::MinimumOp>>(&ctx, _log);
     patterns.add<MinMaxConverter<IE::MaximumOp>>(&ctx, _log);
 
-    if (mlir::failed(mlir::applyPartialConversion(func, target, std::move(patterns)))) {
+    if (mlir::failed(mlir::applyPatternsAndFoldGreedily(func, std::move(patterns), getDefaultGreedyRewriteConfig()))) {
         _log.debug("Failed to replace Min or Max operation with Clamp");
         signalPassFailure();
     }

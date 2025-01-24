@@ -13,9 +13,9 @@
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPU/utils/const_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/conv_utils.hpp"
+#include "vpux/compiler/dialect/VPU/utils/mpe_engine_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_matmul_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/ppe_version_config.hpp"
-#include "vpux/compiler/utils/VPU/ppe_utils.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 #include "vpux/compiler/utils/types.hpp"
 
@@ -49,7 +49,7 @@ mlir::LogicalResult arch37xx::ConvToNCE::matchAndRewrite(IE::ConvolutionOp origO
     mlir::IntegerAttr cmSpPatternAttr;
     if (isCompressConvSupported) {
         auto weightsConstOp = weightsConstValue.getDefiningOp<Const::DeclareOp>();
-        auto weightsContentAttr = weightsConstOp.getContentAttr();
+        const auto& weightsContentAttr = weightsConstOp.getContentAttr();
         auto origChannelVal =
                 weightsContentAttr.getBaseContent().getType().cast<NDTypeInterface>().getShape()[Dims4D::Filter::IC];
         for (auto attr : weightsContentAttr.getTransformations()) {
@@ -84,8 +84,9 @@ mlir::LogicalResult arch37xx::ConvToNCE::matchAndRewrite(IE::ConvolutionOp origO
         auto biasConstOp = origOp.getBias().getDefiningOp<Const::DeclareOp>();
         bias = biasConstOp.getContentAttr();
     }
-    const auto ppeOpaqueAttr = VPU::PpeVersionConfig::retrievePPEAttribute(origOp);
+    const auto ppeAttr = VPU::PpeVersionConfig::retrievePPEAttribute(origOp);
     const auto ppeConverter = VPU::NCESparsity::getPPEConverterCb(_arch);
+    const auto mpeEngineAttr = VPU::MPEEngineConfig::retrieveMPEEngineAttribute(origOp, VPU::getArch(origOp));
     const auto biasConverter = VPU::NCESparsity::getBiasConverterCb(_arch);
     const auto weightsTableVec =
             VPU::createWeightsTableData(origOp.getInput(), origOp.getOutput(), alignedFilter, bias, OC, ppeConverter,
@@ -97,13 +98,13 @@ mlir::LogicalResult arch37xx::ConvToNCE::matchAndRewrite(IE::ConvolutionOp origO
     if (isCompressConvSupported) {
         rewriter.replaceOpWithNewOp<VPU::NCECompressConvolutionOp>(
                 origOp, origOp.getType(), origOp.getInput(), alignedFilter, weightsTable, origOp.getStridesAttr(),
-                padAttr, ppeOpaqueAttr, rawFilterShape,
-                /*multi_cluster_strategyAttr=*/nullptr, cmSpPatternAttr);
+                padAttr, ppeAttr, rawFilterShape,
+                /*multi_cluster_strategyAttr=*/nullptr, cmSpPatternAttr, origOp.getOutputChannelsAttr());
     } else {
         rewriter.replaceOpWithNewOp<VPU::NCEConvolutionOp>(
-                origOp, origOp.getType(), origOp.getInput(), alignedFilter, weightsTable,
-                /*instructionListTable=*/nullptr, origOp.getStridesAttr(), padAttr, ppeOpaqueAttr, rawFilterShape,
-                /*multi_cluster_strategyAttr=*/nullptr);
+                origOp, origOp.getType(), origOp.getInput(), alignedFilter, weightsTable, origOp.getStridesAttr(),
+                padAttr, ppeAttr, mpeEngineAttr, rawFilterShape,
+                /*multi_cluster_strategyAttr=*/nullptr, origOp.getOutputChannelsAttr());
     };
 
     return mlir::success();
@@ -181,7 +182,8 @@ mlir::LogicalResult arch37xx::MatMulToNCE::matchAndRewrite(IE::MatMulOp origOp, 
     // Generate weights table
     Const::ContentAttr bias;
 
-    const auto ppeOpaqueAttr = VPU::PpeVersionConfig::retrievePPEAttribute(origOp);
+    const auto ppeAttr = VPU::PpeVersionConfig::retrievePPEAttribute(origOp);
+    const auto mpeEngineAttr = VPU::MPEEngineConfig::retrieveMPEEngineAttribute(origOp, VPU::getArch(origOp));
 
     auto filterShape = getShape(input2).toValues();
 
@@ -215,7 +217,7 @@ mlir::LogicalResult arch37xx::MatMulToNCE::matchAndRewrite(IE::MatMulOp origOp, 
     // result type unlike NCE.Convolution
     auto nceOp =
             rewriter.create<VPU::NCEMatMulOp>(origOp.getLoc(), newOutputType, input1, input2, weightsTable, stridesAttr,
-                                              padAttr, ppeOpaqueAttr, getIntArrayAttr(rewriter, filterShape),
+                                              padAttr, ppeAttr, mpeEngineAttr, getIntArrayAttr(rewriter, filterShape),
                                               /* multiClusterStrategyAttr = */ nullptr);
 
     // Convert from 5D inputs to 4D.
@@ -247,7 +249,7 @@ mlir::LogicalResult arch37xx::DepthConvToNCE::matchAndRewrite(IE::GroupConvoluti
     const auto alignedFilter = VPU::alignDepthWiseWeightsTensor(rewriter, origOp.getLoc(), filter);
 
     // Generate weights table
-    const auto ppeOpaqueAttr = VPU::PpeVersionConfig::retrievePPEAttribute(origOp);
+    const auto ppeAttr = VPU::PpeVersionConfig::retrievePPEAttribute(origOp);
 
     const auto ppeConverter = VPU::NCESparsity::getPPEConverterCb(_arch);
     const auto biasConverter = VPU::NCESparsity::getBiasConverterCb(_arch);
@@ -259,9 +261,9 @@ mlir::LogicalResult arch37xx::DepthConvToNCE::matchAndRewrite(IE::GroupConvoluti
     const auto rawFilterShape = getIntArrayAttr(rewriter, filterShape);
 
     auto nceOp = rewriter.create<VPU::NCEDepthConvolutionOp>(
-            origOp->getLoc(), origOp.getType(), origOp.getInput(), alignedFilter, weightsTable,
-            /*instructionListTable=*/nullptr, origOp.getStridesAttr(), padAttr, ppeOpaqueAttr, rawFilterShape,
-            /*multi_cluster_strategyAttr=*/nullptr);
+            origOp->getLoc(), origOp.getType(), origOp.getInput(), alignedFilter, weightsTable, origOp.getStridesAttr(),
+            padAttr, ppeAttr, rawFilterShape,
+            /*multi_cluster_strategyAttr=*/nullptr, origOp.getOutputChannelsAttr());
 
     rewriter.replaceOp(origOp, nceOp.getOutput());
     return mlir::success();
@@ -277,12 +279,12 @@ mlir::LogicalResult arch37xx::MaxPoolToNCE::matchAndRewrite(IE::MaxPoolOp origOp
 
     // Generate weights table
     const auto padAttr = VPU::getPaddingAttr(getContext(), PadInfo(origOp.getPadsBegin(), origOp.getPadsEnd()));
-    const auto ppeOpaqueAttr = VPU::PpeVersionConfig::retrievePPEAttribute(origOp);
+    const auto ppeAttr = VPU::PpeVersionConfig::retrievePPEAttribute(origOp);
 
-    auto nceOp = rewriter.create<VPU::NCEMaxPoolOp>(origOp->getLoc(), origOp.getType(), origOp.getInput(),
-                                                    /*weightsTable=*/nullptr, origOp.getKernelSizeAttr(),
-                                                    origOp.getStridesAttr(), padAttr, ppeOpaqueAttr,
-                                                    /*multi_cluster_strategyAttr=*/nullptr);
+    auto nceOp = rewriter.create<VPU::NCEMaxPoolOp>(
+            origOp->getLoc(), origOp.getType(), origOp.getInput(),
+            /*weightsTable=*/nullptr, origOp.getKernelSizeAttr(), origOp.getStridesAttr(), padAttr, ppeAttr,
+            /*multi_cluster_strategyAttr=*/nullptr, origOp.getOutputChannelsAttr());
 
     rewriter.replaceOp(origOp, nceOp.getOutput());
     return mlir::success();
@@ -297,11 +299,11 @@ mlir::LogicalResult arch37xx::AveragePoolToNCE::matchAndRewrite(IE::AvgPoolOp or
     _log.trace("[{0}] Got '{1}' at '{2}'", getDebugName(), origOp->getName(), origOp->getLoc());
 
     const auto padAttr = VPU::getPaddingAttr(getContext(), PadInfo(origOp.getPadsBegin(), origOp.getPadsEnd()));
-    const auto ppeOpaqueAttr = VPU::PpeVersionConfig::retrievePPEAttribute(origOp);
+    const auto ppeAttr = VPU::PpeVersionConfig::retrievePPEAttribute(origOp);
 
-    auto nceOp = rewriter.create<VPU::NCEAveragePoolOp>(origOp->getLoc(), origOp.getType(), origOp.getInput(),
-                                                        origOp.getKernelSizeAttr(), origOp.getStridesAttr(), padAttr,
-                                                        ppeOpaqueAttr, /*multi_cluster_strategyAttr=*/nullptr);
+    auto nceOp = rewriter.create<VPU::NCEAveragePoolOp>(
+            origOp->getLoc(), origOp.getType(), origOp.getInput(), origOp.getKernelSizeAttr(), origOp.getStridesAttr(),
+            padAttr, ppeAttr, /*multi_cluster_strategyAttr=*/nullptr, origOp.getOutputChannelsAttr());
 
     rewriter.replaceOp(origOp, nceOp.getOutput());
     return mlir::success();
@@ -319,11 +321,11 @@ mlir::LogicalResult arch37xx::PermuteQuantizeToNCEPermute::matchAndRewrite(IE::P
     const auto expandedChannels = outType.getShape()[Dims4D::Act::C];
     const auto dstElemAttr = mlir::TypeAttr::get(outType.getElementType());
 
-    const auto ppeOpaqueAttr = VPU::PpeVersionConfig::retrievePPEAttribute(origOp);
+    const auto ppeAttr = VPU::PpeVersionConfig::retrievePPEAttribute(origOp);
 
     auto nceOp = rewriter.create<VPU::NCEPermuteOp>(origOp->getLoc(), outType, origOp.getInput(),
                                                     getIntAttr(getContext(), expandedChannels), dstElemAttr,
-                                                    origOp.getDstOrderAttr(), ppeOpaqueAttr,
+                                                    origOp.getDstOrderAttr(), ppeAttr,
                                                     /*multi_cluster_strategyAttr=*/nullptr);
 
     rewriter.replaceOp(origOp, nceOp.getOutput());

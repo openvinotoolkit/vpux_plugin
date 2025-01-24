@@ -121,8 +121,25 @@ private:
     void safeRunOnFunc() final;
 };
 
+namespace {
+const std::unordered_map<VPURegMapped::TaskType, size_t> taskBinarySize40XX = {
+        {VPURegMapped::TaskType::DPUInvariant, sizeof(npu40xx::nn_public::VpuDPUInvariant)},
+        {VPURegMapped::TaskType::DPUVariant, sizeof(npu40xx::nn_public::VpuDPUVariant)},
+        {VPURegMapped::TaskType::ActKernelRange, sizeof(npu40xx::nn_public::VpuActKernelRange)},
+        {VPURegMapped::TaskType::ActKernelInvocation, sizeof(npu40xx::nn_public::VpuActKernelInvocation)},
+        {VPURegMapped::TaskType::DMA, sizeof(npu40xx::nn_public::VpuDMATask)},
+        {VPURegMapped::TaskType::M2I, sizeof(npu40xx::nn_public::VpuMediaTask)}};
+}  // namespace
+
+// TODO: E#121934 Add method for VPURegMapped TaskType to be able to directly return its binary size in an
+// arch-specific way
+size_t getTaskBinarySize(VPURegMapped::TaskType taskType, VPU::ArchKind /*arch*/) {
+    return taskBinarySize40XX.at(taskType);
+}
+
 void ResolveTaskLocationPass::safeRunOnFunc() {
     auto funcOp = getOperation();
+    const auto arch = VPU::getArch(funcOp);
 
     MetadataBuffersContainer metadataBuffers;
     MaxTileInfo maxTileInfo;
@@ -147,16 +164,6 @@ void ResolveTaskLocationPass::safeRunOnFunc() {
     populate<VPURegMapped::TaskType::DMA>(metadataBuffers, mappedInferenceOp, maxTileInfo);
     populate<VPURegMapped::TaskType::M2I>(metadataBuffers, mappedInferenceOp, maxTileInfo);
 
-    // TODO: E#121934 Add method for VPURegMapped TaskType to be able to directly return its binary size in an
-    // arch-specific way
-    const std::unordered_map<VPURegMapped::TaskType, size_t> taskBinarySize = {
-            {VPURegMapped::TaskType::DPUInvariant, sizeof(npu40xx::nn_public::VpuDPUInvariant)},
-            {VPURegMapped::TaskType::DPUVariant, sizeof(npu40xx::nn_public::VpuDPUVariant)},
-            {VPURegMapped::TaskType::ActKernelRange, sizeof(npu40xx::nn_public::VpuActKernelRange)},
-            {VPURegMapped::TaskType::ActKernelInvocation, sizeof(npu40xx::nn_public::VpuActKernelInvocation)},
-            {VPURegMapped::TaskType::DMA, sizeof(npu40xx::nn_public::VpuDMATask)},
-            {VPURegMapped::TaskType::M2I, sizeof(npu40xx::nn_public::VpuMediaTask)}};
-
     auto builder = mlir::OpBuilder::atBlockBegin(&funcOp.getBody().front());
 
     // Construct map for TaskBufferLayout
@@ -177,10 +184,10 @@ void ResolveTaskLocationPass::safeRunOnFunc() {
                         builder.getContext(), mlir::IntegerAttr::get(u64Type, list.dynamicSize),
                         mlir::IntegerAttr::get(u64Type, list.staticSize),
                         mlir::IntegerAttr::get(u64Type, taskOffset + intraTileOffset),
-                        mlir::IntegerAttr::get(u64Type, taskBinarySize.at(taskType)));
+                        mlir::IntegerAttr::get(u64Type, getTaskBinarySize(taskType, arch)));
                 sizesPerList.push_back(taskGroup);
 
-                intraTileOffset += list.staticSize * taskBinarySize.at(taskType);
+                intraTileOffset += list.staticSize * getTaskBinarySize(taskType, arch);
             }
             auto arrayAttr = mlir::ArrayAttr::get(builder.getContext(), sizesPerList);
             sizeForTileAndList.push_back(arrayAttr);

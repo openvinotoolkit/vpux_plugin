@@ -88,6 +88,40 @@ def Outliner : PassBase<"outliner", "vpux::ModulePass"> {
 }
 
 //
+// DuplicateFQAcrossFunctionCalls
+//
+
+def DuplicateFQAcrossFunctionCalls : PassBase<"duplicate-fq-across-function-calls", "vpux::ModulePass"> {
+    let summary = "Duplicates FakeQuantize operations across function calls";
+
+    let description = [{
+        Identifies cases where FakeQuantzie operations should be duplicated inside or outside functions.
+
+        For example, for the following IR:
+            func @function(%arg) {
+                %fq1 = FakeQuantize(%arg)
+                %0 = Op(%fq1)
+                return %0
+            }
+            func @main(%arg) {
+                %0 = Op(%arg)
+                %call = call @function(%0)
+                %fq2 = FakeQuantize(%call)
+                %1 = Op(%fq2)
+                return %1
+            }
+        The %fq1 operation will be duplicated outside the function and will be the parent operation for the call op.
+        Similarly, %fq2 will be duplicated inside the function and will be the parent for the return op.
+    }];
+
+    let constructor = "vpux::IE::createDuplicateFQAcrossFunctionCallsPass()";
+
+    let dependentDialects = [
+        "vpux::IE::IEDialect"
+    ];
+}
+
+//
 // Debatcher
 //
 
@@ -134,6 +168,14 @@ def DeDebatcher : PassBase<"de-debatcher", "vpux::FunctionPass"> {
 
     let dependentDialects = [
         "vpux::IE::IEDialect"
+    ];
+
+    let options = [
+        Option<
+            "debatcherMethod", "debatching-inlining-method",
+            "std::string", [{"reordering"}],
+            "Propagate relevant debatcher inlining method"
+        >
     ];
 
 }
@@ -248,6 +290,20 @@ def FuseReshapeMvn : PassBase<"fuse-reshape-mvn", "vpux::FunctionPass"> {
 }
 
 //
+// FuseRMSNorm
+//
+def FuseRMSNorm : PassBase<"fuse-rmsnorm", "vpux::FunctionPass"> {
+    let summary = "Fuse Power-ReduceMean-Add-Sqrt-Divide-Multiply-Multiply to RMSNorm";
+    let description = [{
+        fuse a sequence of ops to one RMSNorm.
+    }];
+    let constructor = "vpux::IE::createFuseRMSNormPass()";
+    let dependentDialects = [
+        "vpux::IE::IEDialect"
+    ];
+}
+
+//
 // OptimizeReorders
 //
 
@@ -293,6 +349,25 @@ def OptimizeTileOp : PassBase<"optimize-tile-op", "vpux::FunctionPass"> {
     }];
 
     let constructor = "vpux::IE::createOptimizeTileOpPass()";
+
+    let dependentDialects = [
+        "vpux::IE::IEDialect"
+    ];
+}
+
+//
+// OptimizePrecisionAcrossFunctionCalls
+//
+
+def OptimizePrecisionAcrossFunctionCalls : PassBase<"optimize-precision-across-function-calls", "vpux::ModulePass"> {
+    let summary = "Optimizes conversion / quantization operations across function calls";
+
+    let description = [{
+        Tries to optimize out Convert->Convert / Dequantize->Quantize operations that are found at the boundaries of functions,
+        if these pairs of operations end up producing the same element type.
+    }];
+
+    let constructor = "vpux::IE::createOptimizePrecisionAcrossFunctionCallsPass()";
 
     let dependentDialects = [
         "vpux::IE::IEDialect"
@@ -1197,6 +1272,24 @@ def DecomposeLSTMCell : PassBase<"decompose-lstm-cell", "vpux::FunctionPass"> {
 }
 
 //
+// DecomposeGRUCell
+//
+
+def DecomposeGRUCell : PassBase<"decompose-gru-cell", "vpux::FunctionPass"> {
+    let summary = "Replace GRUCell operation with a subgraph of smaller operations";
+
+    let description = [{
+        Decomposes `GRUCell` operation into smaller `DPU` friendly operations and activation functions.
+    }];
+
+    let constructor = "vpux::IE::createDecomposeGRUCellPass()";
+
+    let dependentDialects = [
+        "vpux::IE::IEDialect"
+    ];
+}
+
+//
 // DilatedConvConvert
 //
 
@@ -1418,6 +1511,28 @@ def ConvertStridedSlice2Conv : PassBase<"convert-strided-slice-to-conv", "vpux::
     ];
 }
 
+
+//
+// RunF16ToF32ConvertOnDPU
+//
+
+def RunF16ToF32ConvertOnDPU : PassBase<"run-f16-to-f32-convert-on-dpu", "vpux::FunctionPass"> {
+    let summary = "Run F16 -> F32 Convert layer on DPU";
+
+    let description = [{
+        DPU can output an FP32 tensor and can be used to perform fp16 -> fp32 conversions, instead of SW Convert.
+
+        If an IE.ConvertOp with f16 input, f32 output has a future DPU op as parent, this pass sets f32 to parent output
+        and removes the original IE.ConvertOp
+    }];
+
+    let constructor = "vpux::IE::createRunF16ToF32ConvertOnDPUPass()";
+
+    let dependentDialects = [
+        "vpux::IE::IEDialect"
+    ];
+}
+
 //
 // OptimizeSliceWithStride
 //
@@ -1511,6 +1626,31 @@ def ConvertGroupConvToConv : PassBase<"convert-groupconv-to-conv", "vpux::Functi
     }];
 
     let constructor = "vpux::IE::createConvertGroupConvToConvPass()";
+
+    let dependentDialects = [
+        "vpux::IE::IEDialect"
+    ];
+}
+
+//
+// ConvertLargeConvToMultiConvWithAdd
+//
+
+def ConvertLargeConvToMultiConvWithAdd : PassBase<"convert-large-conv-to-multi-conv-with-add", "vpux::FunctionPass"> {
+    let summary = "Convert large Convolution to multi Convolution with Add Op";
+
+    let description = [{
+        This pass is part of the `AdjustForVPU` pipeline.
+
+        It converts large `Convolution` Op into multiple smaller `Convolution` Op followed by an `Add` Op.
+
+        The purpose is to optimize the `Convolution` by splitting it into smaller pieces along the input channels.
+        There are two performance benefits:
+        1. Reduces the overlapped input data, thereby decreasing the DMA size
+        2. Reduces the number of tiles, preventing excessive tiling and improving workload efficiency
+    }];
+
+    let constructor = "vpux::IE::createConvertLargeConvToMultiConvWithAddPass()";
 
     let dependentDialects = [
         "vpux::IE::IEDialect"
@@ -1613,6 +1753,38 @@ def ConvertMVN6ToMVN1 : PassBase<"convert-mvn6-to-mvn1", "vpux::FunctionPass"> {
 
     let dependentDialects = [
         "vpux::IE::IEDialect"
+    ];
+}
+
+//
+// HandleU16FakeQuantize
+//
+
+def HandleU16FakeQuantize : PassBase<"handle-u16-fake-quantize", "vpux::FunctionPass"> {
+    let summary = "Handle U16 FakeQuantize";
+
+    let description = [{
+        The pass is a part of `InitialTransformations` pipeline.
+
+        This pass do the following transformations to U16 FakeQuantize:
+        1. In case enableU16FQToScaleShiftConversion is true and the FakeQuantize has in_low != out_low or in_high != out_high it is replaced with a ScaleShift op.
+        2. In case enableU16FQToScaleShiftConversion is false and the FakeQuantize is per tensor and the input and output low is equal to 0 it is replaced with a ReLu activation function.
+        3. Otherwise the FakeQuantize is completely removed.
+    }];
+
+    let constructor = "vpux::IE::createHandleU16FakeQuantizePass()";
+
+    let options = [
+        Option<
+            "enableU16FQToScaleShiftConversion", "enable-u16-fake-quantize-to-scale-shift-conversion",
+            "bool", "false",
+            "Enable U16 FakeQuantize to ScaleShift conversion"
+        >
+    ];
+
+    let dependentDialects = [
+        "vpux::IE::IEDialect",
+        "mlir::quant::QuantizationDialect"
     ];
 }
 
@@ -1856,63 +2028,6 @@ def SwapFakeQuantWithReshapeAndStridedSlice : PassBase<"swap-fake-quant-with-res
 }
 
 //
-// HandleFakeQuantHasNegativeScales
-//
-
-def HandleFakeQuantHasNegativeScales : PassBase<"handle-fake-quant-has-negative-scales", "vpux::FunctionPass"> {
-    let summary = "Handle FakeQuantize has Negative Scales";
-
-    let description = [{
-        The pass is a part of `LowPrecision` pipeline.
-
-        It handle `FakeQuantize` operations that has negative scales and convert it to positive
-        To solve this situation, a new Q'(QuantizedConst), ZP'(ZeroPoints), S'(Scales), where:
-        (Q - ZP) * S = (Q' - ZP') * S'
-        Limitation 1: Not support differet ZeroPoints. Set: ZP' = ZP
-        Limitation 2: Negative scale should convert to positive. Set: S' = (S < 0) ? S * (-1) : S
-        And the new Quantized Const should be: Q' = (S < 0) ? 2 * ZP - Q : Q
-    }];
-
-    let constructor = "vpux::IE::createHandleFakeQuantHasNegativeScalesPass()";
-
-    let dependentDialects = [
-        "vpux::IE::IEDialect",
-        "mlir::quant::QuantizationDialect"
-    ];
-}
-
-//
-// HandleU16FakeQuantize
-//
-
-def HandleU16FakeQuantize : PassBase<"handle-u16-fake-quantize", "vpux::FunctionPass"> {
-    let summary = "Handle U16 FakeQuantize";
-
-    let description = [{
-        The pass is a part of `LowPrecision` pipeline.
-
-        This pass do the following transformations to U16 FakeQuantize:
-        1. In case the FakeQuantize is per tensor and the input and output low is equal to 0 it is replaced with a ReLu activation function
-        2. Otherwise the FakeQuantize is completely removed.
-    }];
-
-    let constructor = "vpux::IE::createHandleU16FakeQuantizePass()";
-
-    let options = [
-        Option<
-            "enableHandleU16FakeQuantize", "enable-handle-u16-fake-quantize",
-            "bool", "false",
-            "Enable HandleU16FakeQuantizePass"
-        >
-    ];
-    
-    let dependentDialects = [
-        "vpux::IE::IEDialect",
-        "mlir::quant::QuantizationDialect"
-    ];
-}
-
-//
 // SplitFakeQuant
 //
 
@@ -1985,6 +2100,20 @@ def DequantizeConst : PassBase<"dequantize-const", "vpux::FunctionPass"> {
 
     let dependentDialects = [
         "vpux::IE::IEDialect"
+    ];
+
+    let options = [
+        Option<
+            "enableRuntimeDequant", "enable-runtime-dequant",
+            "bool", "false",
+            "Enable runtime dequantization for mixed precision weights"
+        >,
+        Option<
+            "runtimeDequantizationLimit", "runtime-dequantization-limit",
+            "int64_t", "524288",
+            "Lower limit on weight size for runtime dequantization"
+            "Weights smaller than the limit will be statically dequantized"
+        >
     ];
 }
 
@@ -2819,6 +2948,25 @@ def PropagateFqThroughConcat : PassBase<"propagate-fq-through-concat", "vpux::Fu
 }
 
 //
+// LoopOutliner
+//
+
+def LoopOutliner : PassBase<"loop-outliner", "vpux::ModulePass"> {
+    let summary = "Extract loop body as a function and call it inside of loop";
+
+    let description = [{
+        This pass extracts a function from loop body.
+        By calling it before unrolling, the compiled IR can be greatly reduced.
+    }];
+
+    let constructor = "vpux::IE::createLoopOutlinerPass()";
+
+    let dependentDialects = [
+        "vpux::IE::IEDialect"
+    ];
+}
+
+//
 // UnrollTensorIterator
 //
 
@@ -2974,7 +3122,7 @@ def ExpandActivationWidth : PassBase<"expand-activation-width", "vpux::FunctionP
         Supported operations:
         * IE.PermuteQuantize
             To avoid blocking optimization of permuteQuantize, place the pass after buildMemPermuteProcessingPipeline()
-            for NPU37XX and NPU40XX.
+            for VPUX37XX, VPUX40XX.
     }];
 
     let constructor = "vpux::IE::createExpandActivationWidthPass()";
@@ -3041,7 +3189,7 @@ def AdjustInputShape: PassBase<"adjust-input-shape", "vpux::FunctionPass"> {
            Insert ShapeCast ops to the outputs before the next non-eltwise op.
         2. Insert ShapeCast op and Expand op to the input of pooling ops when the pooling has KY=1, SY=1.
            Insert ShapeCast op, Slice Op and Expand op to the outputs.
-        Platforms NPU37XX and NPU40XX all benefit.
+        Platforms NPU37XX, NPU40XX all benefit.
     }];
 
     let constructor = "vpux::IE::createAdjustInputShapePass()";
@@ -3381,6 +3529,45 @@ def PropagateMemPermuteBeforeOp : PassBase<"propagate-mem-permute-before-op", "v
     ];
 }
 
+//
+// OptimizeConcatWithConv
+//
+
+def OptimizeConcatWithConv : PassBase<"optimize-concat-with-conv", "vpux::FunctionPass"> {
+    let summary = "Optimize IE.Concat with IE.Convolution op";
+
+    let description = [{
+        Optimize IE.Concat with IE.Convolution if the IE.Concat meets the following conditions:
+        1. Layout is NCHW;
+        2. There are two inputs with same shape like [1, C, 1, 1];
+        3. Concat Axis is H;
+        For example:
+            Input0[1,HWC,1,1]\
+                              Concat[1, HWC, 2, 1]
+            Input1[1,HWC,1,1]/
+        Converts to
+            Input0[1,HWC,1,1]->Reshape[1,C,H,W]->LayoutCast[1,C,H,W]#NHWC\
+                                                                         Conv[1,2C,H,W]#NHWC->LayoutCast[1,2C,H,W]->Reshape[1,HWC,2,1]
+            Input0[1,HWC,1,1]->Reshape[1,C,H,W]->LayoutCast[1,C,H,W]#NHWC/
+
+        The Convoluation has weight[2C, C, H+1, 1] with Pad[0, 0, 0, 0] and Strides[1, 1]
+        The weights values are filled as follows:
+                        0                 1          ...        C-1
+        OC0:      [1, 0,..., 0, 0], [0, 0,..., 0, 0], ...,  [0, 0, ..., 0, 0]
+        OC1:      [0, 0,..., 0, 1], [0, 0,..., 0, 0], ...,  [0, 0, ..., 0, 0]
+        OC2:      [0, 0,..., 0, 0], [1, 0,..., 0, 0], ...,  [0, 0, ..., 0, 0]
+        OC3:      [0, 0,..., 0, 0], [0, 0,..., 0, 1], ...,  [0, 0, ..., 0, 0]
+        ...
+        OC(2C-2): [0, 0,..., 0, 0], [0, 0,..., 0, 0], ...,  [1, 0, ..., 0, 0]
+        OC(2C-1): [0, 0,..., 0, 0], [0, 0,..., 0, 0], ...,  [0, 0, ..., 0, 1]
+    }];
+
+    let constructor = "vpux::IE::createOptimizeConcatWithConvPass()";
+
+    let dependentDialects = [
+        "vpux::IE::IEDialect"
+    ];
+}
 
 //
 // PropagateMemPermuteThroughSoftMax
@@ -3405,36 +3592,6 @@ def PropagateMemPermuteThroughSoftMax : PassBase<"propagate-mem-permute-through-
 
     let dependentDialects = [
         "vpux::IE::IEDialect"
-    ];
-}
-
-//
-// ExpandMatMulSoftMaxMatMul
-//
-
-def ExpandMatMulSoftMaxMatMul : PassBase<"expand-matmul-softmax-matmul", "vpux::FunctionPass"> {
-    let summary = "Expand buffers for operators in a specific Matmul-Softmax-Matmul pattern";
-
-    let description = [{
-       For a better performance, we need to round the MatMul buffer dimensions to 64, in a specific
-       software case. This pass will introduce in the pattern the next operators:
-       Expand for second input of first MatMul 32x49 -> 32x64
-       Expand second input of second MatMul 49x32 -> 49x64
-       Slice output of second MatMul back to 49x32
-    }];
-
-    let constructor = "vpux::IE::createExpandMatMulSoftMaxMatMulPass()";
-
-    let dependentDialects = [
-        "vpux::IE::IEDialect"
-    ];
-
-    let options = [
-        Option<
-            "enableGroupedMatMul", "enable-grouped-matmul",
-            "bool", "false",
-            "Flag to enable or disable grouped MatMul execution"
-        >
     ];
 }
 
@@ -3707,6 +3864,25 @@ def MVNFusion : PassBase<"mvn-fusion", "vpux::FunctionPass"> {
 }
 
 //
+// MergeFullyConnected
+//
+
+def MergeFullyConnected : PassBase<"merge-fully-connected", "vpux::FunctionPass"> {
+    let summary = "The pass merges the unrolled fullyConnected layers.";
+
+    let description = [{
+        For FullyConnected which has first dim = 1, e.g. KV cached Matmul, the performance bottleneck is caused by too much small DMA ops instead of compute ops.
+        So this pass will try to merge the unrolled FullyConnected layers to improve performance by using more data calculation and less DMA ops.
+    }];
+
+    let constructor = "vpux::IE::createMergeFullyConnectedPass()";
+
+    let dependentDialects = [
+        "vpux::IE::IEDialect"
+    ];
+}
+
+//
 // UnrollGroupQuantize
 //
 
@@ -3896,23 +4072,14 @@ def MoveMultiplyPostOp : PassBase<"move-multiply-post-op", "vpux::FunctionPass">
         ```
         If matmul output size is smaller than input, after swap multiply with matmul, we will
         reduce the computation of multiply. For above case, 80 times saving.
-        The pass also used in dynamic quantization case, when multiply second input is a
-        argument input instead of const input, we could not get quantization info from it in
-        compile stage. When we set move-multiply-post-fc-for-dynamic-quant=true, this pass will
-        move the multiply post matmul/fc, to make dynamic quantization functional.
+        The pass also did some other optimization like move multiply post gather or concat for
+        llm optimization.
     }];
 
     let constructor = "vpux::IE::createMoveMultiplyPostOpPass()";
 
     let dependentDialects = [
         "vpux::IE::IEDialect"
-    ];
-    let options = [
-        Option<
-            "moveMultiplyPostFCForDynamicQuant", "move-multiply-post-fc-for-dynamic-quant",
-            "bool", "false",
-            "Flag to trigger move multiply post fc for dynamic quant"
-        >
     ];
 }
 
@@ -4156,7 +4323,7 @@ def MergeParallelFullyConnected : PassBase<"merge-parallel-fully-connected", "vp
                                 /              \
                         IE.SLice(1x2)     IE.slice(1x3)
         ```
-        The optimization is used for LLM GPTQ model. GPTQ MatMul is not efficient in NPU40XX,
+        The optimization is used for LLM GPTQ model. GPTQ MatMul is not efficient in LNL,
         especially for KV cache model, due to so many small ops increase the runtime idle
         time. Matmul will convert to fully connected layer. Assume originally two parallel
         MatMul unroll to 64 small MatMul, after merge, we only 32 MatMul, op reduce will
@@ -4294,4 +4461,218 @@ def ShrinkMatmulGroups : PassBase<"shrink-matmul-groups", "vpux::FunctionPass"> 
         "vpux::IE::IEDialect"
     ];
 }
+
+//
+// PropagatePermuteCastThroughDequantize
+//
+
+def PropagatePermuteCastThroughDequantize : PassBase<"propagate-permute-cast-through-dequantize", "vpux::FunctionPass"> {
+    let summary = "Propagates permute cast thorugh dequantizeop";
+
+    let description = [{
+        Converts :
+        DequantizeOp -> PermuteCastOp
+        to :
+        PermuteCastOp -> DequantizeOp
+        Target of this change is mostly ConstDeclare -> Dequantize -> PermuteCast pattern
+        with the purpose of enabling easier strategy assignment logic and folding permuteCast
+        to Const.
+    }];
+
+    let constructor = "vpux::IE::createPropagatePermuteCastThroughDequantizePass()";
+
+    let dependentDialects = [
+        "vpux::IE::IEDialect"
+    ];
+}
+
+//
+// ConvertDynamicDequantizeToDequantize
+//
+
+def ConvertDynamicDequantizeToDequantize : PassBase<"convert-dynamic-dequantize-to-dequantize", "vpux::FunctionPass"> {
+    let summary = "Convert 'IE.DynamicDequantize' to 'IE.Dequantize'";
+
+    let description = [{
+        This transformation takes the following subgraph:
+        ```
+                Input2(512x128xi4:f16)    Input3(512x1xf16)
+                              \           /
+        Input1(1x128xf16)     IE.DynamicDequantize(512x128xf16)
+                        \       /
+                    IE.FullyConnected(1x512xf16)
+        ```
+        To:
+        ```
+                Input2(512x128xi4:f16)
+                              \
+        Input1(1x128xf16)    IE.Dequantize(512x128xf16)
+                        \       /                      Input3(512x1xf16)
+                    IE.FullyConnected(1x512xf16)              |
+                                    \                IE.Transpose(1x512xf16)
+                                     \               /
+                                 IE.Multiply(1x512xf16)
+        ```
+        When DynamicDequantize input parameter scale is 1.0f, zero point is 0, and is the
+        input if FC, we could convert it to a normal Dequantize operation, and move the scale
+        of DynamicDequantize to post FC by a Multiply operation.
+    }];
+
+    let constructor = "vpux::IE::createConvertDynamicDequantizeToDequantizePass()";
+
+    let dependentDialects = [
+        "vpux::IE::IEDialect"
+    ];
+}
+
+//
+// MoveDynamicDequantizeToUser
+//
+
+def MoveDynamicDequantizeToUser : PassBase<"move-dynamic-dequantize-to-user", "vpux::FunctionPass"> {
+    let summary = "Move Dynamic Dequantize operation to user";
+
+    let description = [{
+        Move DynamicDequantize after AffineReshape and PermuteCast
+        to ease conversion of Dynamic Quantization subgraph to VPU dialect.
+         DynamicDequantize               AffineReshape
+               |                               |
+         AffineReshape            ->      PermuteCast
+               |                               |
+          PermuteCast                  DynamicDequantize
+    }];
+
+    let constructor = "vpux::IE::createMoveDynamicDequantizeToUserPass()";
+
+    let dependentDialects = [
+        "vpux::IE::IEDialect"
+    ];
+}
+
+def PopulateDynamicDimensionsHW : PassBase<"populate-dynamic-dimensions-hw", "vpux::FunctionPass"> {
+    let summary = "Adapter for `mlir::bufferization::populateDynamicDimSizes` that targets HW operations";
+
+    let description = [{
+        1. Decide wether the operation is a tail of HW executed operation chain.
+        2. Call `populateDynamicDimSizes` to insert `tensor.dim` operations into the graph.
+        3. Concatenate values of static dimensions with dynamic dimensions.
+           a. Cast `tensor.dim` to i64 via `mlir::arith::IndexCastOp`
+           b. Cast i64 to tensor<1xi64> via `mlir::tensor::FromElementsOp`
+           c. Cast tensor<1xi64> to tensor<1xsi64> with `mlir::tensor::BitcastOp`
+           d. These steps are necessary because IE dialect cannot work with signless scalars.
+        4. Create a `StridedSlice` operation to slice the output.
+        5. Insert a `DynamicReshape` operation to to reconcile type differences.
+           a. One of the inputs of the `StridedSlice` is the output of `Concat`
+           b. `StridedSlice` infers tensor<?x?x?x?xf16> if any of its inputs are unknown at compile time.
+           c. Function signature does not always set every dimension to ?, so the `DynamicReshape` is required.
+    }];
+
+    let constructor = "vpux::IE::createPopulateDynamicDimensionsHWPass()";
+
+    let dependentDialects = [
+        "vpux::IE::IEDialect"
+    ];
+}
+
+def PopulateDynamicDimensionsGeneric : PassBase<"populate-dynamic-dimensions-generic", "vpux::FunctionPass"> {
+    let summary = "Adapter for `mlir::bufferization::populateDynamicDimSizes` that targets ReifyRankedShapedTypeOpInterface operations";
+
+    let description = [{
+        Finds ReifyRankedShapedTypeOpInterface operations and populates output dimensions.
+        Resulted static and dynamic dimensions are combined with ConcatOp.
+        Result of ConcatOp is the new shape.
+    }];
+
+    let constructor = "vpux::IE::createPopulateDynamicDimensionsGenericPass()";
+
+    let dependentDialects = [
+        "vpux::IE::IEDialect"
+    ];
+}
+
+//
+// LegalizeReifyResultShapesResiduals
+//
+
+def LegalizeReifyResultShapesResiduals : PassBase<"legalize-reify-result-shapes-residuals", "vpux::FunctionPass"> {
+    let summary = "Legalize operations created by reifyResultShapes functions";
+
+    let description = [{
+        Convert tensor.dim to IE::ShapeOf->IE::SliceOp
+        Convert arith.divsi to IE::DivideOp
+    }];
+
+    let constructor = "vpux::IE::createLegalizeReifyResultShapesResidualsPass()";
+
+    let dependentDialects = [
+        "mlir::arith::ArithDialect",
+        "mlir::tensor::TensorDialect",
+
+        "vpux::IE::IEDialect"
+    ];
+}
+
+def PadDynamicInputs : PassBase<"pad-dynamic-inputs", "vpux::FunctionPass"> {
+    let summary = "Pad dynamic inputs of a graph";
+
+    let description = [{
+        1. Look for `IE.StridedSlice` -> `IE.DynamicReshape` pattern created by `PopulateDynamicDimensions`
+        2. Traverse dynamic graph towards block arguments and reset operations shapes with static values.
+        3. Insert `IE.DynamicExpand` before the first operation to freeze input shape by upper bound.
+
+        Example:
+        ```
+            BlockArg (1x2x3x?, bounds = [1, 2, 3, 10]) -> MaxPool -> StridedSlice (1x2x3x?, bounds = [1, 2, 3, 10])
+        ```
+        becomes:
+        ```
+            BlockArg (1x2x3x?, bounds = [1, 2, 3, 10]) -> DynamicExpand (1x2x3x10) -> MaxPool -> StridedSlice (1x2x3x?, bounds = [1, 2, 3, 10])
+        ```
+    }];
+
+    let constructor = "vpux::IE::createPadDynamicInputsPass()";
+
+    let dependentDialects = [
+        "vpux::IE::IEDialect"
+    ];
+}
+
+//
+// ConvertParallelSlicesToGather
+//
+
+def ConvertParallelSlicesToGather : PassBase<"convert-parallel-slices-to-gather", "vpux::FunctionPass"> {
+    let summary = "Convert parallel Slice operations to single Gather operation";
+
+    let description = [{
+        When SliceOp branches share the same source and are finally concatenated, convert these SliceOp into single Gather operation.
+        For NPU4000+, Gather operation will be mapped to GatherDMA.
+        With this conversion, DMA workloads can be reduced and benefit performance.
+    }];
+
+    let constructor = "vpux::IE::createConvertParallelSlicesToGatherPass()";
+
+    let dependentDialects = [
+        "vpux::IE::IEDialect"
+    ];
+}
+
+//
+// SwapOperationWithGather
+//
+
+def SwapOperationWithGather : PassBase<"swap-operation-with-gather", "vpux::FunctionPass"> {
+    let summary = "Move operation after GatherOp";
+
+    let description = [{
+        Move operation after GatherOp to reduce the tensor size to be processed
+    }];
+
+    let constructor = "vpux::IE::createSwapOperationWithGatherPass()";
+
+    let dependentDialects = [
+        "vpux::IE::IEDialect"
+    ];
+}
+
 #endif

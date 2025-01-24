@@ -100,18 +100,19 @@ mlir::OpFoldResult vpux::VPU::PadOp::fold(FoldAdaptor) {
 void vpux::VPU::PadOp::build(::mlir::OpBuilder& builder, ::mlir::OperationState& state, ::mlir::Value input,
                              ::mlir::Value pads_begin, ::mlir::Value pads_end, ::mlir::Value pad_value,
                              ::mlir::ArrayAttr pads_begin_attr, ::mlir::ArrayAttr pads_end_attr,
-                             ::mlir::FloatAttr pad_value_attr, vpux::IE::PadModeAttr mode) {
+                             ::mlir::FloatAttr pad_value_attr, vpux::IE::PadModeAttr mode,
+                             ::mlir::IntegerAttr output_channels) {
     build(builder, state, input, pads_begin, pads_end, pad_value, pads_begin_attr, pads_end_attr, pad_value_attr, mode,
-          nullptr);
+          nullptr, output_channels);
 }
 
 void vpux::VPU::PadOp::build(::mlir::OpBuilder& builder, ::mlir::OperationState& state,
                              vpux::NDTypeInterface& input_type, ::mlir::Value input, ::mlir::Value pads_begin,
                              ::mlir::Value pads_end, ::mlir::Value pad_value, ::mlir::ArrayAttr pads_begin_attr,
-                             ::mlir::ArrayAttr pads_end_attr, ::mlir::FloatAttr pad_value_attr,
-                             vpux::IE::PadMode mode) {
+                             ::mlir::ArrayAttr pads_end_attr, ::mlir::FloatAttr pad_value_attr, vpux::IE::PadMode mode,
+                             ::mlir::IntegerAttr output_channels) {
     build(builder, state, input_type, input, pads_begin, pads_end, pad_value, pads_begin_attr, pads_end_attr,
-          pad_value_attr, mode, {});
+          pad_value_attr, mode, {}, output_channels);
 }
 
 //

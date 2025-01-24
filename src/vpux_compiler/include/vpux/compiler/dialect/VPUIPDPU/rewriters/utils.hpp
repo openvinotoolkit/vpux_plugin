@@ -20,6 +20,11 @@ enum class BlockArg {
     ACT_SE_IN,
     ACT_SPARSE_MAP_IN,
     WEIGHTS_TABLE,
+    WEIGHTS_TABLE_DATA_PTR,
+    WEIGHTS_TABLE_SP_PTR,
+    WEIGHTS_TABLE_SCALE,
+    WEIGHTS_TABLE_BIAS,
+    WEIGHTS_ZERO_POINTS,
     WEIGHTS,
     WEIGHTS_SPARSE_MAP,
     SPR_LOOKUP_TABLE,
@@ -39,6 +44,7 @@ AttrType getEnumAttrOrNull(mlir::OpBuilder& builder, const std::optional<ValueTy
     return nullptr;
 }
 mlir::FloatAttr getF32FloatAttrOrNull(mlir::OpBuilder& builder, const std::optional<float>& attr);
+mlir::ArrayAttr getF64ArrayAttrOrNull(mlir::OpBuilder& builder, const std::optional<llvm::ArrayRef<double>>& attr);
 
 mlir::MemRefType getBufferType(mlir::Operation* bufferRef);
 
@@ -47,7 +53,7 @@ uint64_t getSwizzlingKey(mlir::Operation* bufferRef);
 mlir::BlockArgument getInvBlockArg(BlockArg invBlockArg, mlir::Block* invBlock,
                                    const std::unordered_map<BlockArg, size_t>& invBlockArgsPos);
 
-mlir::Type getBaseType(mlir::Type type);
+mlir::Type getBaseType(mlir::Type type, bool isPalletModeEnabled = false);
 
 mlir::LogicalResult getQuantConfig(const Logger&, mlir::Type type, SmallVector<int64_t>& quantMult,
                                    SmallVector<int64_t>& quantShift, SmallVector<uint8_t>& quantZero);

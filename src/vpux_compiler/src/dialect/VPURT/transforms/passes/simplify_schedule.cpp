@@ -317,14 +317,9 @@ private:
 };
 
 void SimplifySchedulePass::safeRunOnFunc() {
-    if (!_shareWaitAndUpdateBarriers) {
-        return;
-    }
-
     auto funcOp = getOperation();
     auto& barrierInfo = getAnalysis<BarrierInfo>();
     auto& cycleCostInfo = getAnalysis<CycleCostInfo>();
-    const auto legalVariantCount = VPUIP::getBarrierMaxVariantCount(funcOp) / 2;
 
     // If barrier order by producer, some task's wait barrier number is bigger than update barrier, but some functions
     // in this pass like resolveOutOfOrderDependencies and reduceParallelControlFlowsr need task's wait barrier number
@@ -340,10 +335,13 @@ void SimplifySchedulePass::safeRunOnFunc() {
     VPURT::orderExecutionTasksAndBarriers(funcOp, barrierInfo);
 
     // 2. make execution fully controlled by barriers
-    barrierInfo.buildTaskQueueTypeMap();
-    barrierInfo.shareWaitAndUpdateBarriers(legalVariantCount);
-    // re-order execution
-    VPURT::orderExecutionTasksAndBarriers(funcOp, barrierInfo);
+    if (_shareWaitAndUpdateBarriers) {
+        const auto legalVariantCount = VPUIP::getBarrierMaxVariantCount(funcOp) / 2;
+        barrierInfo.buildTaskQueueTypeMap();
+        barrierInfo.shareWaitAndUpdateBarriers(legalVariantCount);
+        // re-order execution
+        VPURT::orderExecutionTasksAndBarriers(funcOp, barrierInfo);
+    }
 
     if (_reduceParallelControlFlows) {
         // run simulation to get operation cycles

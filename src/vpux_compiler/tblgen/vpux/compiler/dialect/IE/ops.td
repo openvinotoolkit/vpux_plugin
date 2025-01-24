@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -474,8 +474,6 @@ def IE_TileResourceOp :
         vpux::IE::MemoryResourceOp addAvailableMemory(mlir::SymbolRefAttr memSpace, Byte size);
 
         bool hasAvailableMemory(mlir::SymbolRefAttr memSpace);
-        vpux::IE::MemoryResourceOp setUsedMemory(mlir::SymbolRefAttr memSpace, Byte size);
-        vpux::IE::MemoryResourceOp getUsedMemory(mlir::SymbolRefAttr memSpace);
 
         vpux::IE::MemoryResourceOp getAvailableMemory(mlir::SymbolRefAttr memSpace);
 
@@ -516,16 +514,6 @@ def IE_TileResourceOp :
         template <typename Enum>
         mem_resource_if<Enum> getAvailableMemory(Enum kind) {
             return getAvailableMemory(mlir::SymbolRefAttr::get(getContext(), stringifyEnum(kind)));
-        }
-
-        template <typename Enum>
-        mem_resource_if<Enum> setUsedMemory(Enum kind, Byte size) {
-            return setUsedMemory(mlir::SymbolRefAttr::get(getContext(), stringifyEnum(kind)), size);
-        }
-
-        template <typename Enum>
-        mem_resource_if<Enum> getUsedMemory(Enum kind) {
-            return getUsedMemory(mlir::SymbolRefAttr::get(getContext(), stringifyEnum(kind)));
         }
 
         static mlir::StringRef getDefaultDialect() {
@@ -660,7 +648,10 @@ def IE_ReorderOp :
 
 def IE_SoftMaxOp :
         IE_LayerOp<
-            "SoftMax"
+            "SoftMax",
+            [
+                DeclareOpInterfaceMethods<ReifyRankedShapedTypeOpInterface>
+            ]
         > {
     let summary = "InferenceEngine SoftMax layer";
 
@@ -791,7 +782,9 @@ def IE_ReLUOp :
         IE_LayerOp<
             "ReLU",
             [
-                IE_EltwiseOp
+                IE_EltwiseOp,
+                DeclareOpInterfaceMethods<ReifyRankedShapedTypeOpInterface>,
+                ShapeBoundOp
             ]
         > {
     let summary = "InferenceEngine ReLU layer";
@@ -857,6 +850,9 @@ def IE_PowerOp :
     let results = (outs
         RankedTensorOf<[F16, F32, SI32, SI64, UI8, UI16, UI32, UI64]>:$output
     );
+
+    let hasCanonicalizer = 1;
+    let hasFolder = 1;
 }
 
 //
@@ -868,7 +864,9 @@ def IE_AddOp :
             "Add",
             [
                 Commutative,
-                IE_EltwiseOp
+                IE_EltwiseOp,
+                DeclareOpInterfaceMethods<ReifyRankedShapedTypeOpInterface>,
+                ShapeBoundOp
             ]
         > {
     let summary = "InferenceEngine Add layer";
@@ -890,7 +888,7 @@ def IE_AddOp :
 
     let hasFolder = 1;
 
-    let elemComparisonModes = [IE_TypeComparisonMode_ALLOW_QUANT_MIXED_PRECISION];
+    let elemComparisonModes = [IE_TypeComparisonMode_ALLOW_MIXED_PRECISION];
 }
 
 //
@@ -1110,7 +1108,7 @@ def IE_GreaterEqualOp :
     );
 
     let results = (outs
-        RankedTensorOf<[Bool8]>:$output
+        RankedTensorOf<[F16, F32, SI32, SI64]>:$output
     );
 }
 
@@ -1219,7 +1217,7 @@ def IE_MultiplyOp :
 
     let hasFolder = 1;
 
-    let elemComparisonModes = [IE_TypeComparisonMode_ALLOW_QUANT_MIXED_PRECISION];
+    let elemComparisonModes = [IE_TypeComparisonMode_ALLOW_MIXED_PRECISION];
 }
 
 //
@@ -1251,7 +1249,7 @@ def IE_AndOp :
         RankedTensorOf<[I8, F16, F32, SI32, SI64, quant_QuantizedType]>:$output
     );
 
-    let elemComparisonModes = [IE_TypeComparisonMode_ALLOW_QUANT_MIXED_PRECISION];
+    let elemComparisonModes = [IE_TypeComparisonMode_ALLOW_MIXED_PRECISION];
 }
 
 //
@@ -1360,7 +1358,11 @@ def IE_BitwiseNotOp :
 
 def IE_ConvolutionOp :
         IE_LayerOp<
-            "Convolution"
+            "Convolution",
+            [
+                DeclareOpInterfaceMethods<ReifyRankedShapedTypeOpInterface>,
+                ShapeBoundOp
+            ]
         > {
     let summary = "InferenceEngine Convolution layer";
 
@@ -1387,7 +1389,7 @@ def IE_ConvolutionOp :
 
     let hasCanonicalizer = 1;
 
-    let elemComparisonModes = [IE_TypeComparisonMode_ALLOW_QUANT_MIXED_PRECISION, IE_TypeComparisonMode_ALLOW_DIFFERENT_QUANT];
+    let elemComparisonModes = [IE_TypeComparisonMode_ALLOW_MIXED_PRECISION, IE_TypeComparisonMode_ALLOW_DIFFERENT_QUANT];
 }
 
 //
@@ -1423,7 +1425,7 @@ def IE_GroupConvolutionOp :
 
     let hasCanonicalizer = 1;
 
-    let elemComparisonModes = [IE_TypeComparisonMode_ALLOW_QUANT_MIXED_PRECISION, IE_TypeComparisonMode_ALLOW_DIFFERENT_QUANT];
+    let elemComparisonModes = [IE_TypeComparisonMode_ALLOW_MIXED_PRECISION, IE_TypeComparisonMode_ALLOW_DIFFERENT_QUANT];
 }
 
 //
@@ -1482,7 +1484,7 @@ def IE_AvgPoolOp :
         RankedTensorOf<[F16, F32, quant_QuantizedType, SI32, SI64, SI8, UI8]>:$output
     );
 
-    let elemComparisonModes = [IE_TypeComparisonMode_ALLOW_QUANT_MIXED_PRECISION, IE_TypeComparisonMode_ALLOW_DIFFERENT_QUANT];
+    let elemComparisonModes = [IE_TypeComparisonMode_ALLOW_MIXED_PRECISION, IE_TypeComparisonMode_ALLOW_DIFFERENT_QUANT];
 }
 
 //
@@ -1491,7 +1493,11 @@ def IE_AvgPoolOp :
 
 def IE_MaxPoolOp :
         IE_LayerOp<
-            "MaxPool"
+            "MaxPool",
+            [
+                DeclareOpInterfaceMethods<ReifyRankedShapedTypeOpInterface>,
+                ShapeBoundOp
+            ]
         > {
     let summary = "InferenceEngine MaxPool layer";
 
@@ -1514,7 +1520,7 @@ def IE_MaxPoolOp :
         RankedTensorOf<[F16, F32, quant_QuantizedType, SI32, SI64, SI8, UI8]>:$output
     );
 
-    let elemComparisonModes = [IE_TypeComparisonMode_ALLOW_QUANT_MIXED_PRECISION, IE_TypeComparisonMode_ALLOW_DIFFERENT_QUANT];
+    let elemComparisonModes = [IE_TypeComparisonMode_ALLOW_MIXED_PRECISION, IE_TypeComparisonMode_ALLOW_DIFFERENT_QUANT];
 }
 
 //
@@ -1547,6 +1553,7 @@ def IE_MaxPool8Op :
     );
 
 }
+
 
 //
 // AdaptiveAvgPoolOp
@@ -2508,6 +2515,7 @@ def IE_QuantizeOp :
     );
 
     let hasFolder = 1;
+    let hasCanonicalizer = 1;
 }
 
 //
@@ -2567,13 +2575,13 @@ def IE_QuantizeCastOp :
     let summary = "InferenceEngine Quantize Cast layer";
 
     let arguments = (ins
-        RankedTensorOf<[AnyInteger, quant_QuantizedType]>:$input,
+        AnyRankedTensor:$input,
 
         TypeAttr:$dstElemType
     );
 
     let results = (outs
-        RankedTensorOf<[AnyInteger, quant_QuantizedType]>:$output
+        AnyRankedTensor:$output
     );
 
     let hasCanonicalizer = 1;
@@ -2587,7 +2595,11 @@ def IE_QuantizeCastOp :
 
 def IE_MatMulOp:
         IE_LayerOp<
-            "MatMul"
+            "MatMul",
+            [
+                DeclareOpInterfaceMethods<ReifyRankedShapedTypeOpInterface>,
+                ShapeBoundOp
+            ]
         > {
     let summary = "InferenceEngine MatMul layer";
 
@@ -2605,7 +2617,7 @@ def IE_MatMulOp:
 
     let hasCanonicalizer = 1;
 
-    let elemComparisonModes = [IE_TypeComparisonMode_ALLOW_QUANT_MIXED_PRECISION];
+    let elemComparisonModes = [IE_TypeComparisonMode_ALLOW_MIXED_PRECISION];
 }
 
 //
@@ -3275,7 +3287,10 @@ def IE_ErfOp :
 
 def IE_TransposeOp :
         IE_LayerOp<
-            "Transpose"
+            "Transpose",
+            [
+                DeclareOpInterfaceMethods<ReifyRankedShapedTypeOpInterface>
+            ]
         > {
     let summary = "InferenceEngine Transpose layer";
 
@@ -3348,7 +3363,8 @@ def IE_InterpolateOp :
         OptionalAttr<I64ArrayAttr>:$initial_input_dims_attr,
         OptionalAttr<I64ArrayAttr>:$initial_output_dims_attr,
 
-        IE_InterpolateAttr:$attr
+        IE_InterpolateAttr:$attr,
+        OptionalAttr<IntAttr>:$output_channels
     );
 
     let results = (outs
@@ -3357,7 +3373,7 @@ def IE_InterpolateOp :
     let hasFolder = 1;
     let hasCanonicalizer = 1;
 
-    let elemComparisonModes = [IE_TypeComparisonMode_ALLOW_QUANT_MIXED_PRECISION, IE_TypeComparisonMode_ALLOW_DIFFERENT_QUANT];
+    let elemComparisonModes = [IE_TypeComparisonMode_ALLOW_MIXED_PRECISION, IE_TypeComparisonMode_ALLOW_DIFFERENT_QUANT];
 }
 
 //
@@ -3609,6 +3625,8 @@ def IE_MVNOp :
             "::mlir::FloatAttr":$eps
         )>
     ];
+
+    let hasCanonicalizer = 1;
 }
 
 //
@@ -3649,7 +3667,10 @@ def IE_MVN6Op :
 
 def IE_ConcatOp :
         IE_LayerOp<
-            "Concat"
+            "Concat",
+            [
+                DeclareOpInterfaceMethods<ReifyRankedShapedTypeOpInterface>
+            ]
         > {
     let summary = "InferenceEngine Concat layer";
 
@@ -4002,7 +4023,7 @@ def IE_TransposedConvolutionOp:
 
     let hasCanonicalizer = 1;
 
-    let elemComparisonModes = [IE_TypeComparisonMode_ALLOW_QUANT_MIXED_PRECISION, IE_TypeComparisonMode_ALLOW_DIFFERENT_QUANT];
+    let elemComparisonModes = [IE_TypeComparisonMode_ALLOW_MIXED_PRECISION, IE_TypeComparisonMode_ALLOW_DIFFERENT_QUANT];
 }
 
 //
@@ -4187,7 +4208,8 @@ def IE_UpsamplingOp :
     let arguments = (ins
         RankedTensorOf<[F16, F32, quant_QuantizedType]>:$input,
         I64ArrayAttr:$upsampling_factor,
-        OptionalAttr<IE_UpsamplingPadAttr>:$pad
+        OptionalAttr<IE_UpsamplingPadAttr>:$pad,
+        OptionalAttr<IntAttr>:$output_channels
     );
 
     let results = (outs
@@ -4353,7 +4375,8 @@ def IE_PadOp :
         OptionalAttr<I64ArrayAttr>:$pads_end_attr,
         OptionalAttr<F64Attr>:$pad_value_attr,
 
-        IE_PadModeAttr:$mode
+        IE_PadModeAttr:$mode,
+        OptionalAttr<IntAttr>:$output_channels
     );
 
     let results = (outs
@@ -4540,6 +4563,8 @@ def IE_SubtractOp :
     );
 
     let hasFolder = 1;
+
+    let elemComparisonModes = [IE_TypeComparisonMode_ALLOW_MIXED_PRECISION];
 }
 
 //
@@ -4555,6 +4580,15 @@ def IE_LSTMSequenceOp :
         > {
     let summary = "InferenceEngine LSTMSequence layer";
 
+    let description = [{
+        This operation is for InferenceEngine LSTMSequence layer:
+
+          * The sequenceLength attribute is not mandatory, which allows us to support dynamic
+            shape cases where the sequenceLength is initially unknown. In such cases, we will
+            derive the necessary information from the inputData and keep the sequenceLength
+            attribute empty.
+    }];
+
     let arguments = (ins
         RankedTensorOf<[F16, F32]>:$inputData,
         RankedTensorOf<[F16, F32]>:$initialHiddenState,
@@ -4563,7 +4597,7 @@ def IE_LSTMSequenceOp :
         RankedTensorOf<[F16, F32]>:$reccurenceWeights,
         Optional<RankedTensorOf<[F16, F32]>>:$biases,
 
-        IntAttr:$sequenceLength,
+        OptionalAttr<IntAttr>:$sequenceLength,
         IE_RNNSequenceDirectionAttr:$direction
     );
 
@@ -4797,6 +4831,34 @@ def IE_BatchToSpace :
     );
 
     let hasCanonicalizer = 1;
+}
+
+//
+//ReverseOp
+//
+
+def IE_ReverseOp :
+        IE_LayerOp<
+            "Reverse"
+        > {
+
+    let summary = "Reverse operations reverse specified axis in an input tensor.";
+
+    let arguments = (ins
+        AnyRankedTensor:$input,
+        Optional<1DTensorOf<[AnyInteger]>>:$axis,
+
+        OptionalAttr<I64ArrayAttr>:$axis_value,
+
+        IE_ReverseModeAttr:$mode
+    );
+
+    let results = (outs
+    AnyRankedTensor:$output
+    );
+
+    let hasCanonicalizer = 1;
+
 }
 
 //
@@ -5880,6 +5942,30 @@ def IE_ShapeOfOp :
     let results = (outs
         1DTensorOf<[SI32, SI64]>:$output
     );
+
+    let hasFolder = 1;
+}
+
+//
+// RangeOp
+//
+
+def IE_RangeOp :
+        IE_LayerOp<
+            "Range"
+        > {
+    let summary = "InferenceEngine Range layer";
+
+    let arguments = (ins
+        1DTensorOf<[AnyInteger, AnyFloat]>:$start,
+        1DTensorOf<[AnyInteger, AnyFloat]>:$stop,
+        1DTensorOf<[AnyInteger, AnyFloat]>:$step,
+        TypeAttr:$dstElemType
+    );
+
+    let results = (outs
+        1DTensorOf<[AnyInteger, AnyFloat]>:$output
+    );
 }
 
 //
@@ -5918,7 +6004,9 @@ def IE_DynamicReshapeOp :
         RankedTensorOf<[AnyInteger]>:$shape,
 
         I64ArrayAttr:$output_shape,
-        I64ArrayAttr:$output_bounds
+        I64ArrayAttr:$output_bounds,
+
+        UnitAttr:$only_set_shape
     );
 
     let results = (outs
@@ -6041,7 +6129,7 @@ def IE_RMSOp :
 
     let arguments = (ins
         RankedTensorOf<[F16, F32]>:$input,
-        1DTensorOf<[F16, F32]>:$gamma,
+        RankedTensorOf<[F16, F32]>:$gamma,
         F64Attr:$epsilon
      );
    let results = (outs
@@ -6100,6 +6188,47 @@ def IE_InverseOp :
     let results = (outs
         RankedTensorOf<[F16, F32]>:$output
     );
+}
+
+//
+// DynamicExpandOp
+//
+
+def IE_DynamicExpandOp :
+        IE_LayerOp<
+            "DynamicExpand"
+        > {
+    let summary = "DynamicExpand operation";
+
+    let description = [{
+        DynamicExpand operation isn't related to any InferenceEngine layer and is designed to take an input
+        tensor with dynamic shapes and perform zero-padding to match the dimensions of an upper bound.
+        This operation is specifically intended for converting a subgraph of a dynamic network into a static one
+        Example:
+        Input tensor<1x1x?x?xf16, {bounds = [1, 1, 5, 5]>
+        Input dynamic shape: 1x1x3x3
+        1, 1, 1
+        1, 1, 1
+        1, 1, 1
+        In memory: 1, 1, 1, 1, 1, 1, 1, 1, 1
+        Output tensor<1x1x5x5xf16>
+        1, 1, 1, 0, 0
+        1, 1, 1, 0, 0
+        1, 1, 1, 0, 0
+        0, 0, 0, 0, 0
+        0, 0, 0, 0, 0
+        In memory: 1, 1, 1, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+    }];
+
+    let arguments = (ins
+        AnyRankedTensor:$input
+    );
+
+    let results = (outs
+        AnyRankedTensor:$output
+    );
+
+    let hasFolder = 1;
 }
 
 #endif

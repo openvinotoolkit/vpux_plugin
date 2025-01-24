@@ -179,7 +179,8 @@ void buildRaceConditionDPUTest(const nb::TestCaseJsonDescriptor& testDesc, mlir:
             mlir::DenseElementsAttr::get(weightsTableDDRType, llvm::ArrayRef<std::int32_t>(weightsTable));
     auto weightsTableDDR = functionBuilder.create<vpux::Const::DeclareOp>(
             loc, weightsTableDDRMemRef,
-            vpux::Const::ContentAttr::transform(weightsTableValues).reorder(vpux::DimsOrder::NHWC).get());
+            vpux::Const::ContentAttr::get(weightsTableValues,
+                                          Const::ContentSetup(weightsTableDDRType).reorder(vpux::DimsOrder::NHWC)));
 
     auto [waitWLMBarrier, freeBarrierId] =
             insertWLMStartSequence(functionBuilder, testDesc.getWLMParams().isWLMPartialEnabled);
@@ -233,7 +234,7 @@ void buildRaceConditionDPUTest(const nb::TestCaseJsonDescriptor& testDesc, mlir:
             auto nceTask = VPURT::wrapIntoTaskOp<VPUIP::NCEClusterTaskOp>(
                     functionBuilder, mlir::ValueRange(waitBarrier.getBarrier()),
                     mlir::ValueRange(updateBarrier.getBarrier()), loc, inputsCMX[idx].getBuffer(),
-                    weightsCMX[idx].getBuffer(), weightsTablesCMX[idx].getBuffer(), nullptr, nullptr,
+                    weightsCMX[idx].getBuffer(), weightsTablesCMX[idx].getBuffer(), /*spr_lookup_table=*/nullptr,
                     inputsCMX[idx].getBuffer(), outputsCMX[idx].getBuffer(), outputsCMX[idx].getBuffer(),
                     vpux::VPUIP::NCETaskType::CONV, kernelSize, strides, pad, nullptr, nullptr);
             nceTask.addDPUTask(functionBuilder, start, outEnd, start, inEnd, pad, conv.cube_mode);

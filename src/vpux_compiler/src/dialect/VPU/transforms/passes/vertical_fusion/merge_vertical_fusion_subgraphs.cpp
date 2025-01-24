@@ -7,11 +7,15 @@
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
 #include "vpux/compiler/dialect/VPU/transforms/factories/vf_axis_increment.hpp"
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
+#include "vpux/compiler/dialect/VPU/utils/generate_tiling.hpp"
 #include "vpux/compiler/dialect/VPU/utils/manual_strategy_utils.hpp"
-#include "vpux/compiler/dialect/VPU/utils/vertical_fusion_config.hpp"
-#include "vpux/compiler/dialect/VPU/utils/vertical_fusion_utils.hpp"
+#include "vpux/compiler/dialect/VPU/utils/vertical_fusion/vertical_fusion_case.hpp"
+#include "vpux/compiler/dialect/VPU/utils/vertical_fusion/vertical_fusion_config.hpp"
+#include "vpux/compiler/dialect/VPU/utils/vertical_fusion/vertical_fusion_utils.hpp"
 #include "vpux/compiler/utils/VPU/tile_utils.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
+
+#include "vpux/compiler/dialect/VPU/utils/vertical_fusion/vertical_fusion_scheduling_factory.hpp"
 
 #include <llvm/ADT/SetOperations.h>
 #include <llvm/ADT/SmallSet.h>
@@ -22,6 +26,59 @@ using namespace vpux;
 using namespace VPU;
 
 namespace {
+
+// This function tries to find mergeable input for the currentOp
+// Currently only support NCE task with weights
+// E-141686: A general solution to merge more subgraph for VFOp.
+mlir::FailureOr<VPU::VerticalFusionOp> findMergeableVFInput(VFConfig& vfConfig) {
+    auto currentOp = vfConfig.getSubgraph();
+    for (auto* op : vfConfig.getOperationsForTiling()) {
+        auto nceOp = mlir::dyn_cast<VPU::NCEOpInterface>(op);
+        if (nceOp == nullptr || nceOp.getWeightsOperand() == nullptr) {
+            continue;
+        }
+        if (auto blockArg = mlir::dyn_cast<mlir::BlockArgument>(nceOp.getWeightsOperand())) {
+            auto parentOp = currentOp.getOperand(blockArg.getArgNumber()).getDefiningOp<VPU::VerticalFusionOp>();
+            if (parentOp != nullptr) {
+                return parentOp;
+            }
+        }
+    }
+    return mlir::failure();
+}
+
+// This function checks if other inputs of currentOp can be merged
+// If prevOp was tried to merge with currentOp, return false
+bool checkOtherVFInput(VPU::VerticalFusionOp currentOp, VPU::VerticalFusionOp prevOp) {
+    // Check if currentOp has mergeable input
+    auto vfConfig = VFConfig(currentOp);
+    auto mergeableOp = findMergeableVFInput(vfConfig);
+    if (mlir::failed(mergeableOp)) {
+        return false;
+    }
+    // prevOp was tried to merge with currentOp
+    return mergeableOp.value() != prevOp;
+}
+
+// This function checks the weights tilingStrategy is split over output channel
+bool isTileOverOutputChannel(VFConfig& vfConfig) {
+    // Check if nceTaskOp has mergeable input, weights of NCE task
+    auto nceTaskOp = vfConfig.getSubgraph();
+    auto weightsOp = findMergeableVFInput(vfConfig);
+    if (mlir::failed(weightsOp)) {
+        return false;
+    }
+
+    const auto moreThanOne = [](auto value) {
+        return value > 1;
+    };
+
+    // weights, tiles on OutputChannel dim > 1
+    // NCE task, tiles on activation Channel dim > 1
+    const auto weightsTilingStrategy = parseIntArrayAttr<int64_t>(weightsOp.value().getTilingStrategy());
+    const auto nceTaskTilingStrategy = parseIntArrayAttr<int64_t>(nceTaskOp.getTilingStrategy());
+    return weightsTilingStrategy[Dims4D::Filter::OC.ind()] > 1 || llvm::any_of(nceTaskTilingStrategy, moreThanOne);
+}
 
 // set VF users for correct tensor size calculation
 class VFSubgraphUserSetter {
@@ -63,22 +120,24 @@ public:
     mlir::LogicalResult matchAndRewrite(VPU::VerticalFusionOp origOp, mlir::PatternRewriter& rewriter) const final;
 
 private:
-    bool checkVFCostFunction(VPU::VerticalFusionOp prevOp, VPU::VerticalFusionOp currentOp,
-                             VPU::VerticalFusionOp mergedVFOp, mlir::ArrayAttr tiling,
-                             std::optional<StrategyCost> mergedVFCost) const;
+    bool checkVFCostFunction(VPU::VerticalFusionOp prevOp, VPU::VerticalFusionOp currentOp, VFCase& mergedCase) const;
     int64_t getMaxDimLimit(const Dim axis, ArrayRef<mlir::Operation*> operation) const;
-    bool getOptimalTilingStrategy(SmallVector<int64_t>& tilingArray, const Dim dim, const int64_t minTiles,
-                                  const int64_t maxTiles, VFConfig& config) const;
+    std::optional<int64_t> getOptimalTilingStrategy(const std::shared_ptr<IVFScheduling>& scheduling, const Dim dim,
+                                                    const int64_t minTiles, int64_t& maxTiles,
+                                                    TilingOperationStorage::UPtr& minStorage,
+                                                    TilingOperationStorage::UPtr& maxStorage, VFConfig& config) const;
     bool waitOtherUsers(VPU::VerticalFusionOp newBlock, VPU::VerticalFusionOp parentVFOp) const;
-    mlir::ArrayAttr getVFTilingInfo(VPU::VerticalFusionOp newBlock, VPU::VerticalFusionOp parentVFOp,
-                                    VPU::VerticalFusionOp mergedVFOp, std::optional<StrategyCost>& mergedCost) const;
+    mlir::FailureOr<VFCase> findVFCase(VPU::VerticalFusionOp newBlock, VPU::VerticalFusionOp parentVFOp,
+                                       VPU::VerticalFusionOp mergedVFOp) const;
     bool alignMCTiling(VPU::VerticalFusionOp currentOp, VPU::VerticalFusionOp prevOp) const;
-    mlir::FailureOr<Dim> getTilingAxis(SmallVector<int64_t>& tilingStrategy, VPU::VerticalFusionOp prevOp,
-                                       VPU::VerticalFusionOp currentOp, VPU::VerticalFusionOp mergedVFOp,
-                                       std::optional<StrategyCost>& mergedCost) const;
+    mlir::FailureOr<VFCase> findVFTiling(VPU::VerticalFusionOp mergedOp, VPU::VerticalFusionOp prevOp,
+                                         VPU::VerticalFusionOp currentOp) const;
+    std::deque<std::shared_ptr<IVFScheduling>> getVFSchedulingChecks(VFConfig& config) const;
+    StrategyCost extractVFCost(VFConfig& vfConfig) const;
+    std::shared_ptr<IVFScheduling> detectScenario(VFConfig& vfConfig) const;
 
-    void fuseBlocks(mlir::PatternRewriter& rewriter, VPU::VerticalFusionOp currentOp, VPU::VerticalFusionOp mergedOp,
-                    mlir::ArrayAttr tilingInfo) const;
+    void fuseBlocks(mlir::PatternRewriter& rewriter, VPU::VerticalFusionOp currentOp,
+                    VPU::VerticalFusionOp mergedOp) const;
 
     bool _enableVerticalFusionPipelining = false;
     bool _enablePrefetchTiling = true;
@@ -139,8 +198,10 @@ bool MergeVFRegionRewriter::alignMCTiling(VPU::VerticalFusionOp currentOp, VPU::
         return ndType.dyn_cast_or_null<VPU::DistributedTensorType>();
     };
 
-    const auto getInputDistributedType = [](VPU::ClusteredOpInterface clusteredOp, mlir::Value inputOperand) {
+    const auto getInputDistributedType = [](VPU::ClusteredOpInterface clusteredOp, mlir::Value inputOperand,
+                                            bool& isSparsed) {
         const auto inputType = inputOperand.getType().cast<NDTypeInterface>();
+        isSparsed = false;
         const auto numClusters =
                 clusteredOp.getOptimalNumClusters(inputType.getShape(), clusteredOp.getMultiClusterStrategy().value());
 
@@ -153,6 +214,7 @@ bool MergeVFRegionRewriter::alignMCTiling(VPU::VerticalFusionOp currentOp, VPU::
                                   .cast<NDTypeInterface>();
         if (auto sparseTensorType = ndType.dyn_cast<VPU::SparseTensorType>()) {
             ndType = sparseTensorType.getData().cast<NDTypeInterface>();
+            isSparsed = true;
         }
 
         return ndType.dyn_cast_or_null<VPU::DistributedTensorType>();
@@ -217,15 +279,24 @@ bool MergeVFRegionRewriter::alignMCTiling(VPU::VerticalFusionOp currentOp, VPU::
         if (isPrevOutOpWithMCStrategy && isCurrInOpWithMCStrategy) {
             auto currInputOperand = currInputViewLikeOps.empty() ? currInputArg.cast<mlir::Value>()
                                                                  : currInputViewLikeOps.back()->getResult(0);
-            auto actualCurrInDistType =
-                    getInputDistributedType(mlir::cast<VPU::ClusteredOpInterface>(currInputOp), currInputOperand);
-            auto inferredCurrInDistType = inferInputDistributedType(prevOutDistType, currInputViewLikeOps);
+            bool isSparsed = false;
+            auto actualCurrInDistType = getInputDistributedType(mlir::cast<VPU::ClusteredOpInterface>(currInputOp),
+                                                                currInputOperand, isSparsed);
+
+            auto inputTrueOverlapped = hasTrueOverlappedParams(actualCurrInDistType);
+
+            //  E#112803 will handle sparse consumers
+            if (inputTrueOverlapped && isSparsed) {
+                return false;
+            }
 
             // TODO E#92130 extend Shave operations with OVERLAPPED param propagation
             if ((outputTrueOverlapped && mlir::isa<VPU::SWOpInterface>(currInputOp)) ||
-                (isSWLayer && hasTrueOverlappedParams(actualCurrInDistType))) {
+                (isSWLayer && inputTrueOverlapped)) {
                 return false;
             }
+
+            auto inferredCurrInDistType = inferInputDistributedType(prevOutDistType, currInputViewLikeOps);
 
             if (areDistributionAttrsCompatible(inferredCurrInDistType, actualCurrInDistType, true).failed()) {
                 return false;
@@ -247,6 +318,133 @@ size_t getLinkNumber(VPU::VerticalFusionOp currentOp, VPU::VerticalFusionOp prev
     return std::distance(operands.begin(), operandIt);
 }
 
+VPUNNCostParameters fillInCostParam(mlir::Operation* operation, const OutputTiling& tiling,
+                                    const SmallVector<TileInfo>& inputTiles, const bool enablePrefetching) {
+    auto mcStrategy = VPU::MultiClusterStrategy::Clustering;
+    if (auto mcOperation = mlir::dyn_cast<VPU::ClusteredOpInterface>(operation)) {
+        mcStrategy = mcOperation.getMultiClusterStrategy().value_or(mcStrategy);
+    }
+
+    auto mode = enablePrefetching ? TilingMode::PREFETCHING : TilingMode::ISOLATED;
+
+    SmallVector<OutputTiling> inputAllTiles;
+    if (!inputTiles.empty()) {
+        inputAllTiles.push_back(inputTiles);
+    }
+    return VPUNNCostParameters(mcStrategy, tiling, mode, inputAllTiles);
+}
+
+std::shared_ptr<IVFScheduling> MergeVFRegionRewriter::detectScenario(VFConfig& vfConfig) const {
+    VFSchedulingFactory costFactory(_enablePrefetchTiling);
+    auto scenarioKind = vfConfig.getSubgraph().getScenario().has_value()
+                                ? vfConfig.getSubgraph().getScenario().value()
+                                : _enablePrefetchTiling ? VFScenario::WEIGHTS_PREFETCHING : VFScenario::MINIMAL;
+    return costFactory.createVFScenario(scenarioKind, _log);
+}
+
+SmallVector<mlir::Operation*> findUsers(mlir::Operation* operation) {
+    SmallVector<mlir::Operation*> users;
+
+    for (auto* user : operation->getUsers()) {
+        if (!isPureViewOp(user)) {
+            users.emplace_back(user);
+            continue;
+        }
+
+        auto usersBelow = findUsers(user);
+        if (!usersBelow.empty()) {
+            llvm::copy(usersBelow, std::back_inserter(users));
+        }
+    }
+
+    return users;
+}
+
+StrategyCost MergeVFRegionRewriter::extractVFCost(VFConfig& vfConfig) const {
+    auto vfOp = vfConfig.getSubgraph();
+    auto tilingDims = parseIntArrayAttr<int64_t>(vfOp.getTilingStrategyAttr());
+
+    const auto dim = getVFTilingDim(tilingDims);
+    auto operations = vfConfig.getOperationsForTiling();
+    if (operations.empty()) {
+        return 0;
+    }
+
+    if (!dim.has_value() || operations.size() == 1) {
+        OutputTiling tiles;
+        auto* operation = operations.front();
+        if (dim.has_value()) {
+            auto tiling = fillDividedTiles(operation, Shape(tilingDims), getShape(operation->getResult(0)));
+            VPUX_THROW_WHEN(mlir::failed(tiling), "Incorrect tiling {0} for vf {1}", tilingDims, vfOp);
+            tiles = tiling.value();
+        }
+
+        const auto costParameters = fillInCostParam(operation, tiles, {}, _enablePrefetchTiling);
+        auto cost = _vpunnCostFunction->getStrategyCost(operation, costParameters);
+
+        SmallVector<mlir::Value> operands = {operation->getOperand(0)};
+        if (operation->getNumOperands() > 1 && operation->hasTrait<VPU::EltwiseOp>() &&
+            operation->getOperand(0) != operation->getOperand(1)) {
+            operands.emplace_back(operation->getOperand(1));
+        }
+
+        auto nceOp = mlir::dyn_cast<VPU::NCEOpInterface>(operation);
+
+        auto spilling = dim.has_value() &&
+                        (isSpatialTiling(tilingDims) || (nceOp == nullptr || nceOp.getWeightsOperand() == nullptr));
+        auto hasSpilledParents = llvm::any_of(operands, [&](mlir::Value value) {
+            if (auto arg = value.dyn_cast<mlir::BlockArgument>()) {
+                auto parentOperand = vfConfig.getSubgraph().getOperand(arg.getArgNumber());
+                auto parentOp = findParent(parentOperand);
+                return !isCmxOperation(parentOp, false) ||
+                       isPrevOperationEarlyScheduled(parentOp, vfConfig.getSubgraph());
+            }
+            return false;
+        });
+        auto hasSpilledUsers = vfConfig.getSubgraph()->getUsers().empty() ||
+                               llvm::any_of(findUsers(vfConfig.getSubgraph()), [&vfConfig](auto* user) {
+                                   return !isCmxOperation(user, true) ||
+                                          isPrevOperationEarlyScheduled(vfConfig.getSubgraph().getOperation(), user);
+                               });
+
+        if (spilling || hasSpilledParents) {
+            for (auto operandValue : operands | indexed) {
+                auto operand = operandValue.value();
+                auto arg = operand.dyn_cast<mlir::BlockArgument>();
+                if (!spilling && arg != nullptr) {
+                    auto parentOp = vfConfig.getSubgraph().getOperand(arg.getArgNumber()).getDefiningOp();
+                    if (isCmxOperation(parentOp, false) &&
+                        !isPrevOperationEarlyScheduled(parentOp, vfConfig.getSubgraph())) {
+                        continue;
+                    }
+                }
+                cost += _vpunnCostFunction->getSpillingReadCost(
+                        operation, costParameters, operand, [&](const auto& tileInfo) {
+                            return vfConfig.getOperationTypes(operation, tileInfo, {})[operandValue.index()];
+                        });
+            }
+        }
+
+        if (spilling || hasSpilledUsers) {
+            cost += _vpunnCostFunction->getSpillingWriteCost(operation, costParameters, [&](const auto& tileInfo) {
+                auto types = vfConfig.getOperationTypes(operation, tileInfo, {});
+                VPUX_THROW_WHEN(types.empty(), "Cannot get types for {0}", *operation);
+                return types.back();
+            });
+        }
+
+        return cost;
+    }
+
+    auto vfCase = VFCase(vfConfig, dim.value());
+    vfCase.setTilingNumber(tilingDims[dim.value().ind()]);
+
+    auto scenario = detectScenario(vfConfig);
+
+    vfCase.setScheduling(std::move(scenario));
+    return vfCase.getCost(_vpunnCostFunction, _log);
+}
+
 /*
  Function checks if two blocks suit to be merged in one on following criterias:
  1. Number of operations doesn't exceed the limit
@@ -255,196 +453,54 @@ size_t getLinkNumber(VPU::VerticalFusionOp currentOp, VPU::VerticalFusionOp prev
  4. Required CMX memory by constant weights shouldn't exceed the size of the whole memory
 */
 bool MergeVFRegionRewriter::checkVFCostFunction(VPU::VerticalFusionOp prevOp, VPU::VerticalFusionOp currentOp,
-                                                VPU::VerticalFusionOp mergedVFOp, mlir::ArrayAttr tiling,
-                                                std::optional<StrategyCost> mergedVFCost) const {
-    VPUX_THROW_WHEN(tiling == nullptr, "Incorrect tiling strategy for VF");
+                                                VFCase& mergedCase) const {
+    VPUX_THROW_WHEN(!mergedCase.isInitialized(), "Incorrect tiling strategy for VF");
 
-    const auto prevBlock = prevOp.getBody();
-    const auto currentVFOp = currentOp.getBody();
-
-    auto newOps = currentVFOp->getOps<VPU::VerticalFusionOpInterface>();
-    auto oldOps = prevBlock->getOps<VPU::VerticalFusionOpInterface>();
-
-    if (newOps.empty() || oldOps.empty()) {
-        return false;
+    if (mergedCase.getTilingNumber() == 1 && mergedCase.getConfig().isPotentiallyPipelined()) {
+        mergedCase.approveScheduling();
+        return true;
     }
 
     // compare the cost between merged VF Subgraph and 2 subgraphs with the spill
-    const auto prevCost = getVFCost(_vpunnCostFunction, prevOp, _log, _enablePrefetchTiling);
-    const auto currentCost = getVFCost(_vpunnCostFunction, currentOp, _log, _enablePrefetchTiling);
+    auto prevOpConfig = VFConfig(prevOp, _enablePrefetchTiling);
+    auto currentOpConfig = VFConfig(currentOp, _enablePrefetchTiling);
+
+    // Inaccurate INT4 cost, skip and merge
+    auto isNCEWithInt4Weights = [](mlir::Operation* op) {
+        return VPU::isNCEWithInt4Weights(op);
+    };
+    auto newOps = currentOpConfig.getOperationsForTiling();
+    auto oldOps = prevOpConfig.getOperationsForTiling();
+    if (llvm::any_of(newOps, isNCEWithInt4Weights) || llvm::any_of(oldOps, isNCEWithInt4Weights)) {
+        mergedCase.approveScheduling();
+        return true;
+    }
+
+    const auto prevCost = extractVFCost(prevOpConfig);
+    const auto currentCost = extractVFCost(currentOpConfig);
 
     // simply decide if there is tiling for parents
     const auto prevTilingStrategy = parseIntArrayAttr<int64_t>(prevOp.getTilingStrategy());
     const auto currentTilingStrategy = parseIntArrayAttr<int64_t>(currentOp.getTilingStrategy());
-    StrategyCost spillingCost = 0;
 
-    const auto moreThanOne = [](auto value) {
-        return value > 1;
-    };
-
-    const auto isSpillBetween = [&](auto& prevTilingStrategy, auto& currentTilingStrategy) {
-        // There must be a spill when parent VF needs tiling but current VF doesn't
-        if (llvm::any_of(prevTilingStrategy, moreThanOne) && !llvm::any_of(currentTilingStrategy, moreThanOne)) {
-            const auto prevOutputSize = prevOp->getResult(0).getType().cast<NDTypeInterface>().getTotalAllocSize();
-            if (prevOutputSize > VPU::getTotalCMXSize(prevOp)) {
-                return true;
-            }
-        }
-
-        const auto isSpatialTiling = [](auto& strategy) {
-            if (strategy.size() <= Dims4D::Act::numSpatialDims) {
-                return false;
-            }
-
-            for (auto index : irange(Dims4D::Act::numSpatialDims)) {
-                if (strategy[Dims4D::Act::getSpatialDim(index).ind()] > 1) {
-                    return true;
-                }
-            }
-            return false;
-        };
-
-        if (isSpatialTiling(prevTilingStrategy)) {
-            return true;
-        }
-
-        if (llvm::any_of(currentTilingStrategy, moreThanOne)) {
-            if (isSpatialTiling(currentTilingStrategy)) {
-                return true;
-            }
-            // A channel tiling case
-            // Note: only care if current tiling strategy is moreThanOne, as the previous vertical fusion may have
-            // cmx-concat optimization thus there's no spilling even though prevTilingStrategy is moreThanOne
-            auto currentConfig = VFConfig(currentOp);
-            auto currentOperations = currentConfig.getVFOperations();
-            for (auto* op : currentOperations) {
-                if (auto nceOp = mlir::dyn_cast<VPU::NCEOpInterface>(op)) {
-                    if (nceOp.getWeightsOperand() != nullptr) {
-                        return false;
-                    }
-                }
-            }
-            return true;
-        }
-
-        return false;
-    };
-
-    auto spillBetween = isSpillBetween(prevTilingStrategy, currentTilingStrategy);
-
-    const auto getStrategy = [](auto* operation) -> VPU::MultiClusterStrategy {
-        auto strategy = VPU::MultiClusterStrategy::Clustering;
-        if (auto mcOperation = mlir::dyn_cast<VPU::ClusteredOpInterface>(operation)) {
-            strategy = mcOperation.getMultiClusterStrategy().value_or(strategy);
-        }
-        return strategy;
-    };
-
-    if (spillBetween) {
-        // for each operation from previous subgraph which has users in current subgraph
-        // calculate spill cost
-        const auto lastOp = prevBlock->getTerminator()->getOperands().back().getDefiningOp();
-        auto mcStrategy = getStrategy(lastOp);
-
-        const auto prevTiles = fillDividedTiles(prevOp, Shape(prevTilingStrategy), getShape(lastOp->getResult(0)));
-
-        const auto lastOpParams = VPUNNCostParameters(mcStrategy, prevTiles.value());
-        spillingCost += _vpunnCostFunction->getSpillingWriteCost(lastOp, lastOpParams);
-
-        // Record the operation and its corresponding tiling strategy when back-infer subgraph
-        std::unordered_map<mlir::Operation*, SmallVector<int64_t>> opTilingStrategyMap;
-        backInferVFTilingStrategy(currentOp, currentTilingStrategy, opTilingStrategyMap);
-
-        for (auto arg : currentVFOp->getArguments()) {
-            auto operand = currentOp.getOperand(arg.getArgNumber());
-            auto findOperand = [&](mlir::Value value) -> bool {
-                return value == arg;
-            };
-            if (operand.getDefiningOp() == prevOp) {
-                for (auto* user : arg.getUsers()) {
-                    mcStrategy = getStrategy(user);
-                    VPUX_THROW_WHEN(opTilingStrategyMap.find(user) == opTilingStrategyMap.end(),
-                                    "Operation {0} is not in the map", user->getLoc());
-                    const auto currentTiles =
-                            fillDividedTiles(user, Shape(opTilingStrategyMap.at(user)), getShape(user->getResult(0)));
-
-                    const auto userParams = VPUNNCostParameters(mcStrategy, currentTiles.value());
-                    spillingCost += _vpunnCostFunction->getSpillingReadCost(user, userParams, prevOp.getOperation(),
-                                                                            findOperand);
-                }
-            }
-        }
+    StrategyCost mergedVFCost = 0;
+    {
+        // change the IR so that merged VF substitutes current operation and previous op to
+        // calculate correct cost
+        // the IR will change back when the setter is destroyed
+        VFSubgraphUserSetter setter(currentOp, mergedCase.getConfig().getSubgraph());
+        mergedCase.getConfig().invalidatePointers();
+        prevOpConfig.invalidatePointers();
+        currentOpConfig.invalidatePointers();
+        mergedVFCost = mergedCase.getCost(_vpunnCostFunction, _log);
     }
+    mergedCase.getConfig().invalidatePointers();
 
-    // create new VF, in case the cost is worse, delete it
-    // E-121586
-    if (!mergedVFCost.has_value()) {
-        VFSubgraphUserSetter setter(currentOp, mergedVFOp);
-        mergedVFCost = getVFCost(_vpunnCostFunction, mergedVFOp, _log, _enablePrefetchTiling, tiling);
-
-        VPUX_THROW_WHEN(!mergedVFCost.has_value(), "Couldn't calculate cost for {0}", mergedVFOp);
-    }
-
-    const auto spillAfter = llvm::any_of(currentTilingStrategy, moreThanOne);
-    const auto isCmxOperation = [](auto* operation) {
-        return mlir::isa_and_nonnull<VPU::TilingInfoOpInterface>(operation) && !operation->hasAttr(tilingStrategy);
-    };
-
-    if (!spillAfter) {
-        if (!currentVFOp->getUsers().empty() && llvm::all_of(currentVFOp->getUsers(), isCmxOperation)) {
-            // add spill after the last op to DDR
-            const auto lastOp = currentVFOp->getTerminator()->getOperands().back().getDefiningOp();
-            VPUX_THROW_WHEN(lastOp == nullptr, "Cannot get the last operation in VF {0}", currentOp);
-            auto tiles = fillDividedTiles(currentOp, Shape(currentTilingStrategy), getShape(currentOp->getResult(0)));
-            VPUX_THROW_WHEN(mlir::failed(tiles) || tiles.value().empty(),
-                            "Cannot get tiles {0} for the operation in VF {1}", currentTilingStrategy, currentOp);
-
-            auto types = getTileTypes(lastOp, tiles.value().back());
-            VPUX_THROW_WHEN(types.empty(), "Cannot get type for operation {0} tile {1}", *lastOp, tiles.value().back());
-
-            mergedVFCost.value() += types.back().getTotalAllocSize().count();
-        }
-    }
-
-    if (llvm::none_of(prevTilingStrategy, moreThanOne)) {
-        auto currentConfig = VFConfig(currentOp);
-        auto currentOperations = currentConfig.getVFOperations();
-        const auto isBlockArg = [](mlir::Value value) -> bool {
-            return value.isa<mlir::BlockArgument>();
-        };
-        DenseMap<mlir::Value, Byte> operandsSpills;
-        for (auto* inputOp : currentOperations | filtered([](mlir::Operation* op) {
-                                 return op->hasTrait<VPU::EltwiseOp>();
-                             })) {
-            // for input operations which have one of operands not in
-            // VFblock arguments
-            // calculate spilling
-            if (!llvm::any_of(inputOp->getOperands(), isBlockArg)) {
-                continue;
-            }
-            for (auto operand : inputOp->getOperands()) {
-                if (auto arg = operand.dyn_cast<mlir::BlockArgument>()) {
-                    auto previousOp = currentOp.getOperand(arg.getArgNumber()).getDefiningOp();
-                    if (mlir::isa_and_nonnull<Const::DeclareOp, VPU::VerticalFusionOp>(previousOp) ||
-                        previousOp == prevOp || !isCmxOperation(previousOp)) {
-                        continue;
-                    }
-
-                    auto operandCost = operand.getType().cast<vpux::NDTypeInterface>().getTotalAllocSize();
-                    auto curOpStorage = std::make_unique<TilingOperationStorage>();
-                    VPU::restoreTilingRegions(currentOp, _log, curOpStorage);
-                    if (!validateCMXSize(currentConfig, curOpStorage, _log, operandCost)) {
-                        mergedVFCost.value() += 2 * operandCost.count();
-                    }
-                }
-            }
-        }
-    }
-
-    if (mergedVFCost.value() > prevCost + currentCost + spillingCost) {
+    if (mergedVFCost > prevCost + currentCost) {
         return false;
     }
 
+    mergedCase.approveScheduling();
     return true;
 }
 
@@ -477,60 +533,77 @@ bool MergeVFRegionRewriter::waitOtherUsers(VPU::VerticalFusionOp prevOp, VPU::Ve
     return true;
 }
 
-bool MergeVFRegionRewriter::getOptimalTilingStrategy(SmallVector<int64_t>& tilingArray, const Dim dim,
-                                                     const int64_t minTiles, const int64_t maxTiles,
-                                                     VFConfig& config) const {
+std::optional<int64_t> MergeVFRegionRewriter::getOptimalTilingStrategy(
+        const std::shared_ptr<IVFScheduling>& scheduling, const Dim dim, const int64_t minTiles, int64_t& maxTiles,
+        TilingOperationStorage::UPtr& minStorage, TilingOperationStorage::UPtr& maxStorage, VFConfig& config) const {
     if (minTiles > maxTiles || maxTiles == 1) {
-        return false;
+        return std::nullopt;
     }
 
     auto minNTiles = minTiles;
     auto maxNTiles = maxTiles;
 
+    std::optional<int64_t> result;
     auto outType = config.getSubgraph()->getResult(0).getType().cast<vpux::NDTypeInterface>();
-    tilingArray = SmallVector<int64_t>(outType.getRank(), 1);
+    auto tilingArray = SmallVector<int64_t>(outType.getRank(), 1);
     tilingArray[dim.ind()] = minNTiles;
-
     if (minTiles == maxTiles) {
-        auto curOpStorage = std::make_unique<TilingOperationStorage>();
-        auto tilingRegions = VPU::calculateTilingRegions(config.getSubgraph(), tilingArray, _log, curOpStorage);
+        if (minStorage == nullptr) {
+            minStorage = std::make_unique<TilingOperationStorage>();
+            auto tilingRegions = VPU::calculateTilingRegions(config.getSubgraph(), tilingArray, _log, minStorage);
 
-        return mlir::succeeded(tilingRegions);
+            if (mlir::failed(tilingRegions)) {
+                minStorage.reset();
+                return std::nullopt;
+            }
+        }
+
+        if (scheduling->validate(config, minStorage)) {
+            result = minTiles;
+        }
+        return result;
     }
 
     auto tilingMaxStrategy = SmallVector<int64_t>(outType.getRank(), 1);
     tilingMaxStrategy[dim.ind()] = maxNTiles;
 
-    auto opStorage = std::make_unique<TilingOperationStorage>();
+    if (minStorage == nullptr) {
+        minStorage = std::make_unique<TilingOperationStorage>();
+        auto getValidStrategy = VPU::getMinimalValidTilingStrategyFromRange(config.getSubgraph(), tilingArray,
+                                                                            tilingMaxStrategy, dim, minStorage, _log);
 
-    auto getValidStrategy = VPU::getMinimalValidTilingStrategyFromRange(config.getSubgraph(), tilingArray,
-                                                                        tilingMaxStrategy, dim, opStorage, _log);
+        if (mlir::failed(getValidStrategy)) {
+            minStorage.reset();
+            return std::nullopt;
+        }
 
-    if (mlir::failed(getValidStrategy)) {
-        return false;
+        tilingArray = getValidStrategy.value();
+        minNTiles = tilingArray[dim.ind()];
     }
 
-    tilingArray = getValidStrategy.value();
-    minNTiles = tilingArray[dim.ind()];
-
-    if (validateCMXSize(config, opStorage, _log)) {
-        return true;
+    if (scheduling->validate(config, minStorage)) {
+        result = minNTiles;
+        return result;
     }
 
-    getValidStrategy = VPU::getMaximalValidTilingStrategyFromRange(config.getSubgraph(), tilingArray, tilingMaxStrategy,
-                                                                   dim, opStorage, _log);
+    if (maxStorage == nullptr) {
+        maxStorage = std::make_unique<TilingOperationStorage>();
+        auto getValidStrategy = VPU::getMaximalValidTilingStrategyFromRange(config.getSubgraph(), tilingArray,
+                                                                            tilingMaxStrategy, dim, maxStorage, _log);
 
-    if (mlir::failed(getValidStrategy)) {
-        return false;
+        if (mlir::failed(getValidStrategy)) {
+            maxStorage.reset();
+            return std::nullopt;
+        }
+
+        tilingMaxStrategy = getValidStrategy.value();
+        maxNTiles = tilingMaxStrategy[dim.ind()];
+        maxTiles = tilingMaxStrategy[dim.ind()];
     }
 
-    if (!validateCMXSize(config, opStorage, _log)) {
-        // let VF with minimal requirements to be checked
-        return !config.isPipelined();
+    if (!scheduling->validate(config, maxStorage)) {
+        return std::nullopt;
     }
-
-    tilingMaxStrategy = getValidStrategy.value();
-    maxNTiles = tilingMaxStrategy[dim.ind()];
 
     auto axisIncrement = getVFAxisIncrement(dim);
     VPUX_THROW_WHEN(axisIncrement == nullptr, "Cannot get functions to get values for axis {0}", dim);
@@ -542,32 +615,38 @@ bool MergeVFRegionRewriter::getOptimalTilingStrategy(SmallVector<int64_t>& tilin
         auto currentNTiles = axisIncrement->getMiddleValue(minNTiles, maxNTiles);
 
         if (maxNTiles == nextValueFromMin) {
-            tilingArray[dim.ind()] = maxNTiles;
+            result = maxNTiles;
+            if (maxNTiles == maxTiles) {
+                minStorage.reset(maxStorage.release());
+            }
             break;
         }
 
         if (currentNTiles == minNTiles) {
-            return false;
+            return std::nullopt;
         }
 
         tilingMaxStrategy[dim.ind()] = maxNTiles;
         tilingArray[dim.ind()] = currentNTiles;
 
+        auto opStorage = std::make_unique<TilingOperationStorage>();
         auto getValidTilingStrategy = VPU::getMinimalValidTilingStrategyFromRange(
                 config.getSubgraph(), tilingArray, tilingMaxStrategy, dim, opStorage, _log);
         if (mlir::failed(getValidTilingStrategy)) {
-            return false;
+            return std::nullopt;
         }
 
         tilingArray = getValidTilingStrategy.value();
         currentNTiles = tilingArray[dim.ind()];
+        result = currentNTiles;
 
         if (currentNTiles == maxNTiles) {
             break;
         }
 
-        if (validateCMXSize(config, opStorage, _log)) {
+        if (scheduling->validate(config, opStorage)) {
             maxNTiles = currentNTiles;
+            minStorage.reset(opStorage.release());
         } else {
             minNTiles = currentNTiles;
         }
@@ -576,13 +655,35 @@ bool MergeVFRegionRewriter::getOptimalTilingStrategy(SmallVector<int64_t>& tilin
         axisIncrement->increasedValue(nextValueFromMin, maxNTiles);
     }
 
-    return true;
+    return result;
 }
 
-mlir::FailureOr<Dim> MergeVFRegionRewriter::getTilingAxis(SmallVector<int64_t>& tilingArray,
-                                                          VPU::VerticalFusionOp prevOp, VPU::VerticalFusionOp currentOp,
-                                                          VPU::VerticalFusionOp mergedVFOp,
-                                                          std::optional<StrategyCost>& mergedCost) const {
+std::deque<std::shared_ptr<IVFScheduling>> MergeVFRegionRewriter::getVFSchedulingChecks(VFConfig& config) const {
+    std::deque<std::shared_ptr<IVFScheduling>> vfChecks;
+    VFSchedulingFactory vfFactory(_enablePrefetchTiling);
+
+    auto minimalCheck = vfFactory.createVFScenario(VFScenario::MINIMAL, _log);
+
+    if (config.isPipelined()) {
+        auto pipeliningChecks = vfFactory.createVFScenario(VFScenario::VF_PIPELINING, _log);
+        minimalCheck->addNext(std::move(pipeliningChecks));
+    }
+
+    auto prefetchingCheck = vfFactory.createVFScenario(VFScenario::LASTOP_PREFETCHING, _log);
+    auto weightsCheck = vfFactory.createVFScenario(VFScenario::WEIGHTS_PREFETCHING, _log);
+    auto fullPrefetching = vfFactory.createVFScenario(VFScenario::FULL_PREFETCHING, _log);
+    weightsCheck->addNext(std::move(fullPrefetching));
+    prefetchingCheck->addNext(std::move(weightsCheck));
+    minimalCheck->addNext(std::move(prefetchingCheck));
+
+    vfChecks.emplace_back(std::move(minimalCheck));
+
+    return vfChecks;
+}
+
+mlir::FailureOr<VFCase> MergeVFRegionRewriter::findVFTiling(VPU::VerticalFusionOp mergedOp,
+                                                            VPU::VerticalFusionOp prevOp,
+                                                            VPU::VerticalFusionOp currentOp) const {
     const auto currentTiling = parseIntArrayAttr<int64_t>(currentOp.getTilingStrategy());
     const auto prevTiling = parseIntArrayAttr<int64_t>(prevOp.getTilingStrategy());
 
@@ -607,7 +708,7 @@ mlir::FailureOr<Dim> MergeVFRegionRewriter::getTilingAxis(SmallVector<int64_t>& 
     // if both doesn't have tiling, check if there is at least one
     // allowed axis for both of them
 
-    auto vfConfig = VFConfig(mergedVFOp, _enableVerticalFusionPipelining);
+    auto vfConfig = VFConfig(mergedOp, _enableVerticalFusionPipelining);
 
     if (!prevHasTiling && !curHasTiling && !vfConfig.isPipelined()) {
         const auto filterNCENotEltwiseLike = [](mlir::Operation* op) {
@@ -616,13 +717,10 @@ mlir::FailureOr<Dim> MergeVFRegionRewriter::getTilingAxis(SmallVector<int64_t>& 
         const auto filterSWKernels = [](mlir::Operation* op) {
             return mlir::isa<VPU::SWOpInterface>(op);
         };
-        const auto nonViewLike = [](mlir::Operation* op) {
-            return !mlir::isa_and_nonnull<VPU::TilingViewLikeOpInterface>(op);
-        };
         // when pipeline case is generic this check is enough to prevent VF
         // but now we check additionally that there are no operations
         // with different executors
-        auto checkedOperations = vfConfig.getVFOperations() | filtered(nonViewLike);
+        auto checkedOperations = vfConfig.getOperationsForTiling();
         if ((llvm::all_of(checkedOperations, filterNCENotEltwiseLike) ||
              llvm::all_of(checkedOperations, filterSWKernels))) {
             return mlir::failure();
@@ -633,13 +731,33 @@ mlir::FailureOr<Dim> MergeVFRegionRewriter::getTilingAxis(SmallVector<int64_t>& 
     std::unordered_map<mlir::Operation*, vpux::Dim> opDimMap;
     // Only for current VF Op check to skip restricted dims
     // E.g., VF{conv} -> VF{conv}, the first VF can support CTiling, but the second cannot
-    const auto isRegionRestrictedDim = [](VPU::VerticalFusionOp currentOp,
-                                          const std::unordered_map<mlir::Operation*, vpux::Dim>& opDimMap) {
-        for (auto operation : currentOp.getBody()->getOps<VPU::VerticalFusionOpInterface>()) {
-            auto restrictedAxes = operation.restrictedFusionAxes();
-            VPUX_THROW_WHEN(opDimMap.find(operation.getOperation()) == opDimMap.end(),
-                            "Operation {0} is not in the map", operation.getOperation()->getLoc());
-            auto dim = opDimMap.at(operation.getOperation());
+    const auto isRegionRestrictedDim = [&](const std::unordered_map<mlir::Operation*, vpux::Dim>& opDimMap) {
+        // Skip the case of ConvolutionOp whose weights has split over output channel tiling strategy
+        if (isTileOverOutputChannel(currentConfig)) {
+            return false;
+        }
+
+        for (auto* operation : currentConfig.getOperationsForTiling()) {
+            auto vfOperation = mlir::cast<VPU::VerticalFusionOpInterface>(operation);
+            auto restrictedAxes = vfOperation.restrictedFusionAxes();
+            if (restrictedAxes.empty()) {
+                continue;
+            }
+
+            if (llvm::find(currentConfig.getInputs(), operation) != currentConfig.getInputs().end()) {
+                // skip inputs which has no connection with previous operation
+                if (llvm::none_of(operation->getOperands(), [&](mlir::Value value) {
+                        if (auto argument = mlir::dyn_cast<mlir::BlockArgument>(value)) {
+                            return currentOp.getOperand(argument.getArgNumber()).getDefiningOp() == prevOp;
+                        }
+                        return false;
+                    })) {
+                    continue;
+                }
+            }
+            VPUX_THROW_WHEN(opDimMap.find(operation) == opDimMap.end(), "Operation {0} is not in the map",
+                            operation->getLoc());
+            auto dim = opDimMap.at(operation);
             if (llvm::find(restrictedAxes, dim) != restrictedAxes.end()) {
                 return true;
             }
@@ -647,41 +765,60 @@ mlir::FailureOr<Dim> MergeVFRegionRewriter::getTilingAxis(SmallVector<int64_t>& 
         return false;
     };
 
-    VFSubgraphUserSetter setter(currentOp, mergedVFOp);
+    auto vfSchedulingChecks = getVFSchedulingChecks(vfConfig);
 
-    auto getVFTilingStrategy = [&](SmallVector<int64_t>& tilingArray, const Dim curDim, const Dim prevDim) -> bool {
-        const auto maxTiles = getTilingLimit(curDim, vfConfig.getVFOperations());
-        const auto minTiles = std::max(currentTiling[curDim.ind()], prevTiling[prevDim.ind()]);
+    VFSubgraphUserSetter setter(currentOp, mergedOp);
 
-        // get optimal tiling strategy for the 1st time
-        auto result = getOptimalTilingStrategy(tilingArray, curDim, minTiles, maxTiles, vfConfig);
-        if (result) {
-            return tilingArray[curDim.ind()] != 1 || vfConfig.isPotentiallyPipelined();
+    auto getVFCaseWithTiling = [&](const Dim curDim, const Dim prevDim) -> VFCase {
+        auto maxTiles = getTilingLimit(curDim, vfConfig.getVFOperations());
+        auto minTiles = std::max(currentTiling[curDim.ind()], prevTiling[prevDim.ind()]);
+
+        VFCase mergedCase(vfConfig, curDim);
+
+        auto schedulingChecks = vfSchedulingChecks;
+
+        TilingOperationStorage::UPtr maxStorage = nullptr;
+        TilingOperationStorage::UPtr minStorage = nullptr;
+
+        while (!schedulingChecks.empty()) {
+            auto currentCheck = schedulingChecks.front();
+            schedulingChecks.pop_front();
+            auto numTiles = getOptimalTilingStrategy(currentCheck, curDim, minTiles, maxTiles, minStorage, maxStorage,
+                                                     vfConfig);
+
+            if (numTiles.has_value()) {
+                mergedCase.setTilingNumber(numTiles.value());
+                mergedCase.setScheduling(currentCheck);
+
+                if (currentCheck->nextChecks().empty()) {
+                    mergedCase.setTilingStorage(std::move(minStorage));
+                    return mergedCase;
+                }
+                for (auto check : currentCheck->nextChecks() | reversed) {
+                    schedulingChecks.push_front(check);
+                }
+                minTiles = numTiles.value();
+            }
         }
 
-        // if it failed to get optimal stratey for the first time with VF pipelining
-        // try to get strategy once again without VF pipelining
-        // it might success becasue VF requires smaller CMX memory size without VF pipelining
-        if (vfConfig.isPipelined()) {
-            vfConfig.disableVFPipeline();
-            result = getOptimalTilingStrategy(tilingArray, curDim, minTiles, maxTiles, vfConfig);
-            vfConfig.restoreVFPipeline();
-
-            // if we don't need tiling, VF is inefficient without pipelining
-            return result && tilingArray[curDim.ind()] != 1;
-        }
-
-        return false;
+        return mergedCase;
     };
 
     const auto linkNumber = getLinkNumber(currentOp, prevOp);
+    std::optional<Dim> checkedDim;
     if (curHasTiling && prevHasTiling) {
-        auto curInputAxes = backInferVFTilingDim(currentOp, curAxis.value(), opDimMap);
-        if (curInputAxes[linkNumber] == prevAxis.value()) {
-            // try to use current axis, otherwise try to find other axis
-            if (!isRegionRestrictedDim(currentOp, opDimMap) &&
-                getVFTilingStrategy(tilingArray, curAxis.value(), prevAxis.value())) {
-                return curAxis.value();
+        auto curInputAxes = backInferVFTilingDim(currentConfig, curAxis.value(), opDimMap);
+        if (curInputAxes[linkNumber] == prevAxis.value() && !isRegionRestrictedDim(opDimMap)) {
+            auto areAllAligned = llvm::all_of(vfConfig.getOperationsForTiling(), [](auto* operation) {
+                return mlir::isa<IE::AlignedChannelsOpInterface>(operation);
+            });
+            if (prevAxis.value() != Dims4D::Act::C || !areAllAligned) {
+                // try to use current axis, otherwise try to find other axis
+                auto mergedCase = getVFCaseWithTiling(curAxis.value(), prevAxis.value());
+                checkedDim = curAxis.value();
+                if (mergedCase.isInitialized()) {
+                    return mergedCase;
+                }
             }
         }
     }
@@ -692,68 +829,50 @@ mlir::FailureOr<Dim> MergeVFRegionRewriter::getTilingAxis(SmallVector<int64_t>& 
     }
 
     StrategyCost bestCost = std::numeric_limits<StrategyCost>::max();
-    mlir::FailureOr<Dim> axis;
+    mlir::FailureOr<VFCase> mergedCase;
     for (auto dim : allowedDims) {
+        // in order not to check twice dim which has been handled unsuccessfully
+        if (checkedDim.has_value() && checkedDim.value() == dim) {
+            continue;
+        }
         // E.g., prevTiling [1, 3, 1, 1] -> permuteCast -> currentTiling [1, 1, 2, 1]
         // Thus we need dim backinfer to get correct axis to compare
         // As Vf inputs may be more than one, we need backinfer dim for each of them and use correct one
-        auto curInputDims = backInferVFTilingDim(currentOp, dim, opDimMap);
+        auto curInputDims = backInferVFTilingDim(currentConfig, dim, opDimMap);
 
-        if (isRegionRestrictedDim(currentOp, opDimMap)) {
+        if (isRegionRestrictedDim(opDimMap)) {
             continue;
         }
 
+        auto currentVFCase = getVFCaseWithTiling(dim, curInputDims[linkNumber]);
+
         // calculate optimal number of tiles for that dim
-        SmallVector<int64_t> tilingAxisArray;
-        if (!getVFTilingStrategy(tilingAxisArray, dim, curInputDims[linkNumber])) {
+        if (!currentVFCase.isInitialized()) {
             continue;
         }
 
         // get vpunncost
-        StrategyCost cost = getVFCost(_vpunnCostFunction, mergedVFOp, _log, _enablePrefetchTiling,
-                                      getIntArrayAttr(getContext(), tilingAxisArray));
+        StrategyCost cost = currentVFCase.getCost(_vpunnCostFunction, _log.nest());
         // compare cost, choose best strategy
         if (cost < bestCost) {
             bestCost = cost;
-            axis = dim;
-            tilingArray = std::move(tilingAxisArray);
+            mergedCase = std::move(currentVFCase);
         }
     }
 
-    if (mlir::succeeded(axis)) {
-        mergedCost = bestCost;
-    }
-    return axis;
+    return mergedCase;
 }
 
-/*
- There are several steps in order to adjust tiling in order to get it fit in CMX
- 1. Restore tiles for operation from current block
- 2. Match block arguments and tiles
- 3. Restore tiles for previous block starting from operations which are operands of current block
- 4. In case some operations doesn't fit in CMX, try to increase number of tiles by the limit
- 5. CMX memory used percentage by the largest operation shouldn't exceed VF_LARGEST_OP_MEM_RATIO to prevent spilling
-*/
-mlir::ArrayAttr MergeVFRegionRewriter::getVFTilingInfo(VPU::VerticalFusionOp prevOp, VPU::VerticalFusionOp currentOp,
-                                                       VPU::VerticalFusionOp mergedVFOp,
-                                                       std::optional<StrategyCost>& mergedCost) const {
+mlir::FailureOr<VFCase> MergeVFRegionRewriter::findVFCase(VPU::VerticalFusionOp prevOp, VPU::VerticalFusionOp currentOp,
+                                                          VPU::VerticalFusionOp mergedVFOp) const {
     if (!alignMCTiling(currentOp, prevOp)) {
-        return nullptr;
+        return mlir::failure();
     }
-
-    SmallVector<int64_t> tilingArray;
-    const auto axis = getTilingAxis(tilingArray, prevOp, currentOp, mergedVFOp, mergedCost);
-
-    if (mlir::failed(axis)) {
-        return nullptr;
-    }
-
-    return getIntArrayAttr(currentOp.getContext(), tilingArray);
+    return findVFTiling(mergedVFOp, prevOp, currentOp);
 }
 
 void MergeVFRegionRewriter::fuseBlocks(mlir::PatternRewriter& rewriter, VPU::VerticalFusionOp currentOp,
-                                       VPU::VerticalFusionOp mergedOp, mlir::ArrayAttr tilingInfo) const {
-    mergedOp.setTilingStrategyAttr(tilingInfo);
+                                       VPU::VerticalFusionOp mergedOp) const {
     rewriter.replaceOp(currentOp, mergedOp.getResult(0));
 }
 
@@ -763,7 +882,6 @@ mlir::LogicalResult MergeVFRegionRewriter::matchAndRewrite(VPU::VerticalFusionOp
 
     VPU::VerticalFusionOp vfBlock = nullptr;
     VPU::VerticalFusionOp parentVFOp = nullptr;
-    mlir::ArrayAttr tilingInfo = nullptr;
     for (auto operand : vfOp->getOperands()) {
         parentVFOp = operand.getDefiningOp<VPU::VerticalFusionOp>();
         vfBlock = nullptr;
@@ -785,15 +903,15 @@ mlir::LogicalResult MergeVFRegionRewriter::matchAndRewrite(VPU::VerticalFusionOp
         }
 
         vfBlock = fuseOpsInBlock(rewriter, vfOp, parentVFOp.getOperation());
-        std::optional<StrategyCost> mergedCost;
-        tilingInfo = getVFTilingInfo(parentVFOp, vfOp, vfBlock, mergedCost);
-        if (tilingInfo == nullptr) {
+        auto vfCase = findVFCase(parentVFOp, vfOp, vfBlock);
+        if (mlir::failed(vfCase) || !checkVFCostFunction(parentVFOp, vfOp, vfCase.value())) {
             rewriter.eraseOp(vfBlock);
-            return mlir::failure();
-        }
-
-        if (!checkVFCostFunction(parentVFOp, vfOp, vfBlock, tilingInfo, mergedCost)) {
-            rewriter.eraseOp(vfBlock);
+            vfBlock = nullptr;
+            // Add support for NCE task, if merging activation failed, continue to merge weights.
+            // E-141686: A general solution to merge more subgraph for more VF ops.
+            if (checkOtherVFInput(vfOp, parentVFOp)) {
+                continue;
+            }
             return mlir::failure();
         }
 
@@ -805,7 +923,7 @@ mlir::LogicalResult MergeVFRegionRewriter::matchAndRewrite(VPU::VerticalFusionOp
     }
 
     _log.trace("Merged subgraph {0}", vfBlock);
-    fuseBlocks(rewriter, vfOp, vfBlock, tilingInfo);
+    fuseBlocks(rewriter, vfOp, vfBlock);
 
     return mlir::success();
 }
@@ -856,11 +974,25 @@ void MergeVfSubgraphsPass::safeRunOnFunc() {
     auto func = getOperation();
     const auto costFunction = std::make_unique<VPU::LayerVPUNNCost>(func);
 
+    // TODO rewrite with largest spill detection on each step
+    SmallVector<int64_t> maxTiling;
+    func->walk([&](VPU::VerticalFusionOp op) {
+        const auto tiling = parseIntArrayAttr<int64_t>(op.getTilingStrategy());
+        auto dim = getVFTilingDim(tiling);
+        if (dim.has_value()) {
+            maxTiling.emplace_back(tiling[dim.value().ind()]);
+        }
+    });
+
+    auto maxTilingOp = std::max_element(maxTiling.begin(), maxTiling.end());
+
     mlir::RewritePatternSet patterns(&ctx);
     patterns.add<MergeVFRegionRewriter>(&ctx, _enableVerticalFusionPipelining, _enablePrefetchTiling, costFunction,
                                         _log);
 
-    if (mlir::failed(mlir::applyPatternsAndFoldGreedily(func, std::move(patterns), getDefaultGreedyRewriteConfig()))) {
+    auto config = getDefaultGreedyRewriteConfig();
+    config.useTopDownTraversal = maxTilingOp == maxTiling.end() || maxTilingOp != std::prev(maxTiling.end());
+    if (mlir::failed(mlir::applyPatternsAndFoldGreedily(func, std::move(patterns), config))) {
         signalPassFailure();
     }
 }

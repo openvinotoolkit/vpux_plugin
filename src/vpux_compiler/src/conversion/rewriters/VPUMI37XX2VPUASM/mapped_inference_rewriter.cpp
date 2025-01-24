@@ -14,8 +14,8 @@ llvm::SmallVector<mlir::FlatSymbolRefAttr> MappedInferenceRewriter::getSymbolicN
     return {mlir::FlatSymbolRefAttr::get(getContext(), "MappedInference")};
 }
 
-mlir::LogicalResult MappedInferenceRewriter::symbolize(VPUMI37XX::MappedInferenceOp op, SymbolMapper&,
-                                                       mlir::ConversionPatternRewriter& rewriter) const {
+mlir::FailureOr<SymbolizationResult> MappedInferenceRewriter::symbolize(
+        VPUMI37XX::MappedInferenceOp op, SymbolMapper&, mlir::ConversionPatternRewriter& rewriter) const {
     mlir::MLIRContext* ctx = rewriter.getContext();
     auto result = op.getResult();
 
@@ -44,15 +44,15 @@ mlir::LogicalResult MappedInferenceRewriter::symbolize(VPUMI37XX::MappedInferenc
     mlir::SymbolRefAttr actShaveRT = op.getActShaveRt() ? findSym(op.getActShaveRt()) : nullptr;
     mlir::ArrayAttr actShaveStacks = shaveStacks.size() ? mlir::ArrayAttr::get(ctx, shaveStacks) : nullptr;
 
-    rewriter.create<VPUASM::MappedInferenceOp_37XX>(op.getLoc(), symName, dmasAttr, invariantTasks, variantTasks,
-                                                    actKernelRanges, actKernelInvocations, barrierTasks, actShaveRT,
-                                                    actShaveStacks, op.getDmaCountAttr(), op.getInvariantCountAttr(),
-                                                    op.getVariantCountAttr(), op.getActKernelRangesCountAttr(),
-                                                    op.getActKernelInvocationsCountAttr(), op.getBarrierCountAttr());
+    auto newOp = rewriter.create<VPUASM::MappedInferenceOp_37XX>(
+            op.getLoc(), symName, dmasAttr, invariantTasks, variantTasks, actKernelRanges, actKernelInvocations,
+            barrierTasks, actShaveRT, actShaveStacks, op.getDmaCountAttr(), op.getInvariantCountAttr(),
+            op.getVariantCountAttr(), op.getActKernelRangesCountAttr(), op.getActKernelInvocationsCountAttr(),
+            op.getBarrierCountAttr());
 
     rewriter.eraseOp(op);
 
-    return mlir::success();
+    return SymbolizationResult(newOp);
 }
 
 }  // namespace vpumi37xx2vpuasm

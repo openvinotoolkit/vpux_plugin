@@ -3,12 +3,18 @@
 # SPDX-License-Identifier: Apache 2.0
 #
 
-file(GLOB_RECURSE SRC_FILES *.cpp)
 set(TARGET_NAME "npu_compiler_frontend")
-add_mlir_library(${TARGET_NAME}
-    STATIC ${SRC_FILES}
-    EXCLUDE_FROM_LIBMLIR
-    DISABLE_INSTALL
+if(BUILD_COMPILER_FOR_DRIVER)
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+        string(REPLACE "/sdl" "" CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE}")
+        string(REPLACE "/sdl" "" CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE}")
+    endif()
+endif()
+
+
+file(GLOB_RECURSE SRC_FILES *.cpp)
+add_npu_library(${TARGET_NAME}
+    ${SRC_FILES}
     LINK_LIBS PRIVATE
         npu_compiler_core
         npu_compiler_utils
@@ -16,23 +22,10 @@ add_mlir_library(${TARGET_NAME}
         npu_ov_utils
         flatbuffers
         npu_elf
-        npu_compiler_dialect_vpuip)
-add_dependencies(${TARGET_NAME} MLIRVPUXIncGenList)
-
-target_include_directories(${TARGET_NAME}
-    SYSTEM PRIVATE
-        $<BUILD_INTERFACE:${MLIR_INCLUDE_DIRS}>
-        ${VPU_COMPILER_BIN_INCLUDE_DIR})
-target_include_directories(${TARGET_NAME}
-    PRIVATE
-        ${VPU_COMPILER_SRC_INCLUDE_DIR})
-
-target_include_directories(${TARGET_NAME}
-    PRIVATE
+        npu_compiler_dialect_vpuip
+    INCLUDES
         $<TARGET_PROPERTY:openvino::npu_al,INTERFACE_INCLUDE_DIRECTORIES>)
 
 ov_link_system_libraries(${TARGET_NAME}
     PUBLIC
         npu_ngraph_transformations)
-add_src_target(${TARGET_NAME})
-enable_warnings_as_errors(${TARGET_NAME} WIN_STRICT)

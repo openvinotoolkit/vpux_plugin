@@ -15,17 +15,14 @@ ConstData ConstData::allocateBytes(std::size_t byteSize) {
         llvm::deallocate_buffer(data, size, alignof(std::max_align_t));
     };
     data._size = byteSize;
-    data._kind = DataKind::Internal;
     return data;
 }
 
 ConstData ConstData::fromRawBuffer(const void* ptr, std::size_t byteSize) {
     ConstData data;
-    // Note: const casting here is fine, DataKind::External would protect us
-    // from modification.
+    // Note: const casting here is fine, isMutable() protects from modification.
     data._ptr = const_cast<void*>(ptr);
     data._size = byteSize;
-    data._kind = DataKind::External;
     return data;
 }
 }  // namespace vpux::Const

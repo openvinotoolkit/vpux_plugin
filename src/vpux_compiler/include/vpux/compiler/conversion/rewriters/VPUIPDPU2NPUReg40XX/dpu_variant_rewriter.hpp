@@ -5,8 +5,12 @@
 
 #pragma once
 
+#include "vpux/compiler/NPU40XX/dialect/NPUReg40XX/attributes.hpp"
+#include "vpux/compiler/NPU40XX/dialect/NPUReg40XX/ops.hpp"
 #include "vpux/compiler/NPU40XX/dialect/VPUIPDPU/ops.hpp"
 #include "vpux/compiler/conversion.hpp"
+
+using namespace NPUReg40XX;
 
 namespace vpux {
 namespace vpuipdpu2npureg40xx {
@@ -24,17 +28,13 @@ private:
 
     mlir::LogicalResult verifyDPUVariant(VPUIPDPU::DPUVariantOp op) const;
 
-    void fillDPUConfigs(
-            mlir::Region& DPURegion,
-            std::map<std::string, std::map<std::string, vpux::VPURegMapped::RegFieldValue>>& initValues) const;
+    void fillIDUCfg(mlir::Region& DPURegion, vpux::NPUReg40XX::Descriptors::DpuVariantRegister& descriptor) const;
+    void fillODUCfg(mlir::Region& DPURegion, vpux::NPUReg40XX::Descriptors::DpuVariantRegister& descriptor) const;
 
-    void fillBarrierCfg(
-            VPUIPDPU::DPUVariantOp op,
-            std::map<std::string, std::map<std::string, vpux::VPURegMapped::RegFieldValue>>& initValues) const;
-    void fillProfilingCfg(
-            VPUIPDPU::DPUVariantOp origOp,
-            std::map<std::string, std::map<std::string, vpux::VPURegMapped::RegFieldValue>>& initValues) const;
-    void fillStubCfg(std::map<std::string, std::map<std::string, vpux::VPURegMapped::RegFieldValue>>& initValues) const;
+    void fillBarrierCfg(VPUIPDPU::DPUVariantOp op, vpux::NPUReg40XX::Descriptors::DpuVariantRegister& descriptor) const;
+    void fillProfilingCfg(VPUIPDPU::DPUVariantOp origOp,
+                          vpux::NPUReg40XX::Descriptors::DpuVariantRegister& descriptor) const;
+    void fillStubCfg(vpux::NPUReg40XX::Descriptors::DpuVariantRegister& descriptor) const;
 };
 
 }  // namespace vpuipdpu2npureg40xx

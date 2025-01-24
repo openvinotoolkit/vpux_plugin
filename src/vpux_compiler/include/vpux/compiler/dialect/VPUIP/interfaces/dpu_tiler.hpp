@@ -40,7 +40,7 @@ struct WorkloadCostParams {
     bool isWeightsSparsityEnabled = false;
     float weightsSparsityRatio = 0.0;
     VPU::MultiClusterStrategy layerStrategy = VPU::MultiClusterStrategy::Clustering;
-    VPU::PPEAttr ppeOpaqueAttr = nullptr;
+    VPU::PPEAttr ppeAttr = nullptr;
     // Output layout default: ZMAJOR , odu permute is PERMUTE_ZXY
     // For NCE.PermuteQuantize op, odu permute is PERMUTE_YZX
     VPUIPDPU::ODUPermuteDataMode oduPermutation = VPUIPDPU::ODUPermuteDataMode::PERMUTE_ZXY;

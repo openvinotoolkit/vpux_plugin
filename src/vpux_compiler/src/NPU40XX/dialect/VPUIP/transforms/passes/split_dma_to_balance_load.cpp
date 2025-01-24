@@ -9,6 +9,7 @@
 #include "vpux/compiler/dialect/VPU/utils/distributed_tensor_utils.hpp"
 #include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
 #include "vpux/compiler/dialect/VPURT/IR/task.hpp"
+#include "vpux/compiler/dialect/const/utils/utils.hpp"
 #include "vpux/utils/core/error.hpp"
 
 #include <mlir/Transforms/GreedyPatternRewriteDriver.h>
@@ -153,7 +154,7 @@ void replaceDmaWithTwoParts(VPURT::TaskOp taskOp, VPUIP::NNDMAOp dmaOp, BuffersP
 // Trivial constant is constant without LAST or PREFERRED_LAST transformation, so SubView transformation can be
 // attached to the end of list
 bool isTrivialConst(Const::DeclareOp cstOp) {
-    auto contentAttr = cstOp.getContentAttr();
+    const auto& contentAttr = cstOp.getContentAttr();
     auto transformations = contentAttr.getTransformations();
     return transformations.empty() ||
            transformations.back().getPositionRequirement() == vpux::Const::details::PositionRequirement::NONE;
@@ -196,18 +197,23 @@ void splitFoldedConstToBufferDma(VPURT::TaskOp taskOp, VPUIP::NNDMAOp dmaOp, Con
     }
 
     const auto rankedElemType = rankedTensorType.getElementType();
+    const auto fullShape = rankedTensorType.getShape();
+    SmallVector<int64_t> newShapeVec(fullShape.begin(), fullShape.end());
+    auto actualTileDims = getNonOneDim(ShapeRef(newShapeVec));
+    if (actualTileDims.size() == 0) {
+        log.trace("Can't split constant with all ones shape");
+        return;
+    }
+    newShapeVec[actualTileDims[0].ind()] /= 2;
+
     builder.setInsertionPoint(cstOp);
     const auto createCstPart = [&](int64_t tileOffset, int64_t newDimSize, StringRef locSuffix) -> mlir::Value {
         const size_t offsetSize = Byte(tileOffset * tileDimStride).count();
         const size_t bufferSize = Byte(newDimSize * tileDimStride).count();
         char* baseContentPtr = tempBuf.data() + offsetSize;
         ArrayRef<char> partContent(baseContentPtr, baseContentPtr + bufferSize);
-
-        const auto fullShape = rankedTensorType.getShape();
-        SmallVector<int64_t> newShapeVec(fullShape.begin(), fullShape.end());
-        newShapeVec[tileDim.ind()] /= 2;
         const auto partRankedTensorType = rankedTensorType.clone(newShapeVec, rankedElemType);
-        const auto denseAttr = mlir::DenseElementsAttr::getFromRawBuffer(partRankedTensorType, partContent);
+        const auto denseAttr = Const::createConstContent(partRankedTensorType, partContent);
         const auto newLoc = takeOpLoc(cstOp, locSuffix);
         const auto newType = getNewBufferType(cstType, tileDim, tileOffset, newDimSize);
 

@@ -226,7 +226,7 @@ Const::Content vpux::Const::RelocateWeightsTableAttr::transform(vpux::Const::Con
     }
 
     const auto channelOffset = getChannelOffset() != nullptr ? checked_cast<int32_t>(getChannelOffset().getInt()) : 0;
-    const auto weightsPtrOffset = channelOffset * weightPtrStep;
+    auto weightsPtrOffset = channelOffset * weightPtrStep;
     const auto sparsityPtrOffset = channelOffset * sparsityPtrStep;
 
     const auto OC = checked_cast<int64_t>(numWTEntries / numElemPerOC);
@@ -240,7 +240,7 @@ Const::Content vpux::Const::RelocateWeightsTableAttr::transform(vpux::Const::Con
     SmallVector<int64_t> weightsPtrSteps(OC);
     if (getWeightsCompression() != nullptr) {
         const auto numElems = to_small_vector(getWeightsCompression().getNumElems().getValues<int64_t>());
-        VPUX_THROW_UNLESS(numElems.size() == static_cast<size_t>(OC),
+        VPUX_THROW_UNLESS(numElems.size() >= static_cast<size_t>(OC) + channelOffset,
                           "Invalid weights compression with {0} elements for {1} channels", numElems.size(), OC);
         VPUX_THROW_UNLESS(getWeightsElemBitSize() != nullptr, "Missing weights element type attribute");
         const auto weightsElemBitSize = getWeightsElemBitSize().getInt();
@@ -248,6 +248,16 @@ Const::Content vpux::Const::RelocateWeightsTableAttr::transform(vpux::Const::Con
                                        ? getWeightsCompression().getAlignment().getInt()
                                        : VPU::NCEInvariant::VPU_WEIGHT_SET_BYTE_ALIGNMENT;
         int64_t ptrOffset = 0;
+        weightsPtrOffset = 0;
+        // Non 0 channelOffset suggests a SubView slicing single cluster
+        // was moved before RelocateWeightsTable. In such case we have recompute weightsPtrOffset
+        // taking into account weights sparsity compression. Below loop doesn't take multiple clusters
+        // into account because data about cluster offsets was lost when swapping transformations. We are also
+        // guaranteed to never get the case of segmented weights being sliced half-way through a single cluster.
+        for (int64_t oc = 0; oc < channelOffset; ++oc) {
+            weightsPtrOffset += alignValUp(
+                    alignMemSize(Bit(numElems[oc] * weightsElemBitSize), Byte(1)).to<Byte>().count(), alignment);
+        }
         for (int64_t oc = 0, clusterIdx = 0; oc < OC; ++oc) {
             if (isNewCluster(oc, clusterIdx)) {
                 clusterIdx++;
@@ -255,7 +265,7 @@ Const::Content vpux::Const::RelocateWeightsTableAttr::transform(vpux::Const::Con
             }
             weightsPtrSteps[oc] = ptrOffset;
             const auto weightSetByteSize =
-                    alignMemSize(Bit(numElems[oc] * weightsElemBitSize), Byte(1)).to<Byte>().count();
+                    alignMemSize(Bit(numElems[oc + channelOffset] * weightsElemBitSize), Byte(1)).to<Byte>().count();
             ptrOffset += alignValUp<int64_t>(weightSetByteSize, alignment);
         }
     } else {
@@ -279,13 +289,4 @@ Const::Content vpux::Const::RelocateWeightsTableAttr::transform(vpux::Const::Con
         }
     }
     return output;
-}
-
-Const::ContentSetup vpux::Const::ContentSetup::relocateWeightsTablePointers(
-        ArrayRef<uint32_t> weightsPtr, uint64_t sparsityPtr, ShapeRef offsets, uint64_t weightsTableSize,
-        uint64_t weightsElemBitSize, VPUIP::SparsityCompressionAttr weightsCompression, uint64_t channelOffset) {
-    return addTransformation(Const::RelocateWeightsTableAttr::get(
-            getIntArrayAttr(getContext(), weightsPtr), getIntAttr(getContext(), sparsityPtr),
-            getIntArrayAttr(getContext(), offsets), getIntAttr(getContext(), weightsTableSize),
-            getIntAttr(getContext(), weightsElemBitSize), weightsCompression, getIntAttr(getContext(), channelOffset)));
 }

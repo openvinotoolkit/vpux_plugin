@@ -10,24 +10,24 @@
 namespace vpux {
 namespace vpumi40xx2vpuasm {
 
-mlir::LogicalResult KernelRangeRewriter::symbolize(VPUMI40XX::ActKernelRangeOp op, SymbolMapper&,
-                                                   mlir::ConversionPatternRewriter& rewriter) const {
+mlir::FailureOr<SymbolizationResult> KernelRangeRewriter::symbolize(VPUMI40XX::ActKernelRangeOp op, SymbolMapper&,
+                                                                    mlir::ConversionPatternRewriter& rewriter) const {
     auto symName = findSym(op).getRootReference();
     auto taskLocation = findSym(op.getTaskLocation());
 
     auto kernelTaskType = op.getKernelTaskType();
     bool isCacheOp = VPUIP::isCacheOpTaskType(kernelTaskType, /*includePrefetch=*/false);
 
-    mlir::FlatSymbolRefAttr kernelTextAttr = isCacheOp ? nullptr : findSym(op.getKernelTextIndex());
-    mlir::FlatSymbolRefAttr kernelEntryAttr = isCacheOp ? nullptr : findSym(op.getKernelEntryIndex());
+    mlir::SymbolRefAttr kernelTextAttr = isCacheOp ? nullptr : findSym(op.getKernelTextIndex());
+    mlir::SymbolRefAttr kernelEntryAttr = isCacheOp ? nullptr : findSym(op.getKernelEntryIndex());
 
     auto taskIdx = mlir::TypeAttr::get(op.getType());
 
-    rewriter.create<VPUASM::ActKernelRangeOp>(op.getLoc(), symName, taskIdx, taskLocation, kernelTextAttr,
-                                              kernelEntryAttr, kernelTaskType);
+    auto newOp = rewriter.create<VPUASM::ActKernelRangeOp>(op.getLoc(), symName, taskIdx, taskLocation, kernelTextAttr,
+                                                           kernelEntryAttr, kernelTaskType);
     rewriter.eraseOp(op);
 
-    return mlir::success();
+    return SymbolizationResult(newOp);
 }
 
 }  // namespace vpumi40xx2vpuasm

@@ -46,7 +46,7 @@ mlir::OpFoldResult vpux::IE::LogSoftmaxOp::fold(FoldAdaptor) {
     }
 
     const auto valueType = mlir::RankedTensorType::get(inShape, mlir::Float32Type::get(getContext()));
-    auto baseContentSetup = Const::ContentAttr::transform(mlir::DenseElementsAttr::get(valueType, 0.0f));
-
-    return baseContentSetup.castElemType(getOutput().getType().cast<mlir::ShapedType>().getElementType()).get();
+    return Const::ContentAttr::get(mlir::DenseElementsAttr::get(valueType, 0.0f),
+                                   Const::ContentSetup(valueType).castElemType(
+                                           getOutput().getType().cast<mlir::ShapedType>().getElementType()));
 }

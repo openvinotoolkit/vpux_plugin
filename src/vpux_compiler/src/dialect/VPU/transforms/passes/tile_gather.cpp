@@ -6,6 +6,7 @@
 #include <mlir/IR/PatternMatch.h>
 #include <mlir/Transforms/GreedyPatternRewriteDriver.h>
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPU/transforms/factories/gather_dma_constants.hpp"
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
 #include "vpux/compiler/dialect/VPU/utils/gather_dma_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/generate_tiling.hpp"
@@ -41,6 +42,7 @@ mlir::LogicalResult TileGatherElement::matchAndRewrite(VPU::GatherOp origOp, mli
     const auto inputShape = getShape(origOp.getInput());
     const auto outputShape = getShape(origOp.getOutput());
     const auto outputType = origOp.getOutput().getType().cast<vpux::NDTypeInterface>();
+    const auto arch = VPU::getArch(origOp);
 
     Shape nTilesOnDim(outputShape.size(), 1);
     DimArr tileDimOrder;
@@ -56,6 +58,7 @@ mlir::LogicalResult TileGatherElement::matchAndRewrite(VPU::GatherOp origOp, mli
         if (mlir::failed(tiles)) {
             return false;
         }
+        const size_t GATHER_DMA_MAX_ELEMENT_SIZE_ARCH_BASED = VPU::getGatherDMAMaxElementSize(arch);
 
         for (auto tile : tiles.value()) {
             size_t element_size = vpux::getElemTypeSize(outputType).to<Byte>().count();
@@ -64,11 +67,11 @@ mlir::LogicalResult TileGatherElement::matchAndRewrite(VPU::GatherOp origOp, mli
             for (size_t idx = axis + 1; idx < inputShape.size(); ++idx) {
                 element_size *= inTiles.begin()->shape.raw()[idx];
             }
-            if (element_size <= VPUIP::arch40xx::GATHER_DMA_MAX_ELEMENT_SIZE) {
-                return true;
+            if (element_size > GATHER_DMA_MAX_ELEMENT_SIZE_ARCH_BASED) {
+                return false;
             }
         }
-        return false;
+        return true;
     };
 
     auto tileDimIter = tileDimOrder.begin();
@@ -114,6 +117,7 @@ mlir::LogicalResult TileGatherIndices::matchAndRewrite(VPU::GatherOp origOp, mli
     const auto indicesType = origOp.getIndices().getType().cast<vpux::NDTypeInterface>();
     const auto indicesShape = indicesType.getShape();
     const auto indicesRank = origOp.getIndicesRank().value_or(indicesShape.size());
+    const auto arch = VPU::getArch(origOp);
 
     Shape nTilesOnDim(outputShape.size(), 1);
 
@@ -122,13 +126,14 @@ mlir::LogicalResult TileGatherIndices::matchAndRewrite(VPU::GatherOp origOp, mli
         if (mlir::failed(tiles)) {
             return false;
         }
+        const size_t DMA_MAX_INDICES_LIST_LENGTH_ARCH_BASED = VPU::getGatherDMAMaxIndicesListLength(arch);
 
         for (auto tile : tiles.value()) {
             const auto inputTiling = origOp.backInferTileInfo(tile, _log);
             const auto indicesTiling = inputTiling.tiles[1];
             const auto newIndicesType = indicesType.extractDenseTile(indicesTiling.offsets, indicesTiling.shape);
             const size_t numberOfIndices = newIndicesType.getNumElements();
-            if (numberOfIndices <= VPUIP::arch40xx::DMA_MAX_INDICES_LIST_LENGTH) {
+            if (numberOfIndices <= DMA_MAX_INDICES_LIST_LENGTH_ARCH_BASED) {
                 return true;
             }
         }

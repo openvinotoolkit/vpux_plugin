@@ -37,14 +37,10 @@ profiling::TaskInfo makeTaskInfo(VPURT::TaskOp taskOp, double startTimeNs, doubl
 
     auto op = taskOp.getInnerTaskOp();
     VPUX_THROW_WHEN(op == nullptr, "TaskOp with no op inside - '{0}'", taskOp->getLoc());
-    auto taskName = stringifyPrimaryLocation(op->getLoc());
-    taskName += suffix;
-    auto length = taskName.copy(taskInfo.name, sizeof(taskInfo.name) - 1);
-    taskInfo.name[length] = '\0';
+    auto loc = op->getLoc();
 
-    auto layerType = std::string(op->getName().getStringRef().data());
-    length = layerType.copy(taskInfo.layer_type, sizeof(taskInfo.layer_type) - 1);
-    taskInfo.layer_type[length] = '\0';
+    taskInfo.name = stringifyPrimaryLocation(loc) + suffix;
+    taskInfo.layer_type = getLayerTypeFromLocation(loc);
 
     taskInfo.start_time_ns = startTimeNs;
     taskInfo.duration_ns = durationNs;
@@ -105,8 +101,8 @@ void createScheduleTraceEventFile(const SmallVector<VPURT::TaskConfig, 1>& tasks
         }
     }
 
-    printProfilingAsTraceEvent(tasks, /*layers=*/{}, /*dpuFreq=*/{freqInMHz, profiling::FreqStatus::SIM}, out_stream,
-                               log);
+    auto layers = getLayerInfo(tasks);
+    printProfilingAsTraceEvent(tasks, layers, /*dpuFreq=*/{freqInMHz, profiling::FreqStatus::SIM}, out_stream, log);
 }
 
 class InferenceExecutionAnalysisPass final :

@@ -15,6 +15,8 @@
 #include "vpux/compiler/utils/permute_utils.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 
+#include <mlir/IR/AffineMap.h>
+#include <mlir/IR/BuiltinAttributes.h>
 #include <mlir/IR/PatternMatch.h>
 #include <mlir/Transforms/GreedyPatternRewriteDriver.h>
 
@@ -47,7 +49,7 @@ mlir::LogicalResult MoveThroughSoftmax::matchAndRewrite(IE::SoftMaxOp origOp, ml
         return matchFailed(_log, rewriter, origOp, "TransposeOp not found or has multiple uses");
     }
 
-    const auto softmaxInputRank = origOp.getInput().getType().dyn_cast<NDTypeInterface>().getRank();
+    const auto softmaxInputRank = mlir::cast<NDTypeInterface>(origOp.getInput().getType()).getRank();
     const auto softmaxAxisInd = getPositiveAxisInd(origOp.getAxisIndAttr(), softmaxInputRank);
 
     const auto transposePerm = DimsOrder::fromAffineMap(transposeOp.getOrderValue().value());
@@ -248,34 +250,126 @@ public:
 
 private:
     mlir::LogicalResult matchAndRewrite(IE::MultiplyOp origOp, mlir::PatternRewriter& rewriter) const final;
+    mlir::LogicalResult processMultiplyOpWithBroadCastNonTransposeInput(IE::MultiplyOp origOp,
+                                                                        mlir::PatternRewriter& rewriter) const;
 
 private:
     Logger _log;
 };
 
-mlir::LogicalResult MoveTransposeThroughMultiply::matchAndRewrite(IE::MultiplyOp origOp,
-                                                                  mlir::PatternRewriter& rewriter) const {
-    _log.trace("Got '{0}' at '{1}'", origOp->getName(), origOp->getLoc());
+mlir::LogicalResult MoveTransposeThroughMultiply::processMultiplyOpWithBroadCastNonTransposeInput(
+        IE::MultiplyOp origOp, mlir::PatternRewriter& rewriter) const {
+    /* Convert pattern
+                     Input2
+                      |
+         Input1    Transpose
+            \        /
+             Multiply
+                |
+              Output
 
-    if (getShape(origOp.getInput1()) != getShape(origOp.getInput2())) {
+       to:
+
+       New Input1   Input2
+           |           |
+    [inv Transpose]    |
+           \           /
+             Multiply
+                |
+           Transpose
+                |
+              Output
+   */
+
+    const auto& nestedLog = _log.nest();
+    auto tranposeInput = origOp.getInput1();
+    mlir::Value anotherInput = origOp.getInput2();
+    auto transposeOp = tranposeInput.getDefiningOp<IE::TransposeOp>();
+    if (transposeOp == nullptr) {
+        tranposeInput = origOp.getInput2();
+        anotherInput = origOp.getInput1();
+        transposeOp = tranposeInput.getDefiningOp<IE::TransposeOp>();
+    }
+
+    if (transposeOp == nullptr || !transposeOp->hasOneUse()) {
+        nestedLog.trace("No TransposeOp or TransposeOp has more than one use");
         return mlir::failure();
     }
 
+    auto transposeOutShape = getShape(transposeOp.getOutput());
+    auto origOpOutShape = getShape(origOp.getOutput());
+    if (transposeOutShape != origOpOutShape) {
+        nestedLog.trace("TransposeOp output shape is different from Multiply output shape");
+        return mlir::failure();
+    }
+
+    auto anotherInputShape = getShape(anotherInput);
+    const auto isScalar = llvm::all_of(anotherInputShape, [](auto dim) {
+        return dim == 1;
+    });
+    const auto isVector = llvm::count(anotherInputShape, 1) == static_cast<int64_t>(anotherInputShape.size() - 1);
+    if (!isVector && !isScalar) {
+        nestedLog.trace("Multiply's other input is not a vector or a scalar");
+        return mlir::failure();
+    }
+    const auto orderVal = transposeOp.getOrderValue();
+    if (!orderVal.has_value()) {
+        nestedLog.trace("TranposeOp does not have order_value");
+    }
+
+    if (isVector) {
+        auto inversePermutation = mlir::inversePermutation(orderVal.value());
+        anotherInput = rewriter.createOrFold<IE::TransposeOp>(anotherInput.getLoc(), anotherInput, nullptr,
+                                                              mlir::AffineMapAttr::get(inversePermutation));
+    }
+
+    auto newMultiply = rewriter.create<IE::MultiplyOp>(origOp.getLoc(), transposeOp.getInput(), anotherInput,
+                                                       origOp.getAutoBroadcastAttr(), origOp.getPostOpAttr(),
+                                                       origOp.getClampAttr(), origOp.getOutputChannelsAttr(),
+                                                       origOp.getInputChannelsAttr());
+    rewriter.replaceOpWithNewOp<IE::TransposeOp>(origOp, newMultiply.getOutput(), nullptr,
+                                                 transposeOp.getOrderValueAttr());
+    _log.debug("Successfully moved Transpose through Multiply.");
+    return mlir::success();
+}
+
+mlir::LogicalResult MoveTransposeThroughMultiply::matchAndRewrite(IE::MultiplyOp origOp,
+                                                                  mlir::PatternRewriter& rewriter) const {
+    _log.debug("Got '{0}' at '{1}'", origOp->getName(), origOp->getLoc());
+    const auto& nestedLog = _log.nest();
+
     auto transpose1Op = origOp.getInput1().getDefiningOp<IE::TransposeOp>();
     auto transpose2Op = origOp.getInput2().getDefiningOp<IE::TransposeOp>();
+    auto singleTranspose = (transpose1Op != nullptr && transpose2Op == nullptr) ||
+                           (transpose1Op == nullptr && transpose2Op != nullptr);
+
+    auto origOutputType = mlir::cast<vpux::NDTypeInterface>(origOp.getOutput().getType());
+    bool channelBiggerThanAlignment = origOutputType.getShape()[Dims4D::Act::C] >=
+                                      VPU::NCEInvariant::getAlignment(origOutputType.getElementType());
+    if (singleTranspose && channelBiggerThanAlignment) {
+        nestedLog.trace("Processing Multiply with single Transpose and broadcastable input.");
+        return processMultiplyOpWithBroadCastNonTransposeInput(origOp, rewriter);
+    }
+
+    if (getShape(origOp.getInput1()) != getShape(origOp.getInput2())) {
+        nestedLog.trace("MultiplyOp does not have inputs with same shape");
+        return mlir::failure();
+    }
+
     if (transpose1Op == nullptr || !transpose1Op->hasOneUse() || transpose2Op == nullptr ||
         !transpose2Op->hasOneUse() || transpose1Op.getOrder() != nullptr || transpose2Op.getOrder() != nullptr) {
         // Only constant input is supported when order is set. In this case transpose can be fused into constant
+        nestedLog.trace("Unsupported Transpose pattern.");
         return mlir::failure();
     }
 
     if (transpose1Op.getOrderValue() != transpose2Op.getOrderValue()) {
+        nestedLog.trace("Transpose ops have different order values.");
         return mlir::failure();
     }
 
     auto input1 = transpose1Op.getInput();
     auto input2 = transpose2Op.getInput();
-    auto origOutputType = origOp.getOutput().getType().cast<vpux::NDTypeInterface>();
     auto newOutputType = origOutputType.changeShape(getShape(input1));
     auto newMultiplyOp = rewriter.create<IE::MultiplyOp>(
             origOp.getLoc(), newOutputType, input1, input2, origOp.getAutoBroadcastAttr(), origOp.getPostOpAttr(),
@@ -285,6 +379,7 @@ mlir::LogicalResult MoveTransposeThroughMultiply::matchAndRewrite(IE::MultiplyOp
                                                  transpose1Op.getOrderValueAttr());
     rewriter.eraseOp(transpose1Op);
     rewriter.eraseOp(transpose2Op);
+    _log.debug("Successfully moved Transpose through Multiply.");
     return mlir::success();
 }
 
@@ -373,17 +468,11 @@ void PropagateTransposePass::safeRunOnFunc() {
             return false;
         }
 
-        auto inputType = transposeOp.getInput().getType().cast<vpux::NDTypeInterface>();
-        const auto inputShape = inputType.getShape();
-        auto iface = mlir::cast<IE::AlignedChannelsOpInterface>(avgPoolOp.getOperation());
-        const auto alignment = iface.getInputChannelAlignment();
-        // It's more safe to move transpose after avgPool when input satisfy avgPool requirement
-        if (inputShape[Dims4D::Act::C] % alignment || inputShape[Dims4D::Act::N] > 1) {
-            return false;
-        }
-
-        // Not to swap for model input to transpose case, to avoid introduce nce.permute op before avgPool
-        if (transposeOp.getInput().getDefiningOp() == nullptr) {
+        auto convertOp = transposeOp.getInput().getDefiningOp<IE::ConvertOp>();
+        // Not to swap for model input or model input -> convert to transpose case, to avoid introduce nce.permute op
+        // before avgPool
+        if (transposeOp.getInput().getDefiningOp() == nullptr ||
+            (convertOp != nullptr && convertOp.getInput().getDefiningOp() == nullptr)) {
             return false;
         }
 

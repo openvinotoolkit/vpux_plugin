@@ -8,9 +8,9 @@
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
 #include "vpux/compiler/dialect/VPU/utils/const_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/generate_tiling.hpp"
+#include "vpux/compiler/dialect/VPU/utils/mpe_engine_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_invariant.hpp"
 #include "vpux/compiler/dialect/VPU/utils/ppe_version_config.hpp"
-#include "vpux/compiler/utils/VPU/ppe_utils.hpp"
 #include "vpux/compiler/utils/sparsity.hpp"
 
 using namespace vpux;
@@ -209,9 +209,12 @@ mlir::LogicalResult EnsureConvICRequirements::matchAndRewrite(VPU::NCEConvolutio
     auto filterType = origOp.getFilter().getType().cast<vpux::NDTypeInterface>();
     auto filterElemType = filterType.getElementType();
 
-    // Note: A new PPE is generated, ignoring post-op's, since NCEConvolutionOp is not a LayerWithPostOp.
-    // The old PPE attribute, with post-op's, ends up in the final AddOp
-    const auto ppeOpaqueAttr = VPU::PpeVersionConfig::retrievePPEAttribute(origOp);
+    // A stripped PPE is generated, ignoring post-op's and per-tensor scale/bias (since NCEConvolutionOp is not a
+    // LayerWithPostOp and scale/bias info is discarded)
+    auto strippedPpeAttr = VPU::PpeVersionConfig::retrievePPEAttribute(origOp);
+    // The original PPE attribute of the convolution (containing post-op and per-tensor scale/bias info), ends up in the
+    // final Add
+    auto finalPpeAttr = origOp.getPpeAttr();
 
     // TODO: E#70371 - Remaining opens for InputChannels 8K size
     for (auto tile = 0; tile < maxTiles; tile++) {
@@ -267,8 +270,8 @@ mlir::LogicalResult EnsureConvICRequirements::matchAndRewrite(VPU::NCEConvolutio
         auto weightsTable = VPU::createWeightsTableTensor(rewriter, origOp->getLoc(), weightsTableVec);
         auto convOp = rewriter.create<VPU::NCEConvolutionOp>(
                 origOp.getLoc(), origOp.getType(), convInput.getResult(), convFilter.getResult(), weightsTable,
-                origOp.getInstructionListTable(), origOp.getStrides(), origOp.getPad(), ppeOpaqueAttr,
-                rawKernelSliceShape, origOp.getMultiClusterStrategyAttr());
+                origOp.getStrides(), origOp.getPad(), strippedPpeAttr, origOp.getMpeEngineAttr(), rawKernelSliceShape,
+                origOp.getMultiClusterStrategyAttr(), origOp.getOutputChannelsAttr());
 
         convOps.push_back(convOp);
     }
@@ -282,13 +285,22 @@ mlir::LogicalResult EnsureConvICRequirements::matchAndRewrite(VPU::NCEConvolutio
     SmallVector<VPU::NCEEltwiseOp> addOps;
     VPU::NCEEltwiseOp addResult;
 
+    // Elwise-ops do not have a weights table, thus per-channel scale/bias need to be applied through Convolutions. The
+    // PPE for the generated Add's must reflect this by setting neutral values to scale and bias.
+    // TODO: E#150106, a similar logic is also needed for IntPPE
+    if (const auto wtInfoAdapter = VPU::PpeVersionConfig::getFactoryAs<VPU::IPpeAdapterWeightsTableInfo*>()) {
+        finalPpeAttr = wtInfoAdapter->discardWeightsTableIfPresent(finalPpeAttr);
+        strippedPpeAttr = wtInfoAdapter->discardWeightsTableIfPresent(strippedPpeAttr);
+    }
+
     for (size_t index = 0; index < convOps.size() - 1; index++) {
         auto addOperand = index == 0 ? convOps[index].getOutput() : addResult.getOutput();
 
         // NCEEltwise inType and outType are always same with ConvOp outType
-        addResult = rewriter.create<VPU::NCEEltwiseOp>(
-                origOp->getLoc(), targetEltwiseOutputType, addOperand, convOps[index + 1].getOutput(), opType,
-                (index == convOps.size() - 2 ? origOp.getOpaquePpeAttr() : ppeOpaqueAttr), nullptr, nullptr);
+        addResult = rewriter.create<VPU::NCEEltwiseOp>(origOp->getLoc(), targetEltwiseOutputType, addOperand,
+                                                       convOps[index + 1].getOutput(), opType,
+                                                       (index == convOps.size() - 2 ? finalPpeAttr : strippedPpeAttr),
+                                                       nullptr, nullptr, origOp.getOutputChannelsAttr());
 
         // change NCEConv's output layout to supported NCEEltwise input layout
         // Eg: if NCEConv (inL=NHWC,outL=NCHW) splits into 3 small NCEConv:
@@ -337,13 +349,30 @@ mlir::LogicalResult EnsureConvICRequirements::matchAndRewrite(VPU::NCEConvolutio
 class EnsureNCEOpsSizeRequirementsPass final :
         public VPU::EnsureNCEOpsSizeRequirementsBase<EnsureNCEOpsSizeRequirementsPass> {
 public:
-    explicit EnsureNCEOpsSizeRequirementsPass(Logger log) {
+    explicit EnsureNCEOpsSizeRequirementsPass(bool enableOutputEnsurance, Logger log)
+            : _enableOutputEnsurance(enableOutputEnsurance) {
         Base::initLogger(log, Base::getArgumentName());
     }
+    mlir::LogicalResult initialize(mlir::MLIRContext* ctx) final;
 
 private:
     void safeRunOnFunc() final;
+    bool _enableOutputEnsurance = true;
 };
+
+mlir::LogicalResult EnsureNCEOpsSizeRequirementsPass::initialize(mlir::MLIRContext* ctx) {
+    if (mlir::failed(Base::initialize(ctx))) {
+        return mlir::failure();
+    }
+    if (enableOutputEnsurance.hasValue()) {
+        _log.trace("Overloading the default value {0} of the '_enableOutputEnsurance' field to the value {1} of the "
+                   "pass option "
+                   "'enableOutputEnsurance' generated by MLIR",
+                   _enableOutputEnsurance, enableOutputEnsurance);
+        _enableOutputEnsurance = enableOutputEnsurance;
+    }
+    return mlir::success();
+}
 
 //
 // safeRunOnFunc
@@ -371,6 +400,11 @@ void EnsureNCEOpsSizeRequirementsPass::safeRunOnFunc() {
 
     if (mlir::failed(mlir::applyPartialConversion(getOperation(), target, std::move(patterns)))) {
         signalPassFailure();
+    }
+
+    // If output shape ensurance is disabled, skip the rest of the pass
+    if (!_enableOutputEnsurance) {
+        return;
     }
 
     target.markUnknownOpDynamicallyLegal([&](mlir::Operation* op) {
@@ -421,6 +455,6 @@ void EnsureNCEOpsSizeRequirementsPass::safeRunOnFunc() {
 // createEnsureNCEOpsSizeRequirementsPass
 //
 
-std::unique_ptr<mlir::Pass> vpux::VPU::createEnsureNCEOpsSizeRequirementsPass(Logger log) {
-    return std::make_unique<EnsureNCEOpsSizeRequirementsPass>(log);
+std::unique_ptr<mlir::Pass> vpux::VPU::createEnsureNCEOpsSizeRequirementsPass(bool enableOutputEnsurance, Logger log) {
+    return std::make_unique<EnsureNCEOpsSizeRequirementsPass>(enableOutputEnsurance, log);
 }

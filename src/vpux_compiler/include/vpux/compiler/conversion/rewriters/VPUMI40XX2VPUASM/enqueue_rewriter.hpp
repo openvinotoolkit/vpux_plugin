@@ -14,8 +14,8 @@ namespace vpumi40xx2vpuasm {
 class EnqueueRewriter : public VPUASMSymbolizationPattern<VPURegMapped::EnqueueOp> {
 public:
     using Base::Base;
-    mlir::LogicalResult symbolize(VPURegMapped::EnqueueOp op, SymbolMapper& mapper,
-                                  mlir::ConversionPatternRewriter& rewriter) const override;
+    mlir::FailureOr<SymbolizationResult> symbolize(VPURegMapped::EnqueueOp op, SymbolMapper& mapper,
+                                                   mlir::ConversionPatternRewriter& rewriter) const override;
 };
 
 }  // namespace vpumi40xx2vpuasm

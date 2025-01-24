@@ -27,7 +27,7 @@ private:
 };
 
 void createNewFlatAlignedConst(Const::DeclareOp& constOp) {
-    const auto contentAttr = constOp.getContentAttr();
+    const auto& contentAttr = constOp.getContentAttr();
 
     const auto newOutputType = contentAttr.getType();
     auto constType = constOp.getOutput().getType().cast<vpux::NDTypeInterface>();

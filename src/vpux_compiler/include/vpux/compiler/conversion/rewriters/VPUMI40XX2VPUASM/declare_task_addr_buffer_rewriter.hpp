@@ -14,8 +14,8 @@ namespace vpumi40xx2vpuasm {
 class DeclareTaskAddrBuffRewriter : public VPUASMSymbolizationPattern<VPURegMapped::DeclareTaskAddrBufferOp> {
 public:
     using Base::Base;
-    mlir::LogicalResult symbolize(VPURegMapped::DeclareTaskAddrBufferOp op, SymbolMapper& mapper,
-                                  mlir::ConversionPatternRewriter& rewriter) const override;
+    mlir::FailureOr<SymbolizationResult> symbolize(VPURegMapped::DeclareTaskAddrBufferOp op, SymbolMapper& mapper,
+                                                   mlir::ConversionPatternRewriter& rewriter) const override;
     llvm::SmallVector<mlir::FlatSymbolRefAttr> getSymbolicNames(VPURegMapped::DeclareTaskAddrBufferOp op,
                                                                 size_t counter) override;
 };

@@ -124,7 +124,12 @@ def VPURegMapped_EnqueueOp:
 
         let description = [{
             An enqueue operation refers to pushing of the task descriptors in the HW FIFO. It is performed by the runtime while
-            ensuring the barrier at which the enqueue is attached has been consumed and reprogrammed
+            ensuring the barrier at which the enqueue is attached has been consumed and reprogrammed.
+
+            `start` and `end` arguments represent a continious range of tasks to be enqueued. For DPU & Shave only "secondary"
+            task type (variant and invocation accordingly) are enqueued.
+
+            If task type supports linked lists, it means only the head of the list will be enqueued, in this case `start` == `end`.
         }];
 
         let arguments = (ins

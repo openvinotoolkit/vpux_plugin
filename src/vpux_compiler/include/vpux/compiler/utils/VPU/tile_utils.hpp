@@ -63,8 +63,12 @@ Byte getRequiredCMX(VPU::ConvolutionOp convOp, const vpux::TileInfo& tiling,
 Byte getRequiredCMX(VPU::NCEConvolutionOp convOp, const vpux::TileInfo& tiling,
                     const std::optional<InputTiling>& inputTiles = std::nullopt);
 
+Byte getRequiredCMX(VPU::NCEConvolutionOp convOp, const SmallVector<NDTypeInterface>& types);
+
 Byte getRequiredCMX(VPU::NCECompressConvolutionOp convOp, const vpux::TileInfo& tiling,
                     const std::optional<InputTiling>& inputTiles = std::nullopt);
+
+Byte getRequiredCMX(VPU::NCECompressConvolutionOp convOp, const SmallVector<NDTypeInterface>& types);
 
 Byte getRequiredCMXForWeight(VPU::NCECompressConvolutionOp convOp, const vpux::TileInfo& tiling,
                              const std::optional<InputTiling>& inputTiles = std::nullopt);
@@ -81,8 +85,12 @@ Byte getRequiredCMX(VPU::GroupConvolutionOp gConvOp, const vpux::TileInfo& tilin
 Byte getRequiredCMX(VPU::NCEDepthConvolutionOp dConvOp, const vpux::TileInfo& tiling,
                     const std::optional<InputTiling>& inputTiles = std::nullopt);
 
+Byte getRequiredCMX(VPU::NCEDepthConvolutionOp dConvOp, const SmallVector<NDTypeInterface>& types);
+
 Byte getRequiredCMX(VPU::NCEPermuteOp pqOp, const vpux::TileInfo& tiling,
                     const std::optional<InputTiling>& inputTiles = std::nullopt);
+
+Byte getRequiredCMX(VPU::NCEPermuteOp pqOp, const SmallVector<NDTypeInterface>& types);
 
 Byte getRequiredCMXForWeight(VPU::NCEPermuteOp op, const vpux::TileInfo& tiling,
                              const std::optional<InputTiling>& inputTiles = std::nullopt);
@@ -102,8 +110,12 @@ Byte getRequiredCMX(VPU::MaxPoolOp poolOp, const vpux::TileInfo& tiling,
 Byte getRequiredCMX(VPU::NCEMaxPoolOp poolOp, const vpux::TileInfo& tiling,
                     const std::optional<InputTiling>& inputTiles = std::nullopt);
 
+Byte getRequiredCMX(VPU::NCEMaxPoolOp poolOp, const SmallVector<NDTypeInterface>& types);
+
 Byte getRequiredCMX(VPU::NCEAveragePoolOp poolOp, const vpux::TileInfo& tiling,
                     const std::optional<InputTiling>& inputTiles = std::nullopt);
+
+Byte getRequiredCMX(VPU::NCEAveragePoolOp poolOp, const SmallVector<NDTypeInterface>& types);
 
 Byte getEltwiseRequiredCMX(mlir::Operation* op, const vpux::TileInfo& tiling,
                            const std::optional<InputTiling>& inputTiles = std::nullopt);
@@ -115,6 +127,8 @@ Byte getRequiredCMXForWeight(VPU::AddOp op, const vpux::TileInfo& tiling,
                              const std::optional<InputTiling>& inputTiles = std::nullopt);
 Byte getRequiredCMX(VPU::MultiplyOp op, const vpux::TileInfo& tiling,
                     const std::optional<InputTiling>& inputTiles = std::nullopt);
+
+Byte getRequiredCMX(VPU::MultiplyOp op, const SmallVector<NDTypeInterface>& types);
 
 Byte getRequiredCMXForWeight(VPU::MultiplyOp op, const vpux::TileInfo& tiling,
                              const std::optional<InputTiling>& inputTiles = std::nullopt);
@@ -134,6 +148,12 @@ Byte getRequiredCMXForWeight(VPU::AndOp op, const vpux::TileInfo& tiling,
 Byte getRequiredCMX(VPU::NCEEltwiseOp op, const vpux::TileInfo& tiling,
                     const std::optional<InputTiling>& inputTiles = std::nullopt);
 
+Byte getRequiredCMX(VPU::NCEEltwiseOp op, const SmallVector<NDTypeInterface>& types);
+
+Byte getRequiredCMX(VPU::NCEPermuteOp pqOp, const SmallVector<NDTypeInterface>& tileTypes);
+
+Byte getRequiredCMX(VPU::MultiplyOp op, const SmallVector<NDTypeInterface>& tileTypes);
+
 Byte getRequiredCMXForWeight(VPU::NCEEltwiseOp op, const vpux::TileInfo& tiling,
                              const std::optional<InputTiling>& inputTiles = std::nullopt);
 
@@ -149,8 +169,11 @@ Byte getRequiredCMXSizeForNCEOps(ArrayRef<vpux::NDTypeInterface> operands, int64
 
 Byte getRequiredCMXSizeForDefaultOps(mlir::Operation* op);
 
+Byte getRequiredCMX(mlir::Operation* op, const SmallVector<NDTypeInterface>& types);
+
 OutputTiling getUniqueShapeTilingCandidates(mlir::Operation* op, const OutputTiling& origTiles, Logger log);
 
+bool canSWLayerBeEvenlyUnrolled(mlir::Operation* op, const OutputTiling& tiles, Dim targetDim, Logger);
 struct TileShapeCompare {
     bool operator()(const TileInfo& tile1, const TileInfo& tile2) const {
         return tile1.shape < tile2.shape;

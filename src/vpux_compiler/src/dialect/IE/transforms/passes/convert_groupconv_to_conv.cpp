@@ -147,7 +147,7 @@ mlir::LogicalResult ConvertGroupConvToConvPass::GroupConvToSingleConvConverter::
         return mlir::failure();
     }
 
-    const auto weightsContentAttr = weightsCst.getContentAttr();
+    const auto& weightsContentAttr = weightsCst.getContentAttr();
     auto reconstructGroupWeights = [&](const int64_t groupIdx) -> mlir::Value {
         const auto subviewOffsets = Shape{(groupIdx - 1) * groupOutSize, 0, 0, 0};
         const auto subviewStaticShape = Shape{groupOutSize, weightsShape[Dims4D::Filter::IC],

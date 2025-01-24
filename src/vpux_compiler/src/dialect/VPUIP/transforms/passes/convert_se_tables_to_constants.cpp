@@ -6,6 +6,7 @@
 #include "vpux/compiler/dialect/VPU/utils/nce_sparsity.hpp"
 #include "vpux/compiler/dialect/VPUIP/transforms/passes.hpp"
 #include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
+#include "vpux/compiler/dialect/const/utils/utils.hpp"
 
 #include <mlir/IR/BuiltinAttributes.h>
 
@@ -155,7 +156,7 @@ void ConvertSETablesToConstantsPass::safeRunOnFunc() {
         auto contentType = mlir::RankedTensorType::get(seTableType.getShape().raw(), seTableType.getElementType())
                                    .cast<vpux::NDTypeInterface>()
                                    .changeDimsOrder(seTableType.getDimsOrder());
-        auto seTableContent = mlir::DenseElementsAttr::get(mlir::cast<mlir::ShapedType>(contentType), ArrayRef(sePtrs));
+        auto seTableContent = Const::createConstContent(mlir::cast<mlir::ShapedType>(contentType), ArrayRef(sePtrs));
         auto constantOp = builder.create<Const::DeclareOp>(seTableOp.getLoc(), seTableType,
                                                            Const::ContentAttr::get(seTableContent));
 

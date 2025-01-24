@@ -9,7 +9,6 @@
 #include <npu_40xx_nnrt.hpp>
 
 using namespace vpux;
-using namespace npu40xx;
 
 //
 // ActKernelInvocationOp
@@ -23,12 +22,12 @@ void vpux::VPUASM::ActKernelInvocationOp::serialize(elf::writer::BinaryDataSecti
 #endif
 }
 
-size_t vpux::VPUASM::ActKernelInvocationOp::getBinarySize() {
-    return sizeof(nn_public::VpuActKernelInvocation);
+size_t vpux::VPUASM::ActKernelInvocationOp::getBinarySize(VPU::ArchKind /*arch*/) {
+    return sizeof(npu40xx::nn_public::VpuActKernelInvocation);
 }
 
-size_t vpux::VPUASM::ActKernelInvocationOp::getAlignmentRequirements() {
-    return alignof(nn_public::VpuActKernelInvocation);
+size_t vpux::VPUASM::ActKernelInvocationOp::getAlignmentRequirements(VPU::ArchKind /*arch*/) {
+    return alignof(npu40xx::nn_public::VpuActKernelInvocation);
 }
 
 vpux::ELF::SectionFlagsAttr vpux::VPUASM::ActKernelInvocationOp::getPredefinedMemoryAccessors() {

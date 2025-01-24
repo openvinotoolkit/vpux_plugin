@@ -26,10 +26,6 @@ class Exception : public std::runtime_error {
     using std::runtime_error::runtime_error;
 };
 
-class WlmRollbackException : public std::runtime_error {
-    using std::runtime_error::runtime_error;
-};
-
 namespace details {
 template <typename ExceptionT>
 [[noreturn]] void throwFormat(const char* file, int line, const std::string& message);

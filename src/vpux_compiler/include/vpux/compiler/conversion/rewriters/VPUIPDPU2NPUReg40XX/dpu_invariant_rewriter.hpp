@@ -5,9 +5,10 @@
 
 #pragma once
 
+#include "vpux/compiler/NPU40XX/dialect/NPUReg40XX/attributes.hpp"
+#include "vpux/compiler/NPU40XX/dialect/NPUReg40XX/ops.hpp"
 #include "vpux/compiler/NPU40XX/dialect/VPUIPDPU/ops.hpp"
 #include "vpux/compiler/conversion.hpp"
-
 namespace vpux {
 namespace vpuipdpu2npureg40xx {
 
@@ -22,21 +23,15 @@ private:
     Logger _log;
     VPU::DPUDryRunMode _dryRunMode;
 
-    void fillIDUCfg(mlir::Region& DPURegion,
-                    std::map<std::string, std::map<std::string, vpux::VPURegMapped::RegFieldValue>>& initValues) const;
-    void fillMPECfg(mlir::Region& DPURegion,
-                    std::map<std::string, std::map<std::string, vpux::VPURegMapped::RegFieldValue>>& initValues) const;
-    void fillPPECfg(mlir::Region& DPURegion,
-                    std::map<std::string, std::map<std::string, vpux::VPURegMapped::RegFieldValue>>& initValues) const;
-    void fillODUCfg(mlir::Region& DPURegion,
-                    std::map<std::string, std::map<std::string, vpux::VPURegMapped::RegFieldValue>>& initValues) const;
-    void fillBarrierCfg(
-            VPUIPDPU::DPUInvariantOp origOp,
-            std::map<std::string, std::map<std::string, vpux::VPURegMapped::RegFieldValue>>& initValues) const;
-    void fillProfilingCfg(
-            VPUIPDPU::DPUInvariantOp origOp,
-            std::map<std::string, std::map<std::string, vpux::VPURegMapped::RegFieldValue>>& initValues) const;
-    void fillStubCfg(std::map<std::string, std::map<std::string, vpux::VPURegMapped::RegFieldValue>>& initValues) const;
+    void fillIDUCfg(mlir::Region& DPURegion, vpux::NPUReg40XX::Descriptors::DpuInvariantRegister& descriptor) const;
+    void fillMPECfg(mlir::Region& DPURegion, vpux::NPUReg40XX::Descriptors::DpuInvariantRegister& descriptor) const;
+    void fillPPECfg(mlir::Region& DPURegion, vpux::NPUReg40XX::Descriptors::DpuInvariantRegister& descriptor) const;
+    void fillODUCfg(mlir::Region& DPURegion, vpux::NPUReg40XX::Descriptors::DpuInvariantRegister& descriptor) const;
+    void fillBarrierCfg(VPUIPDPU::DPUInvariantOp origOp,
+                        vpux::NPUReg40XX::Descriptors::DpuInvariantRegister& descriptor) const;
+    void fillProfilingCfg(VPUIPDPU::DPUInvariantOp origOp,
+                          vpux::NPUReg40XX::Descriptors::DpuInvariantRegister& descriptor) const;
+    void fillStubCfg(vpux::NPUReg40XX::Descriptors::DpuInvariantRegister& descriptor) const;
 };
 
 }  // namespace vpuipdpu2npureg40xx

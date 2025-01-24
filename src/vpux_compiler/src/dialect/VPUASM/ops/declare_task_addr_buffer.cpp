@@ -13,18 +13,18 @@ using namespace vpux;
 //
 
 void VPUASM::DeclareTaskAddrBufOp::serialize(elf::writer::BinaryDataSection<uint8_t>& binDataSection) {
-    auto size = getBinarySize();
+    auto size = getBinarySize(VPU::ArchKind::UNKNOWN);
     std::vector<uint8_t> tmpBuf(size, 0);
     binDataSection.appendData(tmpBuf.data(), size);
     return;
 }
 
-size_t VPUASM::DeclareTaskAddrBufOp::getBinarySize() {
+size_t VPUASM::DeclareTaskAddrBufOp::getBinarySize(VPU::ArchKind) {
     const auto type = getBufferType().getMemref().cast<vpux::NDTypeInterface>();
     return type.getTotalAllocSize().count();
 }
 
-size_t VPUASM::DeclareTaskAddrBufOp::getAlignmentRequirements() {
+size_t VPUASM::DeclareTaskAddrBufOp::getAlignmentRequirements(VPU::ArchKind) {
     return sizeof(uint32_t);
 }
 

@@ -37,12 +37,12 @@ class IE_Attr<string name, list<Trait> traits = []> :
 //
 
 defvar IE_STRICT_EQUAL = "STRICT_EQUAL";
-defvar IE_ALLOW_QUANT_MIXED_PRECISION = "ALLOW_QUANT_MIXED_PRECISION";
+defvar IE_ALLOW_MIXED_PRECISION = "ALLOW_MIXED_PRECISION";
 defvar IE_ALLOW_DIFFERENT_QUANT = "ALLOW_DIFFERENT_QUANT";
 defvar IE_ALLOW_GROUPED_OUTPUT = "ALLOW_GROUPED_OUTPUT";
 defvar IE_ALLOW_DISTRIBUTED_OUTPUT = "ALLOW_DISTRIBUTED_OUTPUT";
 defvar IE_TypeComparisonMode_STRICT_EQUAL = !strconcat("vpux::IE::TypeComparisonMode::", IE_STRICT_EQUAL);
-defvar IE_TypeComparisonMode_ALLOW_QUANT_MIXED_PRECISION = !strconcat("vpux::IE::TypeComparisonMode::", IE_ALLOW_QUANT_MIXED_PRECISION);
+defvar IE_TypeComparisonMode_ALLOW_MIXED_PRECISION = !strconcat("vpux::IE::TypeComparisonMode::", IE_ALLOW_MIXED_PRECISION);
 defvar IE_TypeComparisonMode_ALLOW_DIFFERENT_QUANT = !strconcat("vpux::IE::TypeComparisonMode::", IE_ALLOW_DIFFERENT_QUANT);
 defvar IE_TypeComparisonMode_ALLOW_GROUPED_OUTPUT = !strconcat("vpux::IE::TypeComparisonMode::", IE_ALLOW_GROUPED_OUTPUT);
 defvar IE_TypeComparisonMode_ALLOW_DISTRIBUTED_OUTPUT = !strconcat("vpux::IE::TypeComparisonMode::", IE_ALLOW_DISTRIBUTED_OUTPUT);
@@ -53,7 +53,7 @@ def IE_TypeComparisonMode :
             "Tensor element type comparison modes",
             [
                 I64BitEnumAttrCase<IE_STRICT_EQUAL, 0x1>,
-                I64BitEnumAttrCase<IE_ALLOW_QUANT_MIXED_PRECISION, 0x2>,
+                I64BitEnumAttrCase<IE_ALLOW_MIXED_PRECISION, 0x2>,
                 I64BitEnumAttrCase<IE_ALLOW_DIFFERENT_QUANT, 0x4>,
                 I64BitEnumAttrCase<IE_ALLOW_GROUPED_OUTPUT, 0x8>,
                 I64BitEnumAttrCase<IE_ALLOW_DISTRIBUTED_OUTPUT, 0x10>
@@ -313,6 +313,23 @@ def IE_ProposalAttr : IE_Attr<"Proposal"> {
         "mlir::BoolAttr":$inferProbs
     );
 }
+
+//
+// ReverseMode
+//
+
+def IE_ReverseMode :
+        IE_I64EnumAttr<
+            "ReverseMode",
+            "ReverseMode specifies how the second input tensor should be interpreted",
+            [
+                I64EnumAttrCase<"INDEX", 0>,
+                I64EnumAttrCase<"MASK", 1>,
+            ]
+        > {
+}
+
+def IE_ReverseModeAttr : IE_EnumAttr<IE_ReverseMode, "reverse_mode">;
 
 //
 // Interpolate

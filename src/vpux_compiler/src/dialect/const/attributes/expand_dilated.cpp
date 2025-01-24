@@ -131,7 +131,3 @@ Const::Content vpux::Const::ExpandDilatedAttr::transform(vpux::Const::Content& i
 
     return output;
 }
-
-Const::ContentSetup vpux::Const::ContentSetup::expandDilated(ShapeRef dilations) {
-    return addTransformation(Const::ExpandDilatedAttr::get(getIntArrayAttr(getContext(), dilations)));
-}

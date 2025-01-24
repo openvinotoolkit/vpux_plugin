@@ -25,7 +25,7 @@ bool isConvertSupportedOnDMA(T convertOp) {
             VPU::ArchKind::NPU40XX,
     };
     if (compatibleTargets.count(archKind) <= 0) {
-        // Feature is only tested on 40XX
+        // Feature is only tested on NPU40XX
         return false;
     }
     auto inputElementType = convertOp.getInput().getType().template cast<NDTypeInterface>().getElementType();

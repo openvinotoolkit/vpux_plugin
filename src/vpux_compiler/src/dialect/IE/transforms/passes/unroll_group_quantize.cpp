@@ -29,6 +29,8 @@ private:
                                                  mlir::PatternRewriter& rewriter) const = 0;
     virtual std::set<int64_t> findAxes(ConcreteOp origOp) const = 0;
 
+    virtual bool isBeneficialForUnroll(ConcreteOp origOp) const;
+
 private:
     Logger _log;
 };
@@ -78,6 +80,11 @@ SmallVector<mlir::Value> GenericUnrollBase<ConcreteOp>::splitValue(const mlir::V
 }
 
 template <typename ConcreteOp>
+bool GenericUnrollBase<ConcreteOp>::isBeneficialForUnroll(ConcreteOp) const {
+    return true;
+}
+
+template <typename ConcreteOp>
 mlir::LogicalResult GenericUnrollBase<ConcreteOp>::matchAndRewrite(ConcreteOp origOp,
                                                                    mlir::PatternRewriter& rewriter) const {
     if (mlir::isa_and_nonnull<IE::GroupConvolutionOp>(*origOp.getResult().user_begin())) {
@@ -87,6 +94,10 @@ mlir::LogicalResult GenericUnrollBase<ConcreteOp>::matchAndRewrite(ConcreteOp or
     const auto axes = findAxes(origOp);
     // Cases when there's only one axis or there are no axes at all are fine. Nothing to do.
     if (axes.size() <= 1) {
+        return mlir::failure();
+    }
+
+    if (!isBeneficialForUnroll(origOp)) {
         return mlir::failure();
     }
     // Unroll the eligible axis.
@@ -160,6 +171,7 @@ private:
     SmallVector<mlir::Value> splitInputs(IE::DynamicDequantizeOp origOp, const int64_t axis,
                                          mlir::PatternRewriter& rewriter) const override;
     std::set<int64_t> findAxes(IE::DynamicDequantizeOp origOp) const override;
+    bool isBeneficialForUnroll(IE::DynamicDequantizeOp origOp) const override;
 };
 
 SmallVector<mlir::Value> UnrollDynamicDequantize::splitInputs(IE::DynamicDequantizeOp origOp, const int64_t axis,
@@ -186,6 +198,43 @@ SmallVector<mlir::Value> UnrollDynamicDequantize::splitInputs(IE::DynamicDequant
 
 std::set<int64_t> UnrollDynamicDequantize::findAxes(IE::DynamicDequantizeOp origOp) const {
     return IE::findAxes(origOp);
+}
+
+bool UnrollDynamicDequantize::isBeneficialForUnroll(IE::DynamicDequantizeOp origOp) const {
+    // Benefit when: KV cache model, the first dim is one.
+    // For prefill mode, it's more performant to keep the op unrolled.
+    if (!origOp->hasOneUse()) {
+        return true;
+    }
+
+    auto propagateTranspose = [](mlir::Operation* userOp) {
+        if (!mlir::isa_and_nonnull<IE::TransposeOp>(userOp) || !userOp->hasOneUse()) {
+            return userOp;
+        }
+        return *userOp->getUsers().begin();
+    };
+
+    auto user = propagateTranspose(*origOp->getUsers().begin());
+
+    auto reshape = mlir::dyn_cast<IE::AffineReshapeOp>(user);
+    if (reshape == nullptr || !reshape->hasOneUse()) {
+        return true;
+    }
+
+    const auto reshapeInputDims = getShape(reshape.getInput());
+    const auto reshapeOutputDims = getShape(reshape.getOutput());
+    if (reshapeInputDims.size() != 3 || reshapeOutputDims.size() != 2) {
+        return true;
+    }
+
+    user = propagateTranspose(*reshape->getUsers().begin());
+
+    auto matMul = mlir::dyn_cast<IE::FullyConnectedOp>(user);
+    if (matMul == nullptr) {
+        return true;
+    }
+    auto outShape = getShape(matMul.getOutput());
+    return outShape.size() == 2 && outShape[Dim(0)] == 1;
 }
 
 class UnrollGroupQuantizePass final : public IE::UnrollGroupQuantizeBase<UnrollGroupQuantizePass> {

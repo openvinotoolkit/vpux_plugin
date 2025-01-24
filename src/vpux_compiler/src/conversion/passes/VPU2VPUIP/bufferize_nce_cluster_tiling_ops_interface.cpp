@@ -195,28 +195,29 @@ mlir::LogicalResult vpux::bufferizeOp(mlir::MLIRContext* ctx, VPU::NCEClusterTil
         auto operand = p.value();
 
         mlir::Value origOperand = origOpBodyBlock.getArguments()[operandIdx];
-        origOperand = skipUserCast(origOperand);
-
-        if (std::distance(origOperand.getUsers().begin(), origOperand.getUsers().end()) == 0) {
-            continue;
-        }
-
-        if (llvm::any_of(origOperand.getUsers(), [](mlir::Operation* userOp) {
-                return mlir::isa<VPUIP::UngroupSparseBufferOp>(userOp) ||
-                       (VPUIP::isPureViewOp(userOp) && !mlir::isa<VPUIP::GroupSparseBufferOp>(userOp));
-            })) {
-            for (auto userOp : origOperand.getUsers()) {
-                for (auto result : userOp->getResults()) {
-                    auto it = innerOuterOpValueMapping.find(result);
-                    newOperands.push_back(it->second);
-                    operandsIdxMapping[operandIdx].push_back(newOperands.size() - 1);
-                }
+        for (auto user : origOperand.getUsers()) {
+            auto operandUser = skipUserCast(user->getResult(0));
+            if (std::distance(operandUser.getUsers().begin(), operandUser.getUsers().end()) == 0) {
+                continue;
             }
-            continue;
-        }
 
-        newOperands.push_back(operand);
-        operandsIdxMapping[operandIdx].push_back(newOperands.size() - 1);
+            if (llvm::any_of(operandUser.getUsers(), [](mlir::Operation* userOp) {
+                    return mlir::isa<VPUIP::UngroupSparseBufferOp>(userOp) ||
+                           (VPUIP::isPureViewOp(userOp) && !mlir::isa<VPUIP::GroupSparseBufferOp>(userOp));
+                })) {
+                for (auto userOp : operandUser.getUsers()) {
+                    for (auto result : userOp->getResults()) {
+                        auto it = innerOuterOpValueMapping.find(result);
+                        newOperands.push_back(it->second);
+                        operandsIdxMapping[operandIdx].push_back(newOperands.size() - 1);
+                    }
+                }
+                continue;
+            }
+
+            newOperands.push_back(operand);
+            operandsIdxMapping[operandIdx].push_back(newOperands.size() - 1);
+        }
     }
 
     // Add the output operands to the new vector of operands

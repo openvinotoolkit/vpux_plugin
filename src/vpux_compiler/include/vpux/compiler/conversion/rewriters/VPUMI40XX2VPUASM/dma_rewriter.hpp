@@ -13,12 +13,12 @@ namespace vpumi40xx2vpuasm {
 class NNDMARewriter : public VPUASMSymbolizationPattern<VPUMI40XX::NNDMAOp> {
 public:
     using Base::Base;
-    mlir::LogicalResult symbolize(VPUMI40XX::NNDMAOp op, SymbolMapper& mapper,
-                                  mlir::ConversionPatternRewriter& rewriter) const override;
+    mlir::FailureOr<SymbolizationResult> symbolize(VPUMI40XX::NNDMAOp op, SymbolMapper& mapper,
+                                                   mlir::ConversionPatternRewriter& rewriter) const override;
     llvm::SmallVector<mlir::FlatSymbolRefAttr> getSymbolicNames(VPUMI40XX::NNDMAOp op, size_t) override;
 
 private:
-    VPUIP::DMADescriptorAttr getDmaTransactionTraits(VPUMI40XX::NNDMAOp op, mlir::MLIRContext* ctx) const;
+    VPUIP::DMADescriptorAttr getDmaDescriptorAttr(VPUMI40XX::NNDMAOp op, mlir::MLIRContext* ctx) const;
 };
 
 }  // namespace vpumi40xx2vpuasm

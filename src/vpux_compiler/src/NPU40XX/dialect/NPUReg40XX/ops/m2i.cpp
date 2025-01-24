@@ -6,7 +6,6 @@
 #include <mlir/IR/BuiltinTypes.h>
 #include "vpux/compiler/NPU40XX/dialect/NPUReg40XX/ops.hpp"
 #include "vpux/compiler/utils/ELF/utils.hpp"
-#include "vpux/utils/core/optional.hpp"
 
 #include <npu_40xx_nnrt.hpp>
 
@@ -60,19 +59,19 @@ void setAddendForInAddr1AndInAddr2(size_t addend, uint64_t inFormat, uint64_t PS
 void NPUReg40XX::M2IOp::serialize(elf::writer::BinaryDataSection<uint8_t>& binDataSection) {
     auto m2iDescriptor = getM2iDescriptorAttr().getRegMapped();
 
-    VPUX_THROW_UNLESS(Byte(sizeof(nn_public::VpuMediaTask)) == m2iDescriptor.getWidth(),
+    VPUX_THROW_UNLESS(sizeof(nn_public::VpuMediaTask) == m2iDescriptor.size(),
                       "HW M2iDescriptor size {0} != regMapped representation size {1}.",
-                      sizeof(nn_public::VpuMediaTask), m2iDescriptor.getWidth());
+                      sizeof(nn_public::VpuMediaTask), m2iDescriptor.size());
 
-    auto serializedM2iDesc = m2iDescriptor.serialize();
+    auto serializedM2iDesc = m2iDescriptor.getStorage();
     binDataSection.appendData(serializedM2iDesc.data(), serializedM2iDesc.size());
 }
 
-size_t NPUReg40XX::M2IOp::getBinarySize() {
+size_t NPUReg40XX::M2IOp::getBinarySize(VPU::ArchKind) {
     return sizeof(nn_public::VpuMediaTask);
 }
 
-size_t NPUReg40XX::M2IOp::getAlignmentRequirements() {
+size_t NPUReg40XX::M2IOp::getAlignmentRequirements(VPU::ArchKind) {
     return alignof(nn_public::VpuMediaTask);
 }
 
@@ -109,9 +108,9 @@ std::vector<ELF::RelocationInfo> NPUReg40XX::M2IOp::getRelocationInfo(ELF::Symbo
     auto buffDescOffset = offsetof(nn_public::VpuMediaTask, standard.buff_desc_);
 
     auto inputSymRef = getInput();
-    auto m2iDescriptor = getM2iDescriptor();
-    auto PSOB_inPS = m2iDescriptor.getRegMapped().getRegister("PSOB").getField("inPS").getValue();
-    auto inFormat = m2iDescriptor.getRegMapped().getRegister("IOCfg").getField("inFormat").getValue();
+    auto m2iDescriptor = getM2iDescriptor().getRegMapped();
+    auto PSOB_inPS = m2iDescriptor.read<Fields::inPS>();
+    auto inFormat = m2iDescriptor.read<Fields::inFormat>();
 
     auto addend = ELF::getOffsetOfSymRef(symRefMap, inputSymRef);
     size_t addendInAddr1(0), addendInAddr2(0);
@@ -121,17 +120,16 @@ std::vector<ELF::RelocationInfo> NPUReg40XX::M2IOp::getRelocationInfo(ELF::Symbo
     // input relocs
     //
 
-    relocs.push_back(ELF::RelocationInfo(inputSymRef, targetSection, getSymRefOffsetForReloc(*this, inputSymRef),
-                                         ELF::RelocationType::R_VPU_64_BIT_OR_B21_B26_UNSET, addend,
-                                         "Input (inputSymRef) in M2I reloc"));
+    relocs.emplace_back(inputSymRef, targetSection, getSymRefOffsetForReloc(*this, inputSymRef),
+                        ELF::RelocationType::R_VPU_64_BIT_OR_B21_B26_UNSET, addend, "Input (inputSymRef) in M2I reloc");
 
-    relocs.push_back(ELF::RelocationInfo(
-            inputSymRef, targetSection, buffDescOffset + offsetof(VpuMediaBuffDescriptor, inAddr1),
-            ELF::RelocationType::R_VPU_64_BIT_OR_B21_B26_UNSET, addendInAddr1, "Input (inAddr1) in M2I reloc"));
+    relocs.emplace_back(inputSymRef, targetSection, buffDescOffset + offsetof(VpuMediaBuffDescriptor, inAddr1),
+                        ELF::RelocationType::R_VPU_64_BIT_OR_B21_B26_UNSET, addendInAddr1,
+                        "Input (inAddr1) in M2I reloc");
 
-    relocs.push_back(ELF::RelocationInfo(
-            inputSymRef, targetSection, buffDescOffset + offsetof(VpuMediaBuffDescriptor, inAddr2),
-            ELF::RelocationType::R_VPU_64_BIT_OR_B21_B26_UNSET, addendInAddr2, "Input (inAddr2) in M2I reloc"));
+    relocs.emplace_back(inputSymRef, targetSection, buffDescOffset + offsetof(VpuMediaBuffDescriptor, inAddr2),
+                        ELF::RelocationType::R_VPU_64_BIT_OR_B21_B26_UNSET, addendInAddr2,
+                        "Input (inAddr2) in M2I reloc");
 
     //
     // output reloc
@@ -139,20 +137,19 @@ std::vector<ELF::RelocationInfo> NPUReg40XX::M2IOp::getRelocationInfo(ELF::Symbo
 
     auto outputSymRef = getOutputBuff();
 
-    relocs.push_back(ELF::RelocationInfo(outputSymRef, targetSection, getSymRefOffsetForReloc(*this, outputSymRef),
-                                         ELF::RelocationType::R_VPU_64_BIT_OR_B21_B26_UNSET,
-                                         ELF::getOffsetOfSymRef(symRefMap, outputSymRef),
-                                         "Output (outputSymRef) in M2I reloc"));
+    relocs.emplace_back(outputSymRef, targetSection, getSymRefOffsetForReloc(*this, outputSymRef),
+                        ELF::RelocationType::R_VPU_64_BIT_OR_B21_B26_UNSET,
+                        ELF::getOffsetOfSymRef(symRefMap, outputSymRef), "Output (outputSymRef) in M2I reloc");
 
     //
     // next link reloc
     //
 
     if (auto nextLinkSymRef = getNextLink().value_or(nullptr)) {
-        relocs.push_back(ELF::RelocationInfo(
-                nextLinkSymRef, targetSection, getSymRefOffsetForReloc(*this, nextLinkSymRef),
-                ELF::RelocationType::R_VPU_32_BIT_OR_B21_B26_UNSET, ELF::getOffsetOfSymRef(symRefMap, nextLinkSymRef),
-                "Next link (nextLinkSymRef) in M2I reloc"));
+        relocs.emplace_back(nextLinkSymRef, targetSection, getSymRefOffsetForReloc(*this, nextLinkSymRef),
+                            ELF::RelocationType::R_VPU_32_BIT_OR_B21_B26_UNSET,
+                            ELF::getOffsetOfSymRef(symRefMap, nextLinkSymRef),
+                            "Next link (nextLinkSymRef) in M2I reloc");
     }
 
     return relocs;

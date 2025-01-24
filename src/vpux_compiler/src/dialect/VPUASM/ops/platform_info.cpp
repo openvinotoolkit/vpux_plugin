@@ -14,23 +14,23 @@ using namespace vpux;
 void vpux::VPUASM::PlatformInfoOp::serialize(elf::writer::BinaryDataSection<uint8_t>& binDataSection) {
     elf::platform::PlatformInfo platformInfo;
 
-    platformInfo.mArchKind = ELF::mapVpuArchKindToElfArchKind(getArchKind());
+    platformInfo.mArchKind = ELF::mapVpuArchKindToElfArchKind(VPU::getArch(getOperation()));
 
     auto serializedPlatformInfo = elf::platform::PlatformInfoSerialization::serialize(platformInfo);
     binDataSection.appendData(&serializedPlatformInfo[0], serializedPlatformInfo.size());
 }
 
-size_t vpux::VPUASM::PlatformInfoOp::getBinarySize() {
+size_t vpux::VPUASM::PlatformInfoOp::getBinarySize(VPU::ArchKind) {
     // calculate size based on serialized form, instead of just sizeof(PlatformInfo)
     // serialization uses metadata that also gets stored in the blob and must be accounted for
     // also for non-POD types (e.g. have vector as member) account for all data to be serialized
     // (data owned by vector, instead of just pointer)
     elf::platform::PlatformInfo platformInfo;
-    platformInfo.mArchKind = ELF::mapVpuArchKindToElfArchKind(getArchKind());
+    platformInfo.mArchKind = ELF::mapVpuArchKindToElfArchKind(VPU::getArch(getOperation()));
     return elf::platform::PlatformInfoSerialization::serialize(platformInfo).size();
 }
 
-size_t vpux::VPUASM::PlatformInfoOp::getAlignmentRequirements() {
+size_t vpux::VPUASM::PlatformInfoOp::getAlignmentRequirements(VPU::ArchKind) {
     return alignof(elf::platform::PlatformInfo);
 }
 
@@ -44,10 +44,5 @@ bool vpux::VPUASM::PlatformInfoOp::hasMemoryFootprint() {
 }
 
 void vpux::VPUASM::PlatformInfoOp::build(mlir::OpBuilder& builder, mlir::OperationState& state) {
-    build(builder, state, "PlatformInfo", VPU::ArchKind::UNKNOWN);
-}
-
-void vpux::VPUASM::PlatformInfoOp::build(mlir::OpBuilder& builder, mlir::OperationState& state,
-                                         VPU::ArchKind archKind) {
-    build(builder, state, "PlatformInfo", archKind);
+    build(builder, state, "PlatformInfo");
 }

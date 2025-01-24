@@ -50,24 +50,40 @@ mlir::Value createWeightsTableTensor(mlir::OpBuilder& builder, mlir::Location lo
     return Const::createConst(builder, loc, dataStorageType, weightsTable);
 }
 
-mlir::Value createInstructionListTableTensor(mlir::OpBuilder& builder, mlir::Location loc,
-                                             const std::optional<SmallVector<int32_t>>& instructionList) {
-    if (!instructionList.has_value()) {
-        return nullptr;
-    }
-    const auto instructionListArrayRef = ArrayRef(instructionList.value());
-    const auto elemType = getSInt32Type(builder.getContext());
-    const auto instructionListTableShape = Shape{1, 1, 1, static_cast<int64_t>(instructionListArrayRef.size())};
+std::vector<float> createScaleTableData(mlir::Value opInput, mlir::Value opOutput, mlir::Value weights, int64_t OC,
+                                        VPU::NCESparsity::PPEConverterCb ppeConverter, mlir::FloatAttr constScale) {
+    const auto inElemType = opInput.getType().cast<vpux::NDTypeInterface>().getElementType();
+    const auto outElemType = opOutput.getType().cast<vpux::NDTypeInterface>().getElementType();
+    const auto weightsElemType = weights ? weights.getType().cast<vpux::NDTypeInterface>().getElementType() : nullptr;
 
-    const auto dataStorageType = mlir::RankedTensorType::get(instructionListTableShape.raw(), elemType);
-    return Const::createConst(builder, loc, dataStorageType, instructionListArrayRef);
+    return VPU::NCESparsity::getScaleTable(inElemType, outElemType, ppeConverter, OC, weightsElemType, constScale);
+}
+
+std::vector<float> createBiasTableData(mlir::Value opInput, mlir::Value opOutput, mlir::Value weights,
+                                       const Const::ContentAttr& bias, int64_t OC,
+                                       VPU::NCESparsity::BiasConverterCb biasConverter) {
+    const auto inElemType = opInput.getType().cast<vpux::NDTypeInterface>().getElementType();
+    const auto outElemType = opOutput.getType().cast<vpux::NDTypeInterface>().getElementType();
+    const auto weightsElemType = weights ? weights.getType().cast<vpux::NDTypeInterface>().getElementType() : nullptr;
+
+    return VPU::NCESparsity::getBiasTable(inElemType, outElemType, biasConverter, OC, weightsElemType, bias);
+}
+
+mlir::Value createScaleOrBiasTableTensor(mlir::OpBuilder& builder, mlir::Location loc, ArrayRef<float> table,
+                                         mlir::Type elemType) {
+    const int64_t OC = table.size();
+
+    const auto tableShape = NCESparsity::inferScaleTableShape(OC);
+
+    const auto dataStorageType = mlir::RankedTensorType::get(tableShape.raw(), elemType);
+    return Const::createConst(builder, loc, dataStorageType, table);
 }
 
 namespace {
 
 mlir::Value getAlignedConstWeights(mlir::OpBuilder& builder, mlir::Location loc, Const::DeclareOp weightsConst,
                                    Shape flatWeightShape, int64_t padding) {
-    auto weightsContentAttr = weightsConst.getContentAttr();
+    const auto& weightsContentAttr = weightsConst.getContentAttr();
     auto nchwWeightsContentAttr = weightsContentAttr.transform().reorder(DimsOrder::NCHW).get();
 
     auto flatWeightsContentAttr = nchwWeightsContentAttr.transform().reshape(flatWeightShape).get();
@@ -90,14 +106,13 @@ mlir::Value getAlignedConstWeights(mlir::OpBuilder& builder, mlir::Location loc,
 Const::ContentAttr buildPadData(const mlir::Type type, ArrayRef<int64_t> shape) {
     VPUX_THROW_UNLESS(shape.size() == 4, "Unsupported shape size {0}", shape.size());
     const auto OC = shape[Dims4D::Filter::OC.ind()];
-    const auto alignment = shape[Dims4D::Filter::IC.ind()];
 
     if (const auto quantizedType = type.dyn_cast<mlir::quant::QuantizedType>()) {
         const auto padType = mlir::RankedTensorType::get(shape, normalizeQuantStorageType(quantizedType));
-        std::vector<int64_t> padValues;
+        uint8_t padValueUint8 = 0;
 
         if (const auto uniformType = quantizedType.dyn_cast<mlir::quant::UniformQuantizedType>()) {
-            padValues.assign(OC * alignment, uniformType.getZeroPoint());
+            padValueUint8 = static_cast<uint8_t>(uniformType.getZeroPoint());
         } else if (const auto perAxisType = quantizedType.dyn_cast<mlir::quant::UniformQuantizedPerAxisType>()) {
             const auto zeroPoints = perAxisType.getZeroPoints();
             VPUX_THROW_UNLESS(checked_cast<size_t>(OC) == zeroPoints.size(),
@@ -107,24 +122,17 @@ Const::ContentAttr buildPadData(const mlir::Type type, ArrayRef<int64_t> shape) 
             VPUX_THROW_UNLESS(
                     zeroPoints.size() == 1 || std::equal(zeroPoints.begin() + 1, zeroPoints.end(), zeroPoints.begin()),
                     "All zero points should be equal");
-            padValues.assign(OC * alignment, zeroPoints.front());
-
+            padValueUint8 = static_cast<uint8_t>(zeroPoints.front());
         } else {
             VPUX_THROW("Unsupported Quantized Type '{0}'", quantizedType);
         }
-        std::vector<uint8_t> padValuesUint8;
-        std::transform(padValues.begin(), padValues.end(), std::back_inserter(padValuesUint8),
-                       [](int64_t value) -> uint8_t {
-                           return static_cast<uint8_t>(value);
-                       });
-        const auto padAttr = mlir::DenseElementsAttr::get(padType, ArrayRef(padValuesUint8));
+        const auto padAttr = Const::createConstContent(padType, ArrayRef(padValueUint8));
 
-        return Const::ContentAttr::transform(padAttr).quantCast(quantizedType).get();
+        return Const::ContentAttr::get(padAttr, Const::ContentSetup(padType).castElemType(quantizedType));
     } else {
         const auto ndType = mlir::RankedTensorType::get(shape, type).cast<vpux::NDTypeInterface>();
         const auto padType = ndType.changeDimsOrder(DimsOrder::NCHW).cast<mlir::RankedTensorType>();
-        const auto padValues = std::vector<vpux::type::float16>(OC * alignment, 0.f);
-        const auto padAttr = mlir::DenseElementsAttr::get(padType, ArrayRef(padValues));
+        const auto padAttr = Const::createConstContent(padType, ArrayRef(vpux::type::float16(0.f)));
 
         return Const::ContentAttr::get(padAttr);
     }

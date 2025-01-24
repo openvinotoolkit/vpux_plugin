@@ -53,15 +53,26 @@ struct DefaultHWOptionsDeviceBase : public virtual vpux::DefaultHWOptionsBase {
                                        llvm::cl::desc("Threshold for WLM optimization"),
                                        llvm::cl::init(VIRTUAL_BARRIER_THRESHOLD_WLM)};
 
-    BoolOption supportNCEOpInsertion{
-            *this, "support-nce-op-insertion",
-            llvm::cl::desc("Insert a new NCE operation with single user for CMX-Concat to handle the"
-                           "complex case when parent NCE has an extra non-Copy user."),
-            llvm::cl::init(true)};
+    mlir::detail::PassOptions::Option<WlmVpurtEnqueueMode> wlmVpurtEnqueue{
+            *this, "wlm-vpurt-enqueue",
+            ::llvm::cl::desc("Option for enabling WLM enqueue barriers search algorithm at VPURT. To be used only for "
+                             "experiments."),
+            ::llvm::cl::init(WlmVpurtEnqueueMode::DISABLED),
+            ::llvm::cl::values(clEnumValN(WlmVpurtEnqueueMode::ENABLED, "ENABLED",
+                                          "WLM enqueue barriers search algorithm at VPURT ENABLED"),
+                               clEnumValN(WlmVpurtEnqueueMode::DISABLED, "DISABLED",
+                                          "WLM enqueue barriers search algorithm at VPURT DISABLED. Use LCA based "
+                                          "enqueue algorithm at VPUMI"))};
 
     BoolOption enableGroupedMatMul{*this, "enable-grouped-matmul",
                                    llvm::cl::desc("Enable execution of grouped MatMul as a single operation."),
                                    llvm::cl::init(true)};
+
+    BoolOption enableOutputEnsurance{
+            *this, "enable-output-ensurance",
+            llvm::cl::desc(
+                    "Enable output size ensurance when checking nce op shapes in EnsureNCEOpsSizeRequirements pass"),
+            llvm::cl::init(true)};
 };
 
 //

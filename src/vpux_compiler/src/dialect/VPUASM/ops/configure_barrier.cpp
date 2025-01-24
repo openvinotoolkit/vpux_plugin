@@ -10,30 +10,25 @@
 #include <npu_40xx_nnrt.hpp>
 
 using namespace vpux;
-using namespace npu40xx;
 
 //
 // ConfigureBarrierOp
 //
 
-void vpux::VPUASM::ConfigureBarrierOp::serialize(elf::writer::BinaryDataSection<uint8_t>& binaryDataSection) {
-    nn_public::VpuBarrierCountConfig barrier{};
-
-    barrier.next_same_id_ = getNextSameId();
-    barrier.consumer_count_ = getConsumerCount();
-    barrier.producer_count_ = getProducerCount();
-    barrier.real_id_ = getId();
-
-    auto ptrCharTmp = reinterpret_cast<uint8_t*>(&barrier);
-    binaryDataSection.appendData(ptrCharTmp, getBinarySize());
+void vpux::VPUASM::ConfigureBarrierOp::serialize(elf::writer::BinaryDataSection<uint8_t>&) {
+    // TODO: E#80148 after interface refactoring should we not require serialization for ConfigureBarrierOp
+#ifdef VPUX_DEVELOPER_BUILD
+    auto logger = Logger::global();
+    logger.warning("Serializing {0} op, which may mean invalid usage");
+#endif
 }
 
-size_t vpux::VPUASM::ConfigureBarrierOp::getBinarySize() {
-    return sizeof(nn_public::VpuBarrierCountConfig);
+size_t vpux::VPUASM::ConfigureBarrierOp::getBinarySize(VPU::ArchKind /*arch*/) {
+    return sizeof(npu40xx::nn_public::VpuBarrierCountConfig);
 }
 
-size_t vpux::VPUASM::ConfigureBarrierOp::getAlignmentRequirements() {
-    return alignof(nn_public::VpuBarrierCountConfig);
+size_t vpux::VPUASM::ConfigureBarrierOp::getAlignmentRequirements(VPU::ArchKind /*arch*/) {
+    return alignof(npu40xx::nn_public::VpuBarrierCountConfig);
 }
 
 vpux::ELF::SectionFlagsAttr vpux::VPUASM::ConfigureBarrierOp::getPredefinedMemoryAccessors() {

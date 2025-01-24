@@ -6,21 +6,26 @@
 #include "vpux/compiler/conversion/rewriters/VPUMI40XX2VPUASM/declare_buffer_rewriter.hpp"
 #include "vpux/compiler/dialect/VPUASM/ops.hpp"
 
+#include <vpux_elf/types/vpu_extensions.hpp>
+#include "vpux/compiler/NPU40XX/dialect/ELF/ops_interfaces.hpp"
+#include "vpux/compiler/utils/error.hpp"
+
 namespace vpux {
 namespace vpumi40xx2vpuasm {
 
-mlir::LogicalResult DeclareBufferRewriter::symbolize(VPURT::DeclareBufferOp op, SymbolMapper& mapper,
-                                                     mlir::ConversionPatternRewriter& rewriter) const {
+mlir::FailureOr<SymbolizationResult> DeclareBufferRewriter::symbolize(VPURT::DeclareBufferOp op, SymbolMapper& mapper,
+                                                                      mlir::ConversionPatternRewriter& rewriter) const {
     mlir::MLIRContext* ctx = rewriter.getContext();
     auto result = op.getResult();
     auto symNameIt = mapper.find(result);
     if (symNameIt == mapper.end()) {
         rewriter.eraseOp(op);
-        return mlir::success();
+        return SymbolizationResult();
     }
 
     auto symName = symNameIt->getSecond().getRootReference();
 
+    mlir::Operation* operation = nullptr;
     if (result.getType().isa<mlir::MemRefType>()) {
         auto bufferSec = op.getSection();
         auto sectionIndex = op.getSectionIndex();
@@ -30,20 +35,20 @@ mlir::LogicalResult DeclareBufferRewriter::symbolize(VPURT::DeclareBufferOp op, 
         auto memLocation = VPUASM::MemLocationType::get(ctx, bufferSec, bufferIdx, bufferOffs);
         auto memref = result.getType().cast<mlir::MemRefType>();
         auto traits = VPUASM::BufferTraitsType::get(ctx, op.getSwizzlingKey().value_or(0));
-
         auto buffType = VPUASM::BufferType::get(ctx, memLocation, memref, traits);
-        rewriter.create<VPUASM::DeclareBufferOp>(op.getLoc(), symName, buffType);
-        rewriter.eraseOp(op);
+        auto newDeclareBufOp = rewriter.create<VPUASM::DeclareBufferOp>(op.getLoc(), symName, buffType);
+        operation = newDeclareBufOp.getOperation();
 
-        return mlir::success();
+        rewriter.eraseOp(op);
     } else {
         mlir::OpBuilder::InsertionGuard guard(rewriter);
         rewriter.startOpModification(op);
         rewriter.setInsertionPointAfter(op);
         rewriter.create<VPUASM::SymbolizeValueOp>(op.getLoc(), result, symName);
         rewriter.finalizeOpModification(op);
-        return mlir::success();
     }
+
+    return SymbolizationResult(operation);
 }
 
 llvm::SmallVector<mlir::FlatSymbolRefAttr> DeclareBufferRewriter::getSymbolicNames(VPURT::DeclareBufferOp op,

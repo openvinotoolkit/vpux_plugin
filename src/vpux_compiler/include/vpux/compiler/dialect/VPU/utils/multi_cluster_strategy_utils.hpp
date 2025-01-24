@@ -95,6 +95,9 @@ public:
             VPU::ClusteredOpInterface origOp, VPU::MultiClusterStrategy specifiedStrategy) const;
 
     VPU::MultiClusterStrategy getOptimalLayerStrategy(VPU::ClusteredOpInterface clusteredOp);
+    bool isUnderSubgraphOpt() const;
+    void setUnderSubgraphOpt(bool underSubgraphOpt);
+
     double static constexpr COST_MAX = std::numeric_limits<double>::infinity();
 
 private:
@@ -137,6 +140,7 @@ private:
     bool _enablePrefetchTiling;
     Logger _log;
     SiblingOpsAnalysis& _siblingsOpsAnalysis;
+    bool _underSubgraphOpt = false;
 };
 
 std::optional<VPU::MultiClusterStrategy> getDefaultLayerStrategy(VPU::ClusteredOpInterface clusteredOp);
@@ -159,7 +163,8 @@ SmallVector<uint32_t> getPerTileWeightsDMACosts(
 
 SmallVector<uint32_t> getPerTileActivationDMACosts(
         VPU::NCEOpInterface nceOp, ArrayRef<std::vector<std::pair<NDTypeInterface, TensorDistributionMap>>> tilesTypes,
-        std::function<uint32_t(NDTypeInterface, const TensorDistributionMap& distributions)> getSpillingReadCostFunc);
+        std::function<uint32_t(NDTypeInterface, const TensorDistributionMap& distributions)> getSpillingReadCostFunc,
+        VPU::MultiClusterStrategy strategy, int64_t numTiles);
 
 SmallVector<uint32_t> getPerTileOutputDMACosts(
         VPU::NCEOpInterface nceOp, ArrayRef<std::vector<std::pair<NDTypeInterface, TensorDistributionMap>>> tilesTypes,

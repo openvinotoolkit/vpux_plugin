@@ -20,7 +20,7 @@ EnableActivationSparsityMode getActSparsityMode(std::string enableActivationSpar
 EnableActivationSparsityMode getActSparsityMode(const StrOption& enableActivationSparsityOption);
 bool isActSparsityEnabled(const StrOption& enableActivationSparsityOption);
 
-int64_t getSESize(int64_t channels, const VPU::SparsityConstraint& sparsityConstraint);
+int64_t getSESize(int64_t channels, const VPU::SparsityConstraint& sparsityConstraint, bool isDepthwise = false);
 
 /*
     Effective sparse output type is the actual tensor IDU sees at its input after applying SETable over the data.

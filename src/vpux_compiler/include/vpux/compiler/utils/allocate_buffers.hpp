@@ -20,6 +20,10 @@ namespace vpux {
 SmallVector<mlir::Value> allocateBuffersOfType(const Logger& log, mlir::Location loc, mlir::OpBuilder& builder,
                                                mlir::Type bufferType, bool individualBuffers = false);
 
+SmallVector<mlir::Value> allocateBuffersOfType(const Logger& log, mlir::Location loc, mlir::RewriterBase& rewriter,
+                                               mlir::Value value, vpux::IndexedSymbolAttr memSpace,
+                                               bool individualBuffers = false);
+
 //
 // allocateBuffers & allocateBuffersForValue using bufferizable interface
 //
@@ -29,5 +33,8 @@ SmallVector<mlir::Value> allocateBuffersForValue(const Logger& log, mlir::Locati
 
 SmallVector<mlir::Value> allocateBuffers(const Logger& log, mlir::Location loc, mlir::OpBuilder& builder,
                                          mlir::ValueRange values, bool individualBuffers = false);
+
+mlir::Value allocateBuffer(const Logger& log, mlir::Location loc, mlir::RewriterBase& rewriter, mlir::Value value,
+                           vpux::IndexedSymbolAttr memSpace);
 
 }  // namespace vpux

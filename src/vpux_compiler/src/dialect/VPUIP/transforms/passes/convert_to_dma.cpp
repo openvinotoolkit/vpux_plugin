@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -630,11 +630,12 @@ mlir::LogicalResult ConvertToDMAPass::ExpandConverter::matchAndRewrite(VPUIP::Ex
                                                                        mlir::PatternRewriter& rewriter) const {
     _log.trace("Got Expand '{0}' at '{1}'", expandOp->getName(), expandOp->getLoc());
 
-    auto inputType = expandOp.getInput().getType().cast<NDTypeInterface>();
-    VPUX_THROW_WHEN(inputType.getElementType().isa<mlir::FloatType>(),
-                    "Only Non Float type ExpandOp can be converted to DMA, but got '{0}'", inputType.getElementType());
+    const auto inputType = mlir::cast<NDTypeInterface>(expandOp.getInput().getType());
+    VPUX_THROW_WHEN(mlir::isa<mlir::FloatType>(inputType.getElementType()) ||
+                            vpux::isFloat8Quantized(inputType.getElementType()),
+                    "Only integral type ExpandOp can be converted to DMA, but got '{0}'", inputType.getElementType());
 
-    const auto outputType = expandOp.getOutput().getType().cast<vpux::NDTypeInterface>();
+    const auto outputType = mlir::cast<NDTypeInterface>(expandOp.getOutput().getType());
     _log.nest().trace("inType: '{0}', outType: '{1}', padBegin: '{2}', padEnd: '{3}'", inputType, outputType,
                       expandOp.getPadsBegin(), expandOp.getPadsEnd());
 

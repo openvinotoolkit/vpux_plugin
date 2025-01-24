@@ -35,6 +35,19 @@ bool isSupportedHWClampOp(mlir::Operation* mainOp, mlir::Operation* clampOp, con
                                 clampOp->getLoc()));
             return false;
         }
+        // Disable MaxPool fused with Clamp since it is not fully supported by firmware.
+        // Tracking Number: E#145636
+        if (mlir::isa<IE::MaxPoolOp>(mainOp)) {
+            const auto maxVal = clamp.getMaxAttr().getValueAsDouble();
+            const auto maxValueFP16 = checked_cast<double>(std::numeric_limits<vpux::type::float16>::max());
+            // Given upper bound as fp16 max value, keep fusing Clamp into MaxPool to pass CI
+            // Tracking Number: E#146652
+            if ((!isDoubleEqual(maxVal, maxValueFP16))) {
+                logCb(llvm::formatv("{0} at `{1}` cannot be fused into MaxPool due to lack of firmware support",
+                                    clampOp->getName(), clampOp->getLoc()));
+                return false;
+            }
+        }
         return true;
     }
     logCb(llvm::formatv("{0} at `{1}` is not clamp op", clampOp->getName(), clampOp->getLoc()));

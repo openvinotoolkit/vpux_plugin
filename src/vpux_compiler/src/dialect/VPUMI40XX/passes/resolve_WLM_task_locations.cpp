@@ -8,8 +8,7 @@
 #include "vpux/compiler/dialect/IE/utils/resources.hpp"
 #include "vpux/compiler/dialect/VPUMI40XX/passes.hpp"
 #include "vpux/compiler/dialect/VPUMI40XX/utils.hpp"
-
-#include <npu_40xx_nnrt.hpp>
+#include "vpux/compiler/dialect/VPURegMapped/utils.hpp"
 
 using namespace vpux;
 
@@ -29,11 +28,16 @@ void ResolveWLMTaskLocationPass::safeRunOnFunc() {
     auto netFunc = getOperation();
     auto mpi = VPUMI40XX::getMPI(netFunc);
 
+    auto archKind = VPU::getArch(netFunc);
     const llvm::DenseMap<VPURegMapped::TaskType, size_t> sizes = {
-            {VPURegMapped::TaskType::DPUInvariant, npu40xx::nn_public::VPU_INVARIANT_COUNT / 2},
-            {VPURegMapped::TaskType::DPUVariant, npu40xx::nn_public::VPU_VARIANT_COUNT / 2},
-            {VPURegMapped::TaskType::ActKernelInvocation, npu40xx::nn_public::VPU_KERNEL_INVO_COUNT / 2},
-            {VPURegMapped::TaskType::ActKernelRange, npu40xx::nn_public::VPU_KERNEL_RANGE_COUNT / 2}};
+            {VPURegMapped::TaskType::DPUInvariant,
+             VPURegMapped::getDefaultTaskListCount(VPURegMapped::TaskType::DPUInvariant, archKind) / 2},
+            {VPURegMapped::TaskType::DPUVariant,
+             VPURegMapped::getDefaultTaskListCount(VPURegMapped::TaskType::DPUVariant, archKind) / 2},
+            {VPURegMapped::TaskType::ActKernelInvocation,
+             VPURegMapped::getDefaultTaskListCount(VPURegMapped::TaskType::ActKernelInvocation, archKind) / 2},
+            {VPURegMapped::TaskType::ActKernelRange,
+             VPURegMapped::getDefaultTaskListCount(VPURegMapped::TaskType::ActKernelRange, archKind) / 2}};
 
     auto getSize = [&sizes](VPURegMapped::TaskType type) -> size_t {
         auto mapIt = sizes.find(type);

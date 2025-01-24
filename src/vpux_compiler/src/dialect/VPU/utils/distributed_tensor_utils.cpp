@@ -475,7 +475,7 @@ int64_t vpux::VPU::getNumberOfClustersForSOKToAvoidAlignment(int64_t outputChann
                                                              bool uniformDistributedSegments) {
     for (int64_t clusters = numClustersToUseForLayer; clusters >= 1; clusters--) {
         if (uniformDistributedSegments) {
-            // For NPU40XX there's no limitation on how the segments need to be equal to eachother.
+            // For VPUX40XX there's no limitation on how the segments need to be equal to eachother.
             // A balanced segmentation is prefered for performance.
             // A depth of 96 is best split across 4 clusters as [32, 32, 16, 16]
 
@@ -504,7 +504,7 @@ int64_t vpux::VPU::getNumberOfClustersForSpatialDim(int64_t outputSpatialDim, in
                                                     bool uniformDistributedSegments) {
     for (int64_t clusters = numClustersForCompilation; clusters >= 1; clusters--) {
         if (uniformDistributedSegments) {
-            // For NPU40XX there's no limitation on how the segments need to be equal to eachother.
+            // For VPUX40XX there's no limitation on how the segments need to be equal to eachother.
             // A balanced segmentation is prefered for performance.
             // A height of 6 is best split across 4 clusters as [2, 2, 1, 1]
             auto baselineHeight = outputSpatialDim / clusters;
@@ -538,6 +538,13 @@ SmallVector<int64_t> vpux::VPU::getActivationTensorNumTiles(VPU::ClusteredOpInte
         if (isSegmentedInputCompatible(clusteredOp.getOperation())) {
             auto IC = inputShape[Dims4D::Act::C];
             int64_t numClustersToUseForLayer = std::min(numClustersAvailableForCompilation, IC);
+            // E-143638: DequantizeOp is used to processed weights, not activation, a general
+            // solution to distinguish weights and activations for distributed tensor utils
+            if (mlir::isa<VPU::DequantizeOp>(clusteredOp.getOperation())) {
+                auto OC = inputShape[Dims4D::Filter::OC];
+                numClustersToUseForLayer = std::min(numClustersAvailableForCompilation, OC);
+                return {numClustersToUseForLayer, 1, 1, 1};
+            }
             return {1, numClustersToUseForLayer, 1, 1};
         }
         return {1, 1, 1, 1};
@@ -913,7 +920,15 @@ SmallVector<int64_t> vpux::VPU::getOutputTensorNumTiles(VPU::ClusteredOpInterfac
         return {1, 1, numClustersAvailableForCompilation, 1};
     } else if (strategy == VPU::MultiClusterStrategy::SplitOverKernel) {
         const auto numClustersToUseForLayer = getOptimalNumClusters(clusteredOp, outputShape, strategy);
-
+        // E-143638: DequantizeOp is used to processed weights, not activation, a general
+        // solution to distinguish weights and activations for distributed tensor utils
+        if (mlir::isa<VPU::DequantizeOp>(clusteredOp.getOperation())) {
+            auto OC = outputShape[Dims4D::Filter::OC];
+            if (OC == 1) {
+                return {1, numClustersToUseForLayer, 1, 1};
+            }
+            return {numClustersToUseForLayer, 1, 1, 1};
+        }
         return {1, numClustersToUseForLayer, 1, 1};
     } else if (strategy == VPU::MultiClusterStrategy::SplitOverWidth) {
         return {1, 1, 1, numClustersAvailableForCompilation};
@@ -1108,18 +1123,6 @@ SmallVector<int64_t> vpux::VPU::getWeightsTableTensorNumTiles(VPU::ClusteredOpIn
     }
 }
 
-SmallVector<int64_t> vpux::VPU::getInstructionListTableTensorNumTiles(VPU::MultiClusterStrategy strategy) {
-    if (strategy == VPU::MultiClusterStrategy::SplitOverHeightOverlapped ||
-        strategy == VPU::MultiClusterStrategy::SplitOverHeight ||
-        strategy == VPU::MultiClusterStrategy::SplitOverKernel || strategy == VPU::MultiClusterStrategy::Clustering ||
-        strategy == VPU::MultiClusterStrategy::HKSwitch) {
-        return {1, 1, 1, 1};
-    }
-    VPUX_THROW("{0} is an invalid multi-cluster strategy, unable to determine the number of tiles for the "
-               "instruction list table tensor",
-               strategy);
-}
-
 DistributionMode vpux::VPU::getActivationTensorDistributionMode(VPU::ClusteredOpInterface clusteredOp,
                                                                 VPU::MultiClusterStrategy strategy) {
     // Judge if we can select DistributionMode::DUPLICATED mode for the activation of SOH-like strategies
@@ -1207,10 +1210,17 @@ DistributionMode vpux::VPU::getActivationTensorDistributionMode(VPU::ClusteredOp
                     return false;
                 }
             }
-
-            if (!mlir::isa<VPU::NCEEltwiseOp>(op)) {
+            auto eltwiseOp = mlir::dyn_cast<VPU::NCEEltwiseOp>(op);
+            if (eltwiseOp == nullptr) {
                 Logger::global().trace("Select DUPLICATED mode for the activation of SOH-like strategys");
                 return true;
+            }
+            if (eltwiseOp.getIsInplace().value_or(false)) {
+                // E135492: Accuracy issue with duplicated input for SOH-like inplace eltwise
+                // TODO remove this check after the issue is fixed
+                Logger::global().trace(
+                        "Select SEGMENTED mode for the activation of SOH-like strategies for ELTWISE op");
+                return false;
             }
 
             eltwiseInputsCompatible[operand.index()] = true;
@@ -1311,19 +1321,6 @@ DistributionMode vpux::VPU::getOutputTensorDistributionMode(VPU::ClusteredOpInte
     }
 }
 
-DistributionMode vpux::VPU::getInstructionListTableTensorDistributionMode(VPU::MultiClusterStrategy strategy) {
-    if (strategy == VPU::MultiClusterStrategy::SplitOverHeightOverlapped ||
-        strategy == VPU::MultiClusterStrategy::SplitOverHeight ||
-        strategy == VPU::MultiClusterStrategy::SplitOverKernel || strategy == VPU::MultiClusterStrategy::Clustering ||
-        strategy == VPU::MultiClusterStrategy::HKSwitch) {
-        return DistributionMode::DUPLICATED;
-    }
-
-    VPUX_THROW("{0} is an invalid multi-cluster strategy, unable to determine the distribution mode for the "
-               "instruction list table tensor",
-               strategy);
-}
-
 // W * h_per_cluster has to be divisible by 4 or 8, if the input is sparse
 // Based on the given width, the height alignment is computed and returned
 // Note: For sparse inputs, the segment size has to be divisible by 8 to satisfy the segment size requirements for
@@ -1387,7 +1384,7 @@ bool vpux::VPU::isSOHSupportedByDPU(vpux::NDTypeInterface inputType, ShapeRef in
         }
     }
 
-    // On NPU40XX, SOH doesn't have the rules above
+    // On VPUX40XX, SOH doesn't have the rules above
     // Actually the input tile shapes are completely back-inferred by output tile shapes which are following
     // uniformDistributedSegments method
     const std::set<VPU::ArchKind> compatibleTargets = {
@@ -1421,7 +1418,7 @@ int64_t vpux::VPU::getOptimalNumClusters(mlir::Operation* operation, ShapeRef ou
     auto module = operation->getParentOfType<mlir::ModuleOp>();
 
     // Both ACT Shaves and DPUs are grouped together in NCE clusters, in a symmetric manner.
-    // For NPU37XX and subsequent, each NCE cluster 1 DPU and 2 ACT shaves.
+    // For VPUX37XX and subsequent, each NCE cluster 1 DPU and 2 ACT shaves.
     // Thus shaves have the availability for distributing across clusters similar to DPUs.
     auto numClustersAvailableForCompilation = IE::getTileExecutor(module).getCount();
     auto optimalNumberOfClusters = numClustersAvailableForCompilation;
@@ -1436,7 +1433,11 @@ int64_t vpux::VPU::getOptimalNumClusters(mlir::Operation* operation, ShapeRef ou
     if (strategy == VPU::MultiClusterStrategy::SplitOverKernel) {
         const auto OC = outputShape[Dims4D::Act::C];
         int64_t numClustersToUseForLayer = numClustersAvailableForCompilation;
-        if (mlir::isa<VPU::SWOpInterface>(operation)) {
+        if (mlir::isa<VPU::DequantizeOp>(operation)) {
+            // E#149000 : Proper implementation should be done for Dequantize with correct alignment
+            const auto dequantizeOC = outputShape[Dims4D::Act::N];
+            numClustersToUseForLayer = std::min(numClustersToUseForLayer, dequantizeOC);
+        } else if (mlir::isa<VPU::SWOpInterface>(operation)) {
             numClustersToUseForLayer = std::min(numClustersToUseForLayer, OC);
         } else {
             auto uniformDistributedSegments = VPU::isUniformDistributedSegmentsSupported(operation);
@@ -1452,8 +1453,7 @@ int64_t vpux::VPU::getOptimalNumClusters(mlir::Operation* operation, ShapeRef ou
 
     // Limit number clusters to batch size for SOB.
     if (strategy == VPU::MultiClusterStrategy::SplitOverBatch) {
-        auto outputTensorType = operation->getResult(0).getType().cast<vpux::NDTypeInterface>();
-        int64_t maxNumClusters = outputTensorType.getShape()[Dims4D::Act::N];
+        const int64_t maxNumClusters = outputShape[Dims4D::Act::N];
         optimalNumberOfClusters = std::min(maxNumClusters, numClustersAvailableForCompilation);
     }
     return optimalNumberOfClusters;
@@ -1722,6 +1722,16 @@ vpux::VPU::CopyOp vpux::VPU::createDistributedCopyIn(mlir::PatternRewriter& rewr
     const auto memSpace = IndexedSymbolAttr::get(rewriter.getContext(), stringifyEnum(MemoryKind::CMX_NN));
     auto distributedInputCopyOp =
             rewriter.create<VPU::CopyOp>(clusteredOp.getLoc(), inputTensorDistributedTensorType, input, memSpace);
+
+    return distributedInputCopyOp;
+}
+
+vpux::VPU::UnrolledTypeOp vpux::VPU::createDistributedUnrolledTypeIn(
+        mlir::PatternRewriter& rewriter, VPU::ClusteredOpInterface clusteredOp, mlir::Value input,
+        vpux::NDTypeInterface inputTensorDistributedTensorType) {
+    rewriter.setInsertionPoint(clusteredOp);
+    auto distributedInputCopyOp =
+            rewriter.create<VPU::UnrolledTypeOp>(clusteredOp.getLoc(), inputTensorDistributedTensorType, input);
 
     return distributedInputCopyOp;
 }
@@ -2399,11 +2409,14 @@ TensorDistributionMap vpux::VPU::getActivationDistributionAttrFromOp(
         VPU::ClusteredOpInterface clusteredOp, vpux::NDTypeInterface inputType, int64_t numClusters,
         VPU::MultiClusterStrategy customStrategy, SiblingOpsAnalysis& siblingsAnalysis,
         ArrayRef<int64_t> customAlignment, vpux::NDTypeInterface tiledOutputType, const vpux::TileInfo& tileInfo) {
-    auto activationTensorDistributionMode = getActivationTensorDistributionMode(clusteredOp, customStrategy);
-    auto activationTensorNumTiles = getActivationTensorNumTiles(clusteredOp, numClusters, customStrategy, inputType);
+    DistributionMode activationTensorDistributionMode;
+    SmallVector<int64_t> activationTensorNumTiles;
     if (mlir::isa<VPU::SWOpInterface>(clusteredOp.getOperation())) {
         activationTensorDistributionMode = getSWInputTensorDistributionMode(clusteredOp, customStrategy, inputType);
         activationTensorNumTiles = getSWInputTensorNumTiles(clusteredOp, numClusters, customStrategy, inputType);
+    } else {
+        activationTensorDistributionMode = getActivationTensorDistributionMode(clusteredOp, customStrategy);
+        activationTensorNumTiles = getActivationTensorNumTiles(clusteredOp, numClusters, customStrategy, inputType);
     }
 
     auto actualOutputType =
@@ -2815,7 +2828,7 @@ TensorDistributionMap vpux::VPU::getDistributionMapFromDistributedType(vpux::NDT
 }
 
 bool vpux::VPU::isSegmentedLikeDistributionMode(vpux::NDTypeInterface sourceType,
-                                                VPU::DistributionInfo& sourceDistribution) {
+                                                const VPU::DistributionInfo& sourceDistribution) {
     if (sourceType == nullptr || sourceDistribution.getDistributionMode() == DistributionMode::NONE) {
         return false;
     }

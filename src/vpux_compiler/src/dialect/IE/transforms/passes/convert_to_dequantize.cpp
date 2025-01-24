@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+#include "vpux/compiler/core/types/quantile_float/types.hpp"
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/IE/transforms/passes.hpp"
 #include "vpux/compiler/dialect/IE/utils/quantization.hpp"
@@ -141,7 +142,7 @@ mlir::LogicalResult ConvertToDequantizePass::ConvertOpConverter::matchAndRewrite
     }
 
     auto ctx = rewriter.getContext();
-    mlir::quant::UniformQuantizedType outQuantizeElemType;
+    mlir::quant::QuantizedType outQuantizeElemType;
     mlir::IntegerType integerType;
     if (inputElemType.isSignedInteger()) {
         integerType = mlir::IntegerType::get(ctx, inputElemTypeSize, mlir::IntegerType::Signed);
@@ -149,6 +150,14 @@ mlir::LogicalResult ConvertToDequantizePass::ConvertOpConverter::matchAndRewrite
         // Attention, below logic does not cover also I1 integer types
         outQuantizeElemType = mlir::quant::UniformQuantizedType::get(
                 mlir::quant::QuantizationFlags::Signed, integerType, mlir::Float16Type::get(ctx), /*scale=*/1,
+                /*zero_point=*/0, -1 * (1 << (inputElemTypeSize - 1)), (1 << (inputElemTypeSize - 1)) - 1);
+    } else if (auto quantileFloatType = mlir::dyn_cast<vpux::type::QuantileFloatType>(inputElemType)) {
+        // For quantile quantized type, we default its storage type to signed integer,
+        // quantile type and expressed type to FP16
+        integerType = mlir::IntegerType::get(ctx, inputElemTypeSize, mlir::IntegerType::Signed);
+        outQuantizeElemType = mlir::quant::QuantileQuantizedType::get(
+                mlir::quant::QuantizationFlags::Signed, integerType, mlir::Float16Type::get(ctx),
+                mlir::Float16Type::get(ctx), quantileFloatType.getQuantiles(), /*scale=*/1,
                 /*zero_point=*/0, -1 * (1 << (inputElemTypeSize - 1)), (1 << (inputElemTypeSize - 1)) - 1);
     } else {
         integerType = mlir::IntegerType::get(ctx, inputElemTypeSize, mlir::IntegerType::Unsigned);
@@ -165,7 +174,7 @@ mlir::LogicalResult ConvertToDequantizePass::ConvertOpConverter::matchAndRewrite
     rewriter.replaceOpWithNewOp<IE::DequantizeOp>(convertOp, quantizeCastOp.getResult(), outputElemType);
 
     return mlir::success();
-}
+}  // namespace
 
 //
 // safeRunOnFunc

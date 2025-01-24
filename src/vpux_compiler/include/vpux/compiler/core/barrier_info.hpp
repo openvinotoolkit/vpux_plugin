@@ -87,6 +87,14 @@ private:
     void linkTasksToBarriers(const TaskSet& tasksToAdd, const TaskSet& newBarriers, bool waitBarriers,
                              size_t availableSlots);
 
+    /**
+     * @brief Get index of barrier's latest producer
+     *
+     * @param barInd - barrier index
+     * @return size_t - largest index of among barrier producers
+     */
+    size_t getBarrierLatestProducer(size_t barInd);
+
 public:
     void logBarrierInfo();
     void optimizeBarriers(bool checkValidSlotCount = true, bool considerTaskFifoDependency = false);
@@ -112,6 +120,18 @@ public:
     void shareWaitAndUpdateBarriers(size_t availableSlots);
 
     void buildTaskQueueTypeMap();
+    /**
+     * @brief build task control map for given task block
+     *
+     * @param blockIdx block index
+     * @param considerTaskFifoDependency
+     * @return std::pair<SmallVector<llvm::BitVector>, size_t> representing
+     * taskControlMap - a 2-d array suitable for use with controlPathExistsBetweenTasksInSameBlock()
+     * and
+     * task index offset that should be subtracted from task indexes when testing if path exists between tasks.
+     * eg. controlPathExistsBetweenTasksInSameBlock(taskControlMap, taskA - offset, taskB - offset);
+     *
+     */
     std::pair<SmallVector<llvm::BitVector>, size_t> buildTaskControlMap(size_t blockIdx,
                                                                         bool considerTaskFifoDependency = true);
     virtual size_t getNumOfTasks() const;
@@ -146,6 +166,7 @@ public:
     TaskSet& getBarrierConsumers(VPURT::BarrierOpInterface barrierOp);
     TaskSet& getBarrierProducers(size_t barrierIdn);
     TaskSet& getBarrierConsumers(size_t barrierIdn);
+    TaskSet getBarriersUsers(const std::set<int64_t>& barrierInds);
     SmallVector<TaskSet> createLegalVariantBatches(const TaskSet& tasks, size_t availableSlots,
                                                    bool considerTaskExecutorType = false);
     std::optional<VPURT::TaskQueueType> haveSameImplicitDependencyTaskQueueType(const TaskSet& taskInds);
@@ -155,6 +176,23 @@ public:
     SmallVector<TaskSet> getWaitBarriersMap();
     void splitControlGraphToBlocks(const size_t blockSize);
     bool verifyControlGraphSplit();
+
+    /**
+     * @brief Adjust dependencies for the provided tasks if they are connected to other tasks in a way that violates
+     * constrains of existing control graph split.
+     * @param tasks - list of tasks whose connections via update and wait barriers be checked and corrected, if needed.
+     * For the below examples the graph would be corrected if task 7 is provided in the argument.
+     */
+    bool adjustTasksDependenciesToGraphSplitConstraints(const TaskSet& producers);
+
+    /**
+     * @brief Get index of sync-task from the block preceding the block of the provided taskInd
+     *
+     * @param taskInd - task index
+     * @return std::optional<size_t> preceding block sync-task index if exists. Tasks from 0'th block
+     * do not have sync-point.
+     */
+    std::optional<size_t> getPreviousBlockSyncPoint(size_t taskInd) const;
     void splitBarriersWithExceedingVariantCount(size_t availableSlots, size_t maxSlotsSum, size_t maxAvailableSlots);
     void splitBarrierProducers(size_t availableSlots, size_t maxSlotsSum, bool maxSlotsSumLimitEnabled);
     void splitBarrierConsumers(size_t availableSlots, size_t maxSlotsSum, bool maxSlotsSumLimitEnabled);
@@ -186,6 +224,22 @@ public:
      */
     std::pair<size_t, size_t> getControlGraphBlockTaskRange(size_t blockInd, bool blockStartSyncPoint = true,
                                                             bool blockEndSyncPoint = true) const;
+
+    /**
+     * @brief For each of the provided tasks, find previous tasks that can execute in parallel
+     *
+     * @param tasks - set of task indexes for which parallel task candidates are to be sought
+     * @param maxCount - maximal number of parallel task candidates for each provided task
+     * @return SmallVector<std::set<size_t>> vector of size of the provided tasks set, containing
+     * indexes of tasks such that there's no topological connection (either via barrier or FIFO)
+     * between the given task and the found task.
+     * For given task index (idx) from provided tasks set, the search is limited to:
+     * (i) the task block in which a given task (idx) resides in,
+     * (ii) tasks that have any barrier dependence (i.e either wait or update any barrier)
+     */
+    SmallVector<std::set<size_t>> findParallelTasksWithBarrierDependence(const BarrierInfo::TaskSet& tasks,
+                                                                         size_t maxCount = 1);
+
     /**
      * @brief Get vector of barriers associated with given control graph tasks block.
      *
@@ -207,6 +261,24 @@ public:
      * @return block index
      */
     size_t getControlGraphBlockIndex(size_t taskInd) const;
+
+    /**
+     * @brief Block index of barrier's last producer.
+     *
+     * @param barInd barrier index
+     * @return return the block index of barrier's latest producer.
+     */
+    size_t getBarrierBlockIndex(size_t barInd);
+
+    /**
+     * @brief Get index of sync-task for the block to which the task taskInd belongs to.
+     *
+     * @param taskInd - task for which sync-task should be calculated
+     * @return  return index of the sync point from the taskInd's block, if the sync-task exists and return std::nullopt
+     * otherwise. (Tasks from last block do not have a sync-point).
+     *
+     */
+    std::optional<size_t> getControlGraphSyncPoint(size_t taskInd) const;
 
     /**
      * @brief Create barrier representation of dependencies implied FIFOs execution order.

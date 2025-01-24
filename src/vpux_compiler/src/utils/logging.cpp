@@ -9,6 +9,8 @@
 #include <mlir/Pass/Pass.h>
 #include <mlir/Pass/PassInstrumentation.h>
 
+#include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
+
 using namespace vpux;
 
 //
@@ -68,15 +70,27 @@ public:
     }
 
     void runBeforePass(mlir::Pass* pass, mlir::Operation* op) final {
-        _log.debug("Start Pass {0} on Operation {1}", pass->getName(), op->getLoc());
+        if (pass->getName() != "mlir::detail::OpToOpPassAdaptor") {
+            _log.debug("Start Pass {0} on Operation {1}", pass->getName(), op->getLoc());
+        }
     }
 
     void runAfterPass(mlir::Pass* pass, mlir::Operation* op) override {
-        _log.debug("End Pass {0} on Operation {1}", pass->getName(), op->getLoc());
+        if (pass->getName() != "mlir::detail::OpToOpPassAdaptor") {
+            _log.debug("End Pass {0} on Operation {1}", pass->getName(), op->getLoc());
+        }
     }
 
     void runAfterPassFailed(mlir::Pass* pass, mlir::Operation* op) override {
-        _log.error("Failed Pass {0} on Operation {1}", pass->getName(), op->getLoc());
+        if (pass->getName() == "mlir::detail::OpToOpPassAdaptor") {
+            return;
+        }
+        auto module = op->getParentOfType<mlir::ModuleOp>();
+        if (vpux::VPUIP::getWlmStatus(module) == vpux::VPUIP::WlmStatus::FAILED) {
+            _log.warning("WLM Failed Pass {0} on Operation {1}", pass->getName(), op->getLoc());
+        } else {
+            _log.error("Failed Pass {0} on Operation {1}", pass->getName(), op->getLoc());
+        }
     }
 
     void runBeforeAnalysis(StringRef name, mlir::TypeID, mlir::Operation* op) override {

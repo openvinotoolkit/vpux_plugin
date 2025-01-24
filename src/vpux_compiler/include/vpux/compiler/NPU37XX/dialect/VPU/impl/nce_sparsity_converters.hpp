@@ -7,12 +7,13 @@
 
 #include <mlir/IR/Types.h>
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
+#include "vpux/compiler/dialect/VPU/transforms/factories/nce_sparsity_converters.hpp"
 
 using namespace vpux;
 
 namespace vpux::VPU::arch37xx {
 
-int32_t getScale(uint8_t shift, uint16_t mult, double rescale, mlir::Type inputType);
-int32_t getBias(double realVal, mlir::Type inputType);
+NCESparsity::IntOrFloatType getScale(uint8_t shift, int16_t mult, double rescale, mlir::Type inputType);
+NCESparsity::IntOrFloatType getBias(double realVal, mlir::Type inputType);
 
 }  // namespace vpux::VPU::arch37xx

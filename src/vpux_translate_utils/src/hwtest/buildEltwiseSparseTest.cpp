@@ -10,11 +10,11 @@
 #include <mlir/Dialect/Quant/QuantTypes.h>
 
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
+#include "vpux/compiler/dialect/VPU/utils/ppe_utils.hpp"
 #include "vpux/compiler/dialect/VPUIP/IR/attributes.hpp"
 #include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPURT/IR/task.hpp"
-#include "vpux/compiler/utils/VPU/ppe_utils.hpp"
 #include "vpux/compiler/utils/platform_resources.hpp"
 #include "vpux/hwtest/hwtest_utils.hpp"
 #include "vpux/utils/core/error.hpp"
@@ -36,7 +36,6 @@ void buildEltwiseSparse(const nb::TestCaseJsonDescriptor& testDesc, mlir::Module
     VPUX_THROW_UNLESS(mlir::succeeded(pmBuilderInit.run(module)), "Init compilation failed");
 
     auto* ctx = builder.getContext();
-    auto arch = testDesc.getArchitecture();
 
     auto input = testDesc.getInputLayerList().front();
     auto inputSM = testDesc.getInputSMList().front();
@@ -162,7 +161,6 @@ void buildEltwiseSparse(const nb::TestCaseJsonDescriptor& testDesc, mlir::Module
             /*weights=*/weightscmx.getOperation()->getResult(0),
             /*weights_sparsity_map=*/weightsSMCmx.getOperation()->getResult(0),
             /*weightsTable=*/nullptr,
-            /*instruction_table_list=*/nullptr,
             /*spr_lookup_table*/ nullptr,
             /*parent_input=*/parentInputCmx.getOperation()->getResult(0),
             /*parent_input_sparsity_map=*/inputSMCmx.getOperation()->getResult(0),
@@ -171,31 +169,38 @@ void buildEltwiseSparse(const nb::TestCaseJsonDescriptor& testDesc, mlir::Module
             /*parent_output_sparsity_map=*/nullptr,
             /*output_buff=*/outputCmx.getOperation()->getResult(0),
             /*output_sparsity_map_buff=*/nullptr,
-            /*profiling_data=*/nullptr, VPUIP::NCETaskType::ELTWISE,
+            /*profiling_data=*/nullptr,
+            /*max_per_xy=*/nullptr, /*min_per_xy=*/nullptr,
+            /*min_max_per_tensor=*/mlir::ValueRange(), VPUIP::NCETaskType::ELTWISE,
             /*kernel_size=*/mlir::ArrayAttr(), /*kernel_strides*/ mlir::ArrayAttr(),
             /*kernel_padding=*/VPU::PaddingAttr(),
             /*is_continued=*/nullptr, /*cm_sp_pattern=*/nullptr, /*is_segmented=*/nullptr,
             /*out_channel_offset=*/nullptr, /*input_channels_compression*/ nullptr,
+            /*is_zero_offset_weights_table=*/nullptr,
             /*is_superdense=*/nullptr,
             /*is_inplace=*/nullptr,
             /*input_se_size=*/getIntAttr(ctx, static_cast<int32_t>(seSize)),
             /*output_se_size=*/nullptr, /*is permute quantize*/ nullptr, /*is small kernel optimized*/ nullptr,
-            vpux::VPU::EltwiseTypeAttr::get(ctx, eltwiseMode));
+            /*mpe_engine*/ nullptr, vpux::VPU::EltwiseTypeAttr::get(ctx, eltwiseMode));
+
+    // Since Eltwise operation doesn't have weights table it requires final quantization scaling
+    // to be part of output tensor description. Scale vector will be placed in PPE block and
+    // later used during NCE task serialization
+    const auto eltwiseQuantScale =
+            VPU::computeQuantScale(inputCmxType.getElementType(), outputCmxType.getElementType());
 
     int64_t clampLow = std::numeric_limits<int32_t>::min();
     int64_t clampHigh = std::numeric_limits<int32_t>::max();
     int64_t bypassMult = 1;
     int64_t bypassShift = 0;
+
     if (auto outElemQType = outputType.template dyn_cast<mlir::quant::QuantizedType>()) {
         const auto zps = extractScalesAndZeroPoints(outputType).second;
+
         clampLow = outElemQType.getStorageTypeMin() - zps.front();
         clampHigh = outElemQType.getStorageTypeMax() - zps.front();
     }
-    // Since Eltwise operation doesn't have weights table it requires final quantization scaling
-    // to be part of output tensor description. Scale vector will be placed in PPE block and
-    // later used during NCE task serialization
-    auto eltwiseQuantScale =
-            VPU::calculateQuantScaleVectorForEltwise(inputCmxType, weightsCmxType, outputCmxType, arch, false);
+
     // Scale approximation is required for quantized inputs.
     if (inputCmxType.getElementType().isa<mlir::FloatType>()) {
         // It is intentional to apply int32 limits for floating point clamping.

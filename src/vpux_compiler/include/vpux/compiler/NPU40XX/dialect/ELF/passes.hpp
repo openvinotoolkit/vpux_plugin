@@ -26,8 +26,8 @@ namespace ELF {
 // Passes
 //
 
-std::unique_ptr<mlir::Pass> createMoveOpsIntoSectionsPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createAddELFSymbolTablePass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createSetSymbolDescriptorHandlePass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createAddELFRelocationsPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createSetOpOffsetsPass(Logger log = Logger::global(),
                                                    bool enableComputeTaskBufferOffsets = false);

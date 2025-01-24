@@ -157,6 +157,7 @@ void buildEltwiseMultWithDwConv(const nb::TestCaseJsonDescriptor& testDesc, mlir
     using namespace VPUIP;
     // set runtime resources
     std::optional<vpux::Byte> availableCMXMemory = std::nullopt;
+
     mlir::PassManager pmBuilderInit(module->getName(), mlir::OpPassManager::Nesting::Implicit);
     auto initCompilerOptions = VPU::InitCompilerOptions(testDesc.getArchitecture(), VPU::CompilationMode::DefaultHW);
     initCompilerOptions.numberOfDPUGroups = 1;
@@ -321,12 +322,12 @@ void buildEltwiseMultWithDwConv(const nb::TestCaseJsonDescriptor& testDesc, mlir
                                                                       testDesc.getWLMParams().isWLMPartialEnabled);
 
     auto wt_data_vals = generateZeroPadForEltwiseMultWeights(zero_pad_shape, weightsType, ctx);
-    auto wt_data_attr_setup = Const::ContentAttr::transform(wt_data_vals);
+    Const::ContentSetup wt_data_attr_setup(wt_data_vals.getType());
     if (auto qty = weightsType.dyn_cast<mlir::quant::QuantizedType>()) {
-        wt_data_attr_setup = wt_data_attr_setup.quantCast(qty);
+        wt_data_attr_setup = wt_data_attr_setup.castElemType(qty);
     }
 
-    auto wt_data_attr = wt_data_attr_setup.reorder(DimsOrder::NHWC).get();
+    auto wt_data_attr = Const::ContentAttr::get(wt_data_vals, wt_data_attr_setup.reorder(DimsOrder::NHWC));
     auto zero_pad_type = getMemRefType(VPURT::BufferSection::Constant, zero_pad_shape, weightsType, DimsOrder::NHWC);
     auto zero_pad_data =
             funcbuilder.create<Const::DeclareOp>(builder.getUnknownLoc(), zero_pad_type, std::move(wt_data_attr));
@@ -375,7 +376,8 @@ void buildEltwiseMultWithDwConv(const nb::TestCaseJsonDescriptor& testDesc, mlir
 
     auto weightstable_data_ddr = funcbuilder.create<Const::DeclareOp>(
             builder.getUnknownLoc(), weightstable_ddr_memreftype,
-            Const::ContentAttr::transform(weightstable_data_vals).reorder(DimsOrder::NHWC).get());
+            Const::ContentAttr::get(weightstable_data_vals,
+                                    Const::ContentSetup(wtTblData_ddr_valueType).reorder(DimsOrder::NHWC)));
 
     const auto fakeSparsity = getFakeSparsity(VPU::NCESparsity::Mode::DW_CONV, ShapeRef(filter_size), stride_vec[1],
                                               inputType.isa<mlir::quant::QuantizedType>()
@@ -406,9 +408,8 @@ void buildEltwiseMultWithDwConv(const nb::TestCaseJsonDescriptor& testDesc, mlir
     auto nceTask = VPURT::wrapIntoTaskOp<VPUIP::NCEClusterTaskOp>(
             funcbuilder, barrier0.getBarrier(), barrier1.getBarrier(), builder.getUnknownLoc(), output_cmx_memreftype,
             getTensorResult(input_nce_cmx), getTensorResult(weights_nce_cmx), getTensorResult(weightstable_cmx),
-            /*instruction_table_list=*/nullptr, /*spr_lookup_table=*/nullptr, getTensorResult(parent_input_nce_cmx),
-            getTensorResult(parent_output_nce_cmx), getTensorResult(output_nce_cmx), NCETaskType::DWCONV, filtersize,
-            strides, kernel_padding,
+            /*spr_lookup_table=*/nullptr, getTensorResult(parent_input_nce_cmx), getTensorResult(parent_output_nce_cmx),
+            getTensorResult(output_nce_cmx), NCETaskType::DWCONV, filtersize, strides, kernel_padding,
             /*is_continued*/ nullptr, /*sp_pattern*/ nullptr);
 
     int64_t clampLow = std::numeric_limits<int32_t>::min();

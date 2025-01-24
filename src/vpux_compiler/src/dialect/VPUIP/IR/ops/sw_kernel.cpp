@@ -13,6 +13,7 @@
 
 #include <llvm/ADT/TypeSwitch.h>
 #include <llvm/ADT/bit.h>
+#include <algorithm>
 #define REGION_YOLO_MAX_MASK_SIZE 9   // max mask size for region yolo op
 #define PROPOSAL_MAX_RATIO 3          // max ratio size for proposal op
 #define PROPOSAL_MAX_SCALE 6          // max scale size for proposal op
@@ -183,6 +184,20 @@ mlir::ArrayAttr optionalIoAttr(mlir::Operation* op) {
     return getIntArrayAttr(op->getContext(), std::move(params));
 }
 
+// isSupportedElemType checks whether strided_slice kernel supports element type of given value.
+// 1. strided_slice kernel supports i64 attributes
+// 2. strided_slice kernel supports i32 values
+// 3. isAttribute denotes if the value is read from an attribute or from a value
+// For example:
+// if isAttribute is true for slice begins, the kernel reads begins from stridedSlice.getBegins()
+// if isAttribute is false for slice ends, the kernel reads ends from stridedSlice.getEndsAttr()
+bool isSupportedElemType(const bool isAttribute, const mlir::Value value) {
+    if (isAttribute) {
+        return true;
+    }
+    const auto ndType = mlir::cast<NDTypeInterface>(value.getType());
+    return ndType.getElementType().isInteger(32);
+}
 }  // namespace
 
 namespace vpux {
@@ -203,7 +218,23 @@ void vpux::VPUIP::SwKernelOp::print(mlir::OpAsmPrinter& p) {
 
         unsigned opIdx = 0;
         printGroupOfOperands(p, entry, "inputs", getInputs(), opIdx);
+        if (!getDynamicInputShapes().empty()) {
+            p << ' ' << "dynamicInputShapes";
+            p << "(";
+            llvm::interleaveComma(getDynamicInputShapes(), p, [&](const auto& value) {
+                p << value << " : " << value.getType();
+            });
+            p << ")";
+        }
         printGroupOfOperands(p, entry, "outputs", getOutputBuffs(), opIdx);
+        if (!getDynamicOutputShapeBuffs().empty()) {
+            p << ' ' << "dynamicOutputShapes";
+            p << "(";
+            llvm::interleaveComma(getDynamicOutputShapeBuffs(), p, [&](const auto& value) {
+                p << value << " : " << value.getType();
+            });
+            p << ")";
+        }
     }
 
     auto profData = getProfilingData();
@@ -744,8 +775,25 @@ VPUIP::KernelInfo SwKernelOp::getKernelInfo(mlir::Operation* origOp) {
                         scalingAxis.push_back(axis);
                     }
                 }
-                VPUX_THROW_WHEN(scalingAxis.size() > 2, "Unsupported scaling dim size {0} at '{1}'", scalingAxis.size(),
-                                interpolate->getLoc());
+
+                if (scalingAxis.size() == 1) {
+                    if (scalingAxis[0] + 1 < static_cast<int64_t>(initialOutputDim.size())) {
+                        scalingAxis.push_back(scalingAxis[0] + 1);
+                    } else {
+                        scalingAxis.push_back(scalingAxis[0] - 1);
+                    }
+                }
+
+                VPUX_THROW_WHEN(scalingAxis.size() != 2,
+                                "Unsupported number of axis at '{0}'. Expected 2, but got {1}.", interpolate->getLoc(),
+                                scalingAxis.size());
+
+                std::sort(scalingAxis.begin(), scalingAxis.end());
+                VPUX_THROW_WHEN(scalingAxis[0] + 1 != scalingAxis[1],
+                                "Only contiguous axes are supported by the Interpolate kernel");
+
+                VPUX_THROW_WHEN(interpolate.getAttr().getAntialias().getValue() == true,
+                                "Antialiasing is not supported.");
 
                 const auto initialInputOffset =
                         interpolate.getInitialInputOffsetAttr().has_value()
@@ -768,11 +816,16 @@ VPUIP::KernelInfo SwKernelOp::getKernelInfo(mlir::Operation* origOp) {
                 const auto initialInputOffsetAttr = getIntArrayAttr(ctx, initialInputOffset);
                 const auto initialOutputOffsetAttr = getIntArrayAttr(ctx, initialOutputOffset);
 
-                return VPUIP::KernelInfo{SmallVector<mlir::Attribute>{
-                                                 modeAttr, coordModeAttr, nearestModeAttr, antialiasAttr, tileAttr,
-                                                 initialInputDimsParamAttr, initialOutputDimsParamAttr, axisParamAttr,
-                                                 cubeCoeffParamAttr, initialInputOffsetAttr, initialOutputOffsetAttr},
-                                         {"interpolate"}};
+                // INT64_MAX added as a delimiter to find where MemRefData fields are ended in case of variadic number
+                // of inputs
+                const auto delimiterAttr = getIntAttr(ctx, INT64_MAX);
+
+                return VPUIP::KernelInfo{
+                        SmallVector<mlir::Attribute>{delimiterAttr, modeAttr, coordModeAttr, nearestModeAttr,
+                                                     antialiasAttr, tileAttr, initialInputDimsParamAttr,
+                                                     initialOutputDimsParamAttr, axisParamAttr, cubeCoeffParamAttr,
+                                                     initialInputOffsetAttr, initialOutputOffsetAttr},
+                        {"interpolate"}};
             })
             .Case<VPU::ScatterNDUpdateOp>([&](VPU::ScatterNDUpdateOp) {
                 return VPUIP::KernelInfo{SmallVector<mlir::Attribute>{}, {"scatter_nd_update"}};
@@ -1124,6 +1177,10 @@ VPUIP::KernelInfo SwKernelOp::getKernelInfo(mlir::Operation* origOp) {
             .Case<VPU::DynamicQuantizeOp>([&](VPU::DynamicQuantizeOp) {
                 return VPUIP::KernelInfo{SmallVector<mlir::Attribute>{}, {"dynamic_quantize"}};
             })
+            .Case<VPU::DynamicDequantizeOp>([&](VPU::DynamicDequantizeOp) {
+                const auto delimiterAttr = getIntAttr(ctx, INT64_MAX);
+                return VPUIP::KernelInfo{SmallVector<mlir::Attribute>{delimiterAttr}, {"dynamic_dequantize"}};
+            })
             .Case<VPU::DepthToSpaceOp>([&](VPU::DepthToSpaceOp depth_to_space) {
                 const auto mode = static_cast<int64_t>(depth_to_space.getModeAttr().getValue());
                 const auto modeAttr = getIntAttr(ctx, mode);
@@ -1232,6 +1289,8 @@ VPUIP::KernelInfo SwKernelOp::getKernelInfo(mlir::Operation* origOp) {
                 const auto emptyArrayAttr = getIntArrayAttr(ctx, SmallVector<int64_t>{0, 0, 0, 0});
 
                 int64_t isBeginsConst = stridedSlice.getBeginsAttr().has_value() ? 1 : 0;
+                VPUX_THROW_UNLESS(isSupportedElemType(isBeginsConst, stridedSlice.getBegins()),
+                                  "strided_slice kernel supports only i32 begins.");
                 const auto isBeginsConstAttr = getIntAttr(ctx, isBeginsConst);
 
                 const auto stridedSliceBegins = stridedSlice.getBeginsAttr().has_value()
@@ -1239,12 +1298,16 @@ VPUIP::KernelInfo SwKernelOp::getKernelInfo(mlir::Operation* origOp) {
                                                         : padIntArrayAttr(emptyArrayAttr);
 
                 int64_t isEndsConst = stridedSlice.getEndsAttr().has_value() ? 1 : 0;
+                VPUX_THROW_UNLESS(isSupportedElemType(isEndsConst, stridedSlice.getEnds()),
+                                  "strided_slice kernel supports only i32 ends.");
                 const auto isEndsConstAttr = getIntAttr(ctx, isEndsConst);
                 const auto stridedSliceEnds = stridedSlice.getEndsAttr().has_value()
                                                       ? padIntArrayAttr(stridedSlice.getEndsAttr().value())
                                                       : padIntArrayAttr(emptyArrayAttr);
 
                 int64_t isStridesConst = stridedSlice.getStridesAttr().has_value() ? 1 : 0;
+                VPUX_THROW_UNLESS(isSupportedElemType(isStridesConst, stridedSlice.getStrides()),
+                                  "strided_slice kernel supports only i32 strides.");
                 const auto isStridesConstAttr = getIntAttr(ctx, isStridesConst);
                 const auto stridedSliceStrides = stridedSlice.getStridesAttr().has_value()
                                                          ? padIntArrayAttr(stridedSlice.getStridesAttr().value())
@@ -1405,6 +1468,19 @@ VPUIP::KernelInfo SwKernelOp::getKernelInfo(mlir::Operation* origOp) {
                                                      clipBeforeNmsAttr, clipAfterNmsAttr, normalizeAttr,
                                                      boxSizeScaleAttr, boxCoordinateScaleAttr, frameworkAttr},
                         {"proposal"}};
+            })
+            .Case<VPU::ReverseOp>([&](VPU::ReverseOp reverse) {
+                int64_t mode = static_cast<int64_t>(reverse.getMode());
+                const auto reverseModeAttr = getIntAttr(ctx, mode);
+
+                auto sizeAxis = static_cast<int64_t>(reverse.getAxisValueAttr().getValue().size());
+                auto sizeAxisAttr = getIntAttr(ctx, sizeAxis);
+
+                const auto axesVal = parseIntArrayAttr<int64_t>(reverse.getAxisValue());
+                const auto axesValAttr = getIntArrayAttr(ctx, axesVal);
+
+                return VPUIP::KernelInfo{SmallVector<mlir::Attribute>{sizeAxisAttr, reverseModeAttr, axesValAttr},
+                                         {"reverse"}};
             })
             .Case<VPU::PSROIPoolingOp>([&](VPU::PSROIPoolingOp psroi) {
                 const auto iType = psroi.getInput().getType().cast<vpux::NDTypeInterface>();
@@ -1696,8 +1772,7 @@ VPUIP::KernelInfo SwKernelOp::getKernelInfo(mlir::Operation* origOp) {
                 const auto direction =
                         static_cast<std::underlying_type_t<IE::RNNSequenceDirection>>(LSTMSequence.getDirection());
                 const auto RNNForward = getIntAttr(ctx, direction);
-                const auto nCells = LSTMSequence.getSequenceLengthAttr();
-                return VPUIP::KernelInfo{SmallVector<mlir::Attribute>{RNNForward, nCells}, {"lstm_sequence"}};
+                return VPUIP::KernelInfo{SmallVector<mlir::Attribute>{RNNForward}, {"lstm_sequence"}};
             })
             .Case<VPU::CTCGreedyDecoderSeqLenOp>([&](VPU::CTCGreedyDecoderSeqLenOp op) {
                 const auto mergeRepeated = static_cast<int64_t>(op.getMergeRepeatedAttr() != nullptr);
@@ -1845,6 +1920,9 @@ VPUIP::KernelInfo SwKernelOp::getKernelInfo(mlir::Operation* origOp) {
             .Case<VPU::NonZeroOp>([&](VPU::NonZeroOp) {
                 return VPUIP::KernelInfo{SmallVector<mlir::Attribute>{}, {"non_zero"}};
             })
+            .Case<VPU::RangeOp>([&](VPU::RangeOp) {
+                return VPUIP::KernelInfo{SmallVector<mlir::Attribute>{}, {"range"}};
+            })
             .Case<VPU::ShapeOfOp>([&](VPU::ShapeOfOp) {
                 return VPUIP::KernelInfo{SmallVector<mlir::Attribute>{}, {"shape_of"}};
             })
@@ -1853,8 +1931,12 @@ VPUIP::KernelInfo SwKernelOp::getKernelInfo(mlir::Operation* origOp) {
                 const auto permuteAttr = getIntArrayAttr(ctx, reverseMap);
                 return VPUIP::KernelInfo{SmallVector<mlir::Attribute>{permuteAttr}, {"permute_cast"}};
             })
-            .Case<VPU::DynamicReshapeOp>([&](VPU::DynamicReshapeOp) {
-                return VPUIP::KernelInfo{SmallVector<mlir::Attribute>{}, {"dynamic_reshape"}, {"dynamic_reshape.cpp"}};
+            .Case<VPU::DynamicReshapeOp>([&](VPU::DynamicReshapeOp op) {
+                const auto onlySetShapeValue = static_cast<int64_t>(op.getOnlySetShapeAttr() != nullptr);
+                const auto onlySetShapeAttr = getIntAttr(ctx, onlySetShapeValue);
+                return VPUIP::KernelInfo{SmallVector<mlir::Attribute>{onlySetShapeAttr},
+                                         {"dynamic_reshape"},
+                                         {"dynamic_reshape.cpp"}};
             })
             .Case<VPU::DynamicTileOp>([&](VPU::DynamicTileOp tileOp) {
                 auto repeatsSize = static_cast<int64_t>(getShape(tileOp.getOutput()).size());
@@ -1908,6 +1990,14 @@ VPUIP::KernelInfo SwKernelOp::getKernelInfo(mlir::Operation* origOp) {
                                                      op.getDilationsAttr(), op.getGroupAttr(),
                                                      op.getDeformableGroupAttr(), bilinearInterpolatepadAttr},
                         {"deformable_convolution"}};
+            })
+            .Case<VPU::DynamicExpandOp>([&](VPU::DynamicExpandOp) {
+                return VPUIP::KernelInfo{SmallVector<mlir::Attribute>{}, {"dynamic_expand"}, {"dynamic_expand.cpp"}};
+            })
+            .Case<VPU::PopulateWeightTableOp>([&](VPU::PopulateWeightTableOp offPop) {
+                return VPUIP::KernelInfo{SmallVector<mlir::Attribute>{offPop.getBaseAttr(), offPop.getStepAttr()},
+                                         {"populate_weight_table"},
+                                         {"populate_weight_table.cpp"}};
             })
             .Default([](mlir::Operation* unknownOp) -> VPUIP::KernelInfo {
                 VPUX_THROW("Operation '{0}' is not supported by the act-shaves", unknownOp->getName());

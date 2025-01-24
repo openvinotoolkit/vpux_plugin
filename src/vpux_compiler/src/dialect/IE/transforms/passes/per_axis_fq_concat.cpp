@@ -76,8 +76,8 @@ bool isLegalConcat(IE::ConcatOp origConcatOp) {
 void appendFqValues(mlir::Value fqInput, std::vector<float>& totalValues) {
     // Fetch values from given FQ input and concatenate them with destination vector
     auto inConst = fqInput.getDefiningOp<Const::DeclareOp>();
-    auto inConstAttr = inConst.getContentAttr().fold();
-    auto inValues = inConstAttr.getValues<float>();
+    auto inConstContent = inConst.getContentAttr().fold();
+    auto inValues = inConstContent.getValues<float>();
     std::copy(inValues.begin(), inValues.end(), std::back_inserter(totalValues));
 }
 

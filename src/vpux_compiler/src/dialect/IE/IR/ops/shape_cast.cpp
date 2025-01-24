@@ -21,7 +21,7 @@ mlir::LogicalResult vpux::IE::ShapeCastOp::inferReturnTypeComponents(
 
     const auto outShape = parseIntArrayAttr<int64_t>(shapeCast.getShape());
 
-    const auto inType = shapeCast.getSource().getType().cast<vpux::NDTypeInterface>();
+    const auto inType = mlir::cast<vpux::NDTypeInterface>(shapeCast.getSource().getType());
     const auto outDesc = vpux::getTensorAttr(ctx, inType.getDimsOrder(), inType.getMemSpace());
     inferredReturnTypes.emplace_back(outShape, inType.getElementType(), outDesc);
     return mlir::success();
@@ -29,8 +29,8 @@ mlir::LogicalResult vpux::IE::ShapeCastOp::inferReturnTypeComponents(
 
 mlir::OpFoldResult vpux::IE::ShapeCastOp::fold(FoldAdaptor adaptor) {
     auto operands = adaptor.getOperands();
-    auto inputType = getSource().getType().cast<vpux::NDTypeInterface>();
-    auto outputType = getResult().getType().cast<vpux::NDTypeInterface>();
+    auto inputType = mlir::cast<vpux::NDTypeInterface>(getSource().getType());
+    auto outputType = mlir::cast<vpux::NDTypeInterface>(getResult().getType());
     if (getSource().getType() == getResult().getType()) {
         return getSource();
     }
@@ -39,7 +39,7 @@ mlir::OpFoldResult vpux::IE::ShapeCastOp::fold(FoldAdaptor adaptor) {
     if (inputType.getElementType().dyn_cast_or_null<mlir::quant::UniformQuantizedPerAxisType>()) {
         return nullptr;
     }
-    if (const auto attr = operands[0].dyn_cast_or_null<Const::EphemeralContentAttr>()) {
+    if (const auto attr = operands[0].dyn_cast_or_null<Const::ContentAttr>()) {
         return static_cast<Const::ContentAttr>(attr).transform().reshape(outputType.getShape()).get();
     }
 

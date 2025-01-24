@@ -279,7 +279,7 @@ def VPUIP_AsyncLayerOpInterface : OpInterface<"AsyncLayerOpInterface"> {
 //
 
 def VPUIP_SoftwareLayerOpInterface : OpInterface<"SoftwareLayerOpInterface"> {
-    let description = "Interface for layers that will be executed on SHAVEs. (For NPU37XX only)";
+    let description = "Interface for layers that will be executed on SHAVEs. (For VPUX37XX only)";
 
     let cppNamespace = "vpux::VPUIP";
 

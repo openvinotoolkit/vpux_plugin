@@ -19,7 +19,7 @@ public:
     void buildPipeline(mlir::PassManager& pm, const intel_npu::Config& config, mlir::TimingScope& rootTiming,
                        Logger log) override;
     void buildELFPipeline(mlir::PassManager& pm, const intel_npu::Config& config, mlir::TimingScope& rootTiming,
-                          Logger log) override;
+                          Logger log, bool useWlm) override;
 };
 
 }  // namespace vpux

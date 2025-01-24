@@ -76,7 +76,7 @@ void serializeTo(uint8_t* storage, mlir::func::FuncOp main, Logger log, elf::Wri
 
     log.trace("Serializing '{0}' ops", CreateMetadataSectionOp::getOperationName());
     for (auto createMetadataSectionOp : main.getOps<CreateMetadataSectionOp>()) {
-        auto metadataPtr = constructMetadata(main->getParentOfType<mlir::ModuleOp>(), log);
+        auto metadataPtr = constructMetadata(main->getParentOfType<mlir::ModuleOp>(), log.nest());
         auto& metadata = *metadataPtr;
         createMetadataSectionOp.serialize(elfWriter, sectionMap, symbolMap, metadata);
     }
@@ -102,7 +102,7 @@ void serializeTo(uint8_t* storage, mlir::func::FuncOp main, Logger log, elf::Wri
 }  // namespace
 
 std::vector<uint8_t> exportToELF(mlir::ModuleOp module, Logger log) {
-    log.setName("ELFNPU37XX BackEnd");
+    log.setName("ELF Backend - Export");
 
     log.trace("Extract '{0}' from Module (ELF File)", IE::CNNNetworkOp::getOperationName());
 

@@ -19,7 +19,7 @@ using std::string_literals::operator""s;
 bitc::ArchType string_to_arch(const std::string& arch_type) {
     if (arch_type == "NPU27"s)
         return bitc::ArchType::NPU27;
-    else
+    else if (arch_type == "NPU4"s)
         return bitc::ArchType::NPU4;
 }
 
@@ -224,8 +224,8 @@ int main(int argc, char* argv[]) {
 
     bitc::BitCompactorConfig config_bitc{string_to_arch(std::get<std::string>(config.at("arch_type"))),
                                          std::get<std::string>(config.at("weight_compress_enable")) == "true"s,
-                                         std::get<std::string>(config.at("bypass_compression")) == "true"s,
-                                         std::get<std::string>(config.at("mode_fp16_enable")) == "true"s};
+                                         std::get<std::string>(config.at("mode_fp16_enable")) == "true"s,
+                                         std::get<std::string>(config.at("bypass_compression")) == "true"s};
 
     return check_dataset_compression(config, config_bitc) || check_dataset_decompression(config, config_bitc);
 }

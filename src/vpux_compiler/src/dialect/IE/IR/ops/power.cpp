@@ -31,3 +31,70 @@ mlir::LogicalResult vpux::IE::PowerOp::inferReturnTypeComponents(
 
     return mlir::success();
 }
+
+//
+// fold
+//
+
+std::optional<float> getExponentSplatVal(mlir::Value input) {
+    auto exponentCstOp = mlir::dyn_cast_or_null<Const::DeclareOp>(input.getDefiningOp());
+    if (exponentCstOp == nullptr) {
+        return std::nullopt;
+    }
+
+    // Exponent must be a scalar or tensor with all elements equal
+    const auto& constAttr = exponentCstOp.getContentAttr();
+    if (!constAttr.isSplat()) {
+        return std::nullopt;
+    }
+
+    return constAttr.fold().getSplatValue<float>();
+}
+
+mlir::OpFoldResult vpux::IE::PowerOp::fold(FoldAdaptor /*adaptor*/) {
+    auto exponent = getExponentSplatVal(getInput2());
+    if (!exponent.has_value() || !isFloatEqual(exponent.value(), 1.0)) {
+        return nullptr;
+    }
+
+    return getInput1();
+}
+
+//
+// FuseSqrtAndPower
+//
+
+namespace {
+
+class FuseSqrtAndPower final : public mlir::OpRewritePattern<IE::PowerOp> {
+public:
+    using mlir::OpRewritePattern<IE::PowerOp>::OpRewritePattern;
+
+public:
+    mlir::LogicalResult matchAndRewrite(IE::PowerOp origOp, mlir::PatternRewriter& rewriter) const final;
+};
+
+mlir::LogicalResult FuseSqrtAndPower::matchAndRewrite(IE::PowerOp origOp, mlir::PatternRewriter& rewriter) const {
+    auto exponent = getExponentSplatVal(origOp.getInput2());
+    if (!exponent.has_value() || !isFloatEqual(exponent.value(), 2.0)) {
+        return mlir::failure();
+    }
+
+    auto sqrtInOp = mlir::dyn_cast_or_null<IE::SqrtOp>(origOp.getInput1().getDefiningOp());
+    if (sqrtInOp != nullptr && sqrtInOp.getOutput().hasOneUse()) {
+        rewriter.replaceOp(origOp, sqrtInOp.getInput());
+        return mlir::success();
+    }
+
+    return mlir::failure();
+}
+
+}  // namespace
+
+//
+// getCanonicalizationPatterns
+//
+
+void vpux::IE::PowerOp::getCanonicalizationPatterns(mlir::RewritePatternSet& patterns, mlir::MLIRContext* ctx) {
+    patterns.add<FuseSqrtAndPower>(ctx);
+}

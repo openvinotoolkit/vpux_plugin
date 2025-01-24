@@ -52,7 +52,7 @@ mlir::OpFoldResult vpux::IE::ConvertOp::fold(FoldAdaptor adaptor) {
     auto operands = adaptor.getOperands();
     VPUX_THROW_UNLESS(operands.size() == 1, "Wrong number of operands : {0}", operands.size());
 
-    if (auto attr = operands[0].dyn_cast_or_null<Const::EphemeralContentAttr>()) {
+    if (auto attr = operands[0].dyn_cast_or_null<Const::ContentAttr>()) {
         return static_cast<Const::ContentAttr>(attr).transform().castElemType(getDstElemType()).get();
     }
 

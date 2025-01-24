@@ -23,7 +23,7 @@ llvm::SmallVector<mlir::FlatSymbolRefAttr> NNDMARewriter::getSymbolicNames(VPUMI
     return {mlir::FlatSymbolRefAttr::get(symName)};
 }
 
-VPUIP::DMADescriptorAttr NNDMARewriter::getDmaTransactionTraits(VPUMI40XX::NNDMAOp op, mlir::MLIRContext* ctx) const {
+VPUIP::DMADescriptorAttr NNDMARewriter::getDmaDescriptorAttr(VPUMI40XX::NNDMAOp op, mlir::MLIRContext* ctx) const {
     auto inputType = op.getInput().getType().cast<vpux::NDTypeInterface>();
     auto outputType = op.getOutputBuffs()[0].getType().cast<vpux::NDTypeInterface>();
     const Bit elemSize = vpux::getElemTypeSize(inputType);
@@ -46,8 +46,8 @@ VPUIP::DMADescriptorAttr NNDMARewriter::getDmaTransactionTraits(VPUMI40XX::NNDMA
     auto outputTransferRank = reduced_dims_output.dims.size();
 
     if (inputTransferRank > 2 || outputTransferRank > 2) {
-        _log.error("cannot reduce dims to 2 for DMA; Reduced InSize: {0}, OutSize: {1}", inputTransferRank,
-                   outputTransferRank);
+        _log.warning("cannot reduce dims to 2 for DMA; Reduced InSize: {0}, OutSize: {1}", inputTransferRank,
+                     outputTransferRank);
         return nullptr;
     }
 
@@ -132,8 +132,8 @@ VPUIP::DMADescriptorAttr NNDMARewriter::getDmaTransactionTraits(VPUMI40XX::NNDMA
     return transactionAttr;
 }
 
-mlir::LogicalResult NNDMARewriter::symbolize(VPUMI40XX::NNDMAOp op, SymbolMapper& mapper,
-                                             mlir::ConversionPatternRewriter& rewriter) const {
+mlir::FailureOr<SymbolizationResult> NNDMARewriter::symbolize(VPUMI40XX::NNDMAOp op, SymbolMapper& mapper,
+                                                              mlir::ConversionPatternRewriter& rewriter) const {
     mlir::MLIRContext* ctx = rewriter.getContext();
     auto result = op.getResult();
 
@@ -165,23 +165,18 @@ mlir::LogicalResult NNDMARewriter::symbolize(VPUMI40XX::NNDMAOp op, SymbolMapper
         return mlir::isa<VPUMI40XX::NNDMAOp>(op);
     });
 
-    mlir::FlatSymbolRefAttr nextLink = nullptr;
+    mlir::SymbolRefAttr nextLink = nullptr;
     if (nextDmaIt != result.user_end()) {
         auto nextDma = mlir::cast<VPUMI40XX::NNDMAOp>(*nextDmaIt);
         auto nextTaskLocation = nextDma.getTaskLocation();
-        auto isNextHardLinked = nextDma.isHardLinked();
-        if (nextTaskLocation || isNextHardLinked) {
+        auto nextDmaTaskLink = nextDma.getTaskLink();
+        if (nextTaskLocation || nextDmaTaskLink.has_value()) {
+            assert(!nextDmaTaskLink.has_value() || nextDmaTaskLink.value() == op.getType());
             auto nextLinkIt = mapper.find(nextTaskLocation ? nextTaskLocation : nextDma.getResult());
             VPUX_THROW_WHEN(nextLinkIt == mapper.end(), "Cannot find symbol name entry for {0}",
                             nextDma.getOperationName());
             nextLink = nextLinkIt->getSecond();
         }
-    }
-
-    auto descriptor = op.getDmaDescriptor().has_value() ? op.getDmaDescriptorAttr() : getDmaTransactionTraits(op, ctx);
-    if (!descriptor) {
-        _log.error("Failed to lower DMA descriptor parameters");
-        return mlir::failure();
     }
 
     auto accelerationMode = VPUIP::DMAAccModeAttr::get(ctx, op.getAccelerationMode());
@@ -190,6 +185,7 @@ mlir::LogicalResult NNDMARewriter::symbolize(VPUMI40XX::NNDMAOp op, SymbolMapper
     auto isOutOfOrder = op.getIsOutOfOrderAttr();
     auto isCritical = op.getIsCriticalAttr();
     auto enableMSC = op.getEnableMscAttr();
+    auto transaction = op.getDmaTransactionAttr();
     mlir::SymbolRefAttr actCompressionSizeEntryAttr =
             op.getActCompressionSizeEntry() ? findSym(op.getActCompressionSizeEntry()) : nullptr;
 
@@ -206,14 +202,23 @@ mlir::LogicalResult NNDMARewriter::symbolize(VPUMI40XX::NNDMAOp op, SymbolMapper
 
     auto dmaHwpIdAttr = op.getDmaHwpIdAttr();
 
-    rewriter.create<VPUASM::NNDMAOp>(op.getLoc(), symName, taskIdx, taskLocation, nextLink, input, outputs, waitAttr,
-                                     updateAttr, startAfter, cleanAfter, accelerationMode, isOutOfOrder, isCritical,
-                                     enableMSC, actCompressionSizeEntryAttr, sparsityMapAttr, descriptor, dmaHwpIdAttr,
-                                     cmxTiles, indicesAttr);
+    auto descriptor = op.getDmaDescriptor().has_value() ? op.getDmaDescriptorAttr() : getDmaDescriptorAttr(op, ctx);
+    if (!descriptor) {
+        _log.warning("Failed to lower DMA descriptor parameters");
+    }
+    auto newOp = rewriter.create<VPUASM::NNDMAOp>(
+            op.getLoc(), symName, taskIdx, taskLocation, nextLink, input, outputs, waitAttr, updateAttr, startAfter,
+            cleanAfter, accelerationMode, isOutOfOrder, isCritical, enableMSC, actCompressionSizeEntryAttr,
+            sparsityMapAttr, transaction, descriptor, dmaHwpIdAttr, cmxTiles, indicesAttr);
+
+    mlir::SmallVector<mlir::StringAttr> refsToUpdate;
+    if (nextLink && nextLink.getNestedReferences().empty()) {
+        refsToUpdate.push_back(newOp.getNextLinkAttrName());
+    }
 
     rewriter.eraseOp(op);
 
-    return mlir::success();
+    return SymbolizationResult(newOp, refsToUpdate);
 }
 
 }  // namespace vpumi40xx2vpuasm

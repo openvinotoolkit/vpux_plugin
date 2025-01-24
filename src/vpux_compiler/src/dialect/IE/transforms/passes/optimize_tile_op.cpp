@@ -5,17 +5,33 @@
 
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/IE/transforms/passes.hpp"
+#include "vpux/compiler/dialect/IE/utils/shape_infer.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
+
+#include <llvm/ADT/TypeSwitch.h>
 
 using namespace vpux;
 
 namespace {
 
-class FoldTileOpWithSingleValueInput final : public mlir::OpRewritePattern<IE::TileOp> {
+IE::AutoBroadcastType getBroadCastType(mlir::Operation* op) {
+    return llvm::TypeSwitch<mlir::Operation*, IE::AutoBroadcastType>(op)
+            .Case<IE::MultiplyOp>([&](auto multiply) {
+                return multiply.getAutoBroadcast();
+            })
+
+            .Case<IE::AddOp>([&](auto add) {
+                return add.getAutoBroadcast();
+            })
+            .Default([&](auto) -> IE::AutoBroadcastType {
+                VPUX_THROW("Unexpected operation type at '{0}'", op);
+            });
+}
+
+class FoldTileOpRewriter final : public mlir::OpRewritePattern<IE::TileOp> {
 public:
-    FoldTileOpWithSingleValueInput(mlir::MLIRContext* ctx, const Logger& log)
-            : mlir::OpRewritePattern<IE::TileOp>(ctx), _log(log) {
-        setDebugName("FoldTileOpWithSingleValueInput");
+    FoldTileOpRewriter(mlir::MLIRContext* ctx, const Logger& log): mlir::OpRewritePattern<IE::TileOp>(ctx), _log(log) {
+        setDebugName("FoldTileOpRewriter");
     }
 
 public:
@@ -25,13 +41,19 @@ private:
     const Logger& _log;
 };
 
-mlir::LogicalResult FoldTileOpWithSingleValueInput::matchAndRewrite(IE::TileOp origOp,
-                                                                    mlir::PatternRewriter& rewriter) const {
+mlir::LogicalResult FoldTileOpRewriter::matchAndRewrite(IE::TileOp origOp, mlir::PatternRewriter& rewriter) const {
     auto ctx = getContext();
 
     auto origInputType = origOp.getInput().getType().cast<NDTypeInterface>();
     auto origInputShape = origInputType.getShape();
-    if (origInputShape.totalSize() != 1) {
+
+    // If the tile op is used as input for op like eltwise or multiply, and its size is too big to fit into CMX, which
+    // means that the op will be tiled into multiple small ones. And it will cost lots of time before executing the
+    // eltwise/multiply op. So it will be performant if it can be fused into the post op.
+    auto hasLargeSingleChannelInput = origInputType.getTotalAllocSize() > vpux::VPU::getTotalCMXSize(origOp) &&
+                                      origInputShape.size() == 4 && origInputShape[Dims4D::Act::C] == 1;
+
+    if (origInputShape.totalSize() != 1 && !hasLargeSingleChannelInput) {
         return mlir::failure();
     }
 
@@ -56,6 +78,13 @@ mlir::LogicalResult FoldTileOpWithSingleValueInput::matchAndRewrite(IE::TileOp o
         outputUserOp = *(outputValue.getUsers().begin());
     }
 
+    // For the large single channel input, don't fold TileOp if the output is used by FoldableViewOp, since the compiler
+    // may not be able to back infer the new output shape
+    auto hasFoldableUser = isFoldableViewOp(*origOp->getUsers().begin());
+    if (hasLargeSingleChannelInput && hasFoldableUser) {
+        return mlir::failure();
+    }
+
     // More ops which support auto broadcast may also apply here!
     if (!mlir::isa_and_nonnull<IE::MultiplyOp, IE::AddOp>(outputUserOp)) {
         return mlir::failure();
@@ -69,6 +98,22 @@ mlir::LogicalResult FoldTileOpWithSingleValueInput::matchAndRewrite(IE::TileOp o
     }
 
     _log.trace("Folding TileOp at '{0}'", origOp.getLoc());
+
+    if (hasLargeSingleChannelInput) {
+        auto tileOutShape = getShape(origOp.getOutput());
+
+        auto lhsIsTileOp = outputUserOp->getOperand(0).getDefiningOp() == origOp;
+        auto lhsShape = lhsIsTileOp ? tileOutShape : getShape(outputUserOp->getOperand(0));
+        auto rhsShape = lhsIsTileOp ? getShape(outputUserOp->getOperand(1)) : tileOutShape;
+        auto broadCastType = getBroadCastType(outputUserOp);
+        const auto outShape = IE::broadcastEltwiseShape(lhsShape, rhsShape, broadCastType, outputUserOp->getLoc());
+        if (mlir::failed(outShape)) {
+            return mlir::failure();
+        }
+
+        rewriter.replaceAllUsesWith(origOp, origOp.getInput());
+        return mlir::success();
+    }
 
     auto newShape = SmallVector<int64_t>(outputValue.getType().cast<NDTypeInterface>().getRank(), 1);
     auto newReshapeOp = rewriter.createOrFold<IE::ReshapeOp>(origOp.getLoc(), origOp.getInput(), nullptr, false,
@@ -101,7 +146,7 @@ void OptimizeTileOpPass::safeRunOnFunc() {
     auto& ctx = getContext();
 
     mlir::RewritePatternSet patterns(&ctx);
-    patterns.add<FoldTileOpWithSingleValueInput>(&ctx, _log);
+    patterns.add<FoldTileOpRewriter>(&ctx, _log);
 
     auto func = getOperation();
     if (mlir::failed(mlir::applyPatternsAndFoldGreedily(func, std::move(patterns), getDefaultGreedyRewriteConfig()))) {

@@ -36,19 +36,23 @@ namespace {
 
 /// Insert an allocation and deallocation for the given MemRefType.
 static mlir::Value insertAllocAndDealloc(mlir::MemRefType type, mlir::Location loc, mlir::PatternRewriter& rewriter,
-                                         bool isUnit = false) {
-    auto alloc = rewriter.create<mlir::memref::AllocOp>(loc, type);
+                                         bool isUnit = false, bool createsDealloc = true) {
+    mlir::memref::AllocOp alloc;
     if (isUnit) {
         alloc = rewriter.create<mlir::memref::AllocOp>(loc, mlir::MemRefType::get({1}, type.getElementType()));
+    } else {
+        alloc = rewriter.create<mlir::memref::AllocOp>(loc, type);
     }
 
     // Make sure to allocate at the beginning of the block.
     auto* parentBlock = alloc->getBlock();
     alloc->moveBefore(&parentBlock->front());
 
-    // Make sure to deallocate this alloc at the end of the block.
-    auto dealloc = rewriter.create<mlir::memref::DeallocOp>(loc, alloc);
-    dealloc->moveBefore(&parentBlock->back());
+    if (createsDealloc == true) {
+        // Make sure to deallocate this alloc at the end of the block.
+        auto dealloc = rewriter.create<mlir::memref::DeallocOp>(loc, alloc);
+        dealloc->moveBefore(&parentBlock->back());
+    }
     return alloc;
 }
 
@@ -72,6 +76,8 @@ static void lowerOpToLoops(mlir::Operation* op, mlir::ValueRange operands, mlir:
     SmallVector<int64_t, 4> lowerBounds(memRefType.getRank(), /*Value=*/0);
     SmallVector<int64_t, 4> steps(memRefType.getRank(), /*Value=*/1);
     mlir::affine::buildAffineLoopNest(rewriter, loc, lowerBounds, memRefType.getShape(), steps,
+                                      // The ivs parameter (and the other formal arguments) are being assigned by
+                                      // buildAffineLoopNest() based on the parameters it receives itself
                                       [&](mlir::OpBuilder& nestedBuilder, mlir::Location loc, mlir::ValueRange ivs) {
                                           // Call the processing function with the rewriter, the memref operands,
                                           // and the loop induction variables. This function will return the value
@@ -84,8 +90,8 @@ static void lowerOpToLoops(mlir::Operation* op, mlir::ValueRange operands, mlir:
                                                                                             operands[1], ivs);
                                       });
 
-    // Replace this operation with the generated alloc.
     rewriter.replaceOp(op, operands[1]);  // We return the container in which we stored the computed values.
+                                          // (operands[1] is the output buffer)
 }
 
 struct UnaryOpLoweringCos : public mlir::ConversionPattern {
@@ -102,7 +108,7 @@ struct UnaryOpLoweringCos : public mlir::ConversionPattern {
                            // ODS.
                            IERT::CosOp::Adaptor unaryAdaptor(memRefOperands);
 
-                           // Generate load for the element of 'lhs' at the inner loop.
+                           // Generate load for the element of 'input' at the inner loop.
                            auto loadedOpnd =
                                    builder.create<mlir::affine::AffineLoadOp>(loc, unaryAdaptor.getInput(), loopIvs);
 
@@ -212,6 +218,11 @@ struct UnaryOpLoweringSoftMax : public mlir::ConversionPattern {
 
         auto alloc = insertAllocAndDealloc(memRefType, loc, rewriter, true);
 
+        mlir::Value zeroIndex2 = rewriter.create<mlir::arith::ConstantIndexOp>(loc, 0);
+        auto zeroConst =
+                rewriter.create<mlir::arith::ConstantOp>(loc, rewriter.getFloatAttr(memRefType.getElementType(), 0));
+        rewriter.create<mlir::memref::StoreOp>(loc, zeroConst, alloc, zeroIndex2);
+
         SmallVector<int64_t, 4> lowerBounds(memRefType.getRank(), /*Value=*/0);
         SmallVector<int64_t, 4> steps(memRefType.getRank(), /*Value=*/1);
         mlir::affine::buildAffineLoopNest(
@@ -263,6 +274,61 @@ struct UnaryOpLoweringSoftMax : public mlir::ConversionPattern {
     }
 };
 
+struct UnaryOpLoweringGenericReshape : public mlir::ConversionPattern {
+    UnaryOpLoweringGenericReshape(mlir::MLIRContext* ctx)
+            : mlir::ConversionPattern(IERT::GenericReshapeOp::getOperationName(), 1, ctx) {
+    }
+
+    mlir::LogicalResult matchAndRewrite(mlir::Operation* op, ArrayRef<mlir::Value> operands,
+                                        mlir::ConversionPatternRewriter& rewriter) const final {
+        auto loc = op->getLoc();
+
+        auto memRefType = (*op->result_type_begin()).cast<mlir::MemRefType>();
+
+        IERT::GenericReshapeOp grOp;
+
+        // Create a nest of affine loops, with one loop per dimension of the shape.
+        // The buildAffineLoopNest function takes a callback that is used to construct
+        // the body of the innermost loop given a builder, a location and a range of
+        // loop induction variables.
+        SmallVector<int64_t, 4> lowerBounds(memRefType.getRank(), /*Value=*/0);
+        SmallVector<int64_t, 4> steps(memRefType.getRank(), /*Value=*/1);
+        mlir::affine::buildAffineLoopNest(
+                rewriter, loc, lowerBounds, memRefType.getShape(), steps,
+                // The ivs parameter (and the other formal arguments) are being assigned by
+                // buildAffineLoopNest() based on the parameters it receives itself
+                [&](mlir::OpBuilder& nestedBuilder, mlir::Location loc, mlir::ValueRange ivs) {
+                    // Generate an adaptor for the remapped operands of the UnaryOp. This allows
+                    // for using the nice named accessors that are generated by the ODS.
+                    IERT::GenericReshapeOp::Adaptor unaryAdaptor(operands);
+
+                    grOp = mlir::dyn_cast<IERT::GenericReshapeOp>(op);
+                    VPUX_THROW_UNLESS(grOp != nullptr, "op is not of type IERT::GenericReshapeOp");
+                    std::size_t sizeIvsNew = grOp.getInput().getType().cast<mlir::MemRefType>().getShape().size();
+
+                    llvm::SmallVector<mlir::Value> ivsNew;
+                    for (size_t i = 0; i < sizeIvsNew - 1; i++) {
+                        ivsNew.push_back(ivs[0]);
+                    }
+                    ivsNew.push_back(ivs[ivs.size() - 1]);
+
+                    // Generate load for the element of 'input' at the inner loop.
+                    mlir::affine::AffineLoadOp loadOp =
+                            nestedBuilder.create<mlir::affine::AffineLoadOp>(loc, unaryAdaptor.getInput(), ivsNew);
+
+                    mlir::Value valueToStore = loadOp;
+
+                    VPUX_THROW_UNLESS(operands.size() >= 1, "Need to have at least 1 operand");
+
+                    nestedBuilder.create<mlir::affine::AffineStoreOp>(loc, valueToStore, grOp.getOutputBuff(), ivs);
+                });
+
+        rewriter.replaceOp(op, grOp.getOutputBuff());
+
+        return mlir::success();
+    }
+};
+
 //
 // ConvertSWLayers2AffinePass
 //
@@ -276,16 +342,16 @@ public:
 private:
     void safeRunOnModule() final;
 
-    template <class TypeOp>
-    void processSofwareLayer(mlir::MLIRContext& ctx, mlir::ModuleOp moduleOp, mlir::func::FuncOp funcOp);
+    template <class TemplateTypeOp>
+    void processSoftwareLayer(mlir::MLIRContext& ctx, mlir::ModuleOp moduleOp, mlir::func::FuncOp funcOp);
     void processAllSoftwareLayers(mlir::MLIRContext& ctx, mlir::ModuleOp module);
 
     std::map<std::string, int> counterSwLayers;
 };
 
-template <class TypeOp>
-void ConvertSWLayers2AffinePass::processSofwareLayer(mlir::MLIRContext& ctx, mlir::ModuleOp moduleOp,
-                                                     mlir::func::FuncOp entryPointFuncOp) {
+template <class TemplateTypeOp>
+void ConvertSWLayers2AffinePass::processSoftwareLayer(mlir::MLIRContext& ctx, mlir::ModuleOp moduleOp,
+                                                      mlir::func::FuncOp entryPointFuncOp) {
     OpBuilderLogger builderLog(_log);
     static constexpr StringLiteral vpuSwModuleName{"VPU.SW"};
     auto vpuSwmoduleOp = moduleOp.lookupSymbol<mlir::ModuleOp>(vpuSwModuleName);
@@ -295,14 +361,14 @@ void ConvertSWLayers2AffinePass::processSofwareLayer(mlir::MLIRContext& ctx, mli
         vpuSwmoduleOp = mainModuleBuilder.create<mlir::ModuleOp>(mlir::UnknownLoc::get(&ctx), vpuSwModuleName);
     }
 
-    for (auto crtOp : llvm::make_early_inc_range(entryPointFuncOp.getBody().getOps<TypeOp>())) {
+    for (auto crtOp : llvm::make_early_inc_range(entryPointFuncOp.getBody().getOps<TemplateTypeOp>())) {
         std::string opName = crtOp->getName().stripDialect().str();
 
         if (counterSwLayers.find(opName) == counterSwLayers.end()) {
             counterSwLayers[opName] = 0;
         }
 
-        std::string newFuncName = opName + std::to_string(counterSwLayers[opName]);
+        std::string newFuncName = "generated_" + opName + std::to_string(counterSwLayers[opName]);
 
         mlir::Type packedParamsType = vpux::IERT::PackedParamsType::get(&ctx);
 
@@ -312,8 +378,8 @@ void ConvertSWLayers2AffinePass::processSofwareLayer(mlir::MLIRContext& ctx, mli
         mlir::OpBuilder bld(&ctx);
         bld.setInsertionPointToStart(vpuSwmoduleOp.getBody(0));
 
-        mlir::FunctionType newFuncType =
-                mlir::FunctionType::get(&ctx, newFuncArgTypes, mlir::TypeRange(crtOp.getResult().getType()));
+        mlir::FunctionType newFuncType = mlir::FunctionType::get(&ctx, newFuncArgTypes, mlir::TypeRange());
+
         auto newFuncOp =
                 bld.create<mlir::func::FuncOp>(entryPointFuncOp.getLoc(), llvm::StringRef(newFuncName), newFuncType);
 
@@ -324,32 +390,34 @@ void ConvertSWLayers2AffinePass::processSofwareLayer(mlir::MLIRContext& ctx, mli
         mlir::Type type32Attr = mlir::IntegerType::get(&ctx, 32, mlir::IntegerType::Signed);
 
         std::vector<vpux::IERT::ExtractParamOp> newExtractParamOp;
-        for (unsigned int i = 0; i < crtOp.getNumOperands(); i++) {
+        for (unsigned int i = 0; i < crtOp.getOperation()->getNumOperands(); i++) {
             newExtractParamOp.push_back(
-                    bld.create<IERT::ExtractParamOp>(newFuncOp.getLoc(), crtOp.getResult().getType(),
+                    bld.create<IERT::ExtractParamOp>(newFuncOp.getLoc(), crtOp.getOperation()->getOperand(i).getType(),
                                                      newFuncOp.getArgument(0), mlir::IntegerAttr::get(type32Attr, i)));
         }
 
         mlir::IRMapping mapper;
+
         // We map the old values of crtOp to the results of the newExtractParamOp elements
-        for (unsigned int i = 0; i < crtOp.getNumOperands(); i++) {
-            mapper.map(crtOp.getOperand(i), newExtractParamOp[i].getResult());
+        for (unsigned int i = 0; i < crtOp.getOperation()->getNumOperands(); i++) {
+            mapper.map(crtOp.getOperation()->getOperand(i), newExtractParamOp[i].getResult());
         }
-        mlir::Operation* newOp = bld.clone(*(crtOp.getOperation()), mapper);
+        bld.clone(*(crtOp.getOperation()), mapper);
+        bld.create<mlir::func::ReturnOp>(newFuncOp.getLoc(), mlir::ValueRange());
 
-        bld.create<mlir::func::ReturnOp>(newFuncOp.getLoc(), mlir::ValueRange(newOp->getResult(0)));
-
+        // We now insert in the entry point function, from crtOp
         bld.setInsertionPoint(crtOp.getOperation());
 
-        auto newPackMemrefOp = bld.create<IERT::PackMemrefOp>(entryPointFuncOp.getLoc(), packedParamsType,
-                                                              mlir::ValueRange(crtOp.getOperands()));
+        auto newPackMemrefsOp = bld.create<IERT::PackMemrefsOp>(entryPointFuncOp.getLoc(), packedParamsType,
+                                                                mlir::ValueRange(crtOp.getOperation()->getOperands()));
 
         mlir::SymbolRefAttr symRefAttr = mlir::SymbolRefAttr::get(
                 mlir::StringAttr::get(&ctx, "VPU.SW"), llvm::ArrayRef<mlir::FlatSymbolRefAttr>(mlir::SymbolRefAttr::get(
                                                                mlir::StringAttr::get(&ctx, newFuncName))));
-        auto newFuncCallOp =
-                bld.create<IERT::ExtendedCallOp>(entryPointFuncOp.getLoc(), symRefAttr, newFuncOp.getResultTypes(),
-                                                 mlir::ValueRange(newPackMemrefOp.getResult()));
+
+        auto newFuncCallOp = bld.create<IERT::ExtendedCallOp>(entryPointFuncOp.getLoc(), symRefAttr,
+                                                              mlir::TypeRange(crtOp.getResult().getType()),
+                                                              mlir::ValueRange(newPackMemrefsOp.getResult()));
         crtOp.replaceAllUsesWith(newFuncCallOp);
         crtOp.erase();
 
@@ -362,9 +430,10 @@ void ConvertSWLayers2AffinePass::processAllSoftwareLayers(mlir::MLIRContext& ctx
     mlir::func::FuncOp entryPointFuncOp;
     IE::CNNNetworkOp::getFromModule(moduleOp, netOp, entryPointFuncOp);
 
-    processSofwareLayer<IERT::CosOp>(ctx, moduleOp, entryPointFuncOp);
-    processSofwareLayer<IERT::HSwishOp>(ctx, moduleOp, entryPointFuncOp);
-    processSofwareLayer<IERT::SoftMaxOp>(ctx, moduleOp, entryPointFuncOp);
+    processSoftwareLayer<IERT::CosOp>(ctx, moduleOp, entryPointFuncOp);
+    processSoftwareLayer<IERT::HSwishOp>(ctx, moduleOp, entryPointFuncOp);
+    processSoftwareLayer<IERT::SoftMaxOp>(ctx, moduleOp, entryPointFuncOp);
+    processSoftwareLayer<IERT::GenericReshapeOp>(ctx, moduleOp, entryPointFuncOp);
 }
 
 void ConvertSWLayers2AffinePass::safeRunOnModule() {
@@ -387,9 +456,8 @@ void ConvertSWLayers2AffinePass::safeRunOnModule() {
     target.addLegalOp<mlir::memref::AllocOp>();
     target.addLegalOp<VPUIP::CopyOp>();
     target.addLegalOp<IERT::ExtendedCallOp>();
-    target.addLegalOp<IERT::PackMemrefOp>();
+    target.addLegalOp<IERT::PackMemrefsOp>();
     target.addLegalOp<IERT::ExtractParamOp>();
-    target.addLegalOp<IERT::GenericReshapeOp>();
 
     vpux::populateBufferizeMaterializationLegality(target);
 
@@ -398,6 +466,7 @@ void ConvertSWLayers2AffinePass::safeRunOnModule() {
     patterns.add<UnaryOpLoweringCos>(&ctx);
     patterns.add<UnaryOpLoweringHSwish>(&ctx);
     patterns.add<UnaryOpLoweringSoftMax>(&ctx);
+    patterns.add<UnaryOpLoweringGenericReshape>(&ctx);
 
     if (mlir::failed(mlir::applyPartialConversion(module, target, std::move(patterns)))) {
         signalPassFailure();

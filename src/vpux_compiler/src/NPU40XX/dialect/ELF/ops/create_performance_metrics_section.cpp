@@ -5,9 +5,7 @@
 
 #include <vpux_elf/writer.hpp>
 #include "vpux/compiler/NPU40XX/dialect/VPU/utils/performance_metrics.hpp"
-#include "vpux/compiler/dialect/IE/utils/resources.hpp"
 #include "vpux/compiler/dialect/VPU/utils/performance_metrics.hpp"
-#include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
 #include "vpux/compiler/utils/ELF/utils.hpp"
 
 #include <npu_40xx_nnrt.hpp>
@@ -26,7 +24,6 @@ void vpux::ELF::PerformanceMetricsOp::serialize(elf::writer::BinaryDataSection<u
 
     auto operation = getOperation();
     auto mainModule = operation->getParentOfType<mlir::ModuleOp>();
-    auto memRes = IE::getUsedMemory(mainModule);
     // Here we must get AF from NCE res (a TileResourceOp) as the AF attribute is attached to tile op
     mainModule.walk([&](IE::TileResourceOp res) {
         const auto execKind = VPU::getKindValue<VPU::ExecutorKind>(res);
@@ -47,14 +44,14 @@ void vpux::ELF::PerformanceMetricsOp::serialize(elf::writer::BinaryDataSection<u
     }
 
     const auto ptrCharTmp = reinterpret_cast<uint8_t*>(&perf);
-    binDataSection.appendData(ptrCharTmp, getBinarySize());
+    binDataSection.appendData(ptrCharTmp, getBinarySize(VPU::ArchKind::UNKNOWN));
 }
 
-size_t vpux::ELF::PerformanceMetricsOp::getBinarySize() {
+size_t vpux::ELF::PerformanceMetricsOp::getBinarySize(VPU::ArchKind) {
     return sizeof(VpuPerformanceMetrics);
 }
 
-size_t vpux::ELF::PerformanceMetricsOp::getAlignmentRequirements() {
+size_t vpux::ELF::PerformanceMetricsOp::getAlignmentRequirements(VPU::ArchKind) {
     return alignof(VpuPerformanceMetrics);
 }
 

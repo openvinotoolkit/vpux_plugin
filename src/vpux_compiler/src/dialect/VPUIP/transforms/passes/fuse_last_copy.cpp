@@ -4,6 +4,7 @@
 //
 
 #include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/ops_interfaces.hpp"
 #include "vpux/compiler/dialect/VPUIP/transforms/passes.hpp"
 
 #include "vpux/compiler/core/aliases_info.hpp"
@@ -17,10 +18,10 @@ using namespace vpux;
 namespace {
 
 template <typename OpTy>
-mlir::Value replaceCastWith(mlir::Operation* op, mlir::Value sourceRoot, mlir::Value inputValue) {
+mlir::Value replaceCastWith(mlir::Operation* op, mlir::Value sourceRoot, mlir::Type outType, mlir::Value inputValue) {
     mlir::OpBuilder builder(op);
     builder.setInsertionPoint(sourceRoot.getDefiningOp());
-    auto newOperation = builder.create<OpTy>(op->getLoc(), sourceRoot.getType(), inputValue);
+    auto newOperation = builder.create<OpTy>(op->getLoc(), outType, inputValue);
     return newOperation.getResult();
 };
 
@@ -74,104 +75,103 @@ void fuseLastCopy(VPUIP::CopyOp copyOp, const AliasesInfo& aliasesInfo, Logger l
     VPUIP::ConcatViewOp concatViewOp;
     auto newBuffer = copyOp.getOutputBuff();
     auto newOutput = copyOp.getInput();
+    mlir::Operation* typeCastOp = nullptr;
+
+    auto isCastOp = [](mlir::Operation* maybeTypeCastOp) {
+        return mlir::isa_and_present<VPUIP::GenericReshapeOp, VPUIP::QuantizeCastOp, VPUIP::PermuteCastOp,
+                                     VPUIP::ShapeCastOp>(maybeTypeCastOp);
+    };
 
     if (sourceRoot.getType() != copyOp.getOutputBuff().getType()) {
         // check what operation changes the type
-        auto typeCastOp = copyOp.getInput().getDefiningOp();
+        typeCastOp = copyOp.getInput().getDefiningOp();
 
         if (typeCastOp == nullptr || std::distance(typeCastOp->getUsers().begin(), typeCastOp->getUsers().end()) != 1) {
             // skip if typeCastOp has multi users
             return;
         }
 
-        if (mlir::isa<VPUIP::GenericReshapeOp, VPUIP::QuantizeCastOp>(typeCastOp)) {
-            auto preOfTypeCastOp = typeCastOp->getOperand(0).getDefiningOp();
-            while (mlir::isa<VPUIP::GenericReshapeOp, VPUIP::QuantizeCastOp, VPUIP::PermuteCastOp, VPUIP::ShapeCastOp>(
-                    preOfTypeCastOp)) {
-                if (!preOfTypeCastOp->hasOneUse()) {
+        auto preOfTypeCastOp = typeCastOp;
+        while (isCastOp(preOfTypeCastOp)) {
+            // clang-format off
+            // We will make a OpTy(QuantizeCast/GenericReshape) over the output buffer and we will copy from CMX directly
+            // to output buffer, and we will return the output buffer. After ConcatView and OpTy will be redundant.
+            // To do this, reverse and apply the same cast operations to the output buffer.
+            // Original IR:
+            // Copy(CMX->DDR) -> CastOp1(!type1->!type2) -> CastOp2(!type2->!type3) -> Copy(DDR->DDR) to output_buffer
+            // New IR:
+            // output_buffer -> CastOp2(!type3 -> !type2) -> CastOp1(!type2 -> !type1) -> new "output buffer"
+            // source (from CMX) -> Copy(CMX->DDR) new "output buffer"
+            // clang-format on
+
+            if (mlir::isa<VPUIP::GenericReshapeOp>(preOfTypeCastOp)) {
+                newBuffer = replaceCastWith<VPUIP::GenericReshapeOp>(
+                        preOfTypeCastOp, sourceRoot, preOfTypeCastOp->getOperand(0).getType(), newBuffer);
+            } else if (mlir::isa<VPUIP::QuantizeCastOp>(preOfTypeCastOp)) {
+                newBuffer = replaceCastWith<VPUIP::QuantizeCastOp>(preOfTypeCastOp, sourceRoot,
+                                                                   preOfTypeCastOp->getOperand(0).getType(), newBuffer);
+            } else if (auto permuteCastOp = mlir::dyn_cast<VPUIP::PermuteCastOp>(preOfTypeCastOp)) {
+                // clang-format off
+                // do the permute in output
+                // Here we produce invalid operation since we swap I/O type while attributes are the same.
+                // From test cases:
+                // Original operation: VPUIP.PermuteCast {dst_order = #NHWC, mem_perm = #NCHW} inputs(%5 : memref<1x263169x11x1xf16, @DDR>) -> memref<1x11x1x263169xf16, #NHWC, @DDR>
+                // Modified IR: VPUIP.PermuteCast {dst_order = #NHWC, mem_perm = #NCHW} inputs([[OUTPUT]] : memref<1x11x1x263169xf16, #NHWC, @DDR>) -> memref<1x263169x11x1xf16, @DDR>
+                // You may see that for modified PermuteCast output type has #NCHW order, while dst_order #NHWC
+                // This is possible due to lack of validation.
+                // TODO: #-141102
+                // clang-format on
+                mlir::OpBuilder builder(permuteCastOp);
+                builder.setInsertionPoint(sourceRoot.getDefiningOp());
+
+                auto newPermuteCast = builder.create<VPUIP::PermuteCastOp>(
+                        permuteCastOp.getLoc(), permuteCastOp->getOperand(0).getType(), newBuffer,
+                        permuteCastOp.getDstOrderAttr(), permuteCastOp.getMemPermAttr());
+
+                newBuffer = newPermuteCast.getResult();
+            } else if (auto shapeCastOp = mlir::dyn_cast<VPUIP::ShapeCastOp>(preOfTypeCastOp)) {
+                // check is simple ShapeCast
+                if (shapeCastOp.getExplicitOutputShapes().has_value() ||
+                    shapeCastOp.getExplicitOutputOffsets().has_value()) {
+                    nestedLogger.trace("ShapeCast with explicit shapes and offsets not supported");
                     return;
                 }
-                typeCastOp = preOfTypeCastOp;
-                preOfTypeCastOp = preOfTypeCastOp->getOperand(0).getDefiningOp();
+
+                auto newOutType = mlir::cast<NDTypeInterface>(shapeCastOp.getSource().getType());
+                auto newOutShape = newOutType.getShape().raw();
+
+                // do the shape cast in output
+                mlir::OpBuilder builder(shapeCastOp);
+                builder.setInsertionPoint(sourceRoot.getDefiningOp());
+                auto newShapeCast = builder.create<VPUIP::ShapeCastOp>(
+                        shapeCastOp.getLoc(), newOutType, newBuffer,
+                        getIntArrayAttr(shapeCastOp.getContext(), newOutShape),
+                        shapeCastOp.getExplicitOutputShapesAttr(), shapeCastOp.getExplicitOutputOffsetsAttr());
+                newBuffer = newShapeCast.getResult();
+            } else {
+                VPUX_THROW("Unsupported cast operation: {0}", preOfTypeCastOp->getName());
             }
-            if (!mlir::isa<VPUIP::ConcatViewOp, VPUIP::CopyOp>(preOfTypeCastOp)) {
-                nestedLogger.trace("Cannot match because of missed concat in case");
+
+            if (!preOfTypeCastOp->hasOneUse()) {
                 return;
             }
-            concatViewOp = mlir::dyn_cast<VPUIP::ConcatViewOp>(preOfTypeCastOp);
-            if (concatViewOp && !concatViewOp.getOutput().hasOneUse()) {
-                return;
-            }
+            preOfTypeCastOp = preOfTypeCastOp->getOperand(0).getDefiningOp();
         }
 
-        // we will make a OpTy(QuantizeCast/GenericReshape) over the output buffer and we will copy from CMX directly
-        // to output buffer, and we will return the output buffer. After ConcatView and OpTy will be redundant.
         // from CMX -> CopyOp[DDR] -> (ConcatViewOp) -> OpTy -> CopyOp[block-arg] -> return CopyOp
         // Output of this step:
         //                        CMX -> CopyOp[OpTy] -> return block-arg
         //   block-arg -> OpTy /
-        if (mlir::isa<VPUIP::GenericReshapeOp>(typeCastOp)) {
-            newBuffer = replaceCastWith<VPUIP::GenericReshapeOp>(typeCastOp, sourceRoot, copyOp.getOutputBuff());
-        } else if (mlir::isa<VPUIP::QuantizeCastOp>(typeCastOp)) {
-            newBuffer = replaceCastWith<VPUIP::QuantizeCastOp>(typeCastOp, sourceRoot, copyOp.getOutputBuff());
-        } else if (auto permuteCastOp = mlir::dyn_cast<VPUIP::PermuteCastOp>(typeCastOp)) {
-            // do the permute in output
-            mlir::OpBuilder builder(permuteCastOp);
-            builder.setInsertionPoint(sourceRoot.getDefiningOp());
 
-            auto newPermuteCast = builder.create<VPUIP::PermuteCastOp>(
-                    permuteCastOp.getLoc(), sourceRoot.getType(), copyOp.getOutputBuff(),
-                    permuteCastOp.getDstOrderAttr(), permuteCastOp.getMemPermAttr());
-
-            newBuffer = newPermuteCast.getResult();
-        } else if (auto shapeCastOp = mlir::dyn_cast<VPUIP::ShapeCastOp>(typeCastOp)) {
-            // check is simple ShapeCast
-            if (shapeCastOp.getExplicitOutputShapes().has_value() ||
-                shapeCastOp.getExplicitOutputOffsets().has_value()) {
-                nestedLogger.trace("ShapeCast with explicit shapes and offsets not supported");
+        concatViewOp = mlir::dyn_cast<VPUIP::ConcatViewOp>(preOfTypeCastOp);
+        if (concatViewOp != nullptr) {
+            if (!concatViewOp.getOutput().hasOneUse()) {
                 return;
             }
-
-            // check if shape cast has compatible rank
-            const auto sourceRootType = mlir::cast<vpux::NDTypeInterface>(sourceRoot.getType());
-            auto copyOutputType = mlir::cast<vpux::NDTypeInterface>(copyOp.getOutputBuff().getType());
-            if (sourceRootType.getRank() != copyOutputType.getRank()) {
-                nestedLogger.trace("ShapeCast rank not compatible {0} and {1}", sourceRootType.getRank(),
-                                   copyOutputType.getRank());
-                return;
-            }
-
-            // check if shape cast has compatible type after reshape
-            const auto sourceRootShape = sourceRootType.getShape();
-            auto copyOutputTypeWithNewShape = copyOutputType.changeShape(sourceRootShape);
-            if (copyOutputTypeWithNewShape != sourceRootType) {
-                nestedLogger.trace("ShapeCast type not compatible {0} and {1}", sourceRootType,
-                                   copyOutputTypeWithNewShape);
-                return;
-            }
-
-            // do the shape cast in output
-            mlir::OpBuilder builder(shapeCastOp);
-            builder.setInsertionPoint(sourceRoot.getDefiningOp());
-
-            auto newShapeCast = builder.create<VPUIP::ShapeCastOp>(
-                    shapeCastOp.getLoc(), sourceRoot.getType(), copyOp.getOutputBuff(),
-                    getIntArrayAttr(shapeCastOp.getContext(), sourceRootShape),
-                    shapeCastOp.getExplicitOutputShapesAttr(), shapeCastOp.getExplicitOutputOffsetsAttr());
-
-            newBuffer = newShapeCast.getResult();
-        } else {
-            nestedLogger.trace("Cannot match because of missed concat in generic branch");
+        } else if (VPUIP::isPureViewOp(preOfTypeCastOp)) {
             return;
         }
 
-        auto childTypeCast = *typeCastOp->getResult(0).getUsers().begin();
-        if (mlir::isa<VPUIP::GenericReshapeOp, VPUIP::QuantizeCastOp, VPUIP::PermuteCastOp, VPUIP::ShapeCastOp>(
-                    typeCastOp)) {
-            childTypeCast->setOperand(0, newBuffer);
-        }
-        typeCastOp->replaceAllUsesWith(typeCastOp->getOperands());
-        typeCastOp->erase();
         newOutput = copyOp.getOutputBuff();
     }
 
@@ -187,6 +187,14 @@ void fuseLastCopy(VPUIP::CopyOp copyOp, const AliasesInfo& aliasesInfo, Logger l
 
     copyOp.replaceAllUsesWith(newOutput);
     copyOp->erase();
+
+    auto preOfTypeCastOp = typeCastOp;
+    while (isCastOp(preOfTypeCastOp)) {
+        auto currOp = preOfTypeCastOp;
+        preOfTypeCastOp = preOfTypeCastOp->getOperand(0).getDefiningOp();
+        currOp->erase();
+    }
+
     if (concatViewOp) {
         concatViewOp->erase();
     }

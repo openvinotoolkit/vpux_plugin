@@ -338,12 +338,13 @@ bool checkExpandU8Pattern(VPUIP::ExpandOp expandOp, Logger log) {
     log.trace("Got ExpandOp at {0}. Try to find fuse pattern.", expandOp->getLoc());
 
     /*The expandOp was inserted because align to 16 on channel dim. So the expand data is useless. We can fill any data
-     * to the expand data. But for convolution, when expand with FP16 precision the expand data will affect the
-     * calculation results, if we fill unnormal data like null. For U8 precision any value is a normal data, so we can
-     * fill any data to the expand data*/
+     * to the expand data. But for convolution, when expand with floating point precision (FP16, FP8 etc.) the expand
+     * data will affect the calculation results, if we fill unnormal data like NaN/Inf. For U8 precision any value is a
+     * normal data, so we can fill any data to the expand data*/
     const auto outputType = expandOp.getOutput().getType().cast<vpux::NDTypeInterface>();
-    if (!outputType.getElementType().isa<mlir::quant::QuantizedType>()) {
-        log.nest().trace("ExpandOp convert to DMA shloud with U8 precision.");
+    if (const auto qType = mlir::dyn_cast<mlir::quant::QuantizedType>(outputType.getElementType());
+        qType == nullptr || !qType.getStorageType().isInteger(8)) {
+        log.nest().trace("ExpandOp convert to DMA should have U8 precision.");
         return false;
     }
 
@@ -353,19 +354,8 @@ bool checkExpandU8Pattern(VPUIP::ExpandOp expandOp, Logger log) {
 bool checkExpandFP16Pattern(VPUIP::ExpandOp expandOp, Logger log) {
     log.trace("Got ExpandOpFP16 at {0}. Try to find fuse pattern.", expandOp->getLoc());
 
-    const auto hasOneOrSameUser = [](mlir::Operation* op) -> bool {
-        auto users = op->getUsers();
-        if (users.empty()) {
-            return false;
-        }
-        auto firstUser = *users.begin();
-        return std::all_of(std::next(users.begin()), users.end(), [&](mlir::Operation* userOp) {
-            return firstUser == userOp;
-        });
-    };
-
     const auto isCopyOpWithOneUser = [&](mlir::Operation* op) -> bool {
-        if (!hasOneOrSameUser(op)) {
+        if (!VPUIP::hasOneOrSameUser(op)) {
             return false;
         }
 
@@ -377,7 +367,7 @@ bool checkExpandFP16Pattern(VPUIP::ExpandOp expandOp, Logger log) {
     };
 
     const auto isNceButNotConvOpWithOneUser = [&](mlir::Operation* op) -> bool {
-        if (!hasOneOrSameUser(op)) {
+        if (!VPUIP::hasOneOrSameUser(op)) {
             return false;
         }
 
@@ -730,10 +720,6 @@ private:
 
 mlir::LogicalResult FuseMemPermuteWithClusterCopy::matchAndRewrite(VPUIP::SwKernelOp swKernelOp,
                                                                    mlir::PatternRewriter& rewriter) const {
-    if (VPUIP::hasDynamicShape(swKernelOp)) {
-        return mlir::failure();
-    }
-
     if (!checkPermuteWithCopyPattern(swKernelOp, _log)) {
         return mlir::failure();
     }
@@ -823,10 +809,6 @@ private:
 
 mlir::LogicalResult FuseMemPermuteWithCopy::matchAndRewrite(VPUIP::SwKernelOp swKernelOp,
                                                             mlir::PatternRewriter& rewriter) const {
-    if (VPUIP::hasDynamicShape(swKernelOp)) {
-        return mlir::failure();
-    }
-
     if (!checkPermuteWithCopyPattern(swKernelOp, _log)) {
         return mlir::failure();
     }

@@ -78,10 +78,10 @@ void InsertCopyForEltwiseInPlaceInputPass::insertCopies(VPUIP::NCEClusterTaskOp 
     NDTypeInterface inputType = nullptr;
     if (inDistributedType != nullptr) {
         // DistributedBuffer
-        inputType = inDistributedType.getCompactType().cast<vpux::NDTypeInterface>();
+        inputType = mlir::cast<vpux::NDTypeInterface>(inDistributedType.getCompactType());
     } else {
         // memref
-        inputType = overwrittenInput.getType().cast<vpux::NDTypeInterface>();
+        inputType = mlir::cast<vpux::NDTypeInterface>(overwrittenInput.getType());
     }
 
     // To DDR
@@ -113,6 +113,15 @@ void InsertCopyForEltwiseInPlaceInputPass::insertCopies(VPUIP::NCEClusterTaskOp 
     });
 
     auto eltwiseOutput = VPUIP::getLayerOutputs(eltwise)[0];
+    // Ensure eltwise output element type is compatible
+    auto outputType = mlir::cast<vpux::NDTypeInterface>(eltwiseOutput.getType());
+    auto bufferResultType = mlir::cast<vpux::NDTypeInterface>(bufferResult.getType());
+    auto isQuantElemType = mlir::dyn_cast<mlir::quant::QuantizedType>(outputType.getElementType());
+    if (isQuantElemType && outputType.getElementType() != bufferResultType.getElementType()) {
+        auto quantizeCastOp = builder.create<VPUIP::QuantizeCastOp>(appendLoc(eltwise->getLoc(), "_cast_output"),
+                                                                    outputType, bufferResult);
+        bufferResult = quantizeCastOp.getResult();
+    }
     eltwiseOutput.replaceUsesWithIf(bufferResult, [&](mlir::OpOperand& opOperand) {
         return opOperand.getOwner() == eltwise;
     });

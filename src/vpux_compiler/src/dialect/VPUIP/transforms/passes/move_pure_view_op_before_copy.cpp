@@ -297,13 +297,18 @@ mlir::LogicalResult LayerRewriterBase::matchAndRewrite(mlir::ViewLikeOpInterface
             return origDistribution;
         }
 
+        const auto duplicatedOutputMode = VPU::DistributionModeAttr::get(ctx, VPU::DistributionMode::DUPLICATED);
         if (!VPU::isDistributedAttrWithExplicitShapesAndOffsets(origDistribution)) {
             if (isRankChangedByViewOp) {
                 auto axesMapping = getDistributedAxesMapping.value();
                 return VPUIP::changeDistributedAxisOnDistributionInfoAttr(
                         origDistribution, axesMapping.first, axesMapping.second, viewOpOutputType.getShape());
             }
-            return origDistribution;
+
+            return VPU::DistributionInfoAttr::get(ctx, duplicatedOutputMode, nullptr, nullptr, nullptr, nullptr,
+                                                  origDistribution.getNumClusters(), nullptr,
+                                                  origDistribution.getUniformDistributedSegments(), nullptr, nullptr,
+                                                  nullptr, nullptr, nullptr);
         }
 
         // GenericReshape and ShapeCast can change the output shape without needing to follow any rule.
@@ -313,7 +318,6 @@ mlir::LogicalResult LayerRewriterBase::matchAndRewrite(mlir::ViewLikeOpInterface
         // However, GenericReshape & ShapeCast are ops that work on the memory view and do not need compute view
         // at all, so to ensure we do not end up with an output with a clustering dim that cannot be tiled, we're
         // setting distribution as DUPLICATED for output.
-        auto duplicatedOutputMode = VPU::DistributionModeAttr::get(ctx, VPU::DistributionMode::DUPLICATED);
         return VPU::getNonOverlappedDistributedAttr(viewOpOutputShape, duplicatedOutputMode, nullptr,
                                                     origDistribution.getNumClusters(), nullptr,
                                                     origDistribution.getUniformDistributedSegments(), ctx);

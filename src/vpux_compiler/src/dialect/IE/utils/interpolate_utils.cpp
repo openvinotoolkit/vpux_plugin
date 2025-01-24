@@ -4,7 +4,10 @@
 //
 
 #include "vpux/compiler/dialect/IE/utils/interpolate_utils.hpp"
+#include "vpux/compiler/core/attributes/dims_order.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
+#include "vpux/utils/core/array_ref.hpp"
+#include "vpux/utils/core/error.hpp"
 #include "vpux/utils/core/numeric.hpp"
 
 #include "vpux/compiler/utils/error.hpp"
@@ -88,7 +91,7 @@ mlir::FailureOr<SmallVector<double>> extractFPVector(mlir::Location loc, const m
         const auto valueContent = valueConst.getContent();
         return to_small_vector(valueContent.getValues<double>());
     }
-    return errorAt(loc, "Parameter were not provided");
+    return mlir::failure();
 }
 
 SmallVector<int64_t> getInterpAxesVal(mlir::Location loc, const mlir::Value axes,
@@ -104,6 +107,35 @@ SmallVector<int64_t> getInterpAxesVal(mlir::Location loc, const mlir::Value axes
     SmallVector<int64_t> axesVal(inType.getRank());
     std::iota(axesVal.begin(), axesVal.end(), 0);
     return axesVal;
+}
+
+mlir::FailureOr<int64_t> getInnermostAxis(mlir::Location loc, DimsOrder dimsOrder, ArrayRef<int64_t> axes) {
+    if (axes.empty()) {
+        return errorAt(loc, "Got empty axes");
+    }
+    const auto numDims = static_cast<int64_t>(dimsOrder.numDims());
+    auto innermostAxis = axes[0];
+    for (auto axis : axes) {
+        if (axis < 0 || axis >= numDims) {
+            return errorAt(loc, "Axis {0} is out of expected range [0, {1}]", axis, numDims - 1);
+        }
+        if (dimsOrder.dimPos(Dim(innermostAxis)) < dimsOrder.dimPos(Dim(axis))) {
+            innermostAxis = axis;
+        }
+    }
+    return innermostAxis;
+}
+
+int64_t getInterpCoordinatesSize(mlir::Value output, int64_t innermostAxis) {
+    const auto outShape = getShape(output).raw();
+    const auto lenghtResized = outShape[innermostAxis];
+    return lenghtResized;
+}
+
+int64_t getInterpLambdasSize(mlir::Value output, int64_t innermostAxis) {
+    const auto outShape = getShape(output).raw();
+    const auto lenghtResized = outShape[innermostAxis];
+    return lenghtResized * 2;
 }
 
 void applyInterpPads(MutableArrayRef<int64_t> outShape, ArrayRef<int64_t> padsBegin, ArrayRef<int64_t> padsEnd) {

@@ -27,6 +27,15 @@ bool vpux::IE::isEligiblePostOp(mlir::Operation* op, Logger log) {
         return true;
     }
 
+    // Insert AvgPool between MaxPool and Clamp since MaxPool fused with Clamp is not fully supported
+    // by firmware. Tracking Number: E#145636
+    auto parentMaxPoolOp = op->getOperand(0).getDefiningOp<IE::MaxPoolOp>();
+    if (parentMaxPoolOp != nullptr && mlir::isa<IE::ClampOp>(op)) {
+        log.trace("A MaxPool Op followed by a Clamp Op at {0} will not trigger a fusion, insert an AvgPool Op then",
+                  op->getLoc());
+        return true;
+    }
+
     log.trace("A PostOp at {0} has already got a suitable producer", op->getLoc());
     return false;
 }

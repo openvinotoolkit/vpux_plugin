@@ -5,7 +5,7 @@
 
 #pragma once
 
-#include "intel_npu/al/icompiler.hpp"
+#include "intel_npu/icompiler.hpp"
 #include "vpux/utils/core/mem_size.hpp"
 
 namespace vpux {
@@ -55,7 +55,7 @@ struct NetworkDescriptionView {
 
 class CompilerImpl final : public intel_npu::ICompiler {
 public:
-    uint32_t getSupportedOpsetVersion() const final;
+    uint32_t getSupportedOpsetVersion() const;
 
     // Mutable model variant for direct use with deserialized model in VCL
     intel_npu::NetworkDescription compile(const std::shared_ptr<ov::Model>& model,

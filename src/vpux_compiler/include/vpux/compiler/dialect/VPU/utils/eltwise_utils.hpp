@@ -25,5 +25,7 @@ bool isEltwiseLhsActivation(ConcreteOp op) {
     return (lhsType == outShapeRes);
 }
 
+vpux::VPU::EltwiseType decodeNceEltwiseType(mlir::Operation* operation);
+
 }  // namespace VPU
 }  // namespace vpux

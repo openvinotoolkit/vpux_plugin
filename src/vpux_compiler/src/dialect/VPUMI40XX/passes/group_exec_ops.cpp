@@ -8,8 +8,7 @@
 #include "vpux/compiler/dialect/VPUMI40XX/passes.hpp"
 #include "vpux/compiler/dialect/VPUMI40XX/utils.hpp"
 #include "vpux/compiler/dialect/VPURegMapped/ops.hpp"
-
-#include <npu_40xx_nnrt.hpp>
+#include "vpux/compiler/dialect/VPURegMapped/utils.hpp"
 
 using namespace vpux;
 
@@ -68,7 +67,7 @@ VPURegMapped::TaskOpInterface getNextUntil(VPURegMapped::TaskOpInterface start, 
             secondaryCount += llvm::count_if(next.getResult().getUsers(), isTaskOpOfType);
             primaryCount++;
         }
-    } while (next && (primaryCount < maxPrimaryCount) && (secondaryCount < maxSecondaryCount));
+    } while (next && (primaryCount <= maxPrimaryCount) && (secondaryCount <= maxSecondaryCount));
 
     return start;
 }
@@ -116,30 +115,14 @@ VPUMI40XX::ExecutableTaskOpInterface getBarrieredOp(VPURegMapped::TaskOpInterfac
     return nullptr;
 }
 
-size_t getMetadataSize(VPURegMapped::TaskType taskType) {
+size_t getMetadataSize(VPURegMapped::TaskType taskType, VPU::ArchKind archKind) {
     // TODO: E109456
-    switch (taskType) {
-    case VPURegMapped::TaskType::DPUInvariant:
-        return npu40xx::nn_public::VPU_INVARIANT_COUNT / 2;
-        break;
-    case VPURegMapped::TaskType::DPUVariant:
-        return npu40xx::nn_public::VPU_VARIANT_COUNT / 2;
-        break;
-    case VPURegMapped::TaskType::ActKernelInvocation:
-        return npu40xx::nn_public::VPU_KERNEL_INVO_COUNT / 2;
-        break;
-    case VPURegMapped::TaskType::ActKernelRange:
-        return npu40xx::nn_public::VPU_KERNEL_RANGE_COUNT / 2;
-        break;
-    default:
-        VPUX_THROW("Unknown taskType {0}", taskType);
-    }
-
-    return 0;
+    return VPURegMapped::getDefaultTaskListCount(taskType, archKind) / 2;
 }
 
 void groupExecOps(VPUMI40XX::MappedInferenceOp mpi, int64_t tilesCount, const VPURegMapped::TaskType primary,
                   const VPURegMapped::TaskType secondary) {
+    auto archKind = VPU::getArch(mpi.getOperation());
     for (int64_t tileIdx = 0; tileIdx < tilesCount; tileIdx++) {
         auto startingVal = mpi.getListHead(primary, tileIdx);
         if (!startingVal)
@@ -160,7 +143,8 @@ void groupExecOps(VPUMI40XX::MappedInferenceOp mpi, int64_t tilesCount, const VP
         mlir::ValueRange previosGroup;
         do {
             auto minPrimary = traveler;
-            auto maxPrimary = getNextUntil(traveler, secondary, getMetadataSize(primary), getMetadataSize(secondary));
+            auto maxPrimary = getNextUntil(traveler, secondary, getMetadataSize(primary, archKind),
+                                           getMetadataSize(secondary, archKind));
 
             auto minSecondaryIt = vpux::min_element(
                     minPrimary.getResult().getUsers() | details::FilterRangeTag<isSecondaryTaskTypeFilter>{secondary},

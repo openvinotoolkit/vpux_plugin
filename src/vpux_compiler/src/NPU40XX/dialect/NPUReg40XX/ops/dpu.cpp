@@ -6,17 +6,11 @@
 #include <mlir/IR/BuiltinTypes.h>
 
 #include "vpux/compiler/NPU40XX/dialect/NPUReg40XX/ops.hpp"
-#include "vpux/compiler/NPU40XX/dialect/NPUReg40XX/types.hpp"
-#include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
 #include "vpux/compiler/utils/ELF/utils.hpp"
-#include "vpux/utils/core/checked_cast.hpp"
 #include "vpux/utils/core/error.hpp"
 
 #include <stdint.h>
 #include <stdio.h>
-#include <algorithm>
-#include <array>
-#include <string>
 #include <vector>
 
 #include <npu_40xx_nnrt.hpp>
@@ -29,15 +23,15 @@ namespace NPUReg40XX {
 void DPUInvariantOp::serialize(elf::writer::BinaryDataSection<uint8_t>& binDataSection) {
     auto invariantDesc = getDpuInvariantDescriptor().getRegMapped();
 
-    VPUX_THROW_UNLESS(Byte(sizeof(nn_public::VpuDPUInvariant)) == invariantDesc.getWidth(),
+    VPUX_THROW_UNLESS(sizeof(nn_public::VpuDPUInvariant) == invariantDesc.size(),
                       "HW VpuDPUInvariant size {0} != regMapped representation size {1}.",
-                      sizeof(nn_public::VpuDPUInvariant), invariantDesc.getWidth());
+                      sizeof(nn_public::VpuDPUInvariant), invariantDesc.size());
 
-    auto serializedInvariantDesc = invariantDesc.serialize();
+    auto serializedInvariantDesc = invariantDesc.getStorage();
     binDataSection.appendData(serializedInvariantDesc.data(), serializedInvariantDesc.size());
 }
 
-size_t DPUInvariantOp::getBinarySize() {
+size_t DPUInvariantOp::getBinarySize(VPU::ArchKind) {
     return sizeof(nn_public::VpuDPUInvariant);
 }
 
@@ -60,26 +54,25 @@ std::vector<ELF::RelocationInfo> DPUInvariantOp::getRelocationInfo(ELF::SymbolRe
 
         // input address gets relocated 3/4 times and gets masked with CMX_BASE_ADDR_MSK = 0x001F'FFFF
         if (opType != VPUIP::NCETaskType::ELTWISE) {
-            relocs.push_back(ELF::RelocationInfo(
-                    inputSymRef, targetSection,
-                    regsOffset + offsetof(nn_public::VpuDPUInvariantRegisters, act_offset[0]),
-                    ELF::RelocationType::R_VPU_LO_21, addend, "Input (act_offset[0]) in DPU invariant reloc"));
+            relocs.emplace_back(inputSymRef, targetSection,
+                                regsOffset + offsetof(nn_public::VpuDPUInvariantRegisters, act_offset[0]),
+                                ELF::RelocationType::R_VPU_LO_21, addend,
+                                "Input (act_offset[0]) in DPU invariant reloc");
         } else {
-            relocs.push_back(
-                    ELF::RelocationInfo(inputSymRef, targetSection,
-                                        regsOffset + offsetof(nn_public::VpuDPUInvariantRegisters, tensor_start),
-                                        ELF::RelocationType::R_VPU_LO_21_RSHIFT_4, addend,
-                                        "tensor_start (for ELTWISE) in DPU invariant reloc"));
+            relocs.emplace_back(inputSymRef, targetSection,
+                                regsOffset + offsetof(nn_public::VpuDPUInvariantRegisters, tensor_start),
+                                ELF::RelocationType::R_VPU_LO_21_RSHIFT_4, addend,
+                                "tensor_start (for ELTWISE) in DPU invariant reloc");
         }
-        relocs.push_back(ELF::RelocationInfo(
-                inputSymRef, targetSection, regsOffset + offsetof(nn_public::VpuDPUInvariantRegisters, act_offset[1]),
-                ELF::RelocationType::R_VPU_LO_21, addend, "Input (act_offset[1]) in DPU invariant reloc"));
-        relocs.push_back(ELF::RelocationInfo(
-                inputSymRef, targetSection, regsOffset + offsetof(nn_public::VpuDPUInvariantRegisters, act_offset[2]),
-                ELF::RelocationType::R_VPU_LO_21, addend, "Input (act_offset[2]) in DPU invariant reloc"));
-        relocs.push_back(ELF::RelocationInfo(
-                inputSymRef, targetSection, regsOffset + offsetof(nn_public::VpuDPUInvariantRegisters, act_offset[3]),
-                ELF::RelocationType::R_VPU_LO_21, addend, "Input (act_offset[3]) in DPU invariant reloc"));
+        relocs.emplace_back(inputSymRef, targetSection,
+                            regsOffset + offsetof(nn_public::VpuDPUInvariantRegisters, act_offset[1]),
+                            ELF::RelocationType::R_VPU_LO_21, addend, "Input (act_offset[1]) in DPU invariant reloc");
+        relocs.emplace_back(inputSymRef, targetSection,
+                            regsOffset + offsetof(nn_public::VpuDPUInvariantRegisters, act_offset[2]),
+                            ELF::RelocationType::R_VPU_LO_21, addend, "Input (act_offset[2]) in DPU invariant reloc");
+        relocs.emplace_back(inputSymRef, targetSection,
+                            regsOffset + offsetof(nn_public::VpuDPUInvariantRegisters, act_offset[3]),
+                            ELF::RelocationType::R_VPU_LO_21, addend, "Input (act_offset[3]) in DPU invariant reloc");
     }
 
     //
@@ -87,21 +80,19 @@ std::vector<ELF::RelocationInfo> DPUInvariantOp::getRelocationInfo(ELF::SymbolRe
     //
     if (auto inputSparsityMap = getInputSparsityMap().value_or(nullptr)) {
         auto addend = ELF::getOffsetOfSymRef(symRefMap, inputSparsityMap);
-        relocs.push_back(ELF::RelocationInfo(inputSparsityMap, targetSection,
-                                             regsOffset + offsetof(nn_public::VpuDPUInvariantRegisters, sparsity_addr),
-                                             ELF::RelocationType::R_VPU_LO_21, addend,
-                                             "Input sparsity map in DPU invariant reloc"));
+        relocs.emplace_back(inputSparsityMap, targetSection,
+                            regsOffset + offsetof(nn_public::VpuDPUInvariantRegisters, sparsity_addr),
+                            ELF::RelocationType::R_VPU_LO_21, addend, "Input sparsity map in DPU invariant reloc");
 
         if (opType == VPUIP::NCETaskType::ELTWISE) {
             auto elop_addend = addend;
             if (auto tensorBSparsityMapSymRef = getWeightsSparsityMap().value_or(nullptr)) {
                 elop_addend = ELF::getOffsetOfSymRef(symRefMap, tensorBSparsityMapSymRef);
             }
-            relocs.push_back(
-                    ELF::RelocationInfo(inputSparsityMap, targetSection,
-                                        regsOffset + offsetof(nn_public::VpuDPUInvariantRegisters, elops_sparsity_addr),
-                                        ELF::RelocationType::R_VPU_LO_21, elop_addend,
-                                        "Input sparsity map (for ELTWISE) in DPU invariant reloc"));
+            relocs.emplace_back(inputSparsityMap, targetSection,
+                                regsOffset + offsetof(nn_public::VpuDPUInvariantRegisters, elops_sparsity_addr),
+                                ELF::RelocationType::R_VPU_LO_21, elop_addend,
+                                "Input sparsity map (for ELTWISE) in DPU invariant reloc");
         }
     }
 
@@ -110,9 +101,9 @@ std::vector<ELF::RelocationInfo> DPUInvariantOp::getRelocationInfo(ELF::SymbolRe
     //
     if (auto inputSETable = getInputStorageElementTable().value_or(nullptr)) {
         auto addend = ELF::getOffsetOfSymRef(symRefMap, inputSETable);
-        relocs.push_back(ELF::RelocationInfo(
+        relocs.emplace_back(
                 inputSETable, targetSection, regsOffset + offsetof(nn_public::VpuDPUInvariantRegisters, se_addr),
-                ELF::RelocationType::R_VPU_LO_21, addend, "Input SE table (se_addr) in DPU invariant reloc"));
+                ELF::RelocationType::R_VPU_LO_21, addend, "Input SE table (se_addr) in DPU invariant reloc");
     }
 
     //
@@ -125,25 +116,31 @@ std::vector<ELF::RelocationInfo> DPUInvariantOp::getRelocationInfo(ELF::SymbolRe
         // Relocation needs to setup wt_offset to the base CMX addr
         auto addend = 0;
         auto newInput = getInput();
+        auto weights = getWeights().value_or(nullptr);
 
-        relocs.push_back(ELF::RelocationInfo(
+        if (getIsZeroOffsetWeightsTableAttr() != nullptr && weights) {
+            newInput = weights;
+            addend = ELF::getOffsetOfSymRef(symRefMap, weights);
+        }
+
+        relocs.emplace_back(
                 newInput, targetSection, regsOffset + offsetof(nn_public::VpuDPUInvariantRegisters, wt_offset),
                 ELF::RelocationType::R_VPU_LO_21, addend,
-                "Weights (wt_offset) in DPU invariant reloc"));  // Using input as source just as a placeholder
+                "Weights (wt_offset) in DPU invariant reloc");  // Using input as source just as a placeholder
     }
 
     //
     // Tensor2 Relocs
     //
-    // tensor2_start needs to be set for dual elops (ELTWISE with 2 input tensors) in case of per output channel
+    // reserved1 needs to be set for dual elops (ELTWISE with 2 input tensors) in case of per output channel
     // scaling, i.e. when weightTable is provided
     if (getWeightTable().has_value() && opType == VPUIP::NCETaskType::ELTWISE) {
         if (auto weights = getWeights().value_or(nullptr)) {
             auto addend = ELF::getOffsetOfSymRef(symRefMap, weights);
-            relocs.push_back(ELF::RelocationInfo(weights, targetSection,
-                                                 regsOffset + offsetof(nn_public::VpuDPUInvariantRegisters, reserved1),
-                                                 ELF::RelocationType::R_VPU_LO_21_RSHIFT_4, addend,
-                                                 "Weights (for ELTWISE, reserved1) in DPU invariant reloc"));
+            relocs.emplace_back(weights, targetSection,
+                                regsOffset + offsetof(nn_public::VpuDPUInvariantRegisters, reserved1),
+                                ELF::RelocationType::R_VPU_LO_21_RSHIFT_4, addend,
+                                "Weights (for ELTWISE, reserved1) in DPU invariant reloc");
         }
     }
 
@@ -152,10 +149,10 @@ std::vector<ELF::RelocationInfo> DPUInvariantOp::getRelocationInfo(ELF::SymbolRe
     //
     if (auto sprLookupTable = getSprLookupTable().value_or(nullptr)) {
         auto addend = ELF::getOffsetOfSymRef(symRefMap, sprLookupTable);
-        relocs.push_back(ELF::RelocationInfo(sprLookupTable, targetSection,
-                                             regsOffset + offsetof(nn_public::VpuDPUInvariantRegisters, reserved2),
-                                             ELF::RelocationType::R_VPU_16_LSB_17_RSHIFT_5, addend,
-                                             "Spr lookup table (reserved2) in DPU invariant reloc"));
+        relocs.emplace_back(sprLookupTable, targetSection,
+                            regsOffset + offsetof(nn_public::VpuDPUInvariantRegisters, reserved2),
+                            ELF::RelocationType::R_VPU_16_LSB_21_RSHIFT_5, addend,
+                            "Spr lookup table (reserved2) in DPU invariant reloc");
     }
 
     //
@@ -165,16 +162,16 @@ std::vector<ELF::RelocationInfo> DPUInvariantOp::getRelocationInfo(ELF::SymbolRe
     if (!getIsContinued() && getOutput().has_value()) {
         auto outputSymRef = getOutput().value().cast<mlir::SymbolRefAttr>();
         auto addend = ELF::getOffsetOfSymRef(symRefMap, outputSymRef);
-        relocs.push_back(ELF::RelocationInfo(
-                outputSymRef, targetSection, regsOffset + offsetof(nn_public::VpuDPUInvariantRegisters, odu_ac_base),
-                ELF::RelocationType::R_VPU_LO_21, addend, "Output (odu_ac_base) in DPU invariant reloc"));
+        relocs.emplace_back(outputSymRef, targetSection,
+                            regsOffset + offsetof(nn_public::VpuDPUInvariantRegisters, odu_ac_base),
+                            ELF::RelocationType::R_VPU_LO_21, addend, "Output (odu_ac_base) in DPU invariant reloc");
 
         if (auto outputSparsityMap = getOutputSparsityMap().value_or(nullptr)) {
             auto addend = ELF::getOffsetOfSymRef(symRefMap, outputSparsityMap);
-            relocs.push_back(ELF::RelocationInfo(outputSparsityMap, targetSection,
-                                                 regsOffset + offsetof(nn_public::VpuDPUInvariantRegisters, sp_base),
-                                                 ELF::RelocationType::R_VPU_LO_21_MULTICAST_BASE, addend,
-                                                 "Output sparsity map (sp_base) in DPU invariant reloc"));
+            relocs.emplace_back(outputSparsityMap, targetSection,
+                                regsOffset + offsetof(nn_public::VpuDPUInvariantRegisters, sp_base),
+                                ELF::RelocationType::R_VPU_LO_21_MULTICAST_BASE, addend,
+                                "Output sparsity map (sp_base) in DPU invariant reloc");
         }
     }
 
@@ -184,23 +181,23 @@ std::vector<ELF::RelocationInfo> DPUInvariantOp::getRelocationInfo(ELF::SymbolRe
     if (getProfilingData().has_value()) {
         // Relocation needs to setup hwp_cmx_mem_addr to the base CMX addr
         auto addend = 0;
-        relocs.push_back(ELF::RelocationInfo(
+        relocs.emplace_back(
                 getInput(), targetSection, regsOffset + offsetof(nn_public::VpuDPUInvariantRegisters, hwp_cmx_mem_addr),
                 ELF::RelocationType::R_VPU_CMX_LOCAL_RSHIFT_5, addend,
-                "HWP (hwp_cmx_mem_addr) in DPU invariant reloc"));  // Using input as source just as a placeholder
+                "HWP (hwp_cmx_mem_addr) in DPU invariant reloc");  // Using input as source just as a placeholder
     }
 
     // set invariant pointer. workaround preemtion: #E-97614
     auto addend = ELF::getOffsetOfSymRef(symRefMap, getTaskLocation().value());
-    relocs.push_back(ELF::RelocationInfo(getTaskLocation().value(), targetSection,
-                                         offsetof(nn_public::VpuDPUInvariant, registers_.tensor_mode),
-                                         ELF::RelocationType::R_VPU_16_LSB_17_RSHIFT_5_LSHIFT_16, addend,
-                                         "Invariant pointer in DPU invariant reloc"));
+    relocs.emplace_back(getTaskLocation().value(), targetSection,
+                        offsetof(nn_public::VpuDPUInvariant, registers_.tensor_mode),
+                        ELF::RelocationType::R_VPU_16_LSB_21_RSHIFT_5_LSHIFT_16, addend,
+                        "Invariant pointer in DPU invariant reloc");
 
     return relocs;
 }
 
-size_t DPUInvariantOp::getAlignmentRequirements() {
+size_t DPUInvariantOp::getAlignmentRequirements(VPU::ArchKind) {
     return alignof(nn_public::VpuDPUInvariant);
 }
 
@@ -216,15 +213,15 @@ bool DPUInvariantOp::hasMemoryFootprint() {
 void DPUVariantOp::serialize(elf::writer::BinaryDataSection<uint8_t>& binDataSection) {
     auto variantDesc = getDpuVariantDescriptor().getRegMapped();
 
-    VPUX_THROW_UNLESS(Byte(sizeof(nn_public::VpuDPUVariant)) == variantDesc.getWidth(),
+    VPUX_THROW_UNLESS(sizeof(nn_public::VpuDPUVariant) == variantDesc.size(),
                       "HW VpuDPUVariant size {0} != regMapped representation size {1}.",
-                      sizeof(nn_public::VpuDPUVariant), variantDesc.getWidth());
+                      sizeof(nn_public::VpuDPUVariant), variantDesc.size());
 
-    auto serializedVariantDesc = variantDesc.serialize();
+    auto serializedVariantDesc = variantDesc.getStorage();
     binDataSection.appendData(serializedVariantDesc.data(), serializedVariantDesc.size());
 }
 
-size_t DPUVariantOp::getBinarySize() {
+size_t DPUVariantOp::getBinarySize(VPU::ArchKind) {
     return sizeof(nn_public::VpuDPUVariant);
 }
 
@@ -242,53 +239,52 @@ std::vector<ELF::RelocationInfo> DPUVariantOp::getRelocationInfo(ELF::SymbolRefe
     if (auto weightTable = getWeightTable().value_or(nullptr)) {
         // weight_start reloc R_32_SUM with weight_table sym
         auto addend = ELF::getOffsetOfSymRef(symRefMap, weightTable);
-        relocs.push_back(ELF::RelocationInfo(
+        relocs.emplace_back(
                 weightTable, targetSection, regsOffset + offsetof(nn_public::VpuDPUVariantRegisters, weight_start),
-                ELF::RelocationType::R_VPU_LO_21_SUM, addend, "Weights (weight_start) in DPU variant reloc"));
+                ELF::RelocationType::R_VPU_LO_21_SUM, addend, "Weights (weight_start) in DPU variant reloc");
     } else if (opType == VPUIP::NCETaskType::ELTWISE) {
         if (auto weights = getWeights().value_or(nullptr)) {
             auto addend = ELF::getOffsetOfSymRef(symRefMap, weights);
-            relocs.push_back(ELF::RelocationInfo(weights, targetSection,
-                                                 regsOffset + offsetof(nn_public::VpuDPUVariantRegisters, weight_start),
-                                                 ELF::RelocationType::R_VPU_LO_21_RSHIFT_4, addend,
-                                                 "Weights (for ELTWISE, weight_start) in DPU variant reloc"));
+            relocs.emplace_back(weights, targetSection,
+                                regsOffset + offsetof(nn_public::VpuDPUVariantRegisters, weight_start),
+                                ELF::RelocationType::R_VPU_LO_21_RSHIFT_4, addend,
+                                "Weights (for ELTWISE, weight_start) in DPU variant reloc");
         }
     }
 
     // Set the additional invariant pointer in the VpuDPUVariant struct
     if (auto linkedInvariant = getInvariantTaskLocation()) {
         auto addend = ELF::getOffsetOfSymRef(symRefMap, linkedInvariant);
-        relocs.push_back(ELF::RelocationInfo(linkedInvariant, targetSection,
-                                             offsetof(nn_public::VpuDPUVariant, invariant_) +
-                                                     offsetof(nn_public::VpuPtr<nn_public::VpuDPUInvariant>, ptr),
-                                             ELF::RelocationType::R_VPU_64_BIT_OR_B21_B26_UNSET, addend,
-                                             "Invariant pointer in DPU variant reloc"));
+        relocs.emplace_back(linkedInvariant, targetSection,
+                            offsetof(nn_public::VpuDPUVariant, invariant_) +
+                                    offsetof(nn_public::VpuPtr<nn_public::VpuDPUInvariant>, ptr),
+                            ELF::RelocationType::R_VPU_64_BIT_OR_B21_B26_UNSET, addend,
+                            "Invariant pointer in DPU variant reloc");
 
-        relocs.push_back(ELF::RelocationInfo(linkedInvariant, targetSection,
-                                             regsOffset + offsetof(nn_public::VpuDPUVariantRegisters, invar_ptr),
-                                             ELF::RelocationType::R_VPU_16_LSB_17_RSHIFT_5, addend,
-                                             "Invariant pointer register in DPU variant registers reloc"));
+        relocs.emplace_back(linkedInvariant, targetSection,
+                            regsOffset + offsetof(nn_public::VpuDPUVariantRegisters, invar_ptr),
+                            ELF::RelocationType::R_VPU_16_LSB_21_RSHIFT_5, addend,
+                            "Invariant pointer register in DPU variant registers reloc");
     }
 
     // set variant pointer. workaround preemtion: #E-97614
     auto addend = ELF::getOffsetOfSymRef(symRefMap, getTaskLocation().value());
-    relocs.push_back(ELF::RelocationInfo(getTaskLocation().value(), targetSection,
-                                         offsetof(nn_public::VpuDPUVariant, registers_.dpu_cfg),
-                                         ELF::RelocationType::R_VPU_16_LSB_17_RSHIFT_5_LSHIFT_CUSTOM, addend,
-                                         "Variant pointer in DPU variant reloc"));
+    relocs.emplace_back(getTaskLocation().value(), targetSection,
+                        offsetof(nn_public::VpuDPUVariant, registers_.dpu_cfg),
+                        ELF::RelocationType::R_VPU_16_LSB_21_RSHIFT_5_LSHIFT_CUSTOM, addend,
+                        "Variant pointer in DPU variant reloc");
 
     if (auto nextLink = getNextLinkAttr()) {
         auto addend = ELF::getOffsetOfSymRef(symRefMap, nextLink);
-        relocs.push_back(ELF::RelocationInfo(nextLink, targetSection,
-                                             regsOffset + offsetof(nn_public::VpuDPUVariantRegisters, var_cfg),
-                                             ELF::RelocationType::R_VPU_16_LSB_17_RSHIFT_5_LSHIFT_16, addend,
-                                             "Next link (var_cfg) in DPU variant reloc"));
+        relocs.emplace_back(nextLink, targetSection, regsOffset + offsetof(nn_public::VpuDPUVariantRegisters, var_cfg),
+                            ELF::RelocationType::R_VPU_16_LSB_21_RSHIFT_5_LSHIFT_16, addend,
+                            "Next link (var_cfg) in DPU variant reloc");
     }
 
     return relocs;
 }
 
-size_t DPUVariantOp::getAlignmentRequirements() {
+size_t DPUVariantOp::getAlignmentRequirements(VPU::ArchKind) {
     return alignof(nn_public::VpuDPUVariant);
 }
 

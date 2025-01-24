@@ -1,14 +1,16 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
+#include "vpux/compiler/core/attributes/tensor_attr.hpp"
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
+#include "vpux/compiler/dialect/IE/utils/shape_infer.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
-#include "vpux/compiler/utils/empty_node.hpp"
-
 #include "vpux/compiler/utils/infer_output_shape.hpp"
-#include "vpux/utils/core/checked_cast.hpp"
+
+#include <mlir/IR/BuiltinTypes.h>
+#include <cstdint>
 
 using namespace vpux;
 
@@ -29,17 +31,38 @@ mlir::LogicalResult vpux::IE::MaxPoolOp::inferReturnTypeComponents(
     const auto windowStrides = parseIntArrayAttr<int64_t>(maxPool.getStrides());
     const auto roundingType = maxPool.getRoundingType();
 
-    const auto inType = maxPool.getInput().getType().cast<mlir::ShapedType>().getElementType();
-    const auto inShape = maxPool.getInput().getType().cast<mlir::ShapedType>().getShape();
+    const auto inType = mlir::cast<NDTypeInterface>(maxPool.getInput().getType());
+    const auto inShapeInfo = ShapeInfo::fromNDType(inType);
 
-    auto outputShape = inferMaxPoolOutputShape(inShape, windowStrides, dataPaddingBelow, dataPaddingAbove, windowShape,
-                                               roundingType);
-
+    const auto outShapeInfo = inferMaxPoolOutputShape(inShapeInfo, windowStrides, dataPaddingBelow, dataPaddingAbove,
+                                                      windowShape, roundingType);
+    auto outShape = outShapeInfo.shape;
     if (maxPool.getOutputChannels().has_value()) {
-        outputShape[Dims4D::Act::C.ind()] = maxPool.getOutputChannels().value();
+        outShape[Dims4D::Act::C.ind()] = maxPool.getOutputChannels().value();
     }
 
-    inferredReturnShapes.emplace_back(outputShape, inType);
+    mlir::ArrayAttr outBoundsAttr = !outShapeInfo.bounds.empty() ? getIntArrayAttr(ctx, outShapeInfo.bounds) : nullptr;
+    const auto outDesc = vpux::getTensorAttr(ctx, inType.getDimsOrder(), /*memSpace=*/nullptr, outBoundsAttr);
 
+    inferredReturnShapes.emplace_back(outShape, inType.getElementType(), outDesc);
+
+    return mlir::success();
+}
+
+mlir::LogicalResult vpux::IE::MaxPoolOp::reifyResultShapes(mlir::OpBuilder& builder,
+                                                           mlir::ReifiedRankedShapedTypeDims& reifiedReturnShapes) {
+    const auto kernelSize = parseIntArrayAttr<int64_t>(getKernelSizeAttr());
+    const auto strides = parseIntArrayAttr<int64_t>(getStridesAttr());
+    const auto padBegin = parseIntArrayAttr<int64_t>(getPadsBeginAttr());
+    const auto padEnd = parseIntArrayAttr<int64_t>(getPadsEndAttr());
+
+    auto outShape =
+            reifyConvPoolTensors(builder, getInput(), getOutput(), kernelSize, strides, padBegin, padEnd, getLoc());
+
+    if (mlir::failed(outShape)) {
+        return outShape;
+    }
+
+    reifiedReturnShapes.emplace_back(std::move(outShape.value()));
     return mlir::success();
 }

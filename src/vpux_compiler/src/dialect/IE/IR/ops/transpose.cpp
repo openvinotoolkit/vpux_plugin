@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -14,6 +14,7 @@
 #include "vpux/compiler/utils/permute_utils.hpp"
 
 #include "vpux/utils/core/checked_cast.hpp"
+#include "vpux/utils/core/type_traits.hpp"
 
 #include <mlir/IR/PatternMatch.h>
 
@@ -21,7 +22,10 @@ using namespace vpux;
 
 namespace {
 
-mlir::LogicalResult getOrder(IE::TransposeOpAdaptor transpose, SmallVector<uint64_t>& order, mlir::Location loc) {
+template <typename TransposeType, std::enable_if_t<or_<std::is_same<TransposeType, IE::TransposeOp>,
+                                                       std::is_same<TransposeType, IE::TransposeOpAdaptor>>::value,
+                                                   bool> = true>
+mlir::LogicalResult getOrder(TransposeType transpose, SmallVector<uint64_t>& order, mlir::Location loc) {
     const auto getDefaultOrder = [](mlir::ShapedType inType) {
         SmallVector<uint64_t> orderIndices{};
         for (const auto& idx : irange(inType.getRank()) | reversed) {
@@ -38,16 +42,16 @@ mlir::LogicalResult getOrder(IE::TransposeOpAdaptor transpose, SmallVector<uint6
         return errorAt(loc, "Missed order representation");
     }
 
-    const auto inDataType = transpose.getInput().getType().cast<mlir::ShapedType>();
+    const auto inDataType = mlir::cast<mlir::ShapedType>(transpose.getInput().getType());
 
     if (transpose.getOrder() != nullptr) {
-        auto orderOp = transpose.getOrder().getDefiningOp<Const::DeclareOp>();
+        auto orderOp = transpose.getOrder().template getDefiningOp<Const::DeclareOp>();
         if (orderOp == nullptr) {
             return errorAt(loc, "Only constant input is supported");
         }
 
         const auto orderContent = orderOp.getContent();
-        const auto orderVals = orderContent.getValues<uint64_t>();
+        const auto orderVals = orderContent.template getValues<uint64_t>();
 
         order = orderVals.empty() ? getDefaultOrder(inDataType) : to_small_vector(orderVals);
 
@@ -75,7 +79,7 @@ mlir::LogicalResult vpux::IE::TransposeOp::inferReturnTypeComponents(
         return mlir::failure();
     }
 
-    const auto inDataType = transpose.getInput().getType().cast<mlir::RankedTensorType>();
+    const auto inDataType = mlir::cast<mlir::RankedTensorType>(transpose.getInput().getType());
     const auto inDataShape = inDataType.getShape();
 
     SmallVector<uint64_t> order{};
@@ -110,7 +114,7 @@ mlir::LogicalResult vpux::IE::TransposeOp::inferReturnTypeComponents(
     // Transpose must not change the order of its output. It only changes shapes.
     const auto outOrder = inOrder;
     const auto outBoundsAttr =
-            permuteBounds(ctx, inDataType.cast<vpux::BoundedTypeInterface>(), inOrder, outOrder, permutationMap);
+            permuteBounds(ctx, mlir::cast<vpux::BoundedTypeInterface>(inDataType), inOrder, outOrder, permutationMap);
     const auto outDesc = vpux::getTensorAttr(vpux::getOrder(inDataType), /*memSpace=*/nullptr, outBoundsAttr);
 
     inferredReturnShapes.emplace_back(ArrayRef(outShapeVec), outputElemType, outDesc);
@@ -281,7 +285,7 @@ mlir::LogicalResult CollapseMutualTransposes::matchAndRewrite(IE::TransposeOp tr
     auto firstTranspose = reshapeIn.getDefiningOp<IE::TransposeOp>();
     const auto firstTransposeIn = firstTranspose.getInput();
 
-    const auto shape = transposeOp.getOutput().getType().cast<vpux::NDTypeInterface>().getShape();
+    const auto shape = mlir::cast<NDTypeInterface>(transposeOp.getOutput().getType()).getShape();
     const auto newShape = to_small_vector(shape);
     const auto newShapeAttr = getIntArrayAttr(rewriter.getContext(), newShape);
     rewriter.replaceOpWithNewOp<IE::ReshapeOp>(transposeOp, firstTransposeIn, nullptr, false, newShapeAttr);
@@ -316,7 +320,7 @@ mlir::LogicalResult ConvertTrivialTransposeToReshape::matchAndRewrite(IE::Transp
         return mlir::failure();
     }
 
-    const auto outputShape = transposeOp.getOutput().getType().cast<mlir::ShapedType>().getShape();
+    const auto outputShape = mlir::cast<mlir::ShapedType>(transposeOp.getOutput().getType()).getShape();
     const auto outputShapeAttr = getIntArrayAttr(getContext(), outputShape);
     rewriter.replaceOpWithNewOp<IE::ReshapeOp>(transposeOp, transposeOp.getInput(), nullptr, false, outputShapeAttr);
 
@@ -338,7 +342,7 @@ void vpux::IE::TransposeOp::getCanonicalizationPatterns(mlir::RewritePatternSet&
 
 mlir::OpFoldResult vpux::IE::TransposeOp::fold(FoldAdaptor adaptor) {
     auto operands = adaptor.getOperands();
-    if (const auto cst = operands[0].dyn_cast_or_null<Const::EphemeralContentAttr>()) {
+    if (const auto cst = operands[0].dyn_cast_or_null<Const::ContentAttr>()) {
         if (getOrderValue().has_value()) {
             const auto orderAttr = DimsOrder::fromAffineMap(getOrderValue().value());
             return static_cast<Const::ContentAttr>(cst).transform().transpose(orderAttr).get();
@@ -346,7 +350,7 @@ mlir::OpFoldResult vpux::IE::TransposeOp::fold(FoldAdaptor adaptor) {
     }
 
     if (getInput().getType() == getOutput().getType() && getOrderValue().has_value()) {
-        const auto inputRank = static_cast<uint32_t>(getInput().getType().cast<mlir::ShapedType>().getRank());
+        const auto inputRank = static_cast<uint32_t>(mlir::cast<mlir::ShapedType>(getInput().getType()).getRank());
         const auto idMap = mlir::AffineMap::getMultiDimIdentityMap(inputRank, getContext());
         const auto orderMap = getOrderValue().value();
         if (idMap == orderMap) {
@@ -355,4 +359,28 @@ mlir::OpFoldResult vpux::IE::TransposeOp::fold(FoldAdaptor adaptor) {
     }
 
     return nullptr;
+}
+
+mlir::LogicalResult vpux::IE::TransposeOp::reifyResultShapes(mlir::OpBuilder& builder,
+                                                             mlir::ReifiedRankedShapedTypeDims& reifiedReturnShapes) {
+    SmallVector<mlir::OpFoldResult> shapes;
+    const auto loc = getLoc();
+    const auto inputShapedType = mlir::cast<mlir::ShapedType>(getInput().getType());
+    const auto outputShapedType = mlir::cast<mlir::ShapedType>(getOutput().getType());
+    SmallVector<uint64_t> order{};
+    if (::getOrder(*this, order, loc).failed()) {
+        return mlir::failure();
+    }
+    for (const auto& dimIdx : irange(outputShapedType.getRank())) {
+        if (outputShapedType.isDynamicDim(dimIdx)) {
+            // Dynamic dimension: return mlir::Value according to permutation.
+            mlir::OpFoldResult dimOp = builder.createOrFold<mlir::tensor::DimOp>(loc, getInput(), order[dimIdx]);
+            shapes.push_back(mlir::getValueOrCreateConstantIndexOp(builder, loc, dimOp));
+        } else {
+            // Static dimension: return mlir::IntegerAttr.
+            shapes.push_back(builder.getIndexAttr(inputShapedType.getDimSize(dimIdx)));
+        }
+    }
+    reifiedReturnShapes.emplace_back(std::move(shapes));
+    return mlir::success();
 }

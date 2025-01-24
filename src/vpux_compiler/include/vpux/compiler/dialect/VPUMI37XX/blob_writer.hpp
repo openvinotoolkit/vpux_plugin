@@ -5,18 +5,14 @@
 
 #pragma once
 
-#include <vpux/compiler/act_kernels/compilation.h>
 #include "vpux/compiler/core/attributes/shape.hpp"
 #include "vpux/compiler/core/attributes/strides.hpp"
-#include "vpux/compiler/dialect/VPUIP/IR/attributes.hpp"
 #include "vpux/compiler/dialect/VPURT/IR/attributes.hpp"
-#include "vpux/compiler/dialect/const/attributes/content.hpp"
 #include "vpux/compiler/utils/schema.hpp"
 
 #include "vpux/utils/core/array_ref.hpp"
 #include "vpux/utils/core/dense_map.hpp"
 #include "vpux/utils/core/logger.hpp"
-#include "vpux/utils/core/optional.hpp"
 #include "vpux/utils/core/range.hpp"
 #include "vpux/utils/core/string_ref.hpp"
 
@@ -28,8 +24,6 @@
 
 #include <llvm/ADT/MapVector.h>
 #include <unordered_map>
-
-#include "vpux/utils/core/quant_params.hpp"
 
 namespace vpux {
 namespace VPUMI37XX {
@@ -60,30 +54,35 @@ public:
                                     std::optional<int64_t> sparsityMapOffset = std::nullopt,
                                     std::optional<int64_t> storageElementOffset = std::nullopt,
                                     std::optional<int64_t> storageElementSize = std::nullopt,
-                                    std::optional<int64_t> swizzlingKey = std::nullopt);
+                                    std::optional<int64_t> swizzlingKey = std::nullopt,
+                                    std::optional<uint64_t> descriptor = std::nullopt);
     TensorReference createTensorRef(StringRef name, vpux::NDTypeInterface type, VPURT::BufferSection section,
                                     ArrayRef<int64_t> sectionIndex, int64_t byteOffset,
                                     std::optional<int64_t> sparsityMapOffset = std::nullopt,
                                     std::optional<int64_t> storageElementOffset = std::nullopt,
                                     std::optional<int64_t> storageElementSize = std::nullopt,
-                                    std::optional<int64_t> swizzlingKey = std::nullopt);
+                                    std::optional<int64_t> swizzlingKey = std::nullopt,
+                                    std::optional<uint64_t> descriptor = std::nullopt);
     TensorReference createTensorRef(StringRef name, vpux::NDTypeInterface type, VPURT::BufferSection section,
                                     int64_t sectionIndex, int64_t byteOffset,
                                     std::optional<int64_t> sparsityMapOffset = std::nullopt,
                                     std::optional<int64_t> storageElementOffset = std::nullopt,
                                     std::optional<int64_t> storageElementSize = std::nullopt,
-                                    std::optional<int64_t> swizzlingKey = std::nullopt);
+                                    std::optional<int64_t> swizzlingKey = std::nullopt,
+                                    std::optional<uint64_t> descriptor = std::nullopt);
     TensorReference createTensorRef(mlir::Value val, StringRef name, VPURT::BufferSection section,
                                     ArrayRef<int64_t> sectionIndex, int64_t byteOffset,
                                     std::optional<int64_t> sparsityMapOffset = std::nullopt,
                                     std::optional<int64_t> storageElementOffset = std::nullopt,
                                     std::optional<int64_t> storageElementSize = std::nullopt,
-                                    std::optional<int64_t> swizzlingKey = std::nullopt);
+                                    std::optional<int64_t> swizzlingKey = std::nullopt,
+                                    std::optional<uint64_t> descriptor = std::nullopt);
     TensorReference createTensorRef(mlir::Value val, StringRef name, VPURT::BufferSection section, int64_t sectionIndex,
                                     int64_t byteOffset, std::optional<int64_t> sparsityMapOffset = std::nullopt,
                                     std::optional<int64_t> storageElementOffset = std::nullopt,
                                     std::optional<int64_t> storageElementSize = std::nullopt,
-                                    std::optional<int64_t> swizzlingKey = std::nullopt);
+                                    std::optional<int64_t> swizzlingKey = std::nullopt,
+                                    std::optional<uint64_t> descriptor = std::nullopt);
 
 public:
     Vector<uint32_t> createDims(ShapeRef shape);

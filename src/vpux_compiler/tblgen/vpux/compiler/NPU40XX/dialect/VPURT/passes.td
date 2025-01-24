@@ -59,5 +59,20 @@ def OptimizeSyncTasks : PassBase<"optimize-sync-tasks", "vpux::FunctionPass"> {
     let constructor = "vpux::VPURT::arch40xx::createOptimizeSyncTasksPass()";
 }
 
+//
+// FindWlmEnqueueBarrier
+//
+
+def FindWlmEnqueueBarrier : PassBase<"find-wlm-enqueue-barrier", "vpux::FunctionPass"> {
+    let summary = "For WLM for each task find enqueue barrier";
+
+    let description = [{
+        For WLM each task needs to be enqueued at some point. This pass analyzes schedule
+        and for each task finds a barrier at which it can be enqueued. Later this information
+        will be lowered to dedicated enqueue ops (WorkItem task)
+    }];
+
+    let constructor = "vpux::VPURT::arch40xx::createFindWlmEnqueueBarrierPass()";
+}
 
 #endif

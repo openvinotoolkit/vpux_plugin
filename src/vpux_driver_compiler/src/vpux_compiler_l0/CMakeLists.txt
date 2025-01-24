@@ -52,6 +52,9 @@ target_sources(${TARGET_NAME} PRIVATE ${vs_version_output})
 target_include_directories(${TARGET_NAME}
     PRIVATE
         $<TARGET_PROPERTY:openvino::npu_al,INTERFACE_INCLUDE_DIRECTORIES>
+        # Cleaner solution for include dir below would be openvino_transformations interface,
+        # but it is not exported
+        "${OPENVINO_SOURCE_DIR}/common/transformations/include"
 )
 
 target_link_libraries(${TARGET_NAME}

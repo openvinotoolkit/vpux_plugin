@@ -9,26 +9,6 @@
 include "mlir/Pass/PassBase.td"
 
 //
-// MoveOpsIntoSections
-//
-
-def MoveOpsIntoSections : PassBase<"move-ops-into-sections", "vpux::FunctionPass"> {
-    let summary = "Wrap VPUASM ops into ELF section operations";
-
-    let description = [{
-        Each ELF binary op interface should represent a discrete memory entity, with their sum encapsulating
-        the inference as an executable program.
-        With this pass we will wrap these operations inside ELF section operations,
-        to model the op's memory layout decisions.
-    }];
-
-    let constructor = "vpux::ELF::createMoveOpsIntoSectionsPass()";
-    let dependentDialects = [
-        "vpux::ELF::ELFDialect"
-    ];
-}
-
-//
 // CreateSymbolTable
 //
 
