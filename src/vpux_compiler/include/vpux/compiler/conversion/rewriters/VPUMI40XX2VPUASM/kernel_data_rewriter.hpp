@@ -13,8 +13,8 @@ namespace vpumi40xx2vpuasm {
 class KernelDataRewriter : public VPUASMSymbolizationPattern<VPUMI40XX::DeclareKernelArgsOp> {
 public:
     using Base::Base;
-    mlir::LogicalResult symbolize(VPUMI40XX::DeclareKernelArgsOp op, SymbolMapper& mapper,
-                                  mlir::ConversionPatternRewriter& rewriter) const override;
+    mlir::FailureOr<SymbolizationResult> symbolize(VPUMI40XX::DeclareKernelArgsOp op, SymbolMapper& mapper,
+                                                   mlir::ConversionPatternRewriter& rewriter) const override;
 };
 
 }  // namespace vpumi40xx2vpuasm

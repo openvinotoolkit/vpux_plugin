@@ -83,16 +83,22 @@ void vpux::MemLiveRangeInfo::buildRangeInfo(mlir::func::FuncOp funcOp) {
                             // in order to make depenendcy calculation work correctly
                             auto parentOutput = nceTaskOp.getParentOutput();
                             auto parentOutputSparsityMap = nceTaskOp.getParentOutputSparsityMap();
-                            for (const auto& input : inputs) {
-                                if (parentOutput == input) {
-                                    inputs.erase(&input);
-                                }
-                            }
-                            for (const auto& input : inputs) {
-                                if (parentOutputSparsityMap == input) {
-                                    inputs.erase(&input);
-                                }
-                            }
+                            auto input = nceTaskOp.getInput();
+                            auto inputSparsityMap = nceTaskOp.getInputSparsityMap();
+                            auto weights = nceTaskOp.getWeights();
+                            auto weightsSparsityMap = nceTaskOp.getWeightsSparsityMap();
+                            llvm::SmallVector<mlir::Value> inputsToSanitize{};
+                            inputsToSanitize.swap(inputs);
+                            std::copy_if(inputsToSanitize.begin(), inputsToSanitize.end(), std::back_inserter(inputs),
+                                         [&](mlir::Value value) {
+                                             // For in-place eltwise op it might happen that parentOutput == input.
+                                             // Check those first to make sure they don't get removed.
+                                             if (value == input || value == inputSparsityMap || value == weights ||
+                                                 value == weightsSparsityMap) {
+                                                 return true;
+                                             }
+                                             return (value != parentOutput) && (value != parentOutputSparsityMap);
+                                         });
                         }
                         auto outputs = layerOp.getOutputs();
 

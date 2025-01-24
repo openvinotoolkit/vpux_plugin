@@ -10,21 +10,27 @@
 namespace vpux {
 namespace vpumi40xx2vpuasm {
 
-mlir::LogicalResult DPUVariantRewriter::symbolize(VPUMI40XX::DPUVariantOp op, SymbolMapper&,
-                                                  mlir::ConversionPatternRewriter& rewriter) const {
+mlir::FailureOr<SymbolizationResult> DPUVariantRewriter::symbolize(VPUMI40XX::DPUVariantOp op, SymbolMapper&,
+                                                                   mlir::ConversionPatternRewriter& rewriter) const {
     auto symName = findSym(op).getRootReference();
     auto taskLocation = findSym(op.getTaskLocation());
     auto invariantSym = findSym(op.getInvariant());
 
+    auto optionalSym = [&](mlir::Value val) -> mlir::SymbolRefAttr {
+        auto sym = val ? findSym(val) : nullptr;
+        return sym;
+    };
+
     auto opUses = op.getResult().getUses();
-    mlir::FlatSymbolRefAttr nextLink = nullptr;
+    mlir::SymbolRefAttr nextLink = nullptr;
     auto nextVariantIt = llvm::find_if(opUses, [](mlir::OpOperand& operand) -> bool {
         auto user = mlir::dyn_cast<VPUMI40XX::DPUVariantOp>(operand.getOwner());
         return user && user.getPreviousTask() == operand.get();
     });
     auto nextVariant =
             nextVariantIt != opUses.end() ? mlir::cast<VPUMI40XX::DPUVariantOp>(nextVariantIt->getOwner()) : nullptr;
-    if (nextVariant && nextVariant.isHardLinked()) {
+    if (nextVariant && nextVariant.getTaskLink().has_value()) {
+        assert(nextVariant.getTaskLink().value() == op.getType());
         nextLink = findSym(nextVariant.getTaskLocation());
     }
 
@@ -32,20 +38,26 @@ mlir::LogicalResult DPUVariantRewriter::symbolize(VPUMI40XX::DPUVariantOp op, Sy
     auto linkedInvariantOp = mlir::dyn_cast<VPUMI40XX::DPUInvariantOp>(linkedOp);
     auto invariantTaskLocation = findSym(linkedInvariantOp.getTaskLocation());
 
-    auto weights = op.getWeights() ? findSym(op.getWeights()) : nullptr;
-    auto weightTable = op.getWeightTable() ? findSym(op.getWeightTable()) : nullptr;
+    auto weights = optionalSym(op.getWeights());
+    auto weightTable = optionalSym(op.getWeightTable());
+    auto weightTableDataPtr = optionalSym(op.getWeightTableDataPtr());
+    auto weightTableSpPtr = optionalSym(op.getWeightTableSpPtr());
+    auto weightTableScale = optionalSym(op.getWeightTableScale());
+    auto weightTableBias = optionalSym(op.getWeightTableBias());
+    auto weightZeroPoints = optionalSym(op.getWeightZeroPoints());
 
     auto taskIdx = mlir::TypeAttr::get(op.getType());
 
-    rewriter.create<VPUASM::DPUVariantOp>(op.getLoc(), symName, taskIdx, taskLocation, nextLink, invariantSym,
-                                          invariantTaskLocation, weights, weightTable, op.getNceTaskTypeAttr(),
-                                          op.getInStartAttr(), op.getInEndAttr(), op.getStartAttr(), op.getEndAttr(),
-                                          op.getPadAttr(), op.getMpeModeAttr(), op.getClusterIdAttr(),
-                                          op.getHaloRegionsAttr(), op.getWorkloadIdAttr(), op.getLutReadAttr());
+    auto newOp = rewriter.create<VPUASM::DPUVariantOp>(
+            op.getLoc(), symName, taskIdx, taskLocation, nextLink, invariantSym, invariantTaskLocation, weights,
+            weightTable, weightTableDataPtr, weightTableSpPtr, weightTableScale, weightTableBias, weightZeroPoints,
+            op.getNceTaskTypeAttr(), op.getInStartAttr(), op.getInEndAttr(), op.getStartAttr(), op.getEndAttr(),
+            op.getPadAttr(), op.getMpeModeAttr(), op.getClusterIdAttr(), op.getHaloRegionsAttr(),
+            op.getWorkloadIdAttr(), op.getLutReadAttr(), op.getForceInvReadAttr());
 
     rewriter.eraseOp(op);
 
-    return mlir::success();
+    return SymbolizationResult(newOp);
 }
 
 }  // namespace vpumi40xx2vpuasm

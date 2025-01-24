@@ -159,6 +159,7 @@ public:
                                                            SmallVector<size_t>& virtualToPhysicalBarrierMapping);
     SmallVector<mlir::DenseSet<VPURT::DeclareVirtualBarrierOp>> getBarrierBatchesToLegalize();
     void linkNextIds(Logger log);
+    void calculateBarrierBatchesForParallelTasks();
 
 private:
     void parseBarriers(mlir::Operation* parentOp);
@@ -170,6 +171,8 @@ private:
     Status processSim(const VirtualDependencyTracker::Dependency& dep, BarrierUserConfig& user, int64_t count,
                       StringRef taskType, int64_t index, SmallVectorImpl<int64_t>& toVirtual,
                       RingBuffer<int64_t>& nextReal, Logger log);
+
+    void calculateBarrierBatchesForParallelTasks(const std::set<int64_t>& activeBarriers);
 
 private:
     // DMA task index {queue index, task index in queue}
@@ -208,6 +211,7 @@ private:
 
     // Module for managing restrictions on barrier PID reuse in case of WLM
     std::optional<BarrierWlmHandler> _barrierWlmHandlerOpt = std::nullopt;
+    BarrierInfo _barrierInfo;
 };
 
 }  // namespace VPURT

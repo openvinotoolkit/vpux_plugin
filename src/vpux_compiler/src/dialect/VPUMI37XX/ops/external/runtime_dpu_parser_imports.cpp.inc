@@ -2,7 +2,6 @@
 // Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
-//
 #include <mlir/IR/BuiltinTypes.h>
 
 #include "vpux/compiler/dialect/VPUIP/IR/types.hpp"
@@ -1507,10 +1506,10 @@ bool SetupInvariant_Eltwise(vpux::VPUMI37XX::BlobWriter& writer, vpux::VPUMI37XX
     ::std::optional<SmallVector<int64_t>> in2QuantMult;
 
     for (auto ppeOp : op.getPpe().getOps<VPUMI37XX::PPETaskOp>()) {
-        auto opaquePpeAttr = ppeOp.getOpaquePpeAttr();
-        auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(opaquePpeAttr);
+        auto ppeAttr = ppeOp.getPpeAttr();
+        auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(ppeAttr);
         VPUX_THROW_WHEN(intPpeAttr == nullptr,
-                        "Expected PPEIntAttr type but got {0}, make sure to use the right factory version", opaquePpeAttr);
+                        "Expected PPEIntAttr type but got {0}, make sure to use the right factory version", ppeAttr);
         if (const auto in1QuantMultAttr = intPpeAttr.getIn1QuantMult()) {
             in1QuantMult = parseIntArrayAttr<int64_t>(in1QuantMultAttr);
         }
@@ -1558,6 +1557,7 @@ bool SetupInvariant_Eltwise(vpux::VPUMI37XX::BlobWriter& writer, vpux::VPUMI37XX
         }
     }
 
+    // elop_scale_* registers are U16 unlike ppe_scale_mult which are I16
     registers.elop_scale.elop_scale_bf.elop_scale_a = elop_scale_a;
     registers.elop_scale.elop_scale_bf.elop_scale_b = elop_scale_b;
 
@@ -1594,10 +1594,10 @@ FlatBufferAccessor<MVCNN::PPETask> getPPETask(vpux::VPUMI37XX::BlobWriter& write
     float fpPReluAlpha = 1.f;
 
     for (auto ppeOp : op.getPpe().getOps<VPUMI37XX::PPETaskOp>()) {
-            auto opaquePpeAttr = ppeOp.getOpaquePpeAttr();
-            auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(opaquePpeAttr);
+            auto ppeAttr = ppeOp.getPpeAttr();
+            auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(ppeAttr);
             VPUX_THROW_WHEN(intPpeAttr == nullptr,
-                            "Expected PPEintAttr type but got {0}, make sure to use the right factory version", opaquePpeAttr);
+                            "Expected PPEintAttr type but got {0}, make sure to use the right factory version", ppeAttr);
 
             if (intPpeAttr.getMode()) {
                 const auto ppeType = getPPELayerType(intPpeAttr.getMode().getValue());
@@ -1691,10 +1691,10 @@ static void setupTaskTypeDPUEltwise(vpux::VPUMI37XX::BlobWriter& writer, vpux::V
     ::std::optional<SmallVector<int64_t>> in2QuantMult;
 
     for (auto ppeOp : op.getPpe().getOps<VPUMI37XX::PPETaskOp>()) {
-            auto opaquePpeAttr = ppeOp.getOpaquePpeAttr();
-            auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(opaquePpeAttr);
+            auto ppeAttr = ppeOp.getPpeAttr();
+            auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(ppeAttr);
             VPUX_THROW_WHEN(intPpeAttr == nullptr,
-                            "Expected PPEIntAttr type but got {0}, make sure to use the right factory version", opaquePpeAttr);
+                            "Expected PPEIntAttr type but got {0}, make sure to use the right factory version", ppeAttr);
 
             if (const auto quantMultAttr = intPpeAttr.getQuantMult()) {
                 ppeQuantMult = parseIntArrayAttr<int64_t>(quantMultAttr);
@@ -1741,6 +1741,7 @@ static void setupTaskTypeDPUEltwise(vpux::VPUMI37XX::BlobWriter& writer, vpux::V
     case MVCNN::DType_U4: {
         regs.ppe_scale.ppe_scale_bf.ppe_scale_round = ppe_task->rounding();
         // Scale is provided as a pair of integer mult and shift values.
+        // ppe_scale_mult is a I16 register; implicit casting is done
         regs.ppe_scale.ppe_scale_bf.ppe_scale_mult =
                 outputRef->quant_mult()->size() ? outputRef->quant_mult()->Get(0) : 1;
         regs.ppe_scale.ppe_scale_bf.ppe_scale_shift =
@@ -1806,6 +1807,7 @@ static void setupTaskTypeDPUMaxPool(vpux::VPUMI37XX::BlobWriter& writer, vpux::V
 
     if (hasQuantInput && hasFP16Output) {
         // Re-scale the result in mixed precision mode
+        // ppe_scale_mult is a I16 register; implicit casting is done
         regs.ppe_scale.ppe_scale_bf.ppe_scale_mult =
                 inputRef->quant_mult()->size() ? inputRef->quant_mult()->Get(0) : 1;
         regs.ppe_scale.ppe_scale_bf.ppe_scale_shift =
@@ -1857,10 +1859,10 @@ static void setupTaskTypeDPUAvgPool(vpux::VPUMI37XX::BlobWriter& writer, vpux::V
     ::std::optional<SmallVector<int64_t>> ppeQuantShift;
 
     for (auto ppeOp : op.getPpe().getOps<VPUMI37XX::PPETaskOp>()) {
-            auto opaquePpeAttr = ppeOp.getOpaquePpeAttr();
-            auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(opaquePpeAttr);
+            auto ppeAttr = ppeOp.getPpeAttr();
+            auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(ppeAttr);
             VPUX_THROW_WHEN(intPpeAttr == nullptr,
-                            "Expected PPEIntAttr type but got {0}, make sure to use the right factory version", opaquePpeAttr);
+                            "Expected PPEIntAttr type but got {0}, make sure to use the right factory version", ppeAttr);
             if (intPpeAttr.getMode()) {
                 const auto ppeType = getPPELayerType(intPpeAttr.getMode().getValue());
                 if (ppeType != MVCNN::PPELayerType_NOOP) {

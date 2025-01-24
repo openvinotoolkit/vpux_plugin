@@ -25,7 +25,7 @@ module @Test_1 {
                 VPUIPDPU.IDUStride stride_x(0) stride_y(0)
                 VPUIPDPU.IDUInputLayerCfg sparsity_pattern(7) {input_compressed}
                 VPUIPDPU.IDUWorkloadCfg workload_type(MAXPOOL)
-                VPUIPDPU.IDUWeights  wmode(f16)
+                VPUIPDPU.IDUWeights  wmode(f16) wt_plt_cfg(NO_PLT)
                 VPUIPDPU.IDUSESegment se_seg_size_0(16) se_seg_size_1(16) se_seg_size_2(16)
                 VPUIPDPU.IDUSPSegment sp_seg_size_0(16) sp_seg_size_1(16) sp_seg_size_2(16)
             }
@@ -54,7 +54,7 @@ module @Test_1 {
 //CHECK-NEXT:       VPUIPDPU.IDUStride stride_x(0) stride_y(0)
 //CHECK-NEXT:       VPUIPDPU.IDUInputLayerCfg sparsity_pattern(7) {input_compressed}
 //CHECK-NEXT:       VPUIPDPU.IDUWorkloadCfg workload_type(MAXPOOL)
-//CHECK-NEXT:       VPUIPDPU.IDUWeights wmode(f16)
+//CHECK-NEXT:       VPUIPDPU.IDUWeights wmode(f16) wt_plt_cfg(NO_PLT)
 //CHECK-NEXT:       VPUIPDPU.IDUSESegment se_seg_size_0(16) se_seg_size_1(16) se_seg_size_2(16)
 //CHECK-NEXT:       VPUIPDPU.IDUSPSegment sp_seg_size_0(16) sp_seg_size_1(16) sp_seg_size_2(16)
 //CHECK-NEXT:     }

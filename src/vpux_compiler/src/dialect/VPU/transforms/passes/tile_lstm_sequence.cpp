@@ -1,9 +1,12 @@
+//
 // Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
+//
 
 #include <vpux/utils/core/error.hpp>
 #include "vpux/compiler/core/type_interfaces.hpp"
 #include "vpux/compiler/dialect/IE/IR/attributes.hpp"
+#include "vpux/compiler/dialect/IE/utils/dynamic_shape_utils.hpp"
 #include "vpux/compiler/dialect/IE/utils/resources.hpp"
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
@@ -79,7 +82,7 @@ mlir::FailureOr<int> TileLSTMSequence::getNumSplits(VPU::LSTMSequenceOp op) cons
 
     auto inputDataShape = Shape(inputData.getShape());
     auto outputHiddenValuesShape = Shape(outputHiddenValues.getShape());
-    const auto seqLenght = op.getSequenceLength();
+    const auto seqLenght = op.getSequenceLength().has_value() ? op.getSequenceLength().value() : 1;
 
     if (inputDataShape.size() != 4 || outputHiddenValuesShape.size() != 4) {
         _log.trace("LSTMSequenceOp cannot be tiled due to unsupported shape sizes.");
@@ -209,7 +212,7 @@ void TileLSTMSequence::tileBidirectionalLSTMSequence(VPU::LSTMSequenceOp op, mli
     const auto inputDataForwardShape = Shape(getShape(inputDataForward));
     const auto outputHiddenValuesShape = Shape(getShape(op.getOutputHiddenValues()));
 
-    const auto seqLenght = op.getSequenceLength();
+    const auto seqLenght = op.getSequenceLength().has_value() ? op.getSequenceLength().value() : 1;
     mlir::Value hiddenState = op.getInitialHiddenState();
     mlir::Value cellState = op.getInitialCellState();
     SmallVector<mlir::Value> outputHiddenValuesVecForward;
@@ -285,7 +288,7 @@ void TileLSTMSequence::tileForwardOrReverseLSTMSequence(VPU::LSTMSequenceOp op, 
     const auto inputDataShape = Shape(getShape(inputData));
     const auto outputHiddenValuesShape = Shape(getShape(op.getOutputHiddenValues()));
 
-    const auto seqLenght = op.getSequenceLength();
+    const auto seqLenght = op.getSequenceLength().has_value() ? op.getSequenceLength().value() : 1;
     mlir::Value newHiddenState = op.getInitialHiddenState();
     mlir::Value newCellState = op.getInitialCellState();
     SmallVector<mlir::Value> outputHiddenValuesVec;
@@ -342,6 +345,12 @@ void TileLSTMSequence::tileLSTMSequence(VPU::LSTMSequenceOp op, mlir::PatternRew
 
 mlir::LogicalResult TileLSTMSequence::matchAndRewrite(VPU::LSTMSequenceOp op, mlir::PatternRewriter& rewriter) const {
     if (fitIntoCMX(op)) {
+        return mlir::failure();
+    }
+
+    // Tile the LSTMSequenceOp sequentially, creating a chain of LSTMSequenceOps split on the seq_length dimension.
+    // This cannot be done in the case of dynamic seq_length.
+    if (IE::hasDynamicTensors(op)) {
         return mlir::failure();
     }
 

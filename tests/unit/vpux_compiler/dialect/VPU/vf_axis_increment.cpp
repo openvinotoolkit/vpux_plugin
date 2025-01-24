@@ -31,7 +31,10 @@ TEST_F(MLIR_VPU_VFAxisIncrement, VF_SpatialDim) {
     axisIncrement->decreasedValue(value, 8);
     EXPECT_EQ(value, 11);
 
-    EXPECT_EQ(axisIncrement->getLimitValue({4, 6, 2}), 2);
+    EXPECT_EQ(axisIncrement->getLimitValue({4, 6, 2}, {}), 2);
+    EXPECT_EQ(axisIncrement->getLimitValue({}, {4, 6, 2}), 2);
+    EXPECT_EQ(axisIncrement->getLimitValue({474, 474, 474}, {2048}), 474);
+    EXPECT_EQ(axisIncrement->getLimitValue({474, 474, 474}, {4}), 4);
 }
 
 TEST_F(MLIR_VPU_VFAxisIncrement, VF_ChannelDim) {
@@ -48,5 +51,8 @@ TEST_F(MLIR_VPU_VFAxisIncrement, VF_ChannelDim) {
     axisIncrement->decreasedValue(value, 2);
     EXPECT_EQ(value, 8);
 
-    EXPECT_EQ(axisIncrement->getLimitValue({12, 8, 32}), 4);
+    EXPECT_EQ(axisIncrement->getLimitValue({12, 8, 32}, {}), 4);
+    EXPECT_EQ(axisIncrement->getLimitValue({}, {12, 8, 32}), 8);
+    EXPECT_EQ(axisIncrement->getLimitValue({474, 474, 474}, {2048}), 474);
+    EXPECT_EQ(axisIncrement->getLimitValue({474, 474, 474}, {4}), 2);
 }

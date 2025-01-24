@@ -24,13 +24,10 @@ mlir::LogicalResult vpux::IE::RMSOp::inferReturnTypeComponents(
     const auto inType = rms.getInput().getType().cast<mlir::ShapedType>();
     const auto gammaType = rms.getGamma().getType().cast<mlir::ShapedType>();
     const auto inputRank = inType.getRank();
-
-    if (inputRank < 3) {
-        return errorAt(loc, "Input tensor rank should be 3 or greater. Got {0}D tensor.", inputRank);
-    }
+    const auto gammaRank = gammaType.getRank();
 
     const auto inputWidth = inType.getDimSize(inputRank - 1);
-    const auto gammaWidth = gammaType.getDimSize(0);
+    const auto gammaWidth = gammaType.getDimSize(gammaRank - 1);
 
     if (inputWidth != gammaWidth) {
         return errorAt(loc, "Input width should be the same as gamma. Got input width = {0} and gamma width = {1}",

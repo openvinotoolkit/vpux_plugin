@@ -1,4 +1,4 @@
-// Copyright (C) Intel Corporation
+// Copyright (C) 2021 - 2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -45,7 +45,6 @@ class MatMulLayerTest_HW_NPU3720_ppe_fp16_clamp : public MatMulLayerTestCommon {
 
 class MatMulLayerTest_HW_NPU4000 : public MatMulLayerTestCommon {};
 class MatMulLayerTest_SW_NPU4000 : public MatMulLayerTestCommon {};
-
 TEST_P(MatMulLayerTest_HW_NPU3720, HW) {
     setDefaultHardwareMode();
     run(Platform::NPU3720);
@@ -68,13 +67,6 @@ TEST_P(MatMulLayerTest_HW_NPU4000, HW) {
     setDefaultHardwareMode();
     run(Platform::NPU4000);
 }
-
-TEST_P(MatMulLayerTest_HW_NPU3720_ppe_fp16_clamp, HW) {
-    rel_threshold = 1;
-    setDefaultHardwareMode();
-    run(Platform::NPU3720);
-}
-
 }  // namespace test
 }  // namespace ov
 
@@ -338,5 +330,4 @@ INSTANTIATE_TEST_SUITE_P(MatMul1dBothTrans, MatMulLayerTest_HW_NPU3720, matMul1d
 
 INSTANTIATE_TEST_SUITE_P(MatMul1dBothTrans, MatMulLayerTest_HW_NPU4000, matMul1dBothTransParams,
                          MatMulLayerTest_HW_NPU4000::getTestCaseName);
-
 }  // namespace

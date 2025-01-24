@@ -3,11 +3,14 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+#include "vpux/compiler/dialect/IE/utils/reshape_utils.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPU/utils/layout_utils.hpp"
 
 #include "vpux/compiler/dialect/const/ops.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/compiler/utils/error.hpp"
+#include "vpux/compiler/utils/rewriter.hpp"
 
 #include <numeric>
 
@@ -154,9 +157,90 @@ mlir::LogicalResult ConvertToShapeCast::matchAndRewrite(VPU::ReshapeOp origOp, m
 }  // namespace
 
 //
+// FuseReshapes
+//
+
+namespace {
+
+class FuseReshapes final : public mlir::OpRewritePattern<VPU::ReshapeOp> {
+public:
+    using mlir::OpRewritePattern<VPU::ReshapeOp>::OpRewritePattern;
+
+public:
+    mlir::LogicalResult matchAndRewrite(VPU::ReshapeOp origOp, mlir::PatternRewriter& rewriter) const final;
+};
+
+mlir::LogicalResult FuseReshapes::matchAndRewrite(VPU::ReshapeOp origOp, mlir::PatternRewriter& rewriter) const {
+    auto prevOp = origOp.getInput().getDefiningOp();
+    if (prevOp == nullptr || !prevOp->hasOneUse()) {
+        return mlir::failure();
+    }
+    if (!mlir::isa<VPU::SqueezeOp, VPU::UnsqueezeOp, VPU::ReshapeOp, VPU::AffineReshapeOp>(prevOp)) {
+        return mlir::failure();
+    }
+
+    const auto outputType = mlir::cast<NDTypeInterface>(origOp.getOutput().getType());
+    const auto outputShape = outputType.getShape();
+    const auto outputShapeAttr = getIntArrayAttr(getContext(), outputShape);
+
+    auto newOp =
+            rewriter.replaceOpWithNewOp<VPU::ReshapeOp>(origOp, prevOp->getOperand(0), nullptr, false, outputShapeAttr);
+    extendOpLoc(newOp, "fused_with_other");
+
+    return mlir::success();
+}
+
+}  // namespace
+
+//
+// ConvertToAffineReshape
+//
+
+namespace {
+
+class ConvertToAffineReshape final : public mlir::OpRewritePattern<VPU::ReshapeOp> {
+public:
+    using mlir::OpRewritePattern<VPU::ReshapeOp>::OpRewritePattern;
+
+public:
+    mlir::LogicalResult matchAndRewrite(VPU::ReshapeOp origOp, mlir::PatternRewriter& rewriter) const final;
+};
+
+mlir::LogicalResult ConvertToAffineReshape::matchAndRewrite(VPU::ReshapeOp origOp,
+                                                            mlir::PatternRewriter& rewriter) const {
+    auto inputType = mlir::cast<NDTypeInterface>(origOp.getInput().getType());
+    auto outputType = mlir::cast<NDTypeInterface>(origOp.getOutput().getType());
+    const auto outputShape = outputType.getShape();
+    const auto outShapeAttr = getIntArrayAttr(getContext(), outputShape);
+
+    const auto inShape = inputType.getShape();
+    const auto reassociationMap = vpux::IE::getReassociationMap(inShape, outputShape);
+    if (mlir::failed(reassociationMap)) {
+        return mlir::failure();
+    }
+
+    // If no valid output layout can be inferred, don't replace with AffineReshape
+    auto inOrder = DimsOrder::fromValue(origOp.getInput());
+    const auto outputLayout = vpux::VPU::inferAffineReshapeOutputLayout(
+            inOrder.toPermutation(), getIntArrayOfArray(getContext(), reassociationMap.value()));
+    if (mlir::failed(outputLayout)) {
+        return mlir::failure();
+    }
+
+    rewriter.replaceOpWithNewOp<VPU::AffineReshapeOp>(
+            origOp, origOp.getInput(), getIntArrayOfArray(getContext(), reassociationMap.value()), outShapeAttr);
+
+    return mlir::success();
+}
+
+}  // namespace
+
+//
 // getCanonicalizationPatterns
 //
 
 void vpux::VPU::ReshapeOp::getCanonicalizationPatterns(mlir::RewritePatternSet& patterns, mlir::MLIRContext* ctx) {
+    patterns.add<FuseReshapes>(ctx);
     patterns.add<ConvertToShapeCast>(ctx);
+    patterns.add<ConvertToAffineReshape>(ctx);
 }

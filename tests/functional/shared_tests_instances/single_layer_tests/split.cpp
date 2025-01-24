@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation
+// Copyright (C) 2022-2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -10,8 +10,8 @@
 #include "vpu_ov2_layer_test.hpp"
 
 using namespace ov::test::utils;
-namespace ov {
 
+namespace ov {
 namespace test {
 
 class SplitLayerTestCommon : public SplitLayerTest, virtual public VpuOv2LayerTest {
@@ -24,25 +24,19 @@ class SplitLayerTestCommon : public SplitLayerTest, virtual public VpuOv2LayerTe
     }
 };
 
-class SplitLayerTest_NPU3720 : public SplitLayerTestCommon {};
-class SplitLayerTest_NPU4000 : public SplitLayerTestCommon {};
-
-TEST_P(SplitLayerTest_NPU3720, HW) {
+TEST_P(SplitLayerTestCommon, NPU3720_HW) {
     setDefaultHardwareMode();
     run(Platform::NPU3720);
 }
 
-TEST_P(SplitLayerTest_NPU4000, HW) {
+TEST_P(SplitLayerTestCommon, NPU4000_HW) {
     setDefaultHardwareMode();
     run(Platform::NPU4000);
 }
-
 }  // namespace test
-
 }  // namespace ov
 
-using ov::test::SplitLayerTest_NPU3720;
-using ov::test::SplitLayerTest_NPU4000;
+using ov::test::SplitLayerTestCommon;
 
 namespace {
 const std::vector<ov::element::Type> modelTypes = {
@@ -50,31 +44,20 @@ const std::vector<ov::element::Type> modelTypes = {
         ov::element::f16   // tests: GRNLayerTest, SplitLayerTest, CTCGreedyDecoderLayerTest
 };
 
-const auto paramsConfig1 =
+const auto params =
         testing::Combine(::testing::Values(2, 3), ::testing::Values(0, 1, 2, 3), ::testing::ValuesIn(modelTypes),
                          ::testing::ValuesIn(ov::test::static_shapes_to_test_representation(
                                  std::vector<std::vector<ov::Shape>>({{{6, 6, 12, 24}}}))),
                          ::testing::Values(std::vector<size_t>({})), ::testing::Values(ov::test::utils::DEVICE_NPU));
-const auto paramsConfig2 =
-        testing::Combine(::testing::Values(2, 3), ::testing::Values(1, 2, 3), ::testing::ValuesIn(modelTypes),
-                         ::testing::ValuesIn(ov::test::static_shapes_to_test_representation(
-                                 std::vector<std::vector<ov::Shape>>({{{6, 6, 12, 24}}}))),
-                         ::testing::Values(std::vector<size_t>({})), ::testing::Values(ov::test::utils::DEVICE_NPU));
+
 const auto paramsPrecommit =
         testing::Combine(::testing::Values(2, 3), ::testing::Values(0), ::testing::ValuesIn(modelTypes),
                          ::testing::ValuesIn(ov::test::static_shapes_to_test_representation(
                                  std::vector<std::vector<ov::Shape>>({{{6, 6, 12, 24}}}))),
                          ::testing::Values(std::vector<size_t>({})), ::testing::Values(ov::test::utils::DEVICE_NPU));
 
-// --------- NPU3720 ---------
-
-INSTANTIATE_TEST_SUITE_P(smoke_Split, SplitLayerTest_NPU3720, paramsConfig1, SplitLayerTest_NPU3720::getTestCaseName);
-
-// --------- NPU4000 ---------
-
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_Split, SplitLayerTest_NPU4000, paramsPrecommit,
-                         SplitLayerTest_NPU4000::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_Split, SplitLayerTest_NPU4000, paramsConfig2, SplitLayerTest_NPU4000::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_Split, SplitLayerTestCommon, params, SplitLayerTestCommon::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_Split, SplitLayerTestCommon, paramsPrecommit,
+                         SplitLayerTestCommon::getTestCaseName);
 
 }  // namespace

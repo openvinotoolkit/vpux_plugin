@@ -8,6 +8,8 @@
 
 namespace vpux::VPUIPDPU::arch40xx {
 
+mlir::LogicalResult buildDPUVariantGeneral(VPUASM::DPUVariantOp origVarOp, mlir::OpBuilder& builder, const Logger& log);
+
 mlir::LogicalResult buildDPUVariantIDU(VPUASM::DPUVariantOp origVarOp, mlir::OpBuilder& builder, const Logger& log,
                                        ELF::SymbolReferenceMap& symRefMap);
 

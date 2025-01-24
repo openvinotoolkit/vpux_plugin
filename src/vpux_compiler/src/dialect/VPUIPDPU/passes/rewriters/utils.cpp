@@ -29,6 +29,14 @@ mlir::FloatAttr getF32FloatAttrOrNull(mlir::OpBuilder& builder, const std::optio
     return nullptr;
 }
 
+mlir::ArrayAttr getF64ArrayAttrOrNull(mlir::OpBuilder& builder, const std::optional<llvm::ArrayRef<double>>& attr) {
+    if (attr.has_value()) {
+        return builder.getF64ArrayAttr(attr.value());
+    }
+
+    return nullptr;
+}
+
 mlir::MemRefType getBufferType(mlir::Operation* bufferRef) {
     mlir::MemRefType bufferType;
 
@@ -71,9 +79,24 @@ mlir::BlockArgument getInvBlockArg(BlockArg invBlockArg, mlir::Block* invBlock,
     return invBlock->getArgument(arg->second);
 }
 
-mlir::Type getBaseType(mlir::Type type) {
+mlir::Type getBaseType(mlir::Type type, bool isPalletModeEnabled) {
     if (!type.isa<mlir::quant::QuantizedType>()) {
         return type;
+    }
+
+    if (isPalletModeEnabled) {
+        VPUX_THROW_UNLESS(
+                type.isa<mlir::quant::QuantileQuantizedType>() || type.isa<mlir::quant::QuantileQuantizedPerAxisType>(),
+                "Pallet mode requires weights to be of QuantileQuantizedType or QuantileQuantizedPerAxisType, "
+                "containing the quantile look up table");
+
+        // In case of palletization the actual de-palletized weight type is contained in the quantileType field
+        if (auto quantType = mlir::dyn_cast<mlir::quant::QuantileQuantizedType>(type)) {
+            return quantType.getQuantileType();
+        }
+        if (auto quantType = mlir::dyn_cast<mlir::quant::QuantileQuantizedPerAxisType>(type)) {
+            return quantType.getQuantileType();
+        }
     }
 
     auto quantType = type.cast<mlir::quant::QuantizedType>();

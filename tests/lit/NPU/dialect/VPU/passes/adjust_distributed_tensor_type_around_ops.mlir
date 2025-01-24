@@ -80,7 +80,7 @@ func.func @AdjustInputDistributedType(%arg0: !InputDistributed1) -> !OutputDistr
     %3 = VPU.Copy(%cst_1) {out_mem_space = @CMX_NN} : tensor<64x1x1x4xsi32> -> !WeightTableDistributed
 
     %4 = VPU.NCE.Convolution(%1, %2, %3) {
-        opaque_ppe = #VPU.PPEStub<>,
+        ppe = #VPU.PPEStub<>,
         pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
         rawFilterShape = [64, 128, 1, 1], strides = [1, 1]} -> !OutputDistributed
     return %4 : !OutputDistributed

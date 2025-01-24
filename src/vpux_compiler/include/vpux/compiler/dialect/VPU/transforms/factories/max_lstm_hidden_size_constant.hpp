@@ -10,7 +10,8 @@
 namespace vpux {
 namespace VPU {
 
-int64_t getMaxLstmHiddenSizeConstant(VPU::ArchKind arch, bool sequenceEnabled = false);
+int64_t getMaxLstmSequenceHiddenSizeConstant(VPU::ArchKind arch);
+int64_t getMaxLstmCellHiddenSizeConstant(VPU::ArchKind arch);
 
 }  // namespace VPU
 }  // namespace vpux

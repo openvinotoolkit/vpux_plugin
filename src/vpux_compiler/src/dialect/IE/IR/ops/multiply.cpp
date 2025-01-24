@@ -21,8 +21,8 @@ mlir::LogicalResult vpux::IE::MultiplyOp::inferReturnTypeComponents(
         return mlir::failure();
     }
 
-    const auto in1Type = multiply.getInput1().getType().cast<mlir::ShapedType>();
-    const auto in2Type = multiply.getInput2().getType().cast<mlir::ShapedType>();
+    const auto in1Type = mlir::cast<mlir::RankedTensorType>(multiply.getInput1().getType());
+    const auto in2Type = mlir::cast<mlir::RankedTensorType>(multiply.getInput2().getType());
 
     const auto outShapeRes =
             IE::broadcastEltwiseShape(in1Type.getShape(), in2Type.getShape(), multiply.getAutoBroadcast(), loc);
@@ -33,7 +33,10 @@ mlir::LogicalResult vpux::IE::MultiplyOp::inferReturnTypeComponents(
             outShapeResVec[Dims4D::Act::C.ind()] = multiply.getOutputChannels().value();
         }
 
-        inferredReturnShapes.emplace_back(outShapeResVec, in1Type.getElementType());
+        const auto outOrder =
+                in1Type.getRank() >= in2Type.getRank() ? vpux::getOrder(in1Type) : vpux::getOrder(in2Type);
+        const auto outDesc = getTensorAttr(outOrder, getMemorySpace(in1Type), getBounds(in1Type));
+        inferredReturnShapes.emplace_back(outShapeResVec, in1Type.getElementType(), outDesc);
     }
 
     return mlir::success();
@@ -48,7 +51,7 @@ mlir::OpFoldResult vpux::IE::MultiplyOp::fold(FoldAdaptor adaptor) {
         return nullptr;
     }
 
-    const auto attr = mlir::dyn_cast_or_null<Const::EphemeralContentAttr>(operands[1]);
+    const auto attr = mlir::dyn_cast_or_null<Const::ContentAttr>(operands[1]);
     if (attr == nullptr || !attr.isSplat()) {
         return nullptr;
     }

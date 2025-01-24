@@ -21,7 +21,7 @@ mlir::OpFoldResult vpux::VPUIP::PermuteCastOp::fold(FoldAdaptor adaptor) {
     auto operands = adaptor.getOperands();
     VPUX_THROW_UNLESS(!operands.empty(), "Wrong number of operands : {0}", operands.size());
 
-    if (auto attr = operands[0].dyn_cast_or_null<Const::EphemeralContentAttr>()) {
+    if (auto attr = operands[0].dyn_cast_or_null<Const::ContentAttr>()) {
         auto restored = static_cast<Const::ContentAttr>(attr);
         if (restored.getType().getShape() != getShape(getResult())) {
             restored = restored.transform().reshape(getShape(getResult())).get();

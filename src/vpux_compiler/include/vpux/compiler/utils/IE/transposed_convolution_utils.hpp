@@ -97,7 +97,9 @@ mlir::FailureOr<mlir::Value> createUpsampling(mlir::PatternRewriter& rewriter, m
     auto upsamplingFactor = getIntArrayAttr(
             ctx, SmallVector<int64_t>{stridesVector[Dims4D::Strides::X], stridesVector[Dims4D::Strides::Y], 1});
 
-    return rewriter.create<IE::UpsamplingOp>(loc, origOp.getInput(), upsamplingFactor, padAttr).getOutput();
+    return rewriter
+            .create<IE::UpsamplingOp>(loc, origOp.getInput(), upsamplingFactor, padAttr, origOp.getOutputChannelsAttr())
+            .getOutput();
 }
 
 mlir::Value createPadding(mlir::PatternRewriter& rewriter, mlir::Location loc, mlir::Value input, Dim axis,

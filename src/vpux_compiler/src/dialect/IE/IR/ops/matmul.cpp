@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -38,8 +38,10 @@
 
 #include "vpux/compiler/dialect/IE/utils/matmul.hpp"
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
+#include "vpux/compiler/dialect/IE/utils/shape_infer.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
 #include "vpux/compiler/utils/error.hpp"
+#include "vpux/compiler/utils/infer_output_shape.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 
 #include <mlir/IR/PatternMatch.h>
@@ -59,64 +61,38 @@ mlir::LogicalResult vpux::IE::MatMulOp::inferReturnTypeComponents(
         return mlir::failure();
     }
 
-    const auto inType1 = matMul.getInput1().getType().cast<mlir::ShapedType>();
-    const auto inType2 = matMul.getInput2().getType().cast<mlir::ShapedType>();
-    const auto inShape1 = inType1.getShape();
-    const auto inShape2 = inType2.getShape();
+    const auto inType1 = mlir::cast<vpux::NDTypeInterface>(matMul.getInput1().getType());
+    const auto inType2 = mlir::cast<vpux::NDTypeInterface>(matMul.getInput2().getType());
 
-    const auto inRank1 = inShape1.size();
-    const auto inRank2 = inShape2.size();
-    const auto transA = matMul.getTransposeA();
-    const auto transB = matMul.getTransposeB();
+    const auto inShapeInfo1 = ShapeInfo::fromNDType(inType1);
+    const auto inShapeInfo2 = ShapeInfo::fromNDType(inType2);
 
-    // Rightmost two axes are row & col. Remaining left axes are batch
-    constexpr int kRowColIdxRange = 2;
+    auto shapeInfo =
+            inferMatMulOutputShapeInfo(inShapeInfo1, inShapeInfo2, matMul.getTransposeA(), matMul.getTransposeB());
 
-    SmallVector<int64_t> outShape;
-    outShape.reserve(std::max(inRank1, inRank2));
-
-    // Temporally transformed shapes
-    auto inShape1Trans = to_small_vector(inShape1);
-    auto inShape2Trans = to_small_vector(inShape2);
-    std::reverse(inShape1Trans.begin(), inShape1Trans.end());
-    std::reverse(inShape2Trans.begin(), inShape2Trans.end());
-
-    // Apply transpose only when rank >= 2
-    if (transA && (inRank1 > 1)) {
-        std::swap(inShape1Trans[0], inShape1Trans[1]);
-    }
-    if (transB && (inRank2 > 1)) {
-        std::swap(inShape2Trans[0], inShape2Trans[1]);
+    mlir::ArrayAttr outBoundsAttr = nullptr;
+    if (!shapeInfo.bounds.empty()) {
+        outBoundsAttr = getIntArrayAttr(ctx, shapeInfo.bounds);
     }
 
-    // Only use the dim when it is Mat
-    if (inRank2 >= kRowColIdxRange) {
-        outShape.push_back(inShape2Trans[0]);
-    }
-    if (inRank1 >= kRowColIdxRange) {
-        outShape.push_back(inShape1Trans[1]);
+    const auto inElementType = inType1.getElementType();
+    const auto outDesc = vpux::getTensorAttr(ctx, inType1.getDimsOrder(), /*memSpace=*/nullptr, outBoundsAttr);
+    inferredReturnShapes.emplace_back(shapeInfo.shape, inElementType, outDesc);
+
+    return mlir::success();
+}
+
+mlir::LogicalResult vpux::IE::MatMulOp::reifyResultShapes(mlir::OpBuilder& builder,
+                                                          mlir::ReifiedRankedShapedTypeDims& reifiedReturnShapes) {
+    auto loc = getLoc();
+
+    auto outShape = IE::reifyMatMulTensors(builder, getInput1(), getInput2(), getTransposeA(), getTransposeB(), loc);
+
+    if (mlir::failed(outShape)) {
+        return outShape;
     }
 
-    // Process batch axes
-    uint32_t idx1 = kRowColIdxRange;
-    uint32_t idx2 = kRowColIdxRange;
-
-    while (idx1 < inRank1 || idx2 < inRank2) {
-        if (idx1 < inRank1 && idx2 < inRank2) {
-            outShape.push_back(std::max(inShape1Trans[idx1], inShape2Trans[idx2]));
-            ++idx1;
-            ++idx2;
-        } else if (idx2 >= inRank2) {
-            outShape.push_back(inShape1Trans[idx1]);
-            ++idx1;
-        } else if (idx1 >= inRank1) {
-            outShape.push_back(inShape2Trans[idx2]);
-            ++idx2;
-        }
-    }
-    std::reverse(std::begin(outShape), std::end(outShape));
-
-    inferredReturnShapes.emplace_back(outShape, inType1.getElementType());
+    reifiedReturnShapes.emplace_back(std::move(outShape.value()));
     return mlir::success();
 }
 

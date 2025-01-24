@@ -8,7 +8,6 @@
 #include "vpux/compiler/core/attributes/dims_order.hpp"
 #include "vpux/compiler/dialect/const/attr_interfaces.hpp"
 #include "vpux/compiler/dialect/const/utils/content.hpp"
-#include "vpux/compiler/dialect/const/utils/resource_management.hpp"
 #include "vpux/utils/core/func_ref.hpp"
 
 #include <mlir/Dialect/Quant/QuantTypes.h>
@@ -19,89 +18,39 @@
 
 namespace vpux::Const {
 
-class ContentAttr;
-
-class ContentSetup {
-    mlir::ElementsAttr _baseContent;
+namespace detail {
+/// Base class for constant data transformations setup. Provides basic API. Not
+/// intended for direct use.
+class ContentSetupBase {
+    NDTypeInterface _baseType;
     SmallVector<TransformAttrInterface> _transformations;
 
-    // Require the user to explicitly use clone() when he/she desires a copy.
-    ContentSetup(const ContentSetup&) = default;
-    ContentSetup& operator=(const ContentSetup&) = default;
-
 public:
-    ContentSetup() = default;
-    ~ContentSetup() = default;
-    ContentSetup(ContentSetup&& other);
-    ContentSetup& operator=(ContentSetup&& other);
+    ContentSetupBase() = default;
+    ~ContentSetupBase() = default;
+    ContentSetupBase(const ContentSetupBase&) = default;
+    ContentSetupBase& operator=(const ContentSetupBase&) = default;
+    ContentSetupBase(ContentSetupBase&& other);
+    ContentSetupBase& operator=(ContentSetupBase&& other);
 
-    // This constructor throws an exception when _baseContent is null.
-    ContentSetup(mlir::ElementsAttr baseContent, ArrayRef<TransformAttrInterface> transformations = {});
+    // This constructor throws an exception when base type is undefined.
+    ContentSetupBase(mlir::Type baseType, ArrayRef<TransformAttrInterface> transformations);
 
     // getters
-    mlir::MLIRContext* getContext() const {
-        return _baseContent.getContext();
-    }
-
-    mlir::ElementsAttr getBaseContent() const {
-        return _baseContent;
-    }
-
-    ArrayRef<TransformAttrInterface> getTransformations() const {
-        return _transformations;
-    }
-
-    ContentSetup clone() const {
-        checkInvalidated();
-        return *this;
-    }
+    mlir::MLIRContext* getContext() const;
+    ArrayRef<TransformAttrInterface> getTransformations() const;
 
     // transformations
-    [[nodiscard]] ContentSetup addTransformation(TransformAttrInterface newTransformation);
+    void addTransformation(TransformAttrInterface newTransformation);
 
-    // implemented by <concrete transformation attribute>.cpp
-    [[nodiscard]] ContentSetup broadcast(Dim axis, int64_t value);
-    [[nodiscard]] ContentSetup castElemType(mlir::Type newElemType);
-    [[nodiscard]] ContentSetup convertElemType(mlir::Type newElemType);
-    [[nodiscard]] ContentSetup quantCast(mlir::Type newElemType);
-    [[nodiscard]] ContentSetup dequantize();
-    [[nodiscard]] ContentSetup rescale(double scale);
-    [[nodiscard]] ContentSetup relocateWeightsTablePointers(ArrayRef<uint32_t> weightsPtr, uint64_t sparsityPtr,
-                                                            vpux::ShapeRef offsets, uint64_t weightsTableSize,
-                                                            uint64_t weightsElemBitSize,
-                                                            VPUIP::SparsityCompressionAttr weightsCompression,
-                                                            uint64_t channelOffset);
-    [[nodiscard]] ContentSetup swizzleConstant(uint64_t swizzleKey, uint64_t arch);
-    [[nodiscard]] ContentSetup add(double bias);
-    [[nodiscard]] ContentSetup reshape(vpux::ShapeRef newShape);
-    [[nodiscard]] ContentSetup reverse(Dim axis);
-    [[nodiscard]] ContentSetup reorder(vpux::DimsOrder newOrder);
-    [[nodiscard]] ContentSetup padWithZero(vpux::ShapeRef padBefore, vpux::ShapeRef padAfter);
-    [[nodiscard]] ContentSetup subview(vpux::ShapeRef offset, vpux::ShapeRef shape);
-    [[nodiscard]] ContentSetup bitPack(int64_t width);
-    [[nodiscard]] ContentSetup transpose(vpux::DimsOrder newOrder);
-    [[nodiscard]] ContentSetup memPermute(vpux::DimsOrder dstOrder, vpux::DimsOrder memPerm);
-    [[nodiscard]] ContentSetup layoutCast(vpux::DimsOrder dstOrder);
-    [[nodiscard]] ContentSetup expandDilated(vpux::ShapeRef dilations);
-    [[nodiscard]] ContentSetup getSparsityMap();
-    [[nodiscard]] ContentSetup sparsify(bool compressOutputType, mlir::ElementsAttr numActualElements = nullptr);
-    [[nodiscard]] ContentSetup changeShapeAndElemType(vpux::ShapeRef newShape, mlir::Type newElemType);
-    [[nodiscard]] ContentSetup scalarMultInverse();
-    [[nodiscard]] ContentSetup fuse(mlir::RankedTensorType fusedTensorType, ContentAttr weightsTable,
-                                    ContentAttr weights, ContentAttr sparsity, ContentAttr activations);
-    [[nodiscard]] ContentSetup quantize(mlir::quant::QuantizedType newElemType);
+protected:
+    bool isInvalidated() const;
 
-    // get
-    [[nodiscard]] ContentAttr get();
-
-private:
-    bool isInvalidated() const {
-        return _baseContent == nullptr;
-    }
-
-    // This function throws if a move from this class instance happened. This is the case when baseContent is null.
+    // Ensures (by the means of exception being thrown) that this object is not
+    // invalidated and could still be used by the user.
     void checkInvalidated() const;
 };
+}  // namespace detail
 
 // Returns the output type "as if" the transformations were applied to a tensor of type contentType.
 vpux::NDTypeInterface inferFinalType(vpux::NDTypeInterface contentType,
@@ -112,6 +61,96 @@ vpux::NDTypeInterface inferFinalType(vpux::NDTypeInterface contentType,
 std::pair<vpux::NDTypeInterface, bool> inferFinalTypeAndSplat(mlir::ElementsAttr content,
                                                               mlir::ArrayRef<TransformAttrInterface> transformations);
 
+namespace detail {
+// used as a fallback in ContentSetup
+struct NoopGet {
+    using return_type = void;
+};
+};  // namespace detail
+
+template <typename Get = detail::NoopGet>
+class SpecializedContentSetup final : public detail::ContentSetupBase {
+    Get _get;
+    // Note: we want to query return_type from Get callable in order to force
+    // users of SpecializedContentSetup to provide *custom* types -- this is
+    // necessary since C++ lambdas are not move-assignable and thus do not work
+    // with SpecializedContentSetup's usages. for instance:
+    // ```cpp
+    // auto setup = ...;
+    // // requires assignment:
+    // if (something) { setup = setup.add(42.0); }
+    // else { setup = setup.rescale(5.0); }
+    // ```
+    using GetReturnType = typename Get::return_type;
+
+    // Require the user to explicitly use clone() when there's a need to copy.
+    SpecializedContentSetup(const SpecializedContentSetup&) = default;
+    SpecializedContentSetup& operator=(const SpecializedContentSetup&) = default;
+
+public:
+    SpecializedContentSetup(mlir::Type baseType, ArrayRef<TransformAttrInterface> transformations = {},
+                            Get&& get = detail::NoopGet{})
+            : ContentSetupBase(baseType, transformations), _get(std::move(get)) {
+    }
+
+    SpecializedContentSetup(SpecializedContentSetup&&) = default;
+    SpecializedContentSetup& operator=(SpecializedContentSetup&&) = default;
+    ~SpecializedContentSetup() = default;
+
+    SpecializedContentSetup clone() const;
+
+    // shadows base class' version
+    [[nodiscard]] SpecializedContentSetup addTransformation(TransformAttrInterface newTransformation);
+
+    // implemented by <concrete transformation attribute>.cpp
+    [[nodiscard]] SpecializedContentSetup broadcast(Dim axis, int64_t value);
+    [[nodiscard]] SpecializedContentSetup castElemType(mlir::Type newElemType);
+    [[nodiscard]] SpecializedContentSetup convertElemType(mlir::Type newElemType);
+    [[nodiscard]] SpecializedContentSetup dequantize();
+    [[nodiscard]] SpecializedContentSetup rescale(double scale);
+    [[nodiscard]] SpecializedContentSetup relocateWeightsTablePointers(
+            ArrayRef<uint32_t> weightsPtr, uint64_t sparsityPtr, vpux::ShapeRef offsets, uint64_t weightsTableSize,
+            uint64_t weightsElemBitSize, VPUIP::SparsityCompressionAttr weightsCompression, uint64_t channelOffset);
+    [[nodiscard]] SpecializedContentSetup swizzleConstant(uint64_t swizzleKey, uint64_t arch);
+    [[nodiscard]] SpecializedContentSetup add(double bias);
+    [[nodiscard]] SpecializedContentSetup reshape(vpux::ShapeRef newShape);
+    [[nodiscard]] SpecializedContentSetup reverse(Dim axis);
+    [[nodiscard]] SpecializedContentSetup reorder(vpux::DimsOrder newOrder);
+    [[nodiscard]] SpecializedContentSetup padWithZero(vpux::ShapeRef padBefore, vpux::ShapeRef padAfter);
+    [[nodiscard]] SpecializedContentSetup subview(vpux::ShapeRef offset, vpux::ShapeRef shape);
+    [[nodiscard]] SpecializedContentSetup bitPack(int64_t width);
+    [[nodiscard]] SpecializedContentSetup transpose(vpux::DimsOrder newOrder);
+    [[nodiscard]] SpecializedContentSetup memPermute(vpux::DimsOrder dstOrder, vpux::DimsOrder memPerm);
+    [[nodiscard]] SpecializedContentSetup layoutCast(vpux::DimsOrder dstOrder);
+    [[nodiscard]] SpecializedContentSetup expandDilated(vpux::ShapeRef dilations);
+    [[nodiscard]] SpecializedContentSetup getSparsityMap();
+    [[nodiscard]] SpecializedContentSetup sparsify(bool compressOutputType,
+                                                   mlir::ElementsAttr numActualElements = nullptr);
+    [[nodiscard]] SpecializedContentSetup changeShapeAndElemType(vpux::ShapeRef newShape, mlir::Type newElemType);
+    [[nodiscard]] SpecializedContentSetup scalarMultInverse();
+    [[nodiscard]] SpecializedContentSetup fuse(mlir::RankedTensorType fusedTensorType, const ContentAttr& weightsTable,
+                                               const ContentAttr& weights, const ContentAttr& sparsity,
+                                               const ContentAttr& activations);
+    [[nodiscard]] SpecializedContentSetup quantize(mlir::quant::QuantizedType newElemType);
+
+    // Note: this method only exists when there's an explicit "Get" method
+    // provided by the user.
+    template <typename T = Get>
+    [[nodiscard]] GetReturnType get() const {
+        constexpr bool validGet = !std::is_same_v<Get, detail::NoopGet>;
+        static_assert(validGet, "This version of content setup does not support .get()");
+        checkInvalidated();
+        return _get(*this);
+    }
+};
+// ctad's explicit deduction guide for "Get" method
+template <typename Callable>
+SpecializedContentSetup(mlir::Type, ArrayRef<TransformAttrInterface>, Callable &&)->SpecializedContentSetup<Callable>;
+
+/// Default version of the content setup object. Users are highly recommended to
+/// use this instead of the "specialized" version: prefer explicit content
+/// construction (from setup's transformations) to implicit `.get()`.
+using ContentSetup = SpecializedContentSetup<detail::NoopGet>;
 }  // namespace vpux::Const
 
 //
@@ -122,100 +161,55 @@ std::pair<vpux::NDTypeInterface, bool> inferFinalTypeAndSplat(mlir::ElementsAttr
 #include <vpux/compiler/dialect/const/attributes.hpp.inc>
 
 namespace vpux::Const {
-class ContentAttr {
-    mlir::ElementsAttr _baseContent = nullptr;
-    TransformAttrInterfaceArrayAttr _transformations = nullptr;
-    NDTypeInterface _finalType = {};
-    bool _isSplat = false;
-
-public:
-    friend bool operator==(const ContentAttr& x, const ContentAttr& y) {
-        // Note: only base content and transformations are non-inferred fields -
-        // if they differ, other parameters also differ.
-        return x._baseContent == y._baseContent && x._transformations == y._transformations;
-    }
-
-    friend bool operator!=(const ContentAttr& x, const ContentAttr& y) {
-        return !(x == y);
-    }
-
-    friend void swap(ContentAttr& x, ContentAttr& y) {
-        using std::swap;
-        swap(x._baseContent, y._baseContent);
-        swap(x._transformations, y._transformations);
-        swap(x._finalType, y._finalType);
-        swap(x._isSplat, y._isSplat);
-    }
-
-    friend llvm::hash_code hash_value(const ContentAttr& x) {
-        using ::llvm::hash_value;
-        // Note: only base content and transformations are non-inferred fields -
-        // if they differ, other parameters also differ.
-        return llvm::hash_combine(hash_value(x._baseContent), hash_value(x._transformations));
-    }
-
-    // Compatibility APIs for current users
-    static ContentAttr get(mlir::ElementsAttr base, ArrayRef<TransformAttrInterface> transformations = {});
-    static ContentAttr getChecked(FuncRef<mlir::InFlightDiagnostic()> emitError, mlir::ElementsAttr base,
-                                  ArrayRef<TransformAttrInterface> transformations = {});
-    static mlir::LogicalResult verify(FuncRef<mlir::InFlightDiagnostic()> emitError, mlir::ElementsAttr baseContent,
-                                      ArrayRef<TransformAttrInterface> transformations = {});
-
-    mlir::MLIRContext* getContext() const {
-        return _baseContent.getContext();
-    }
-
-    operator mlir::OpFoldResult() const {
-        return EphemeralContentAttr::get(_baseContent.getContext(), _baseContent, _transformations);
-    }
-
-    friend bool operator==(const ContentAttr& x, std::nullptr_t) {
-        return x._baseContent == nullptr;
-    }
-    friend bool operator!=(const ContentAttr& x, std::nullptr_t) {
-        return !(x == nullptr);
-    }
-
-    // Existing APIs
-    vpux::Const::Content fold(bool bypassCache = false) const;
-
-    mlir::ElementsAttr getBaseContent() const {
-        return _baseContent;
-    }
-    mlir::ArrayRef<vpux::Const::TransformAttrInterface> getTransformations() const {
-        return _transformations == nullptr ? mlir::ArrayRef<vpux::Const::TransformAttrInterface>{}
-                                           : _transformations.getValue();
-    }
-    vpux::NDTypeInterface getType() const {
-        return _finalType;
-    }
-    bool isSplat() const {
-        return _isSplat;
-    }
-
-    // ContentSetup interface
-    vpux::Const::ContentSetup transform() const {
-        return ContentSetup(getBaseContent(), getTransformations());
-    }
-
-    static vpux::Const::ContentSetup transform(
-            mlir::ElementsAttr baseContent, llvm::ArrayRef<vpux::Const::TransformAttrInterface> transformations = {}) {
-        return ContentSetup(baseContent, transformations);
-    }
-
-    // Parsing & printing
-    void print(mlir::AsmPrinter&) const;
-    static mlir::FailureOr<ContentAttr> parse(mlir::AsmParser&);
-};
-
-// Helper methods for tablegen's property boilerplate
-mlir::LogicalResult convertFromAttribute(ContentAttr& x, mlir::Attribute attr,
-                                         llvm::function_ref<mlir::InFlightDiagnostic()> emitError);
-mlir::Attribute convertToAttribute(mlir::MLIRContext* ctx, const ContentAttr& x);
-mlir::LogicalResult readFromMlirBytecode(mlir::DialectBytecodeReader&, ContentAttr&);
-void writeToMlirBytecode(mlir::DialectBytecodeWriter&, const ContentAttr&);
 
 // Default custom<ContentAttr> parsing & printing
 mlir::ParseResult parseContentAttr(mlir::AsmParser& parser, ContentAttr& content);
 void printContentAttr(mlir::AsmPrinter& printer, const ContentAttr& content);
+
+/// @brief External constant prefix used for OpenVino constants.
+constexpr const char* OPENVINO_CONST_PREFIX = "ov";
+
+/** @brief Returns new dense_resource<> "base" content.
+
+    This function is used to create the base content for the constant that is
+    external to the compiler. As the memory is explicitly external, it is *not*
+    owned by the created content (users must ensure the lifetime of the data is
+    longer than the lifetime of the created content).
+
+    @note This function is required instead of manual content creation since it
+    performs additional optimizations not done by MLIR.
+ */
+mlir::DenseResourceElementsAttr createExternalConstContent(mlir::ShapedType type, ArrayRef<char> rawData,
+                                                           StringRef resourcePrefix);
+
+namespace detail {
+mlir::DenseElementsAttr createConstContentWithConversion(mlir::ShapedType type, ArrayRef<float> values);
+}
+
+/** @brief Returns new dense<> "base" content.
+
+    This function is used to create the base content for the constant that is
+    internal to the compiler. In this case, the created content owns the data.
+
+    Additionally, a float -> float16 conversion is performed for float values
+    when the type specified requires float16 elements.
+
+    @note Call this function for constant operations instead of MLIR
+ */
+template <typename T, std::enable_if_t<!std::is_same<T, char>::value, bool> = true>
+mlir::DenseElementsAttr createConstContent(mlir::ShapedType type, ArrayRef<T> values) {
+    if constexpr (std::is_same<T, float>::value) {
+        return detail::createConstContentWithConversion(type, values);
+    } else {
+        return mlir::DenseElementsAttr::get(type, values);
+    }
+}
+
+/** @brief Returns new dense<> "base" content.
+
+    @note This is an overload that assumes the constant data provided is a raw
+    buffer.
+ */
+mlir::DenseElementsAttr createConstContent(mlir::ShapedType type, ArrayRef<char> values);
+
 }  // namespace vpux::Const

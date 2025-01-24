@@ -120,8 +120,3 @@ Const::Content vpux::Const::MemPermuteAttr::transform(vpux::Const::Content& inpu
 
     return Const::details::memPermuteTransformation(input, outType, memPerm);
 }
-
-Const::ContentSetup vpux::Const::ContentSetup::memPermute(DimsOrder dstOrder, DimsOrder memPerm) {
-    return addTransformation(Const::MemPermuteAttr::get(mlir::AffineMapAttr::get(dstOrder.toAffineMap(getContext())),
-                                                        mlir::AffineMapAttr::get(memPerm.toAffineMap(getContext()))));
-}

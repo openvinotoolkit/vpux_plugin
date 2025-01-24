@@ -111,9 +111,13 @@ protected:
 };
 
 TEST_P(BroadcastWithShapeOfNPUTest, NPU3720_HW_TestKindSubgraph) {
-    setMLIRCompilerType();
     setDefaultHardwareMode();
     run(Platform::NPU3720);
+}
+
+TEST_P(BroadcastWithShapeOfNPUTest, NPU4000_HW_TestKindSubgraph) {
+    setDefaultHardwareMode();
+    run(Platform::NPU4000);
 }
 
 const std::vector<ov::element::Type> inputType = {ov::element::i64, ov::element::i32, ov::element::f16,
@@ -261,9 +265,13 @@ protected:
 };
 
 TEST_P(BroadcastWithSelectNPUTest, NPU3720_HW_TestKindSubgraph) {
-    setMLIRCompilerType();
     setDefaultHardwareMode();
     run(Platform::NPU3720);
+}
+
+TEST_P(BroadcastWithSelectNPUTest, NPU4000_HW_TestKindSubgraph) {
+    setDefaultHardwareMode();
+    run(Platform::NPU4000);
 }
 
 // *----------------*

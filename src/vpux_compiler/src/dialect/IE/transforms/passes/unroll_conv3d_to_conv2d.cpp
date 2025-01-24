@@ -462,7 +462,7 @@ mlir::LogicalResult TransposedConvGeneralRewriter::matchAndRewrite(IE::Transpose
                     takeOpLoc(origOp, StringLiteral("tconv_{0}_{1}"), actIndex, depthIndex), lastOp->getResult(0),
                     slicedFilters[depthIndex], /*output_shape=*/nullptr,
                     /*bias=*/nullptr, stridesAttr, padBeginAttr, padEndAttr, dilationsAttr, outputPaddingAttr,
-                    /*post_opAttr=*/nullptr, /*clamp=*/nullptr, /*output_channels=*/nullptr,
+                    /*post_opAttr=*/nullptr, /*clamp=*/nullptr, /*output_channels=*/origOp.getOutputChannelsAttr(),
                     /*input_channels=*/nullptr);
             newSubConvs.push_back(std::make_pair(newConvOp->getResult(0), actIndex * stridesZ + depthIndex));
         }

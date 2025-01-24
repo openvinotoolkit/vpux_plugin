@@ -21,14 +21,14 @@ void vpux::NPUReg40XX::ActShaveRtOp::serialize(elf::writer::BinaryDataSection<ui
     binDataSection.appendData(kernelText.data(), kernelText.size());
 }
 
-size_t vpux::NPUReg40XX::ActShaveRtOp::getBinarySize() {
+size_t vpux::NPUReg40XX::ActShaveRtOp::getBinarySize(VPU::ArchKind) {
     const auto kernelText = vpux::ELF::getKernelELF(getOperation(), getKernelPath(), {".text"});
 
     return kernelText.size();
 }
 
 // The management kernel code must be 1kB aligned as an ActShave requirement
-size_t vpux::NPUReg40XX::ActShaveRtOp::getAlignmentRequirements() {
+size_t vpux::NPUReg40XX::ActShaveRtOp::getAlignmentRequirements(VPU::ArchKind) {
     return ELF::VPUX_SHAVE_ALIGNMENT;
 }
 

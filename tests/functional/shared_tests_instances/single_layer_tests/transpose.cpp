@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation
+// Copyright (C) 2022-2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -10,7 +10,6 @@
 #include "vpu_ov2_layer_test.hpp"
 
 namespace ov {
-
 namespace test {
 
 class TransposeLayerTestCommon : public TransposeLayerTest, virtual public VpuOv2LayerTest {};
@@ -26,9 +25,7 @@ TEST_P(TransposeLayerTest_NPU4000, SW) {
     setReferenceSoftwareMode();
     run(Platform::NPU4000);
 }
-
 }  // namespace test
-
 }  // namespace ov
 
 using ov::test::TransposeLayerTest_NPU3720;
@@ -179,5 +176,4 @@ const auto paramsMemPerm =
 
 INSTANTIATE_TEST_SUITE_P(smoke_precommit_Transpose, TransposeLayerTest_NPU4000, paramsMemPerm,
                          TransposeLayerTest_NPU4000::getTestCaseName);
-
 }  // namespace

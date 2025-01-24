@@ -31,6 +31,18 @@ mlir::FailureOr<FqData> revertScaleShift(mlir::MLIRContext* ctx, const Const::Co
                                          const Const::ContentAttr& shift, float low, float high,
                                          vpux::NDTypeInterface storageType, const Logger& log);
 
+/// Returns quantization levels for a given type.
+int64_t getQuantizationLevels(mlir::Type type);
+
+// Returns the real element type of weights that they have during import.
+mlir::Type getTrueElemTypeOfWeights(Const::DeclareOp op);
+
+// Returns the real element type of weights that they have during import.
+// Historically, assume that convert op's input is weights and their type is the
+// real type. This assumption holds when WeightsDequantizeStructureInfo is
+// constructed successfully.
+mlir::Type getTrueElemTypeOfWeights(IE::ConvertOp op);
+
 class WeightsDequantizeStructureInfo final {
     //                     --- Constant Input Case ---
     //
@@ -101,20 +113,13 @@ class WeightsDequantizeStructureInfo final {
     //   |  inHigh  = type_max                  |
     //   |  outLow  = (inLow - shift) * scale   |
     //   |  outHigh = (inHigh - shift) * scale  |
-    //   |  levels  = 256/255 (i8), 16/15 (i4)  |
+    //   |  levels  = 256 (i8), 16 (i4)         |
     //   +--------------------------------------+
     //                      |
 
     //   Subtract and Multiply operation are optional in the dequantization pattern, because they can be folded
 
-    //   Storing i4 values as constants is not possible in MLIR; so even when we import the model we should import
-    //   the model in our frontend we should create a Constant that has higher level storage such as SI8 and a
-    //   transformation which converts the expressed type to I4/U4
-    //   Example: CastElemType<si4>, CastElemType<ui4>
-
 private:
-    mlir::Type trueElemTypeOfWeights = nullptr;
-
     Const::ContentAttr shift = {};  // From subtract op (if present)
     Const::ContentAttr scale = {};  // From multiply op (if present)
     mlir::Value dynamicShift = {};  // From subtract op (if present), coming from blockArgument
@@ -143,19 +148,12 @@ public:
 
     mlir::Value getInput() const;
 
-    // Returns the element type of the weights that they *should* have but not
-    // necessarily have in practice. (For instance, compiler is unable to
-    // represent i4 directly, yet this method would return 'i4' type for the i4
-    // weights).
-    mlir::Type getTrueElemTypeOfWeights() const;
-
     // Manually cleans up the currently found WD structure to ensure consecutive
     // searches on the same root operation would discover *new* WD structures
     // when they exist.
     void cleanUpCurrentWdChain(mlir::PatternRewriter& rewriter) const;
 
     // Quantization-related APIs:
-    int64_t getQuantizationLevels() const;
     [[nodiscard]] std::pair<mlir::Value, mlir::Value> getInputQuantizationInterval(mlir::OpBuilder& builder,
                                                                                    mlir::Location loc, float low,
                                                                                    float high) const;

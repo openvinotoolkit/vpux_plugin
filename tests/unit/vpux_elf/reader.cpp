@@ -110,8 +110,14 @@ TEST(ELFReaderTests, ELFReaderThrowsOnInvalidSectionHeaderCount) {
 TEST(ELFReaderTests, SectionHeadersAreReadCorrectly) {
     std::vector<SectionHeader> sectionHeaders(headerTableSize);
 
+    for (size_t idx = 0; idx < sectionHeaders.size(); idx++) {
+        sectionHeaders[idx].sh_name = idx;
+        sectionHeaders[idx].sh_size = headerTableSize;
+    }
+
     auto fileHeader = createTemplateFileHeader();
     fileHeader.e_shnum = headerTableSize;
+    fileHeader.e_shstrndx = headerTableSize - 1;
 
     std::vector<uint8_t> buffer;
     buffer.insert(buffer.end(), reinterpret_cast<uint8_t*>(&fileHeader),
@@ -132,8 +138,14 @@ TEST(ELFReaderTests, SectionHeadersAreReadCorrectly) {
 TEST(ELFReaderTests, PointerToSectionDataIsResolvedCorrectly) {
     std::vector<SectionHeader> sectionHeaders(headerTableSize);
 
+    for (size_t idx = 0; idx < sectionHeaders.size(); idx++) {
+        sectionHeaders[idx].sh_name = idx;
+        sectionHeaders[idx].sh_size = headerTableSize;
+    }
+
     auto fileHeader = createTemplateFileHeader();
     fileHeader.e_shnum = headerTableSize;
+    fileHeader.e_shstrndx = headerTableSize - 1;
     sectionHeaders[indexToCheck].sh_offset = sizeof(fileHeader);
 
     std::vector<uint8_t> buffer;
@@ -150,8 +162,14 @@ TEST(ELFReaderTests, PointerToSectionDataIsResolvedCorrectly) {
 TEST(ELFReaderTests, PtrToSectionDataIsResolvedCorrectlyWithGetSectionNoData) {
     std::vector<SectionHeader> sectionHeaders(headerTableSize);
 
+    for (size_t idx = 0; idx < sectionHeaders.size(); idx++) {
+        sectionHeaders[idx].sh_name = idx;
+        sectionHeaders[idx].sh_size = headerTableSize;
+    }
+
     auto fileHeader = createTemplateFileHeader();
     fileHeader.e_shnum = headerTableSize;
+    fileHeader.e_shstrndx = headerTableSize - 1;
     sectionHeaders[indexToCheck].sh_offset = sizeof(fileHeader);
 
     std::vector<uint8_t> buffer;

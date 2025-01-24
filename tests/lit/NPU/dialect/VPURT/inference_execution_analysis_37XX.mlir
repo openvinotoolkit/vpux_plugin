@@ -19,9 +19,6 @@
 module @dumpsubgraph attributes {VPU.arch = #VPU.arch_kind<NPU37XX>, VPU.compilationMode = #VPU.compilation_mode<DefaultHW>} {
   IE.TileResource 2 of @NCE at 1.300000e+03 MHz {
     // CHECK:       IE.TileResource {activity_factor = {{[0-9]+.[0-9]+}} : f64} 2 of @NCE at 1.300000e+03 MHz {
-    builtin.module @UsedMemory {
-      IE.MemoryResource 688128 bytes of @CMX_NN
-    }
     IE.MemoryResource 1784217 bytes of @CMX_NN_FragmentationAware
     IE.MemoryResource 1982464 bytes of @CMX_NN {VPU.bandwidth = 32 : i64, VPU.derateFactor = 1.000000e+00 : f64}
     IE.ExecutorResource 2 of @SHAVE_ACT

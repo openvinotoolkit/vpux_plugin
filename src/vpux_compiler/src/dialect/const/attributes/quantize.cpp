@@ -210,7 +210,3 @@ Const::Content vpux::Const::QuantizeAttr::transform(vpux::Const::Content& input)
         VPUX_THROW("Unsupported {0} storage type", storageType);
     }
 }
-
-Const::ContentSetup vpux::Const::ContentSetup::quantize(mlir::quant::QuantizedType newElemType) {
-    return addTransformation(Const::QuantizeAttr::get(getContext(), newElemType));
-}

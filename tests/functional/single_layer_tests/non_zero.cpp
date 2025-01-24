@@ -60,7 +60,6 @@ protected:
 
 TEST_P(NonZeroLayerTest, NPU3720_HW) {
     abs_threshold = 0.0f;
-    setMLIRCompilerType();
     setDefaultHardwareMode();
     run(Platform::NPU3720);
 }

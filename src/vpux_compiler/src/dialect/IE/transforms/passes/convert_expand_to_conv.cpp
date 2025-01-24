@@ -1,11 +1,13 @@
 //
-// Copyright (C) 2023 Intel Corporation
+// Copyright (C) 2023-2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/IE/transforms/passes.hpp"
 #include "vpux/compiler/dialect/IE/utils/expand_utils.hpp"
 #include "vpux/compiler/dialect/IE/utils/pooling_utils.hpp"
+#include "vpux/compiler/dialect/IE/utils/quantization.hpp"
+#include "vpux/compiler/dialect/const/utils/utils.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 
 #include <mlir/IR/PatternMatch.h>
@@ -210,33 +212,6 @@ std::vector<vpux::type::float16> populateWeights(ShapeRef weightShape, const int
     return weightValues;
 }
 
-mlir::Type composeExpressedType(const mlir::Type convolutionInputType) {
-    // Compose quantized weight type for convolution with quantized input.
-    // It must have scale 1 and shift 0 and range 0-255.
-    // Let's keep it obvious: quantized 0 means 0, quantized 1 means 1.
-    // For float cases just use the provided element type.
-    if (convolutionInputType.isa<mlir::quant::QuantizedType>()) {
-        const auto ctx = convolutionInputType.getContext();
-        const auto quantType = mlir::quant::UniformQuantizedType::get(
-                /*flags=*/0, /*storageType=*/getUInt8Type(ctx), /*expressedType=*/mlir::Float16Type::get(ctx),
-                /*scale=*/1.0, /*zeroPoint=*/0, /*storageTypeMin=*/0, /*storageTypeMax=*/255);
-        return quantType;
-    }
-    return convolutionInputType;
-}
-
-Const::ContentAttr applyWeightTransformations(const Const::ContentAttr& weightContentAttr,
-                                              const mlir::Type weightExpressedElemType) {
-    auto setup = weightContentAttr.transform();
-
-    // For quantized types convert weights to storage type. Usually that's UInt8. Then apply quantCast.
-    // For float case just convert weights to expressed element type.
-    if (auto quantType = weightExpressedElemType.dyn_cast<mlir::quant::QuantizedType>()) {
-        return setup.castElemType(quantType.getStorageType()).quantCast(quantType).get();
-    }
-    return setup.castElemType(weightExpressedElemType).get();
-}
-
 mlir::Value composeWeights(mlir::Location loc, ShapeRef origInShape, ShapeRef origOutShape,
                            const mlir::Type convolutionInputType, const int64_t convolutionAlignment,
                            mlir::PatternRewriter& rewriter) {
@@ -246,13 +221,13 @@ mlir::Value composeWeights(mlir::Location loc, ShapeRef origInShape, ShapeRef or
 
     const auto ctx = rewriter.getContext();
     const auto weightStorageType = mlir::RankedTensorType::get(weightShape.raw(), mlir::Float16Type::get(ctx));
-    const auto weightStorageAttr = mlir::DenseElementsAttr::get(weightStorageType, ArrayRef(weightValues));
+    const auto weightStorageAttr = Const::createConstContent(weightStorageType, ArrayRef(weightValues));
     const auto weightContentAttr = Const::ContentAttr::get(weightStorageAttr);
     const auto declLoc = appendLoc(loc, "weights for DPU expand");
 
-    const auto weightExpressedElemType = composeExpressedType(convolutionInputType);
+    const auto weightExpressedElemType = IE::composeWeightsExpressedType(convolutionInputType);
     const auto weightExpressedType = mlir::RankedTensorType::get(weightShape.raw(), weightExpressedElemType);
-    auto targetContentAttr = applyWeightTransformations(weightContentAttr, weightExpressedElemType);
+    auto targetContentAttr = weightContentAttr.transform().castElemType(weightExpressedElemType).get();
     auto declOp = rewriter.create<Const::DeclareOp>(declLoc, weightExpressedType, std::move(targetContentAttr));
 
     const auto reorderLoc = appendLoc(loc, "reorder weights for DPU expand");

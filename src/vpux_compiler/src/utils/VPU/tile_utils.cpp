@@ -1,12 +1,12 @@
 //
-// Copyright (C) 2023 Intel Corporation.
+// Copyright (C) 2023-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
-//
-
 #include "vpux/compiler/utils/VPU/tile_utils.hpp"
+#include "vpux/compiler/dialect/IE/utils/dynamic_shape_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/distributed_tensor_utils.hpp"
+#include "vpux/compiler/utils/analysis.hpp"
 
 #include <llvm/ADT/TypeSwitch.h>
 
@@ -285,11 +285,15 @@ std::vector<std::pair<NDTypeInterface, TensorDistributionMap>> getTileDistributi
         inTiles = inputTiles.value().tiles;
     }
 
+    std::vector<std::pair<NDTypeInterface, TensorDistributionMap>> inputTileTypes;
+    if (IE::hasDynamicTensors(origOp)) {
+        return inputTileTypes;
+    }
+
     VPUX_THROW_UNLESS(inTiles.size() == origOp->getOperands().size(),
                       "Unexpected SW inputTile size '{0}' and Op operands size '{1}'", inTiles.size(),
                       origOp->getOperands().size());
 
-    std::vector<std::pair<NDTypeInterface, TensorDistributionMap>> inputTileTypes;
     for (const auto& input : origOp->getOperands() | indexed) {
         const auto inputType = input.value().getType().cast<vpux::NDTypeInterface>();
         auto inputTileType = inputType.extractDenseTile(inTiles[input.index()].offsets, inTiles[input.index()].shape);
@@ -466,11 +470,15 @@ SmallVector<vpux::NDTypeInterface> getTileTypesCommon(mlir::Operation* origOp, c
         inTiles = inputTiles.value().tiles;
     }
 
+    mlir::SmallVector<vpux::NDTypeInterface> inputTileTypes;
+    if (IE::hasDynamicTensors(origOp)) {
+        return inputTileTypes;
+    }
+
     VPUX_THROW_UNLESS(inTiles.size() == origOp->getOperands().size(),
                       "Unexpected SW inputTile size '{0}' and Op operands size '{1}'", inTiles.size(),
                       origOp->getOperands().size());
 
-    mlir::SmallVector<vpux::NDTypeInterface> inputTileTypes;
     for (const auto& input : origOp->getOperands() | indexed) {
         const auto inputType = input.value().getType().cast<vpux::NDTypeInterface>();
         inputTileTypes.push_back(
@@ -592,9 +600,22 @@ Byte getRequiredCMX(VPU::ConvolutionOp convOp, const vpux::TileInfo& tiling,
     return getRequiredCMXSize({lastInputTileType, lastFilterTileType, lastOutputTileType});
 }
 
+Byte getRequiredCMX(VPU::NCEConvolutionOp convOp, const SmallVector<NDTypeInterface>& tileTypes) {
+    VPUX_THROW_WHEN(tileTypes.size() < 3, "Incorrect types {0} for {1}", tileTypes.size(), convOp);
+    const auto lastInputTileType = tileTypes[0];
+    const auto lastFilterTileType = tileTypes[1];
+    const auto lastOutputTileType = tileTypes[2];
+    const auto OC = lastOutputTileType.getShape()[Dims4D::Act::C];
+    return getRequiredCMXSizeForNCEOps({lastInputTileType, lastFilterTileType, lastOutputTileType}, OC);
+}
+
 Byte getRequiredCMX(VPU::NCEConvolutionOp convOp, const vpux::TileInfo& tiling,
                     const std::optional<InputTiling>& inputTiles) {
-    auto tileTypes = getTileTypes(convOp, tiling, inputTiles);
+    return getRequiredCMX(convOp, getTileTypes(convOp.getOperation(), tiling, inputTiles));
+}
+
+Byte getRequiredCMX(VPU::NCECompressConvolutionOp convOp, const SmallVector<NDTypeInterface>& tileTypes) {
+    VPUX_THROW_WHEN(tileTypes.size() < 3, "Incorrect types {0} for {1}", tileTypes.size(), convOp);
     const auto lastInputTileType = tileTypes[0];
     const auto lastFilterTileType = tileTypes[1];
     const auto lastOutputTileType = tileTypes[2];
@@ -604,12 +625,7 @@ Byte getRequiredCMX(VPU::NCEConvolutionOp convOp, const vpux::TileInfo& tiling,
 
 Byte getRequiredCMX(VPU::NCECompressConvolutionOp convOp, const vpux::TileInfo& tiling,
                     const std::optional<InputTiling>& inputTiles) {
-    auto tileTypes = getTileTypes(convOp.getOperation(), tiling, inputTiles);
-    const auto lastInputTileType = tileTypes[0];
-    const auto lastFilterTileType = tileTypes[1];
-    const auto lastOutputTileType = tileTypes[2];
-    const auto OC = lastOutputTileType.getShape()[Dims4D::Act::C];
-    return getRequiredCMXSizeForNCEOps({lastInputTileType, lastFilterTileType, lastOutputTileType}, OC);
+    return getRequiredCMX(convOp, getTileTypes(convOp.getOperation(), tiling, inputTiles));
 }
 
 Byte getRequiredCMXForWeight(VPU::GroupConvolutionOp gConvOp, const vpux::TileInfo& tiling,
@@ -635,10 +651,12 @@ Byte getRequiredCMX(VPU::GroupConvolutionOp gConvOp, const vpux::TileInfo& tilin
     return getRequiredCMXSize({inputTileType, inputTileType}) + getRequiredCMXForWeight(gConvOp, tiling, inputTiles);
 }
 
-Byte getRequiredCMX(VPU::NCEDepthConvolutionOp dConvOp, const vpux::TileInfo& tiling,
-                    const std::optional<InputTiling>& inputTiles) {
-    auto tileTypes = getTileTypes(dConvOp, tiling, inputTiles);
+Byte getRequiredCMX(VPU::NCEDepthConvolutionOp dConvOp, const SmallVector<NDTypeInterface>& tileTypes) {
+    VPUX_THROW_WHEN(tileTypes.size() < 3, "Incorrect types {0} for {1}", tileTypes.size(), dConvOp);
     const auto inputTileType = tileTypes[0];
+    const auto filterTileShape = tileTypes[1];
+    const auto outputTileType = tileTypes[2];
+    const auto OC = outputTileType.getShape()[Dims4D::Act::C];
     const auto filterShape = Shape(parseIntArrayAttr<int64_t>(dConvOp.getRawFilterShape()));
     const auto KY = filterShape[Dims4D::Filter::KY];
     const auto KX = filterShape[Dims4D::Filter::KX];
@@ -647,12 +665,25 @@ Byte getRequiredCMX(VPU::NCEDepthConvolutionOp dConvOp, const vpux::TileInfo& ti
     const auto kernelStridesVals = Shape(parseIntArrayAttr<int64_t>(kernelStrides));
 
     return getRequiredCMXSizeForNCEOps({inputTileType, inputTileType}, 0) +
-           getRequiredCMXForWeight(dConvOp, tiling, inputTiles);
+           getRequiredCMXSizeForNCEOps({filterTileShape}, OC);
+}
+
+Byte getRequiredCMX(VPU::NCEDepthConvolutionOp dConvOp, const vpux::TileInfo& tiling,
+                    const std::optional<InputTiling>& inputTiles) {
+    return getRequiredCMX(dConvOp, getTileTypes(dConvOp, tiling, inputTiles));
+}
+
+Byte getRequiredCMX(VPU::SWOpInterface /*swOp*/, const SmallVector<NDTypeInterface>& tileTypes) {
+    return getRequiredCMXSize(tileTypes);
 }
 
 Byte getRequiredCMX(VPU::SWOpInterface swOp, const vpux::TileInfo& tiling,
                     const std::optional<InputTiling>& inputTiles) {
     auto tileTypes = getTileTypes(swOp, tiling, inputTiles);
+    return getRequiredCMXSize(tileTypes);
+}
+
+Byte getRequiredCMX(VPU::DepthToSpaceOp /*d2sOp*/, const SmallVector<NDTypeInterface>& tileTypes) {
     return getRequiredCMXSize(tileTypes);
 }
 
@@ -689,9 +720,8 @@ Byte getRequiredCMX(VPU::MaxPoolOp poolOp, const vpux::TileInfo& tiling, const s
     return getRequiredCMXSize({inputType, outputType});
 }
 
-Byte getRequiredCMX(VPU::NCEMaxPoolOp poolOp, const vpux::TileInfo& tiling,
-                    const std::optional<InputTiling>& inputTiles) {
-    auto tileTypes = getTileTypes(poolOp.getOperation(), tiling, inputTiles);
+Byte getRequiredCMX(VPU::NCEMaxPoolOp poolOp, const SmallVector<NDTypeInterface>& tileTypes) {
+    VPUX_THROW_WHEN(tileTypes.size() < 2, "Incorrect types {0} for {1}", tileTypes.size(), poolOp);
     auto inputType = tileTypes[0];
     auto outputType = tileTypes[1];
     auto kernelSize = poolOp.getKernelSize();
@@ -705,17 +735,25 @@ Byte getRequiredCMX(VPU::NCEMaxPoolOp poolOp, const vpux::TileInfo& tiling,
     return getRequiredCMXSizeForNCEOps({inputType, outputType}, IC);
 }
 
-Byte getRequiredCMX(VPU::NCEPermuteOp pqOp, const vpux::TileInfo& tiling,
+Byte getRequiredCMX(VPU::NCEMaxPoolOp poolOp, const vpux::TileInfo& tiling,
                     const std::optional<InputTiling>& inputTiles) {
-    auto tileTypes = getTileTypes(pqOp, tiling, inputTiles);
+    return getRequiredCMX(poolOp, getTileTypes(poolOp.getOperation(), tiling, inputTiles));
+}
+
+Byte getRequiredCMX(VPU::NCEPermuteOp pqOp, const SmallVector<NDTypeInterface>& tileTypes) {
+    VPUX_THROW_WHEN(tileTypes.size() < 2, "Incorrect types {0} for {1}", tileTypes.size(), pqOp);
     auto inputType = tileTypes[0];
     auto outputType = tileTypes[1];
     return getRequiredCMXSize({inputType, outputType});
 }
 
-Byte getRequiredCMX(VPU::NCEAveragePoolOp poolOp, const vpux::TileInfo& tiling,
+Byte getRequiredCMX(VPU::NCEPermuteOp pqOp, const vpux::TileInfo& tiling,
                     const std::optional<InputTiling>& inputTiles) {
-    auto tileTypes = getTileTypes(poolOp.getOperation(), tiling, inputTiles);
+    return getRequiredCMX(pqOp, getTileTypes(pqOp, tiling, inputTiles));
+}
+
+Byte getRequiredCMX(VPU::NCEAveragePoolOp poolOp, const SmallVector<NDTypeInterface>& tileTypes) {
+    VPUX_THROW_WHEN(tileTypes.size() < 2, "Incorrect types {0} for {1}", tileTypes.size(), poolOp);
     auto inputType = tileTypes[0];
     auto outputType = tileTypes[1];
     auto kernelSize = poolOp.getKernelSize();
@@ -729,12 +767,17 @@ Byte getRequiredCMX(VPU::NCEAveragePoolOp poolOp, const vpux::TileInfo& tiling,
     return getRequiredCMXSizeForNCEOps({inputType, outputType}, IC);
 }
 
-Byte getEltwiseRequiredCMX(mlir::Operation* op, const vpux::TileInfo& tiling,
-                           const std::optional<InputTiling>& inputTiles) {
-    auto tileTypes = getTileTypes(op, tiling, inputTiles);
+Byte getRequiredCMX(VPU::NCEAveragePoolOp poolOp, const vpux::TileInfo& tiling,
+                    const std::optional<InputTiling>& inputTiles) {
+    return getRequiredCMX(poolOp, getTileTypes(poolOp.getOperation(), tiling, inputTiles));
+}
+
+Byte getEltwiseRequiredCMX(mlir::Operation* op, const SmallVector<NDTypeInterface>& tileTypes) {
+    VPUX_THROW_WHEN(tileTypes.size() != 3, "Incorrect types {0} for eltwise", tileTypes.size());
     auto firstInputType = tileTypes[0];
     auto secondInputType = tileTypes[1];
     auto outputType = tileTypes[2];
+
     // Inplace eltwise requires less CMX
     if (auto nceEltwise = mlir::dyn_cast<VPU::NCEEltwiseOp>(op)) {
         if (nceEltwise.getIsInplace().value_or(false)) {
@@ -750,6 +793,11 @@ Byte getEltwiseRequiredCMX(mlir::Operation* op, const vpux::TileInfo& tiling,
     return getRequiredCMXSize({firstInputType, secondInputType, outputType});
 }
 
+Byte getEltwiseRequiredCMX(mlir::Operation* op, const vpux::TileInfo& tiling,
+                           const std::optional<InputTiling>& inputTiles) {
+    return getEltwiseRequiredCMX(op, getTileTypes(op, tiling, inputTiles));
+}
+
 Byte getRequiredCMX(VPU::AddOp op, const vpux::TileInfo& tiling, const std::optional<InputTiling>& inputTiles) {
     return getEltwiseRequiredCMX(op.getOperation(), tiling, inputTiles);
 }
@@ -761,6 +809,10 @@ Byte getRequiredCMXForWeight(VPU::AddOp /*op*/, const vpux::TileInfo& /*tiling*/
 
 Byte getRequiredCMX(VPU::MultiplyOp op, const vpux::TileInfo& tiling, const std::optional<InputTiling>& inputTiles) {
     return getEltwiseRequiredCMX(op.getOperation(), tiling, inputTiles);
+}
+
+Byte getRequiredCMX(VPU::MultiplyOp op, const SmallVector<NDTypeInterface>& tileTypes) {
+    return getEltwiseRequiredCMX(op.getOperation(), tileTypes);
 }
 
 Byte getRequiredCMXForWeight(VPU::MultiplyOp /*op*/, const vpux::TileInfo& /*tiling*/,
@@ -788,6 +840,10 @@ Byte getRequiredCMXForWeight(VPU::AndOp /*op*/, const vpux::TileInfo& /*tiling*/
 
 Byte getRequiredCMX(VPU::NCEEltwiseOp op, const vpux::TileInfo& tiling, const std::optional<InputTiling>& inputTiles) {
     return getEltwiseRequiredCMX(op.getOperation(), tiling, inputTiles);
+}
+
+Byte getRequiredCMX(VPU::NCEEltwiseOp op, const SmallVector<NDTypeInterface>& types) {
+    return getEltwiseRequiredCMX(op.getOperation(), types);
 }
 
 Byte getRequiredCMXForWeight(VPU::NCEEltwiseOp /*op*/, const vpux::TileInfo& /*tiling*/,
@@ -916,6 +972,43 @@ Byte getRequiredCMX(mlir::Operation* op, const vpux::TileInfo& tiling, Logger lo
             });
 }
 
+Byte getRequiredCMX(mlir::Operation* op, const SmallVector<NDTypeInterface>& types) {
+    return llvm::TypeSwitch<mlir::Operation*, Byte>(op)
+            .Case<VPU::NCEConvolutionOp>([&](VPU::NCEConvolutionOp origOp) {
+                return getRequiredCMX(origOp, types);
+            })
+            .Case<VPU::NCECompressConvolutionOp>([&](VPU::NCECompressConvolutionOp origOp) {
+                return getRequiredCMX(origOp, types);
+            })
+            .Case<VPU::NCEMaxPoolOp>([&](VPU::NCEMaxPoolOp origOp) {
+                return getRequiredCMX(origOp, types);
+            })
+            .Case<VPU::NCEAveragePoolOp>([&](VPU::NCEAveragePoolOp origOp) {
+                return getRequiredCMX(origOp, types);
+            })
+            .Case<VPU::MultiplyOp>([&](VPU::MultiplyOp origOp) {
+                return getRequiredCMX(origOp, types);
+            })
+            .Case<VPU::NCEEltwiseOp>([&](VPU::NCEEltwiseOp origOp) {
+                return getRequiredCMX(origOp, types);
+            })
+            .Case<VPU::NCEDepthConvolutionOp>([&](VPU::NCEDepthConvolutionOp origOp) {
+                return getRequiredCMX(origOp, types);
+            })
+            .Case<VPU::SWOpInterface>([&](VPU::SWOpInterface origOp) {
+                return getRequiredCMX(origOp, types);
+            })
+            .Case<VPU::DepthToSpaceOp>([&](VPU::DepthToSpaceOp origOp) {
+                return getRequiredCMX(origOp, types);
+            })
+            .Case<VPU::NCEPermuteOp>([&](VPU::NCEPermuteOp origOp) {
+                return getRequiredCMX(origOp, types);
+            })
+            .Default([&](mlir::Operation* defaultOp) -> Byte {
+                return getRequiredCMXSizeForDefaultOps(defaultOp);
+            });
+}
+
 Byte getRequiredCMXSize(ArrayRef<vpux::NDTypeInterface> operands) {
     Byte requiredCMX(0);
 
@@ -953,7 +1046,7 @@ OutputTiling getUniqueShapeTilingCandidates(mlir::Operation* op, const OutputTil
 
     return llvm::TypeSwitch<mlir::Operation*, OutputTiling>(op)
             .Case<VPU::NCEConvolutionOp, VPU::NCEDepthConvolutionOp, VPU::NCECompressConvolutionOp,
-                  VPU::NCEAveragePoolOp, VPU::NCEMaxPoolOp, VPU::NCEPermuteOp>([&](mlir::Operation*) {
+                  VPU::NCEAveragePoolOp, VPU::NCEMaxPoolOp, VPU::NCEPermuteOp>([&](mlir::Operation* op) {
                 auto axis = origTiles[0].axis;
                 auto tilingDims = getNonOneDim(axis);
                 const auto isTiledOnSpatialDims = [](auto dim) {
@@ -965,54 +1058,92 @@ OutputTiling getUniqueShapeTilingCandidates(mlir::Operation* op, const OutputTil
                     return origTiles;
                 }
 
-                // For NCE operations we need to account for the fact that padding is not occupying
-                // any space in CMX so output tiles that are located on the border might result in
-                // a smaller input tile than for an output tile located in the middle of the space
-                // even if output tile shape is the same. To cover those cases add tiles with the same
-                // shape located at the beggining of the dimension(to cover pad before), middle, and
-                // end of dimension(to cover pad after)
-                // Example:
-                // origTiles:
-                // shape = [1, 256, 65, 65] offset = [0, 0, 0, 0]
-                // [1, 256, 65, 65] [0, 0, 65, 0]
-                // [1, 256, 65, 65] [0, 0, 130, 0]
-                // [1, 256, 65, 65] [0, 0, 195, 0]
-                // [1, 256, 65, 65] [0, 0, 260, 0]
-                //
-                // gets transformed to uniqueShapeTiles:
-                //  shape = [1, 256, 65, 65] offset = [0, 0, 0, 0] - first tile
-                // [1, 256, 65, 65] [0, 0, 65, 0] - middle tile
-                // [1, 256, 65, 65] [0, 0, 260, 0] - last tile
+                // Try to limit the tiles to the ones with unique output shape and unique input shape
+                // on the tiling dimension.
 
-                auto lastTile = origTiles.back();
-                const auto lastYOffset = lastTile.offsets[Dims4D::Act::getSpatialDim(0)];
-                const auto lastXOffset = lastTile.offsets[Dims4D::Act::getSpatialDim(1)];
-
-                enum TilePosition { First = 0, Middle = 1, Last = 2 };
-
-                auto classifyTilePosition = [](int tileOffset, int lastOffset) {
-                    if (tileOffset == 0) {
-                        return TilePosition::First;
-                    } else if (tileOffset != lastOffset) {
-                        return TilePosition::Middle;
-                    } else {
-                        return TilePosition::Last;
-                    }
-                };
+                auto nceOp = mlir::dyn_cast<VPU::NCEOpInterface>(op);
+                auto inputShape = mlir::cast<vpux::NDTypeInterface>(op->getOperand(0).getType()).getShape();
+                auto inputYRange = DimRange(0, inputShape[Dims4D::Act::getSpatialDim(0)]);
+                auto inputXRange = DimRange(0, inputShape[Dims4D::Act::getSpatialDim(1)]);
+                auto pads = nceOp.getPad();
+                auto padLeft = pads != nullptr ? pads.getLeft().getInt() : 0;
+                auto padRight = pads != nullptr ? pads.getRight().getInt() : 0;
+                auto padTop = pads != nullptr ? pads.getTop().getInt() : 0;
+                auto padBottom = pads != nullptr ? pads.getBottom().getInt() : 0;
+                auto kernel = nceOp.getKernelSizeVal();
+                auto kernelX = kernel[Dims4D::Kernel::X.ind()];
+                auto kernelY = kernel[Dims4D::Kernel::Y.ind()];
+                auto strides = nceOp.getStridesVal();
+                auto stridesY = strides[Dims4D::Strides::Y.ind()];
+                auto stridesX = strides[Dims4D::Strides::X.ind()];
 
                 auto isNCETileUnique = [&](const TileInfo& tile1, const TileInfo& tile2) {
+                    // For ops with sparse operands check if we don't tile over sparse axis. In case we tile over it
+                    // include each tile with unique offset into the list.
+                    for (auto operand : op->getOperands()) {
+                        if (auto sparseTensor = mlir::dyn_cast<VPU::SparseTensorType>(operand.getType())) {
+                            auto sparsityCompression = sparseTensor.getSparsityCompression();
+                            if (sparsityCompression == nullptr) {
+                                continue;
+                            }
+                            auto axisAttr = sparsityCompression.getAxis();
+                            if (axisAttr == nullptr) {
+                                continue;
+                            }
+                            auto axis = axisAttr.getInt();
+                            if (tile1.offsets[Dim(axis)] != tile2.offsets[Dim(axis)]) {
+                                return tile1.offsets[Dim(axis)] < tile2.offsets[Dim(axis)];
+                            }
+                            // Additionally for convolution-like ops with sparse operand consider
+                            // tiles with differing offset in C dimension as unique. This is because
+                            // C dimension is converted to OC diemnsion(axis == 0) for filter tiles.
+                            if (mlir::isa<VPU::NCEConvolutionOp>(op) || mlir::isa<VPU::NCEDepthConvolutionOp>(op) ||
+                                mlir::isa<VPU::NCECompressConvolutionOp>(op)) {
+                                if (tile1.offsets[Dims4D::Act::C] != tile2.offsets[Dims4D::Act::C]) {
+                                    return tile1.offsets[Dims4D::Act::C] < tile2.offsets[Dims4D::Act::C];
+                                }
+                            }
+                        }
+                    }
                     if (tile1.shape == tile2.shape) {
                         auto tile1YOffset = tile1.offsets[Dims4D::Act::getSpatialDim(0)];
                         auto tile2YOffset = tile2.offsets[Dims4D::Act::getSpatialDim(0)];
                         auto tile1XOffset = tile1.offsets[Dims4D::Act::getSpatialDim(1)];
                         auto tile2XOffset = tile2.offsets[Dims4D::Act::getSpatialDim(1)];
+                        // Ensure that at least one tile with offset == 0 and one tile with offset != 0 is included.
+                        // This is to account for logic that calculates tile padding in
+                        // getOverlappedDistributionParameters. Possibly not needed after E#112801
+                        if (((tile1YOffset == 0 && tile2YOffset != 0) || (tile2YOffset == 0 && tile1YOffset != 0))) {
+                            return tile1YOffset < tile2YOffset;
+                        }
+                        if ((tile1XOffset == 0 && tile2XOffset != 0) || (tile2XOffset == 0 && tile1XOffset != 0)) {
+                            return tile1XOffset < tile2XOffset;
+                        }
                         if (tile1YOffset != tile2YOffset) {
-                            return classifyTilePosition(tile1YOffset, lastYOffset) <
-                                   classifyTilePosition(tile2YOffset, lastYOffset);
+                            const DimRange tile1Range(tile1YOffset,
+                                                      tile1YOffset + tile1.shape[Dims4D::Act::getSpatialDim(0)]);
+                            const DimRange tile2Range(tile2YOffset,
+                                                      tile2YOffset + tile2.shape[Dims4D::Act::getSpatialDim(0)]);
+                            DimRange tile1InputRange;
+                            DimRange tile2InputRange;
+                            std::tie(tile1InputRange, std::ignore, std::ignore) =
+                                    inputForOutputDim(tile1Range, kernelY, stridesY, inputYRange, padTop, padBottom);
+                            std::tie(tile2InputRange, std::ignore, std::ignore) =
+                                    inputForOutputDim(tile2Range, kernelY, stridesY, inputYRange, padTop, padBottom);
+                            return tile1InputRange.length() < tile2InputRange.length();
                         }
                         if (tile1XOffset != tile2XOffset) {
-                            return classifyTilePosition(tile1XOffset, lastXOffset) <
-                                   classifyTilePosition(tile2XOffset, lastXOffset);
+                            const DimRange tile1Range(tile1XOffset,
+                                                      tile1XOffset + tile1.shape[Dims4D::Act::getSpatialDim(1)]);
+                            const DimRange tile2Range(tile2XOffset,
+                                                      tile2XOffset + tile2.shape[Dims4D::Act::getSpatialDim(1)]);
+                            DimRange tile1InputRange;
+                            DimRange tile2InputRange;
+                            std::tie(tile1InputRange, std::ignore, std::ignore) =
+                                    inputForOutputDim(tile1Range, kernelX, stridesX, inputXRange, padLeft, padRight);
+                            std::tie(tile2InputRange, std::ignore, std::ignore) =
+                                    inputForOutputDim(tile2Range, kernelX, stridesX, inputXRange, padLeft, padRight);
+                            return tile1InputRange.length() < tile2InputRange.length();
                         }
                     }
 
@@ -1031,6 +1162,63 @@ OutputTiling getUniqueShapeTilingCandidates(mlir::Operation* op, const OutputTil
             .Default([&](mlir::Operation*) -> OutputTiling {
                 return origTiles;
             });
+}
+
+bool canSWLayerBeEvenlyUnrolled(mlir::Operation* op, const OutputTiling& tiles, Dim targetDim, Logger) {
+    auto tileOp = IE::getTileExecutor(getModuleOp(op));
+    int64_t shaveActCount = 1;
+    if (auto shaveActExec = tileOp.getSubExecutor(VPU::ExecutorKind::SHAVE_ACT)) {
+        shaveActCount = shaveActExec.getCount();
+    }
+
+    const auto outputType = mlir::cast<vpux::NDTypeInterface>(op->getResult(0).getType());
+
+    std::set<TileInfo, VPU::TileShapeCompare> uniqueShapeTiles(tiles.begin(), tiles.end());
+
+    auto canOutputTiledShapeBeEvenlyDivided = [&](const TileInfo& outputTile) {
+        // assume the worst case: ACT SHAVE kernel tiling in VPUIP and SW layer tiling in VPU are performed on the same
+        // dimension
+        int64_t factor = shaveActCount;
+
+        const auto outputTileType = outputType.extractDenseTile(outputTile.offsets, outputTile.shape);
+        const auto outputTileShape = outputTileType.getShape();
+
+        if (op->hasAttr(vpux::VPU::multiClusterStrategy)) {
+            auto clusteredOp = mlir::dyn_cast<VPU::ClusteredOpInterface>(op);
+            VPUX_THROW_WHEN(clusteredOp == nullptr, "Op {0} has multiClusterStrategy but is not an ClusteredOp",
+                            op->getLoc());
+
+            const auto numClusters =
+                    clusteredOp.getOptimalNumClusters(outputTileShape, clusteredOp.getMultiClusterStrategy().value());
+            auto outDistributedType = VPU::getDistributedOutputTypeFromOp(clusteredOp, outputTileType, numClusters);
+            auto dimIdx = VPUIP::getTilingDimIndex(outDistributedType);
+            if (dimIdx.has_value() && dimIdx == targetDim.ind()) {
+                factor *= numClusters;
+            }
+        }
+
+        Shape nTilesOnDim(outputTileShape.size(), 1);
+        nTilesOnDim[targetDim] = factor;
+        auto tiles = fillDividedTiles(nTilesOnDim, outputTileShape);
+        if (mlir::failed(tiles)) {
+            return false;
+        }
+
+        // Currently, a simple heuristic to decide if it's even unrolling or not is comparing tiled shape size
+        // on tiling dimension:
+        // First SHAVE's tile has the largest shape size
+        // If any other tile's shape size is smaller than half of the first tile's shape size on tiling dimension,
+        // it's considered to be unevenly unrolled
+        for (auto tile : tiles.value()) {
+            if (tile.shape[targetDim] <= tiles.value().front().shape[targetDim] / 2) {
+                return false;
+            }
+        }
+
+        return true;
+    };
+
+    return llvm::all_of(uniqueShapeTiles, canOutputTiledShapeBeEvenlyDivided);
 }
 }  // namespace VPU
 }  // namespace vpux

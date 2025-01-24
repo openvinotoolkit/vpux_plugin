@@ -262,7 +262,7 @@ mlir::Value SliceOpConverter::composeWeights(IE::SliceOp origOp, const mlir::Typ
 
     const auto ctx = rewriter.getContext();
     const auto weightStorageType = mlir::RankedTensorType::get(weightShape.raw(), mlir::Float16Type::get(ctx));
-    const auto weightStorageAttr = mlir::DenseElementsAttr::get(weightStorageType, ArrayRef(weightValues));
+    const auto weightStorageAttr = Const::createConstContent(weightStorageType, ArrayRef(weightValues));
     const auto declLoc = appendLoc(origOp.getLoc(), "weights for DPU slice");
 
     const auto weightExpressedType = mlir::RankedTensorType::get(weightShape.raw(), convolutionInputType);
@@ -349,7 +349,7 @@ IE::ConvolutionOp SliceConcatRewriter::createIdentityConvolution(IE::SliceOp sli
     }
 
     const auto weightStorageType = mlir::RankedTensorType::get(origWeightShape.raw(), mlir::Float16Type::get(ctx));
-    const auto weightStorageAttr = mlir::DenseElementsAttr::get(weightStorageType, ArrayRef(weightValues));
+    const auto weightStorageAttr = Const::createConstContent(weightStorageType, ArrayRef(weightValues));
 
     const auto declLoc = appendLoc(sliceOp.getLoc(), "weights for DPU slice");
 

@@ -7,14 +7,18 @@
 #include "vpux/compiler/conversion.hpp"
 #include "vpux/compiler/conversion/passes/VPU2VPUIP/bufferizable_ops_interface.hpp"
 #include "vpux/compiler/dialect/VPU/IR/dialect.hpp"
+#include "vpux/compiler/dialect/VPU/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPU/utils/m2i_utils.hpp"
 #include "vpux/compiler/dialect/VPUIP/IR/dialect.hpp"
 #include "vpux/compiler/dialect/VPUIP/utils/convert_to_dma_utils.hpp"
 #include "vpux/compiler/dialect/VPUIP/utils/sw_utils.hpp"
 #include "vpux/compiler/utils/allocate_buffers.hpp"
+#include "vpux/compiler/utils/analysis.hpp"
 #include "vpux/compiler/utils/error.hpp"
+#include "vpux/compiler/utils/logging.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 
+#include "vpux/utils/core/error.hpp"
 #include "vpux/utils/core/logger.hpp"
 
 using namespace vpux;
@@ -532,6 +536,20 @@ mlir::LogicalResult vpux::bufferizeOp(mlir::MLIRContext*, VPU::GroupSparseTensor
 }
 
 //
+// bufferize VPU::UngroupSparseTensorOp
+//
+
+mlir::LogicalResult vpux::bufferizeOp(mlir::MLIRContext*, VPU::UngroupSparseTensorOp origOp,
+                                      VPU::UngroupSparseTensorOp::Adaptor newArgs, mlir::RewriterBase& rewriter) {
+    auto log = Logger::global().nest("one-shot-bufferize-VPUUngroupSparseTensorOp", 0);
+    log.trace("Got '{0}' at '{1}'", origOp->getName(), origOp->getLoc());
+
+    auto newOp = rewriter.create<VPUIP::UngroupSparseBufferOp>(origOp->getLoc(), newArgs.getInput());
+    mlir::bufferization::replaceOpWithBufferizedValues(rewriter, origOp, newOp->getResults());
+    return mlir::success();
+}
+
+//
 // bufferize VPU::StorageElementTableOp
 //
 
@@ -590,12 +608,27 @@ mlir::LogicalResult vpux::bufferizeOp(mlir::MLIRContext*, VPU::GatherDMAOp origO
                                       mlir::RewriterBase& rewriter) {
     auto log = Logger::global().nest("one-shot-bufferize-VPUGatherDMAOp", 0);
     log.trace("Got '{0}' at '{1}'", origOp->getName(), origOp->getLoc());
-    auto outputBuffers =
-            allocateBuffers(log, origOp->getLoc(), rewriter, origOp->getOpResults(), /*individualBuffers =*/false);
-    auto newOp = rewriter.create<VPUIP::GatherDMAOp>(origOp->getLoc(), newArgs.getInput(), newArgs.getIndices(),
-                                                     outputBuffers[0], 0, 0, 0);
+
+    auto ctx = origOp->getContext();
+    const auto memSpaceCMX = vpux::IndexedSymbolAttr::get(ctx, stringifyEnum(VPU::MemoryKind::CMX_NN), 0);
+
+    // Hardware Limitation: In Gather addressing mode, indices must reside in CMX
+    // Currently, this implementation only handles GatherDMAOp where the input is in DDR and the output is in CMX
+    auto indices = newArgs.getIndices();
+    auto indicesCMXBuffers = allocateBuffer(log, origOp.getLoc(), rewriter, indices, memSpaceCMX);
+    auto indicesCMXCopy = rewriter.create<VPUIP::CopyOp>(origOp.getLoc(), indices, indicesCMXBuffers);
+
+    auto outputCMXBuffers = allocateBuffer(log, origOp.getLoc(), rewriter, origOp.getOutput(), memSpaceCMX);
+    auto newOp = rewriter.create<VPUIP::GatherDMAOp>(origOp.getLoc(), newArgs.getInput(), indicesCMXCopy.getOutput(),
+                                                     outputCMXBuffers, 0, 0, 0);
     newOp.setChannelType(VPUIP::DmaChannelType::DDR);
-    mlir::bufferization::replaceOpWithBufferizedValues(rewriter, origOp, newOp->getResults());
+
+    auto outputDDRBuffers = allocateBuffers(log, origOp.getLoc(), rewriter, origOp->getOpResults(),
+                                            /*individualBuffers =*/false);
+    auto newResult =
+            createCopyResult(newOp.getType(), newOp.getOutput(), outputDDRBuffers[0], rewriter, origOp.getLoc());
+    mlir::bufferization::replaceOpWithBufferizedValues(rewriter, origOp, newResult);
+
     return mlir::success();
 }
 
@@ -632,6 +665,62 @@ mlir::LogicalResult vpux::bufferizeOp(mlir::MLIRContext*, VPU::UpsamplingOp orig
 }
 
 //
+// bufferize VPU::ShapeOfOp
+//
+
+mlir::LogicalResult vpux::bufferizeOp(mlir::MLIRContext*, VPU::ShapeOfOp origOp, VPU::ShapeOfOp::Adaptor newArgs,
+                                      mlir::RewriterBase& rewriter) {
+    auto log = Logger::global().nest("one-shot-bufferize-VPUShapeOfOp", 0);
+
+    auto ctx = origOp.getContext();
+
+    const auto memSpaceCMX = vpux::IndexedSymbolAttr::get(ctx, stringifyEnum(VPU::MemoryKind::CMX_NN), 0);
+
+    auto newOperand = newArgs.getOperands()[0];
+    VPUX_THROW_UNLESS(mlir::isa<VPUIP::BoundedBufferType>(newOperand.getType()),
+                      "Expected to have BoundedBufferType as input to ShapeOf, got: {0}", newOperand.getType());
+
+    auto ungroupInput = rewriter.create<VPUIP::UngroupBoundedBufferOp>(newOperand.getLoc(), newOperand);
+    auto shapeValue = ungroupInput.getDynamicShape();
+    auto shapeAlloc = allocateBuffer(log, shapeValue.getLoc(), rewriter, shapeValue, memSpaceCMX);
+
+    auto copyOp = rewriter.create<VPUIP::CopyOp>(shapeValue.getLoc(), shapeValue, shapeAlloc);
+    SmallVector<mlir::Value> swKernelOperands{copyOp.getOutput()};
+
+    auto origResult = origOp->getResult(0);
+    auto outputBuffer = allocateBuffer(log, origResult.getLoc(), rewriter, origResult, memSpaceCMX);
+    SmallVector<mlir::Value> swKernelResults{outputBuffer};
+
+    auto op = origOp.getOperation();
+    auto module = getModuleOp(op);
+    VPUIP::createRuntimeKernelDefinition(module, log.nest(), VPU::getArch(op));
+
+    auto layerOp = mlir::cast<VPU::LayerOpInterface>(op);
+    auto swLayerOp = mlir::cast<VPUIP::SoftwareLayerOpInterface>(op);
+
+    auto builtInFunction = VPUIP::createBuiltInFunction(module, layerOp, swKernelOperands, swKernelResults,
+                                                        swLayerOp.getKernelInfo(), log.nest());
+
+    const int64_t tileIndex = 0;
+    auto swKernelOp = rewriter.create<VPUIP::SwKernelOp>(origOp.getLoc(), swKernelOperands, swKernelResults,
+                                                         builtInFunction, getIntAttr(ctx, tileIndex));
+
+    vpux::VPUIP::initSwKernel(swKernelOp, swKernelOperands, swKernelResults, swLayerOp.getKernelInfo().args,
+                              log.nest());
+
+    log.trace("Added kernel operation: {0}", swKernelOp);
+
+    auto newResult = swKernelOp.getResult(0);
+    auto resultAlloc = allocateBuffer(log, newResult.getLoc(), rewriter, newResult, nullptr);
+    auto resultCopy = rewriter.create<VPUIP::CopyOp>(swKernelOp->getLoc(), newResult, resultAlloc);
+    SmallVector<mlir::Value> newResults{resultCopy.getOutput()};
+
+    log.trace("Replace origin op {0} with new outputs from SW Kernel {1}", origOp.getLoc(), newResults);
+    mlir::bufferization::replaceOpWithBufferizedValues(rewriter, origOp, newResults);
+    return mlir::success();
+}
+
+//
 // registerVPUBufferizableOpInterfaces
 //
 
@@ -653,10 +742,12 @@ void vpux::registerVPUBufferizableOpInterfaces(mlir::DialectRegistry& registry) 
         VPU::M2ITaskOp::attachInterface<VpuGenericOneShotBufferizeModel<VPU::M2ITaskOp>>(*ctx);
         VPU::StubOp::attachInterface<VpuGenericOneShotBufferizeModel<VPU::StubOp>>(*ctx);
         VPU::GroupSparseTensorOp::attachInterface<VpuGenericOneShotBufferizeModel<VPU::GroupSparseTensorOp>>(*ctx);
+        VPU::UngroupSparseTensorOp::attachInterface<VpuGenericOneShotBufferizeModel<VPU::UngroupSparseTensorOp>>(*ctx);
         VPU::StorageElementTableOp::attachInterface<VpuGenericOneShotBufferizeModel<VPU::StorageElementTableOp>>(*ctx);
         VPU::ShapeCastOp::attachInterface<VpuGenericOneShotBufferizeModel<VPU::ShapeCastOp>>(*ctx);
         VPU::LayoutCastOp::attachInterface<VpuGenericOneShotBufferizeModel<VPU::LayoutCastOp>>(*ctx);
         VPU::WorkloadCastOp::attachInterface<VpuGenericOneShotBufferizeModel<VPU::WorkloadCastOp>>(*ctx);
         VPU::UpsamplingOp::attachInterface<VpuGenericOneShotBufferizeModel<VPU::UpsamplingOp>>(*ctx);
+        VPU::ShapeOfOp::attachInterface<VpuGenericOneShotBufferizeModel<VPU::ShapeOfOp>>(*ctx);
     });
 }

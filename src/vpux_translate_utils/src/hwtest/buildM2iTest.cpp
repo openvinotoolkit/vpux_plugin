@@ -173,6 +173,7 @@ void buildM2iTest(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp mod
     auto dpuTiles = 1;
     if (params.doTiling) {
         const auto arch = testDesc.getArchitecture();
+
         dpuTiles = VPU::getMaxArchDPUClusterNum(arch);
     }
 

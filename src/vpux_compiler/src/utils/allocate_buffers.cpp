@@ -9,6 +9,7 @@
 #include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 
+#include <llvm/ADT/SmallVector.h>
 #include <mlir/Dialect/MemRef/IR/MemRef.h>
 #include <mlir/IR/BuiltinTypes.h>
 
@@ -68,6 +69,14 @@ SmallVector<mlir::Value> vpux::allocateBuffersOfType(const Logger& log, mlir::Lo
     VPUX_THROW("Unexpected type to allocate {0}", bufferType);
 }
 
+SmallVector<mlir::Value> vpux::allocateBuffersOfType(const Logger& log, mlir::Location loc,
+                                                     mlir::RewriterBase& rewriter, mlir::Value value,
+                                                     vpux::IndexedSymbolAttr memSpace, bool individualBuffers) {
+    auto bufferType = vpux::getBufferType(value);
+    auto resultBufferType = bufferType.changeMemSpace(memSpace);
+    return allocateBuffersOfType(log, loc, rewriter, resultBufferType, individualBuffers);
+}
+
 //
 // allocateBuffers & allocateBuffersForValue using bufferizable interface
 //
@@ -87,4 +96,13 @@ SmallVector<mlir::Value> vpux::allocateBuffers(const Logger& log, mlir::Location
         buffers.append(valueBuffers.begin(), valueBuffers.end());
     }
     return buffers;
+}
+
+mlir::Value vpux::allocateBuffer(const Logger& log, mlir::Location loc, mlir::RewriterBase& rewriter, mlir::Value value,
+                                 vpux::IndexedSymbolAttr memSpace) {
+    auto allocatedBuffers = allocateBuffersOfType(log, loc, rewriter, value, memSpace);
+    VPUX_THROW_UNLESS(allocatedBuffers.size() == 1,
+                      "allocateBuffersOfType should return only one buffer but {0} buffer provided for {1}",
+                      allocatedBuffers.size(), value);
+    return allocatedBuffers.front();
 }

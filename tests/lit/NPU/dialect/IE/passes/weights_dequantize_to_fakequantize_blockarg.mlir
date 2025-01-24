@@ -219,7 +219,6 @@ func.func @DontBlockArgConvertNoMultNoSubToFakeQuantize(%input: tensor<1x4x28x28
   // CHECK: return [[ADD]]
 }
 
-
 // -----
 
 #NCWH = affine_map<(d0, d1, d2, d3) -> (d0, d1, d3, d2)>
@@ -253,4 +252,29 @@ func.func @BlockArgWithTransposeSubToFakeQuantize(%input: tensor<1x4x28x48xsi8>)
   // CHECK:    [[ADD:%.+]] = IE.Add([[FQ]], [[CST]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>}
 
   // CHECK: return [[ADD]]
+}
+
+// -----
+
+// CHECK-LABEL: @BlockArgNegativeMultToFakeQuantize
+// CHECK-SAME:      [[INPUT:%.+]]: tensor<1x4x28x28xui8>
+// CHECK-SAME: -> tensor<1x4x28x28xf32>
+func.func @BlockArgNegativeMultToFakeQuantize(%input: tensor<1x4x28x28xui8>) -> tensor<1x4x28x28xf32> {
+  %cst = const.Declare tensor<1x1x1x1xf32> = dense<0.407326102> : tensor<1x1x1x1xf32>
+  %scale = const.Declare tensor<1x1x1x1xf32> = dense<-0.5> : tensor<1x1x1x1xf32>
+
+  %convert = IE.Convert(%input) { dstElemType = f32 } : tensor<1x4x28x28xui8> -> tensor<1x4x28x28xf32>
+  %1 = IE.Multiply(%convert, %scale) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x4x28x28xf32>, tensor<1x1x1x1xf32> -> tensor<1x4x28x28xf32>
+  %2 = IE.Add(%1, %cst) { auto_broadcast = #IE.auto_broadcast_type<NUMPY> } : tensor<1x4x28x28xf32>, tensor<1x1x1x1xf32> -> tensor<1x4x28x28xf32>
+
+  return %2 : tensor<1x4x28x28xf32>
+  // CHECK:  [[ADD_RHS:%.+]] = const.Declare tensor<1x1x1x1xf32> = dense<0.407326102> : tensor<1x1x1x1xf32>
+  // CHECK:  [[IN_LOW:%.+]] = const.Declare tensor<1x1x1x1xf32> = dense<0.000000e+00> : tensor<1x1x1x1xf32>
+  // CHECK:  [[IN_HIGH:%.+]] = const.Declare tensor<1x1x1x1xf32> = dense<2.550000e+02> : tensor<1x1x1x1xf32>
+  // CHECK:  [[OUT_LOW:%.+]] = const.Declare tensor<1x1x1x1xf32> = dense<-0.000000e+00> : tensor<1x1x1x1xf32>
+  // CHECK:  [[OUT_HIGH:%.+]] = const.Declare tensor<1x1x1x1xf32> = dense<-1.275000e+02> : tensor<1x1x1x1xf32>
+  // CHECK:  [[FP_INPUT:%.+]] = IE.Convert([[INPUT]]) {dstElemType = f32} : tensor<1x4x28x28xui8> -> tensor<1x4x28x28xf32>
+  // CHECK:  [[FQ:%.+]] = IE.FakeQuantize([[FP_INPUT]], [[IN_LOW]], [[IN_HIGH]], [[OUT_LOW]], [[OUT_HIGH]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 256 : i64} : tensor<1x4x28x28xf32>, tensor<1x1x1x1xf32>, tensor<1x1x1x1xf32>, tensor<1x1x1x1xf32>, tensor<1x1x1x1xf32> -> tensor<1x4x28x28xf32>
+  // CHECK:  [[RESULT:%.+]] = IE.Add([[FQ]], [[ADD_RHS]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x4x28x28xf32>, tensor<1x1x1x1xf32> -> tensor<1x4x28x28xf32>
+  // CHECK:  return [[RESULT]] : tensor<1x4x28x28xf32>
 }

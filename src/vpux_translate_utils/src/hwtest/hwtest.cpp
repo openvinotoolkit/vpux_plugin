@@ -11,7 +11,7 @@
 #include <mlir/IR/Verifier.h>
 #include <mlir/Support/DebugStringHelper.h>
 #include <mlir/Support/FileUtilities.h>
-#include "intel_npu/al/config/compiler.hpp"
+#include "intel_npu/config/compiler.hpp"
 
 #include "vpux/compiler/NPU37XX/conversion.hpp"
 #include "vpux/compiler/NPU40XX/conversion.hpp"
@@ -91,6 +91,12 @@ mlir::OwningOpRef<mlir::ModuleOp> importHWTEST(llvm::StringRef sourceJson, mlir:
     }
     case nb::CaseType::DMACompressActSparse: {
         hwtest::buildDMACompressActSparse(jsonDesc, module, builder, log, input_types.front(), output_type);
+        break;
+    }
+    case nb::CaseType::ReduceSumSquare:
+    case nb::CaseType::ReduceMean:
+    case nb::CaseType::ReduceOut: {
+        hwtest::buildReductionTest(jsonDesc, module, builder, log, input_types.front(), output_type);
         break;
     }
     case nb::CaseType::GatherDMA: {
@@ -260,7 +266,8 @@ mlir::OwningOpRef<mlir::ModuleOp> importHWTEST(llvm::StringRef sourceJson, mlir:
 
     mlir::PassManager pm(module->getName(), mlir::OpPassManager::Nesting::Implicit);
 
-    auto getLoweringPipeline = [&jsonDesc](vpux::VPU::ArchKind arch, mlir::OpPassManager& pm, Logger log) {
+    auto getLoweringPipeline = [&jsonDesc](vpux::VPU::ArchKind arch, nb::ProfilingParams /*profParams*/,
+                                           mlir::OpPassManager& pm, Logger log) {
         switch (arch) {
         case vpux::VPU::ArchKind::NPU40XX: {
             auto backendCompilationOptions40XX = BackendCompilationOptions40XX();
@@ -277,7 +284,7 @@ mlir::OwningOpRef<mlir::ModuleOp> importHWTEST(llvm::StringRef sourceJson, mlir:
         }
     };
 
-    getLoweringPipeline(jsonDesc.getArchitecture(), pm, log);
+    getLoweringPipeline(jsonDesc.getArchitecture(), jsonDesc.getProfilingParams(), pm, log);
 
     VPUX_THROW_UNLESS(mlir::succeeded(pm.run(module)), "Failed to lower test model to ELF");
 

@@ -18,7 +18,6 @@
 #include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
 #include "vpux/compiler/utils/IE/transposed_convolution_utils.hpp"
-#include "vpux/compiler/utils/VPU/ppe_utils.hpp"
 #include "vpux/compiler/utils/VPU/tile_utils.hpp"
 #include "vpux/compiler/utils/types.hpp"
 
@@ -254,6 +253,11 @@ mlir::LogicalResult vpux::VPUIP::NCEInvariant::verifyGroupConvChannels(mlir::Loc
     const auto OC = filterShape[Dims4D::Filter::OC];
     if (OC != inputChan) {
         log.trace("[{0}] Group Convolution has {1} groups, expected {2}", loc, OC, inputChan);
+        return mlir::failure();
+    }
+
+    if (inputChan % channelsIface.getInputChannelAlignment() != 0) {
+        log.trace("[{0}] Group Convolution input channels are not aligned", loc);
         return mlir::failure();
     }
 

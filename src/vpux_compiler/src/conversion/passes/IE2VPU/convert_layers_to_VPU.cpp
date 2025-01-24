@@ -11,6 +11,7 @@
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPU/IR/dialect.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
+#include "vpux/compiler/dialect/const/utils/utils.hpp"
 
 // Generated
 #include <vpux/compiler/conversion/convert_layers_to_VPU.hpp.inc>
@@ -105,10 +106,7 @@ mlir::LogicalResult CTCGreedyDecoderSeqLenRewrite::matchAndRewrite(IE::CTCGreedy
         auto blankIndxDefValue = checked_cast<int32_t>(inShape.back() - 1);
         auto blankIndxShape = mlir::RankedTensorType::get(
                 {1}, mlir::IntegerType::get(ctx, 32, mlir::IntegerType::SignednessSemantics::Signed));
-        auto blankIndxAttr = mlir::DenseElementsAttr::get(blankIndxShape, blankIndxDefValue);
-        blankIndexValue = rewriter.create<Const::DeclareOp>(origOp.getLoc(), blankIndxShape,
-                                                            Const::ContentAttr::get(blankIndxAttr))
-                                  .getOutput();
+        blankIndexValue = Const::createConst(rewriter, origOp.getLoc(), blankIndxShape, ArrayRef(blankIndxDefValue));
     }
     rewriter.replaceOpWithNewOp<VPU::CTCGreedyDecoderSeqLenOp>(origOp, origOp.getInput(), origOp.getSequenceLength(),
                                                                blankIndexValue, origOp.getMergeRepeatedAttr());
@@ -232,10 +230,11 @@ mlir::LogicalResult InterpolateRewrite::matchAndRewrite(IE::InterpolateOp origOp
                                                         mlir::PatternRewriter& rewriter) const {
     rewriter.replaceOpWithNewOp<VPU::InterpolateOp>(
             origOp, origOp.getType(), origOp.getInput(), origOp.getSizes(), origOp.getScales(), origOp.getAxes(),
-            origOp.getSizesAttrAttr(), origOp.getScalesAttrAttr(), origOp.getAxesAttrAttr(),
-            origOp.getTileOffsetAttrAttr(), origOp.getInitialInputDimsAttrAttr(), origOp.getInitialOutputDimsAttrAttr(),
+            /*coordinates*/ nullptr, /* lambdas */ nullptr, origOp.getSizesAttrAttr(), origOp.getScalesAttrAttr(),
+            origOp.getAxesAttrAttr(), origOp.getTileOffsetAttrAttr(), origOp.getInitialInputDimsAttrAttr(),
+            origOp.getInitialOutputDimsAttrAttr(),
             /*initial_input_offset_attr=*/nullptr, /*initial_output_offset_attr=*/nullptr,
-            /*multiClusterStrategy=*/nullptr, origOp.getAttrAttr());
+            /*multiClusterStrategy=*/nullptr, origOp.getAttrAttr(), origOp.getOutputChannelsAttr());
     return mlir::success();
 }
 
@@ -266,7 +265,8 @@ mlir::LogicalResult TransposedConvRewrite::matchAndRewrite(IE::TransposedConvolu
     rewriter.replaceOpWithNewOp<VPU::TransposedConvolutionOp>(
             origOp, outType, origOp.getInput(), origOp.getFilter(), origOp.getOutputShape(), origOp.getBias(),
             origOp.getStridesAttr(), origOp.getPadsBeginAttr(), origOp.getPadsEndAttr(), origOp.getDilationsAttr(),
-            origOp.getOutputPaddingAttr(), origOp.getPostOpAttr(), origOp.getClampAttr());
+            origOp.getOutputPaddingAttr(), origOp.getPostOpAttr(), origOp.getClampAttr(),
+            origOp.getOutputChannelsAttr());
 
     return mlir::success();
 }
@@ -318,9 +318,12 @@ mlir::LogicalResult LSTMSequenceRewrite::matchAndRewrite(IE::LSTMSequenceOp orig
                            "VPU::LSTMSequence does not support weights and biases; it should have been decomposed by "
                            "the DecomposeLSTMSequencePass.");
     }
+
+    _log.trace("Found LSTMSequence Operation '{0}'", origOp->getLoc());
     rewriter.replaceOpWithNewOp<VPU::LSTMSequenceOp>(
             origOp, origOp.getInputData(), origOp.getInitialHiddenState(), origOp.getInitialCellState(),
             origOp.getReccurenceWeights(), origOp.getSequenceLengthAttr(), origOp.getDirectionAttr(), nullptr);
+
     return mlir::success();
 }
 
@@ -348,7 +351,7 @@ mlir::LogicalResult GroupConvolutionRewrite::matchAndRewrite(IE::GroupConvolutio
     rewriter.replaceOpWithNewOp<VPU::GroupConvolutionOp>(
             origOp, origOp.getOutput().getType(), origOp.getInput(), origOp.getFilter(), origOp.getBias(),
             origOp.getStrides(), origOp.getPadsBegin(), origOp.getPadsEnd(), origOp.getDilations(),
-            origOp.getGroupsAttr(), origOp.getPostOpAttr());
+            origOp.getGroupsAttr(), origOp.getPostOpAttr(), origOp.getOutputChannelsAttr());
 
     return mlir::success();
 }
@@ -363,7 +366,8 @@ mlir::LogicalResult DynamicReshapeRewrite::matchAndRewrite(IE::DynamicReshapeOp 
 
     const auto outputType = origOp.getOutput().getType();
     rewriter.replaceOpWithNewOp<VPU::DynamicReshapeOp>(origOp, outputType, origOp.getInput(), origOp.getShape(),
-                                                       origOp.getOutputShapeAttr(), origOp.getOutputBoundsAttr());
+                                                       origOp.getOutputShapeAttr(), origOp.getOutputBoundsAttr(),
+                                                       origOp.getOnlySetShapeAttr());
 
     return mlir::success();
 }

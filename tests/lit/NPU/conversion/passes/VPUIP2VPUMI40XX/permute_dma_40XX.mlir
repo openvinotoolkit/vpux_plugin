@@ -133,7 +133,7 @@ func.func @UnrollDistributedPermuteDMAOutput(%arg0: memref<1x16x16x16xf16, @DDR>
   // CHECK-DAG: %[[CST:.*]] = const.Declare memref<16x256xf16, @DDR>
 
   %3 = VPURT.DeclareBuffer <CMX_NN> [0, 1] <0> -> !VPUIP.DistributedBuffer<16x256xf16, {order = #NC, strides = [256, 1]}, @CMX_NN, {mode = "DUPLICATED", num_clusters = 2 : i64, uniform_distributed_segments}>
-  // CHECK: %[[WEIGHTS:.*]] = VPURT.DeclareBuffer <CMX_NN> [0, 1] <0> -> !VPUIP.DistributedBuffer<16x256xf16, {order = #NC, strides = [256, 1]}, @CMX_NN, {mode = "DUPLICATED", num_clusters = 2 : i64, uniform_distributed_segments}>
+  // CHECK-NOT: VPURT.DeclareBuffer <CMX_NN> [0, 1] <0> -> !VPUIP.DistributedBuffer<16x256xf16, {order = #NC, strides = [256, 1]}, @CMX_NN, {mode = "DUPLICATED", num_clusters = 2 : i64, uniform_distributed_segments}>
 
   VPURT.Task attributes {isTrailingSWLayer = false} {
     %4 = VPUIP.PermuteDMA {dma_descriptor = #VPUIP.DMADescriptorAttr<numPlanes = 16 : i64, len = 512 : i64, srcWidth = 512 : i64, srcStride = 2 : i64, srcPlaneStride = 512 : i64, dstWidth = 2 : i64, dstStride = 32 : i64, dstPlaneStride = 2 : i64>, port = 0 : i64} inputs(%cst : memref<16x256xf16, #NC, @DDR>) outputs(%3 : !VPUIP.DistributedBuffer<16x256xf16, {order = #NC, strides = [256, 1]}, @CMX_NN, {mode = "DUPLICATED", num_clusters = 2 : i64, uniform_distributed_segments}>) -> !VPUIP.DistributedBuffer<16x256xf16, {order = #NC, strides = [256, 1]}, @CMX_NN, {mode = "DUPLICATED", num_clusters = 2 : i64, uniform_distributed_segments}>

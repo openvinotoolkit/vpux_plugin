@@ -97,7 +97,3 @@ Const::Content vpux::Const::ReorderAttr::transform(vpux::Const::Content& input) 
     const auto memPerm = mlir::AffineMap::getPermutationMap(ArrayRef(computeOrder(inOrder, outOrder)), getContext());
     return Const::details::memPermuteTransformation(input, outType, memPerm);
 }
-
-Const::ContentSetup vpux::Const::ContentSetup::reorder(DimsOrder newOrder) {
-    return addTransformation(Const::ReorderAttr::get(mlir::AffineMapAttr::get(newOrder.toAffineMap(getContext()))));
-}

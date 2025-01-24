@@ -43,7 +43,7 @@ DOT::EdgeDir DPUInvariantOp::getEdgeDirection(mlir::Operation* source) {
     return DOT::EdgeDir::EDGE_NORMAL;
 }
 
-bool DPUInvariantOp::supportsHardLink() {
+bool DPUInvariantOp::supportsTaskLink() {
     return false;
 }
 
@@ -65,6 +65,6 @@ DOT::EdgeDir DPUVariantOp::getEdgeDirection(mlir::Operation*) {
     return DOT::EdgeDir::EDGE_NORMAL;
 }
 
-bool DPUVariantOp::supportsHardLink() {
+bool DPUVariantOp::supportsTaskLink() {
     return true;
 }

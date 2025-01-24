@@ -58,7 +58,7 @@ mlir::LogicalResult RemoveDuplicatingGeneric<ConcreteOp>::matchAndRewrite(Concre
     ConcreteOp firstUser = origOp;
     for (auto user : origOp->getOperand(0).getUsers()) {
         if (auto currOp = mlir::dyn_cast<ConcreteOp>(user)) {
-            if (currOp->isBeforeInBlock(firstUser.getOperation()) && origOp.getType() == currOp.getType()) {
+            if (currOp->isBeforeInBlock(firstUser.getOperation()) && isDuplicatedOperation(origOp, currOp, _log)) {
                 firstUser = currOp;
             }
         }
@@ -339,14 +339,14 @@ void UniquifyOpsPass::safeRunOnFunc() {
     patterns.add<RemoveDuplicatingGeneric<IE::PermuteCastOp>>(&ctx, _log);
     patterns.add<RemoveDuplicatingGeneric<IE::ShapeCastOp>>(&ctx, _log);
     patterns.add<RemoveDuplicatingGeneric<IE::QuantizeCastOp>>(&ctx, _log);
-    patterns.add<RemoveDuplicatingCommutativeEltwise<IE::AddOp>>(&ctx, _log);
-    patterns.add<RemoveDuplicatingCommutativeEltwise<IE::AndOp>>(&ctx, _log);
-    patterns.add<RemoveDuplicatingGeneric<IE::ReshapeOp>>(&ctx, _log);
     patterns.add<RemoveDuplicatingGeneric<IE::LayoutCastOp>>(&ctx, _log);
+    patterns.add<RemoveDuplicatingGeneric<IE::ReshapeOp>>(&ctx, _log);
     patterns.add<RemoveDuplicatingGeneric<IE::AffineReshapeOp>>(&ctx, _log);
     patterns.add<RemoveDuplicatingGeneric<IE::PermuteQuantizeOp>>(&ctx, _log);
     patterns.add<RemoveDuplicatingGeneric<IE::TileOp>>(&ctx, _log);
     patterns.add<RemoveDuplicatingGeneric<IE::FloorOp>>(&ctx, _log);
+    patterns.add<RemoveDuplicatingCommutativeEltwise<IE::AddOp>>(&ctx, _log);
+    patterns.add<RemoveDuplicatingCommutativeEltwise<IE::AndOp>>(&ctx, _log);
     patterns.add<RemoveDuplicatingPooling<IE::AvgPoolOp>>(&ctx, _log);
     patterns.add<RemoveDuplicatingPooling<IE::MaxPoolOp>>(&ctx, _log);
     patterns.add<RemoveDuplicatingConcat>(&ctx, _log);

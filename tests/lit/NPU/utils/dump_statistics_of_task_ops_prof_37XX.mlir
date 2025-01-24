@@ -18,9 +18,6 @@ module @age_gender attributes {VPU.arch = #VPU.arch_kind<NPU37XX>, VPU.compilati
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"} loc(#loc0)
   } loc(#loc0)
   IE.TileResource 2 of @NCE at 1.300000e+03 MHz {
-    builtin.module @UsedMemory {
-      IE.MemoryResource 331840 bytes of @CMX_NN loc(#loc0)
-    } loc(#loc0)
     builtin.module @ReservedMemory {
       module @DmaProfilingReservedMemory {
         IE.MemoryResource 512 bytes of @CMX_NN offset 0 loc(#loc0)
@@ -233,14 +230,14 @@ module @age_gender attributes {VPU.arch = #VPU.arch_kind<NPU37XX>, VPU.compilati
       %109:2 = VPUIP.NCEClusterTask {cm_sp_pattern = 7 : i64, is_segmented, kernel_padding = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, kernel_size = [3, 3], kernel_strides = [1, 1], task_type = #VPUIP.nce_task_type<CONV>} input(%23 : memref<1x16x32x62xf16, #NHWC, [@CMX_NN, 0]>) weights(%47 : memref<48x16x3x3xf16, #NHWC, [@CMX_NN, 0]>) weight_table(%25 : memref<48x1x1x4xsi32, [@CMX_NN, 0]>) parent_input(%20 : !VPUIP.DistributedBuffer<1x16x62x62xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64, alignment = [1, 1, 2, 1]}>) parent_output(%28 : !VPUIP.DistributedBuffer<1x48x60x60xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}>) outputs(%31 : memref<1x48x30x60xf16, #NHWC, [@CMX_NN, 0]>) profiling_data(%49 : memref<2xui64, [@CMX_NN, 0]>) -> memref<1x48x30x60xf16, #NHWC, [@CMX_NN, 0]>, memref<2xui64, [@CMX_NN, 0]> variants : {
         DPUTask {cluster_id = 0 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [59, 29, 47], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>} loc(#loc4)
       } PPE : {
-        PPETask {opaque_ppe = #VPU.PPEStub<>} loc(#loc4)
+        PPETask {ppe = #VPU.PPEStub<>} loc(#loc4)
       } loc(#loc65)
     } loc(#loc65)
     VPURT.Task waits(%3 : !VPURT.Barrier) updates(%4 : !VPURT.Barrier) attributes {isTrailingSWLayer = false} {
       %109:2 = VPUIP.NCEClusterTask {cm_sp_pattern = 7 : i64, is_segmented, kernel_padding = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, kernel_size = [3, 3], kernel_strides = [1, 1], task_type = #VPUIP.nce_task_type<CONV>} input(%24 : memref<1x16x30x62xf16, #NHWC, [@CMX_NN, 1]>) weights(%48 : memref<48x16x3x3xf16, #NHWC, [@CMX_NN, 1]>) weight_table(%26 : memref<48x1x1x4xsi32, [@CMX_NN, 1]>) parent_input(%20 : !VPUIP.DistributedBuffer<1x16x62x62xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64, alignment = [1, 1, 2, 1]}>) parent_output(%28 : !VPUIP.DistributedBuffer<1x48x60x60xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}>) outputs(%32 : memref<1x48x30x60xf16, #NHWC, [@CMX_NN, 1]>) profiling_data(%50 : memref<2xui64, [@CMX_NN, 1]>) -> memref<1x48x30x60xf16, #NHWC, [@CMX_NN, 1]>, memref<2xui64, [@CMX_NN, 1]> variants : {
         DPUTask {cluster_id = 1 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [59, 59, 47], outStart = [0, 30, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>} loc(#loc4)
       } PPE : {
-        PPETask {opaque_ppe = #VPU.PPEStub<>} loc(#loc4)
+        PPETask {ppe = #VPU.PPEStub<>} loc(#loc4)
       } loc(#loc66)
     } loc(#loc66)
     VPURT.Task waits(%4 : !VPURT.Barrier) updates(%5 : !VPURT.Barrier) attributes {isTrailingSWLayer = false} {
@@ -248,7 +245,7 @@ module @age_gender attributes {VPU.arch = #VPU.arch_kind<NPU37XX>, VPU.compilati
         DPUTask {cluster_id = 0 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [29, 14, 31], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 1 : i64, top = 0 : i64, bottom = 0 : i64>} loc(#loc18)
         DPUTask {cluster_id = 0 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [29, 14, 47], outStart = [0, 0, 32], pad = #VPU.Padding<left = 0 : i64, right = 1 : i64, top = 0 : i64, bottom = 0 : i64>} loc(#loc18)
       } PPE : {
-        PPETask {opaque_ppe = #VPU.PPEStub<>} loc(#loc18)
+        PPETask {ppe = #VPU.PPEStub<>} loc(#loc18)
       } loc(#loc67)
     } loc(#loc67)
     VPURT.Task waits(%4 : !VPURT.Barrier) updates(%5 : !VPURT.Barrier) attributes {isTrailingSWLayer = false} {
@@ -256,7 +253,7 @@ module @age_gender attributes {VPU.arch = #VPU.arch_kind<NPU37XX>, VPU.compilati
         DPUTask {cluster_id = 1 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [29, 29, 31], outStart = [0, 15, 0], pad = #VPU.Padding<left = 0 : i64, right = 1 : i64, top = 0 : i64, bottom = 1 : i64>} loc(#loc18)
         DPUTask {cluster_id = 1 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [29, 29, 47], outStart = [0, 15, 32], pad = #VPU.Padding<left = 0 : i64, right = 1 : i64, top = 0 : i64, bottom = 1 : i64>} loc(#loc18)
       } PPE : {
-        PPETask {opaque_ppe = #VPU.PPEStub<>} loc(#loc18)
+        PPETask {ppe = #VPU.PPEStub<>} loc(#loc18)
       } loc(#loc68)
     } loc(#loc68)
     VPURT.Task waits(%5 : !VPURT.Barrier) attributes {isTrailingSWLayer = false} {
@@ -402,6 +399,8 @@ module @age_gender attributes {VPU.arch = #VPU.arch_kind<NPU37XX>, VPU.compilati
 // CHECK:      builtin_Convert - 2 ops
 // CHECK:    NCETask Operations - 4 ops
 // CHECK:      Dense - 4 ops
+// CHECK:    Barrier statistics:
+// CHECK:      VPURT.ConfigureBarrierOp - 8 ops
 // CHECK:  Weights statistics
 // CHECK:  Total weights - count: 4, size: 101.64 KB (no compression)
 // CHECK:  Const swizzling statistics:

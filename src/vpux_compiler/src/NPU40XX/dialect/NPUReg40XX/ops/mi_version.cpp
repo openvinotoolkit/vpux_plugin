@@ -27,21 +27,19 @@ void vpux::NPUReg40XX::MappedInferenceVersionOp::serialize(elf::writer::BinaryDa
     constexpr uint8_t name[nameSize] = {0x4d, 0x49, 0x56, 0};  // 'M'(apped) 'I'(nference) 'V'(ersion) '\0'
     static_assert(sizeof(name) == 4);
     std::memcpy(MIVersionStruct.n_name, name, nameSize);
-
-    constexpr uint32_t desc[descSize] = {elf::elf_note::ELF_NOTE_OS_LINUX, VPU_NNRT_40XX_API_VER_MAJOR,
-                                         VPU_NNRT_40XX_API_VER_MINOR, VPU_NNRT_40XX_API_VER_PATCH};
+    uint32_t desc[descSize] = {elf::elf_note::ELF_NOTE_OS_LINUX, getMajor(), getMinor(), getPatch()};
     static_assert(sizeof(desc) == 64);
     std::memcpy(MIVersionStruct.n_desc, desc, descSize);
 
     auto ptrCharTmp = reinterpret_cast<uint8_t*>(&MIVersionStruct);
-    binDataSection.appendData(ptrCharTmp, getBinarySize());
+    binDataSection.appendData(ptrCharTmp, getBinarySize(VPU::ArchKind::NPU40XX));
 }
 
-size_t vpux::NPUReg40XX::MappedInferenceVersionOp::getBinarySize() {
+size_t vpux::NPUReg40XX::MappedInferenceVersionOp::getBinarySize(VPU::ArchKind) {
     return sizeof(MIVersionNote);
 }
 
-size_t vpux::NPUReg40XX::MappedInferenceVersionOp::getAlignmentRequirements() {
+size_t vpux::NPUReg40XX::MappedInferenceVersionOp::getAlignmentRequirements(VPU::ArchKind) {
     return alignof(MIVersionNote);
 }
 
@@ -52,9 +50,4 @@ std::optional<ELF::SectionSignature> vpux::NPUReg40XX::MappedInferenceVersionOp:
 
 bool vpux::NPUReg40XX::MappedInferenceVersionOp::hasMemoryFootprint() {
     return true;
-}
-
-void vpux::NPUReg40XX::MappedInferenceVersionOp::build(mlir::OpBuilder& builder, mlir::OperationState& state) {
-    build(builder, state, "MappedInferenceVersion", VPU_NNRT_40XX_API_VER_MAJOR, VPU_NNRT_40XX_API_VER_MINOR,
-          VPU_NNRT_40XX_API_VER_PATCH);
 }

@@ -7,15 +7,16 @@
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPU/transforms/factories/nce_sparsity_converters.hpp"
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
+#include "vpux/compiler/dialect/VPU/utils/auto_padding_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/const_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/conv_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/eltwise_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/max_kernel_size_utils.hpp"
+#include "vpux/compiler/dialect/VPU/utils/mpe_engine_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_invariant.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_sparsity.hpp"
 #include "vpux/compiler/dialect/VPU/utils/ppe_version_config.hpp"
-#include "vpux/compiler/utils/VPU/ppe_utils.hpp"
-
+#include "vpux/compiler/dialect/const/attributes/content.hpp"
 #include "vpux/compiler/dialect/const/utils/utils.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/compiler/utils/sparsity.hpp"
@@ -171,12 +172,16 @@ mlir::LogicalResult rewriteSparsityOpWithEltwiseOp(mlir::PatternRewriter& rewrit
     outputTypeForPPEAttr = outputTypeForPPEAttr.changeElemType(newType);
 
     const auto opType = VPU::EltwiseType::ADD;
-    const auto ppeOpaqueAttr = VPU::PpeVersionConfig::retrievePPEAttribute(origOp);
+    const auto ppeAttr = VPU::PpeVersionConfig::retrievePPEAttribute(origOp);
+
+    auto outputChannelsAttr = origOp->hasAttr(VPU::outChanAttrName)
+                                      ? origOp->getAttr(VPU::outChanAttrName).cast<mlir::IntegerAttr>()
+                                      : nullptr;
 
     auto nceOp = rewriter.create<VPU::NCEEltwiseOp>(origOp->getLoc(), outputType, input, input,
-                                                    VPU::EltwiseTypeAttr::get(ctx, opType), ppeOpaqueAttr,
+                                                    VPU::EltwiseTypeAttr::get(ctx, opType), ppeAttr,
                                                     /*multi_cluster_strategyAttr=*/nullptr,
-                                                    /*is_inplace*/ nullptr);
+                                                    /*is_inplace*/ nullptr, outputChannelsAttr);
 
     auto newOutput = nceOp.getOutput();
 
@@ -221,11 +226,11 @@ mlir::Value createFilter(mlir::PatternRewriter& rewriter, mlir::Location loc, vp
         content[oc * IC + oc] = 1.0f;
     }
     auto dataStorageType = mlir::RankedTensorType::get(shape.raw(), mlir::Float32Type::get(ctx));
-    auto dataAttr = mlir::DenseElementsAttr::get(dataStorageType, ArrayRef(content));
+    auto dataAttr = Const::createConstContent(dataStorageType, ArrayRef(content));
 
-    auto contentAttrSetup = Const::ContentAttr::transform(dataAttr);
+    Const::ContentSetup contentAttrSetup(dataStorageType);
     if (auto qElemType = elemType.dyn_cast<mlir::quant::QuantizedType>()) {
-        contentAttrSetup = contentAttrSetup.castElemType(getUInt8Type(ctx)).quantCast(qElemType);
+        contentAttrSetup = contentAttrSetup.castElemType(qElemType);
     } else if (elemType.isa<mlir::Float16Type>()) {
         contentAttrSetup = contentAttrSetup.castElemType(mlir::Float16Type::get(ctx));
     }
@@ -233,15 +238,16 @@ mlir::Value createFilter(mlir::PatternRewriter& rewriter, mlir::Location loc, vp
         contentAttrSetup = contentAttrSetup.reorder(order);
     }
 
-    auto filterContentAttr = contentAttrSetup.clone().sparsify(/*compressOutputType=*/false).get();
+    auto filterContentAttr =
+            Const::ContentAttr::get(dataAttr, contentAttrSetup.clone().sparsify(/*compressOutputType=*/false));
     auto filterConstOp = rewriter.create<Const::DeclareOp>(loc, filterType, std::move(filterContentAttr));
 
     // The sparsity map is introduced to avoid the compute with the numerous zero values in the filter
-    auto sparsityMapContentAttr = contentAttrSetup.clone().getSparsityMap().get();
+    auto sparsityMapContentAttr = Const::ContentAttr::get(dataAttr, contentAttrSetup.clone().getSparsityMap());
     auto sparsityMapConstOp =
             rewriter.create<Const::DeclareOp>(loc, sparsityMapContentAttr.getType(), std::move(sparsityMapContentAttr));
 
-    auto contentAttr = contentAttrSetup.get();
+    auto contentAttr = Const::ContentAttr::get(dataAttr, std::move(contentAttrSetup));
     const auto numNonSparseElements = vpux::countNonSparseElementsPerOC(contentAttr.fold(), elemType);
     const auto numNonSparseElementsType =
             mlir::RankedTensorType::get({static_cast<int64_t>(numNonSparseElements.size())}, getInt64Type(ctx));
@@ -329,9 +335,10 @@ mlir::LogicalResult rewriteSparsityOpWithConv(mlir::PatternRewriter& rewriter, m
     auto filter = createFilter(rewriter, origOp->getLoc(), filterType);
 
     // TODO: add weights sparsity map to save compute
-    const auto ppeOpaqueAttr = VPU::PpeVersionConfig::retrievePPEAttribute(origOp);
+    const auto ppeAttr = VPU::PpeVersionConfig::retrievePPEAttribute(origOp);
     const auto ppeConverter = VPU::NCESparsity::getPPEConverterCb(arch);
     const auto biasConverter = VPU::NCESparsity::getBiasConverterCb(arch);
+    const auto mpeEngineAttr = VPU::MPEEngineConfig::retrieveMPEEngineAttribute(origOp, arch);
     auto weightsTableVec = VPU::createWeightsTableData(origOp->getOperand(0), origOp->getResult(0), filter,
                                                        /*bias=*/{}, OC, ppeConverter, biasConverter,
                                                        /*constScale=*/nullptr);
@@ -341,10 +348,13 @@ mlir::LogicalResult rewriteSparsityOpWithConv(mlir::PatternRewriter& rewriter, m
     auto padAttr = VPU::getPaddingAttr(ctx, pads);
     auto rawFilterShape = getIntArrayAttr(ctx, filterType.getShape().raw());
 
+    auto outputChannelsAttr = origOp->hasAttr(VPU::outChanAttrName)
+                                      ? origOp->getAttr(VPU::outChanAttrName).cast<mlir::IntegerAttr>()
+                                      : nullptr;
+
     auto nceOp = rewriter.create<VPU::NCEConvolutionOp>(origOp->getLoc(), outputType, input, filter, weightsTable,
-                                                        /*instructionListTable=*/nullptr, stridesAttr, padAttr,
-                                                        ppeOpaqueAttr, rawFilterShape,
-                                                        /*multi_cluster_strategyAttr=*/nullptr);
+                                                        stridesAttr, padAttr, ppeAttr, mpeEngineAttr, rawFilterShape,
+                                                        /*multi_cluster_strategyAttr=*/nullptr, outputChannelsAttr);
 
     auto newOutput = nceOp.getOutput();
 

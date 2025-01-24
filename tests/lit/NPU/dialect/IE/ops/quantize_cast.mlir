@@ -89,3 +89,48 @@ func.func @FuseQuantCastsMultipleConsumers(%arg0: tensor<1x16x32x64x!qElemType>)
 
     // CHECK:       return [[MUL]] : tensor<1x16x32x64x!qElemType1>
 }
+
+// -----
+
+!qElemType = !quant.uniform<u8:f16, 0.0173492431640625:32>
+
+// CHECK-LABEL: @ConstantFolding
+func.func @ConstantFolding() -> tensor<2x2x!qElemType> {
+    %cst = const.Declare tensor<2x2xui8> = dense<[[1, 2], [3, 4]]> : tensor<2x2xui8>
+    %quant_cast = IE.QuantizeCast(%cst) { dstElemType = !qElemType } : tensor<2x2xui8> -> tensor<2x2x!qElemType>
+    return %quant_cast : tensor<2x2x!qElemType>
+    // CHECK: [[CST:%.+]] = const.Declare tensor<2x2x!qElemType> = dense<{{\[\[}}1, 2], [3, 4]]> : tensor<2x2xui8>, [#const.CastElemType<!qElemType>]
+    // CHECK: return [[CST]] : tensor<2x2x!qElemType>
+}
+
+// -----
+
+!qElemType = !quant.uniform<u8:f16, 0.0173492431640625:32>
+
+// CHECK-LABEL: @ConstantFoldingNoOp
+func.func @ConstantFoldingNoOp() -> tensor<2x2x!qElemType> {
+    %cst = const.Declare tensor<2x2x!qElemType> = dense<[[1, 2], [3, 4]]> : tensor<2x2xui8>, [#const.CastElemType<!qElemType>]
+    %quant_cast = IE.QuantizeCast(%cst) { dstElemType = !qElemType } : tensor<2x2x!qElemType> -> tensor<2x2x!qElemType>
+    return %quant_cast : tensor<2x2x!qElemType>
+    // CHECK: [[CST:%.+]] = const.Declare tensor<2x2x!qElemType> = dense<{{\[\[}}1, 2], [3, 4]]> : tensor<2x2xui8>, [#const.CastElemType<!qElemType>]
+    // CHECK: return [[CST]] : tensor<2x2x!qElemType>
+}
+
+// -----
+
+!quantileFloatType = !QuantileFloat.quantileFloat<4, {-1.000000e+00,-0.69619280099868774,-0.52507305145263672,-0.39491748809814453,-0.28444138169288635,-0.18477343022823334,-0.091050036251544952,0.000000e+00,0.07958029955625534,0.16093020141124725,0.24611230194568634,0.33791524171829224,0.44070982933044434,0.56261700391769409,0.72295683622360229,1.000000e+00}>
+!qElemType = !quant.quantile<i4:f16:f16, {-1.000000e+00,-0.69619280099868774,-0.52507305145263672,-0.39491748809814453,-0.28444138169288635,-0.18477343022823334,-0.091050036251544952,0.000000e+00,0.07958029955625534,0.16093020141124725,0.24611230194568634,0.33791524171829224,0.44070982933044434,0.56261700391769409,0.72295683622360229,1.000000e+00}:0.07874348958333334>
+
+// CHECK-LABEL: @QuantizeCastNF4
+// CHECK-SAME:  [[INPUT0:%.+]]: tensor<16x32x1x1x!QuantileFloat.quantileFloat<4, {-1.000000e+00,-0.69619280099868774,-0.52507305145263672,-0.39491748809814453,-0.28444138169288635,-0.18477343022823334,-0.091050036251544952,0.000000e+00,0.07958029955625534,0.16093020141124725,0.24611230194568634,0.33791524171829224,0.44070982933044434,0.56261700391769409,0.72295683622360229,1.000000e+00}>>
+// CHECK-SAME:  [[INPUT1:%.+]]: tensor<16x32x1x1x!qElemType>
+func.func @QuantizeCastNF4(%arg0: tensor<16x32x1x1x!quantileFloatType>, %arg1: tensor<16x32x1x1x!qElemType>) -> (tensor<16x32x1x1x!qElemType>, tensor<16x32x1x1x!quantileFloatType>) {
+    %0 = IE.QuantizeCast(%arg0) {dstElemType = !qElemType} : tensor<16x32x1x1x!quantileFloatType> -> tensor<16x32x1x1x!qElemType>
+    %1 = IE.QuantizeCast(%arg1) {dstElemType = !quantileFloatType} : tensor<16x32x1x1x!qElemType> -> tensor<16x32x1x1x!quantileFloatType>
+
+    return %0, %1 : tensor<16x32x1x1x!qElemType>, tensor<16x32x1x1x!quantileFloatType>
+
+    // CHECK:   [[FIRST_QUANT_CAST:%.+]] = IE.QuantizeCast([[INPUT0]]) {dstElemType = !qElemType} : tensor<16x32x1x1x!QuantileFloat.quantileFloat<4, {-1.000000e+00,-0.69619280099868774,-0.52507305145263672,-0.39491748809814453,-0.28444138169288635,-0.18477343022823334,-0.091050036251544952,0.000000e+00,0.07958029955625534,0.16093020141124725,0.24611230194568634,0.33791524171829224,0.44070982933044434,0.56261700391769409,0.72295683622360229,1.000000e+00}>> -> tensor<16x32x1x1x!qElemType>
+    // CHECK:   [[SECOND_QUANT_CAST:%.+]] = IE.QuantizeCast([[INPUT1]]) {dstElemType = !QuantileFloat.quantileFloat<4, {-1.000000e+00,-0.69619280099868774,-0.52507305145263672,-0.39491748809814453,-0.28444138169288635,-0.18477343022823334,-0.091050036251544952,0.000000e+00,0.07958029955625534,0.16093020141124725,0.24611230194568634,0.33791524171829224,0.44070982933044434,0.56261700391769409,0.72295683622360229,1.000000e+00}>} : tensor<16x32x1x1x!qElemType> -> tensor<16x32x1x1x!QuantileFloat.quantileFloat<4, {-1.000000e+00,-0.69619280099868774,-0.52507305145263672,-0.39491748809814453,-0.28444138169288635,-0.18477343022823334,-0.091050036251544952,0.000000e+00,0.07958029955625534,0.16093020141124725,0.24611230194568634,0.33791524171829224,0.44070982933044434,0.56261700391769409,0.72295683622360229,1.000000e+00}>>
+    // CHECK:   return [[FIRST_QUANT_CAST]], [[SECOND_QUANT_CAST]]
+}

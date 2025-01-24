@@ -1673,7 +1673,7 @@ func.func @OptimizeConstCopy(%arg0: memref<1x128x1x1xf16, @DDR>) -> memref<1x512
     %4 = VPUIP.NCEClusterTask {kernel_padding = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, kernel_size = [1, 1], kernel_strides = [1, 1], minimumHardwareExecutionCost = 1710 : i64, task_type = #VPUIP.nce_task_type<CONV>} input(%1 : memref<1x128x1x1xf16, #NHWC, @CMX_NN>) weights(%2 : memref<512x128x1x1xf16, #NHWC, @CMX_NN>) weight_table(%3 : memref<512x1x1x4xsi32, @CMX_NN>) parent_input(%1 : memref<1x128x1x1xf16, #NHWC, @CMX_NN>) parent_output(%alloc_4 : memref<1x512x1x1xf16, #NHWC, @CMX_NN>) outputs(%alloc_4 : memref<1x512x1x1xf16, #NHWC, @CMX_NN>) -> memref<1x512x1x1xf16, #NHWC, @CMX_NN> variants : {
       DPUTask {inEnd = [0, 0, 127], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 511], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     } PPE : {
-      PPETask {opaque_ppe = #VPU.PPEStub<>}
+      PPETask {ppe = #VPU.PPEStub<>}
     }
     %5 = VPUIP.PermuteCast {dst_order = #NCHW, mem_perm = #NWCH} inputs(%4 : memref<1x512x1x1xf16, #NHWC, @CMX_NN>) -> memref<1x512x1x1xf16, @CMX_NN>
 
@@ -1689,7 +1689,7 @@ func.func @OptimizeConstCopy(%arg0: memref<1x128x1x1xf16, @DDR>) -> memref<1x512
     %9 = VPUIP.NCEClusterTask {kernel_padding = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, kernel_size = [1, 1], kernel_strides = [1, 1], minimumHardwareExecutionCost = 1710 : i64, task_type = #VPUIP.nce_task_type<CONV>} input(%8 : memref<1x128x1x1xf16, #NHWC, @CMX_NN>) weights(%6 : memref<512x128x1x1xf16, #NHWC, @CMX_NN>) weight_table(%7 : memref<512x1x1x4xsi32, @CMX_NN>) parent_input(%8 : memref<1x128x1x1xf16, #NHWC, @CMX_NN>) parent_output(%alloc_8 : memref<1x512x1x1xf16, #NHWC, @CMX_NN>) outputs(%alloc_8 : memref<1x512x1x1xf16, #NHWC, @CMX_NN>) -> memref<1x512x1x1xf16, #NHWC, @CMX_NN> variants : {
       DPUTask {inEnd = [0, 0, 127], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 511], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     } PPE : {
-      PPETask {opaque_ppe = #VPU.PPEStub<>}
+      PPETask {ppe = #VPU.PPEStub<>}
     }
     %10 = VPUIP.PermuteCast {dst_order = #NCHW, mem_perm = #NWCH} inputs(%9 : memref<1x512x1x1xf16, #NHWC, @CMX_NN>) -> memref<1x512x1x1xf16, @CMX_NN>
 
@@ -1782,7 +1782,7 @@ func.func @OptimizeCopiesWithinDistance() -> !buffDistrType {
       DPUTask {cluster_id = 2 : i64, inEnd = [31, 61, 63], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [31, 61, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
       DPUTask {cluster_id = 3 : i64, inEnd = [31, 61, 63], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [31, 61, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     } PPE : {
-      PPETask {opaque_ppe = #VPU.PPEStub<>}
+      PPETask {ppe = #VPU.PPEStub<>}
     }
 
     %7 = VPURT.AllocDistributed -> !buffDistrType1
@@ -1797,7 +1797,7 @@ func.func @OptimizeCopiesWithinDistance() -> !buffDistrType {
       DPUTask {cluster_id = 2 : i64, inEnd = [31, 61, 63], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [31, 61, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
       DPUTask {cluster_id = 3 : i64, inEnd = [31, 61, 63], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [31, 61, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     } PPE : {
-      PPETask {opaque_ppe = #VPU.PPEStub<>}
+      PPETask {ppe = #VPU.PPEStub<>}
     }
     return %12 : !buffDistrType
 
@@ -1852,7 +1852,7 @@ func.func @OptimizeCopiesConsiderDistanceForEltwise() -> !buffDistrType {
       DPUTask {cluster_id = 2 : i64, inEnd = [31, 61, 63], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [31, 61, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
       DPUTask {cluster_id = 3 : i64, inEnd = [31, 61, 63], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [31, 61, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     } PPE : {
-      PPETask {opaque_ppe = #VPU.PPEStub<>}
+      PPETask {ppe = #VPU.PPEStub<>}
     }
 
     %7 = VPURT.AllocDistributed -> !buffDistrType1
@@ -1867,7 +1867,7 @@ func.func @OptimizeCopiesConsiderDistanceForEltwise() -> !buffDistrType {
       DPUTask {cluster_id = 2 : i64, inEnd = [31, 61, 63], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [31, 61, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
       DPUTask {cluster_id = 3 : i64, inEnd = [31, 61, 63], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [31, 61, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     } PPE : {
-      PPETask {opaque_ppe = #VPU.PPEStub<>}
+      PPETask {ppe = #VPU.PPEStub<>}
     }
 
     %13 = VPURT.AllocDistributed -> !buffDistrType1
@@ -1882,7 +1882,7 @@ func.func @OptimizeCopiesConsiderDistanceForEltwise() -> !buffDistrType {
       DPUTask {cluster_id = 2 : i64, inEnd = [31, 61, 63], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [31, 61, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
       DPUTask {cluster_id = 3 : i64, inEnd = [31, 61, 63], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [31, 61, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     } PPE : {
-      PPETask {opaque_ppe = #VPU.PPEStub<>}
+      PPETask {ppe = #VPU.PPEStub<>}
     }
 
     %19 = VPURT.AllocDistributed -> !buffDistrType1
@@ -1897,7 +1897,7 @@ func.func @OptimizeCopiesConsiderDistanceForEltwise() -> !buffDistrType {
       DPUTask {cluster_id = 2 : i64, inEnd = [31, 61, 63], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [31, 61, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
       DPUTask {cluster_id = 3 : i64, inEnd = [31, 61, 63], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [31, 61, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     } PPE : {
-      PPETask {opaque_ppe = #VPU.PPEStub<>}
+      PPETask {ppe = #VPU.PPEStub<>}
     }
 
     %25 = VPURT.AllocDistributed -> !buffDistrType1
@@ -1912,7 +1912,7 @@ func.func @OptimizeCopiesConsiderDistanceForEltwise() -> !buffDistrType {
       DPUTask {cluster_id = 2 : i64, inEnd = [31, 61, 63], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [31, 61, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
       DPUTask {cluster_id = 3 : i64, inEnd = [31, 61, 63], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [31, 61, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     } PPE : {
-      PPETask {opaque_ppe = #VPU.PPEStub<>}
+      PPETask {ppe = #VPU.PPEStub<>}
     }
     return %30 : !buffDistrType
 
@@ -1992,7 +1992,7 @@ func.func @OptimizeCopiesConsiderDistanceForConv() -> !buffDistrType {
       DPUTask {cluster_id = 2 : i64, inEnd = [31, 61, 63], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [31, 61, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
       DPUTask {cluster_id = 3 : i64, inEnd = [31, 61, 63], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [31, 61, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     } PPE : {
-      PPETask {opaque_ppe = #VPU.PPEStub<>}
+      PPETask {ppe = #VPU.PPEStub<>}
     }
 
     %13 = VPURT.AllocDistributed -> !buffDistrType1
@@ -2007,7 +2007,7 @@ func.func @OptimizeCopiesConsiderDistanceForConv() -> !buffDistrType {
       DPUTask {cluster_id = 2 : i64, inEnd = [31, 61, 63], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [31, 61, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
       DPUTask {cluster_id = 3 : i64, inEnd = [31, 61, 63], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [31, 61, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     } PPE : {
-      PPETask {opaque_ppe = #VPU.PPEStub<>}
+      PPETask {ppe = #VPU.PPEStub<>}
     }
 
     %19 = VPURT.AllocDistributed -> !buffDistrType1
@@ -2022,7 +2022,7 @@ func.func @OptimizeCopiesConsiderDistanceForConv() -> !buffDistrType {
       DPUTask {cluster_id = 2 : i64, inEnd = [31, 61, 63], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [31, 61, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
       DPUTask {cluster_id = 3 : i64, inEnd = [31, 61, 63], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [31, 61, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     } PPE : {
-      PPETask {opaque_ppe = #VPU.PPEStub<>}
+      PPETask {ppe = #VPU.PPEStub<>}
     }
 
     %25 = VPURT.AllocDistributed -> !buffDistrType1
@@ -2037,7 +2037,7 @@ func.func @OptimizeCopiesConsiderDistanceForConv() -> !buffDistrType {
       DPUTask {cluster_id = 2 : i64, inEnd = [31, 61, 63], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [31, 61, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
       DPUTask {cluster_id = 3 : i64, inEnd = [31, 61, 63], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [31, 61, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     } PPE : {
-      PPETask {opaque_ppe = #VPU.PPEStub<>}
+      PPETask {ppe = #VPU.PPEStub<>}
     }
     return %30 : !buffDistrType
 
@@ -2090,4 +2090,64 @@ func.func @OnlyOptimizeSameTypeCopies(%arg0: memref<128x1x1x1xf16, @DDR>) -> (me
     // CHECK: [[COPY_0:%.+]] = VPUIP.Copy inputs([[RESHAPE]] : memref<1x128x1x1xf16, @DDR>) outputs([[ALLOC_0]] : memref<1x128x1x1xf16, @DDR>) -> memref<1x128x1x1xf16, @DDR>
     // CHECK: [[COPY_1:%.+]] = VPUIP.Copy inputs([[RESHAPE]] : memref<1x128x1x1xf16, @DDR>) outputs([[ALLOC_1]] : memref<1x128x1x1xf16, [@CMX_NN, 0]>) -> memref<1x128x1x1xf16, [@CMX_NN, 0]>
     // CHECK: return [[COPY_0]], [[COPY_1]], [[COPY_1]] : memref<1x128x1x1xf16, @DDR>, memref<1x128x1x1xf16, [@CMX_NN, 0]>, memref<1x128x1x1xf16, [@CMX_NN, 0]>
+}
+
+// -----
+
+// CHECK-LABEL: @NotOptimizeConstCopyForDynamicReshape
+// CHECK-SAME:      ([[INPUT_0:%.+]]: memref<100xsi32, [@CMX_NN, 0]>, [[INPUT_1:%.+]]: memref<2xsi32, [@CMX_NN, 0]>)
+func.func @NotOptimizeConstCopyForDynamicReshape(%arg0: memref<100xsi32, [@CMX_NN, 0]>, %arg1: memref<2xsi32, [@CMX_NN, 0]>) -> (memref<1x100xsi32, [@CMX_NN, 0]>, memref<1x2xsi32, [@CMX_NN, 0]>) {
+    %cst = const.Declare memref<2xsi32> = dense<[1, -1]> : tensor<2xsi32>
+
+    %alloc = memref.alloc() : memref<2xsi32, [@CMX_NN, 0]>
+    %0 = VPUIP.Copy inputs(%cst : memref<2xsi32>) outputs(%alloc : memref<2xsi32, [@CMX_NN, 0]>) -> memref<2xsi32, [@CMX_NN, 0]>
+    %alloc_0 = memref.alloc() : memref<1x100xsi32, [@CMX_NN, 0]>
+    %alloc_1 = memref.alloc() : memref<2xsi32, [@CMX_NN, 0]>
+    %1, %dynamicOutputShapes_0 = VPUIP.SW.Kernel {dynamicInputShapesMap = array<i32: -1, -1>, dynamicOutputShapesMap = array<i32: 0>, resultSegmentSizes = array<i32: 1, 1, 0>} @VPU.SW::@builtin_DynamicReshape
+    inputs(%arg0 as %arg2: memref<100xsi32, [@CMX_NN, 0]>, %0 as %arg3: memref<2xsi32, [@CMX_NN, 0]>)
+    outputs(%alloc_0 as %arg4: memref<1x100xsi32, [@CMX_NN, 0]>)
+    dynamicOutputShapes(%alloc_1 : memref<2xsi32, [@CMX_NN, 0]>) on tile 0 ->
+    (memref<1x100xsi32, [@CMX_NN, 0]>, memref<2xsi32, [@CMX_NN, 0]>){
+        VPUIP.SW.Kernel.run(%arg2, %arg3, %arg4) : memref<100xsi32, [@CMX_NN, 0]>, memref<2xsi32, [@CMX_NN, 0]>, memref<1x100xsi32, [@CMX_NN, 0]>
+    }
+
+    %alloc_2 = memref.alloc() : memref<2xsi32, [@CMX_NN, 0]>
+    %2 = VPUIP.Copy inputs(%cst : memref<2xsi32>) outputs(%alloc_2 : memref<2xsi32, [@CMX_NN, 0]>) -> memref<2xsi32, [@CMX_NN, 0]>
+    %alloc_3 = memref.alloc() : memref<1x2xsi32, [@CMX_NN, 0]>
+    %alloc_4 = memref.alloc() : memref<2xsi32, [@CMX_NN, 0]>
+    %3, %dynamicOutputShapes_1 = VPUIP.SW.Kernel {dynamicInputShapesMap = array<i32: -1, -1>, dynamicOutputShapesMap = array<i32: 0>, resultSegmentSizes = array<i32: 1, 1, 0>} @VPU.SW::@builtin_DynamicReshape
+    inputs(%arg1 as %arg2: memref<2xsi32, [@CMX_NN, 0]>, %2 as %arg3: memref<2xsi32, [@CMX_NN, 0]>)
+    outputs(%alloc_3 as %arg4: memref<1x2xsi32, [@CMX_NN, 0]>)
+    dynamicOutputShapes(%alloc_4 : memref<2xsi32, [@CMX_NN, 0]>) on tile 0 ->
+    (memref<1x2xsi32, [@CMX_NN, 0]>, memref<2xsi32, [@CMX_NN, 0]>){
+        VPUIP.SW.Kernel.run(%arg2, %arg3, %arg4) : memref<2xsi32, [@CMX_NN, 0]>, memref<2xsi32, [@CMX_NN, 0]>, memref<1x2xsi32, [@CMX_NN, 0]>
+    }
+
+    return %1, %3 : memref<1x100xsi32, [@CMX_NN, 0]>, memref<1x2xsi32, [@CMX_NN, 0]>
+
+    // CHECK-DAG:    [[CST:%.+]] = const.Declare memref<2xsi32> = dense<[1, -1]> : tensor<2xsi32>
+    // CHECK:        [[ALLOC:%.+]] = memref.alloc() : memref<2xsi32, [@CMX_NN, 0]>
+    // CHECK:        [[COPY_0:%.+]] = VPUIP.Copy inputs([[CST]] : memref<2xsi32>) outputs([[ALLOC]] : memref<2xsi32, [@CMX_NN, 0]>) -> memref<2xsi32, [@CMX_NN, 0]>
+    // CHECK:        [[ALLOC_0:%.+]] = memref.alloc() : memref<1x100xsi32, [@CMX_NN, 0]>
+    // CHECK:        [[ALLOC_1:%.+]] = memref.alloc() : memref<2xsi32, [@CMX_NN, 0]>
+    // CHECK:        [[RESULTS_0:%.+]], [[DYNAMIC_OUTPUT_SHAPES_0:%.+]] = VPUIP.SW.Kernel {dynamicInputShapesMap = array<i32: -1, -1>, dynamicOutputShapesMap = array<i32: 0>, resultSegmentSizes = array<i32: 1, 1, 0>} @VPU.SW::@builtin_DynamicReshape
+    // CHECK:        inputs([[INPUT_0]] as {{[^:]+}}: memref<100xsi32, [@CMX_NN, 0]>, [[COPY_0]] as {{[^:]+}}: memref<2xsi32, [@CMX_NN, 0]>)
+    // CHECK:        outputs([[ALLOC_0]] as {{[^:]+}}: memref<1x100xsi32, [@CMX_NN, 0]>)
+    // CHECK:        dynamicOutputShapes([[ALLOC_1]] : memref<2xsi32, [@CMX_NN, 0]>)
+    // CHECK:        on tile 0 -> (memref<1x100xsi32, [@CMX_NN, 0]>, memref<2xsi32, [@CMX_NN, 0]>){
+    // CHECK:            VPUIP.SW.Kernel.run({{[^:]+}}, {{[^:]+}}, {{[^:]+}}) : memref<100xsi32, [@CMX_NN, 0]>, memref<2xsi32, [@CMX_NN, 0]>, memref<1x100xsi32, [@CMX_NN, 0]>
+    // CHECK:        }
+    // CHECK:        [[ALLOC_2:%.+]] = memref.alloc() : memref<2xsi32, [@CMX_NN, 0]>
+    // CHECK:        [[COPY_1:%.+]] = VPUIP.Copy inputs([[CST]] : memref<2xsi32>) outputs([[ALLOC_2]] : memref<2xsi32, [@CMX_NN, 0]>) -> memref<2xsi32, [@CMX_NN, 0]>
+    // CHECK:        [[ALLOC_3:%.+]] = memref.alloc() : memref<1x2xsi32, [@CMX_NN, 0]>
+    // CHECK:        [[ALLOC_4:%.+]] = memref.alloc() : memref<2xsi32, [@CMX_NN, 0]>
+    // CHECK:        [[RESULTS_1:%.+]], [[DYNAMIC_OUTPUT_SHAPES_1:%.+]] = VPUIP.SW.Kernel {dynamicInputShapesMap = array<i32: -1, -1>, dynamicOutputShapesMap = array<i32: 0>, resultSegmentSizes = array<i32: 1, 1, 0>} @VPU.SW::@builtin_DynamicReshape
+    // CHECK:        inputs([[INPUT_1]] as {{[^:]+}}: memref<2xsi32, [@CMX_NN, 0]>, [[COPY_1]] as {{[^:]+}}: memref<2xsi32, [@CMX_NN, 0]>)
+    // CHECK:        outputs([[ALLOC_3]] as {{[^:]+}}: memref<1x2xsi32, [@CMX_NN, 0]>)
+    // CHECK:        dynamicOutputShapes([[ALLOC_4]] : memref<2xsi32, [@CMX_NN, 0]>)
+    // CHECK:        on tile 0 -> (memref<1x2xsi32, [@CMX_NN, 0]>, memref<2xsi32, [@CMX_NN, 0]>){
+    // CHECK:            VPUIP.SW.Kernel.run({{[^:]+}}, {{[^:]+}}, {{[^:]+}}) : memref<2xsi32, [@CMX_NN, 0]>, memref<2xsi32, [@CMX_NN, 0]>, memref<1x2xsi32, [@CMX_NN, 0]>
+    // CHECK:        }
+
+    // CHECK:        return [[RESULTS_0]], [[RESULTS_1]] : memref<1x100xsi32, [@CMX_NN, 0]>, memref<1x2xsi32, [@CMX_NN, 0]>
 }

@@ -90,4 +90,18 @@ def DotInterface : OpInterface<"DotInterface"> {
     ];
 }
 
+def ShapeBoundOp : OpInterface<"ShapeBoundOp"> {
+    let description = [{
+        Operations can enforce bounded shape constraints.
+        One example of such operations is a DPU task.
+        DPU tasks support only static shapes.
+        DPU cannot adjust any workload size at runtime once it is set by the compiler.
+        Another example is any operation that supports dynamic shapes, but runs faster when the shapes are static.
+        Transposition with dynamic shapes is mapped to an activation shave kernel.
+        Transposition with static shapes is mapped either to DPU or to DMA.
+        In most cases, DPU transposition is faster than the activation shave implementation.
+    }];
+    let cppNamespace = "vpux";
+}
+
 #endif

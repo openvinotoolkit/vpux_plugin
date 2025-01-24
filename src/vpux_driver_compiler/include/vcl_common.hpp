@@ -20,7 +20,7 @@
 #include "npu_driver_compiler.h"
 #include "vcl_logger.hpp"
 
-#include "intel_npu/al/icompiler.hpp"
+#include "intel_npu/icompiler.hpp"
 #include "vpux/utils/IE/config.hpp"
 
 namespace VPUXDriverCompiler {

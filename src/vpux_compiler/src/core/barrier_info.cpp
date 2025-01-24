@@ -131,6 +131,15 @@ BarrierInfo::TaskSet& vpux::BarrierInfo::getBarrierConsumers(size_t barrierInd) 
     return _barrierConsumerMap[barrierInd];
 }
 
+BarrierInfo::TaskSet vpux::BarrierInfo::getBarriersUsers(const std::set<int64_t>& barrierInds) {
+    BarrierInfo::TaskSet users;
+    for (const auto& barrierInd : barrierInds) {
+        llvm::set_union(users, getBarrierProducers(barrierInd));
+        llvm::set_union(users, getBarrierConsumers(barrierInd));
+    }
+    return users;
+}
+
 //
 // getBarrierProducers
 //
@@ -155,14 +164,16 @@ BarrierInfo::TaskSet& vpux::BarrierInfo::getBarrierConsumers(VPURT::BarrierOpInt
 
 size_t vpux::BarrierInfo::getNumOfSlotsUsed(VPURT::TaskOp op) {
     // This function returns the number of variants used by a task for a barrier.
-    // On VPU H/W, a NCE task is executed (across multiple DPUs) via workloads descriptors (known as variants).
-    // Each variant must update the barrier to signal that it is complete.
+    // On VPU H/W, a NCE task can be executed (across multiple DPUs) via workloads descriptors (known as variants).
     // An NCE task may have multiple workloads descriptors (which are generated in the NCE DPU workloads pass).
     // Therefore, the number of variants must be verified as they will all update a barrier and
     // contribute to the architecture specific MAX VARIANT COUNT that a barrier has.
-    // A DMA does not have variants, therefore they always just requires 1 producer slot to a barrier.
 
     if (op.getExecutorKind() == VPU::ExecutorKind::DPU) {
+        const auto module = op->getParentOfType<mlir::ModuleOp>();
+        if (VPUIP::supportsPerVariantBarrierConfiguration(module)) {
+            return 1;
+        }
         auto nceOp = mlir::dyn_cast<VPUIP::NCEClusterTaskOp>(op.getInnerTaskOp());
         VPUX_THROW_UNLESS(nceOp != nullptr, "Could not cast to NCE task");
         return nceOp.getNumVariants();
@@ -289,6 +300,18 @@ SmallVector<size_t> vpux::BarrierInfo::getBarriersForTaskBlock(size_t blockInd, 
 
 size_t vpux::BarrierInfo::getControlGraphBlockIndex(size_t taskInd) const {
     return _syncTasksIds.empty() ? 0 : _taskToBlockMap[taskInd];
+}
+
+size_t vpux::BarrierInfo::getBarrierBlockIndex(size_t barInd) {
+    return getControlGraphBlockIndex(getBarrierLatestProducer(barInd));
+}
+
+std::optional<size_t> vpux::BarrierInfo::getControlGraphSyncPoint(size_t taskInd) const {
+    auto blockInd = getControlGraphBlockIndex(taskInd);
+    if (blockInd == _syncTasksIds.size()) {
+        return std::nullopt;
+    }
+    return _syncTasksIds[blockInd];
 }
 
 //
@@ -1166,18 +1189,152 @@ bool vpux::BarrierInfo::verifyControlGraphSplit() {
                 size_t childBlockInd = getControlGraphBlockIndex(childTaskInd);
 
                 if (taskInd == syncTaskInd && taskBlockInd + 1 != childBlockInd) {
-                    _log.error("Out of block dep for sync task: {0}(block {1}) -> {2}(block{3}) ", taskInd,
-                               taskBlockInd, childTaskInd, childBlockInd);
+                    _log.debug("Out of block dep for sync task: {0} (block {1}) -> bar {2} -> {3} (block{4}) ", taskInd,
+                               taskBlockInd, updateBarrierInd, childTaskInd, childBlockInd);
                     return false;
                 } else if (taskInd != syncTaskInd && taskBlockInd != childBlockInd) {
-                    _log.error("Out of block dep for task: {0}(block {1}) -> {2}(block{3}) ", taskInd, taskBlockInd,
-                               childTaskInd, childBlockInd);
+                    _log.debug("Out of block dep for task: {0} (block {1}) -> bar {2} -> {3} (block{4}) ", taskInd,
+                               taskBlockInd, updateBarrierInd, childTaskInd, childBlockInd);
                     return false;
                 }
             }
         }
     }
     return true;
+}
+
+bool vpux::BarrierInfo::adjustTasksDependenciesToGraphSplitConstraints(const TaskSet& tasks) {
+    if (_syncTasksIds.empty()) {
+        return false;
+    }
+
+    bool dependenciesChanged = false;
+
+    size_t controlMapBlockInd = std::numeric_limits<size_t>::max();
+    SmallVector<llvm::BitVector> taskControlMap;
+    size_t controlMapOffset = 0;
+
+    auto updateControlMap = [&](size_t taskBlockInd, SmallVector<llvm::BitVector>& taskControlMap,
+                                size_t& controlMapOffset) {
+        if (controlMapBlockInd != taskBlockInd) {
+            std::tie(taskControlMap, controlMapOffset) = buildTaskControlMap(taskBlockInd, false);
+            controlMapBlockInd = taskBlockInd;
+        }
+    };
+
+    for (auto taskInd : tasks) {
+        size_t taskBlockInd = getControlGraphBlockIndex(taskInd);
+        auto taskSyncPoint = getControlGraphSyncPoint(taskInd);
+
+        // check task dependencies through its update barriers
+        auto taskUpdateBarriers = getUpdateBarriers(taskInd);
+        for (const auto& updateBarrierInd : taskUpdateBarriers) {
+            auto barrierBlockIndex = getBarrierBlockIndex(updateBarrierInd);
+
+            if (!taskSyncPoint.has_value()) {
+                // the task belongs to last block
+                VPUX_THROW_WHEN(barrierBlockIndex != taskBlockInd,
+                                "taskInd '{0}' does not have sync point and should not have "
+                                "out-of-block consumers",
+                                taskInd);
+            }
+
+            if (taskBlockInd == barrierBlockIndex) {
+                // dependence does not span across blocks
+                continue;
+            }
+
+            if (isSyncPoint(taskInd) && taskBlockInd + 1 == barrierBlockIndex) {
+                // sync-point can update barriers from the following block
+                continue;
+            }
+            _log.trace("Out of block dependence for task: {0} (block {1}) -> bar {2} (block{3}) ", taskInd,
+                       taskBlockInd, updateBarrierInd, barrierBlockIndex);
+            dependenciesChanged = true;
+
+            /*
+              Task (taskInd) to barrier (updateBarrierInd) dependence spans across task blocks.
+              Remove out-of-block connection from a producer
+
+              /----------------------------------------------------------------------\
+              0 - b0 - 1 - b1 - 2 (sync) - b2 - 3 - b3 - 4 - b4 - 5 (sync) - b5 - 6 - b6 - 7
+
+            */
+
+            // remove out-of-block connection from a producer (0->b6)
+            removeProducer(updateBarrierInd, taskInd);
+        }
+
+        // check task dependencies through its wait barriers
+        auto taskWaitBarriers = getWaitBarriers(taskInd);
+        for (const auto& waitBarrierInd : taskWaitBarriers) {
+            auto barrierBlockIndex = getBarrierBlockIndex(waitBarrierInd);
+            auto barrierLastProducer = getBarrierLatestProducer(waitBarrierInd);
+
+            if (taskBlockInd == barrierBlockIndex) {
+                // dependence does not span across blocks
+                continue;
+            }
+
+            if (isSyncPoint(barrierLastProducer) && taskBlockInd - 1 == barrierBlockIndex) {
+                // any task from a given block can wait for update barrier of sync-point from the previous block
+                continue;
+            }
+            _log.trace("Out of block dependence for task: {0} (block {1}) -> bar {2} (block{3}) ", taskInd,
+                       taskBlockInd, waitBarrierInd, barrierBlockIndex);
+
+            dependenciesChanged = true;
+
+            /*
+              Barrier (waitBarrierInd) to task (taskInd) dependence spans across task blocks.
+              Replace out-of-block connection to a consumer
+
+                    /----------------------------------------------------------------------\
+              0 - b0 - 1 - b1 - 2 (sync) - b2 - 3 - b3 - 4 - b4 - 5 (sync) - b5 - 6        7
+                                                                              \------------/
+              with a connection to its preceding sync point, if no such connection exists
+            */
+
+            // Remove out-of-block connection to a consumer (b0->7)
+            removeConsumer(waitBarrierInd, taskInd);
+            // Remove all barrier producers if there are no more consumers for barrier waitBarrierInd.
+            // (Task 0 should be removed as producer of b0 if b0 is not consumed by any task).
+            if (getBarrierConsumers(waitBarrierInd).empty()) {
+                removeProducers(waitBarrierInd, getBarrierProducers(waitBarrierInd));
+            }
+
+            // get sync-point preceding current task (5)
+            auto prevSyncPoint = getPreviousBlockSyncPoint(taskInd);
+            // if prevSyncPoint doesn't exist, task taskInd cannot have out-of-block dependency and we shouldn't be
+            // here.
+            VPUX_THROW_UNLESS(prevSyncPoint.has_value(), "There's not sync-point preceding task {0}", taskInd);
+
+            updateControlMap(taskBlockInd, taskControlMap, controlMapOffset);
+
+            if (!isSyncPoint(taskInd) &&
+                !controlPathExistsBetweenTasksInSameBlock(taskControlMap, prevSyncPoint.value() - controlMapOffset,
+                                                          taskInd - controlMapOffset, false)) {
+                // Link out-of-block consumer (7) to the preceding sync-point update barrier (b5).
+                // If the task is a sync-point, or a connection already exists, nothing needs to be done.
+                auto prevSyncPointUpdateBarriers = getUpdateBarriers(prevSyncPoint.value());
+                for (const auto& syncPointUpdateBarrierInd : prevSyncPointUpdateBarriers) {
+                    addConsumer(syncPointUpdateBarrierInd, taskInd);
+                }
+            }
+        }
+    }
+
+    return dependenciesChanged;
+}
+
+std::optional<size_t> vpux::BarrierInfo::getPreviousBlockSyncPoint(size_t taskInd) const {
+    auto blockInd = getControlGraphBlockIndex(taskInd);
+    if (blockInd == 0) {
+        return std::nullopt;
+    } else if (blockInd == _syncTasksIds.size()) {
+        return _syncTasksIds.back();
+    }
+    return _syncTasksIds[blockInd - 1];
 }
 
 void vpux::BarrierInfo::splitBarriersWithExceedingVariantCount(size_t availableSlots, size_t maxSlotsSum,
@@ -1370,6 +1527,85 @@ std::pair<size_t, size_t> vpux::BarrierInfo::getControlGraphBlockTaskRange(size_
     }
 
     return std::make_pair(blockStartInd, blockEndInd);
+}
+
+SmallVector<std::set<size_t>> vpux::BarrierInfo::findParallelTasksWithBarrierDependence(
+        const BarrierInfo::TaskSet& tasks, size_t maxCount) {
+    SmallVector<std::set<size_t>> parallelTasks(tasks.size());
+
+    size_t controlMapBlockInd = std::numeric_limits<size_t>::max();
+    SmallVector<llvm::BitVector> taskControlMap;
+    size_t controlMapOffset = 0;
+
+    auto updateControlMap = [&](size_t taskBlockInd, SmallVector<llvm::BitVector>& taskControlMap,
+                                size_t& controlMapOffset) {
+        if (controlMapBlockInd != taskBlockInd) {
+            std::tie(taskControlMap, controlMapOffset) =
+                    buildTaskControlMap(taskBlockInd, /* considerTaskFifoDependency */ true);
+            controlMapBlockInd = taskBlockInd;
+        }
+    };
+
+    buildTaskQueueTypeMap();
+
+    // For every task from the provided set, search for parallel tasks located earlier in the IR.
+    for (auto [i, taskIdx] : tasks | indexed) {
+        auto taskBlockIdx = getControlGraphBlockIndex(taskIdx);
+        auto [fromIdx, _] = getControlGraphBlockTaskRange(taskBlockIdx, /* blockStartSyncPoint */ false,
+                                                          /* blockEndSyncPoint */ true);
+        auto toIdx = taskIdx;
+
+        // build task control map
+        updateControlMap(taskBlockIdx, taskControlMap, controlMapOffset);
+
+        // Scan paths in decreasing task order between the current task and preceding tasks up to the preceding
+        // sync-point. It is expected that typically parallel tasks will be located in the close vicinity of a given
+        // task.
+        for (auto idx : irange(fromIdx, toIdx) | reversed) {
+            if (!controlPathExistsBetweenTasksInSameBlock(taskControlMap, idx - controlMapOffset,
+                                                          taskIdx - controlMapOffset, false)) {
+                if (getUpdateBarriers(idx).empty() && getWaitBarriers(idx).empty()) {
+                    continue;
+                }
+                parallelTasks[i].insert(idx);
+                if (parallelTasks[i].size() >= maxCount) {
+                    break;
+                }
+            }
+        }
+    }
+
+    // If not found, search for parallel tasks located latter in the IR relative to the provided task
+    for (auto [i, taskIdx] : tasks | indexed) {
+        if (parallelTasks[i].size() >= maxCount) {
+            continue;
+        }
+        auto taskBlockIdx = getControlGraphBlockIndex(taskIdx);
+        auto [_, toIdx] = getControlGraphBlockTaskRange(taskBlockIdx, /* blockStartSyncPoint */ false,
+                                                        /* blockEndSyncPoint */ true);
+        auto fromIdx = taskIdx + 1;  // start from index of the following task
+
+        // build task control map
+        updateControlMap(taskBlockIdx, taskControlMap, controlMapOffset);
+
+        // Scan paths in increasing task order between the current task and following tasks up to the next
+        // sync-point (or the last task) inclusively. It is expected that typically parallel tasks will be located in
+        // the close vicinity of a given task.
+        for (auto idx : irange(fromIdx, toIdx + 1)) {
+            if (!controlPathExistsBetweenTasksInSameBlock(taskControlMap, taskIdx - controlMapOffset,
+                                                          idx - controlMapOffset, false)) {
+                if (getUpdateBarriers(idx).empty() && getWaitBarriers(idx).empty()) {
+                    continue;
+                }
+                parallelTasks[i].insert(idx);
+                if (parallelTasks[i].size() >= maxCount) {
+                    break;
+                }
+            }
+        }
+    }
+
+    return parallelTasks;
 }
 
 //
@@ -1907,7 +2143,6 @@ void vpux::BarrierInfo::shareWaitAndUpdateBarriers(size_t availableSlots) {
 
         // handle wait barriers
         BarrierInfo::TaskSet tasksNoWaitBarrier;
-        // for (const auto& taskInd : dmaQueue | reversed) {
         for (auto taskInd = dmaQueue.find_last(); taskInd != -1;) {
             const auto taskWaitBarriers = getWaitBarriers(static_cast<size_t>(taskInd));
             if (taskWaitBarriers.empty()) {
@@ -1969,6 +2204,15 @@ void vpux::BarrierInfo::linkTasksToBarriers(const BarrierInfo::TaskSet& tasksToA
             newBarrierBatch.insert(barrierIdn);
         }
     }
+}
+
+size_t vpux::BarrierInfo::getBarrierLatestProducer(size_t barInd) {
+    auto barProducers = getBarrierProducers(barInd);
+    if (barProducers.empty()) {
+        VPUX_THROW("Barrier {0} does not have any producers.", barInd);
+    }
+    std::set<size_t> barProducersOrd(barProducers.begin(), barProducers.end());
+    return *barProducersOrd.rbegin();
 }
 
 unsigned vpux::BarrierInfo::createBarrierDependenciesImpliedByFIFO(

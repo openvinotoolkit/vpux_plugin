@@ -3,8 +3,8 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
-#include "vpux/compiler/NPU40XX/dialect/VPUIP/utils/convert_to_dma_utils.hpp"
 #include "vpux/compiler/core/cost_model_utils.hpp"
+#include "vpux/compiler/dialect/VPU/transforms/factories/gather_dma_constants.hpp"
 #include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
 #include "vpux/compiler/utils/compression_utils.hpp"
 #include "vpux/compiler/utils/error.hpp"
@@ -236,7 +236,7 @@ mlir::LogicalResult vpux::VPUIP::GatherDMAOp::verify() {
 
     // TODO: #E#86281 move to 40xx
     if (arch != VPU::ArchKind::NPU40XX) {
-        return errorAt(loc, "Operation {0} is only supported for NPU40XX, but got {1}.", getOperationName(), arch);
+        return errorAt(loc, "Operation {0} is only supported for NPU40XX but got {1}.", getOperationName(), arch);
     }
 
     auto indicesType = getIndices().getType().cast<vpux::NDTypeInterface>();
@@ -249,10 +249,11 @@ mlir::LogicalResult vpux::VPUIP::GatherDMAOp::verify() {
         return errorAt(loc, "Indices list must reside in CMX.");
     }
 
-    // Max indices is 64k.
-    if (indicesLength > arch40xx::DMA_MAX_INDICES_LIST_LENGTH) {
+    const size_t DMA_MAX_INDICES_LIST_LENGTH_ARCH_BASED = VPU::getGatherDMAMaxIndicesListLength(arch);
+
+    if (indicesLength > DMA_MAX_INDICES_LIST_LENGTH_ARCH_BASED) {
         return errorAt(loc, "Number of indices({0}) is greater than max supported({1}) by gather DMA.", indicesLength,
-                       arch40xx::DMA_MAX_INDICES_LIST_LENGTH);
+                       DMA_MAX_INDICES_LIST_LENGTH_ARCH_BASED);
     }
 
     return verifyTensorSize(loc, getOutput());

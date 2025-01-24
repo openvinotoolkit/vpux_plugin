@@ -45,9 +45,7 @@ public:
     mlir::MLIRContext ctx;
 };
 
-// E#136692: This test no longer works due to symbol lookup procedure being
-// broken (ContentAttr property breaks the lookup's recursion).
-TEST_F(MLIR_ConstDeclareSymbolTest, DISABLED_FindDeclareOpsUsingSymbol) {
+TEST_F(MLIR_ConstDeclareSymbolTest, FindDeclareOpsUsingSymbol) {
     constexpr StringLiteral MLIR_SOURCE = R"(
 module {
     const.Data @ov_bin_1 {

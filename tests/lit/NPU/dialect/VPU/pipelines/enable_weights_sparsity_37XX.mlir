@@ -16,7 +16,7 @@ func.func @DoNotSparsifyCompressedConv(%arg0: tensor<1x4x16x16xf16, {order = #NH
             pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
             rawFilterShape = [16, 3, 1, 1],
             strides = [1, 1],
-            opaque_ppe = #VPU.PPEStub<>
+            ppe = #VPU.PPEStub<>
         } -> tensor<1x16x16x16xf16, {order = #NHWC}>
 
     return %1 : tensor<1x16x16x16xf16, {order = #NHWC}>

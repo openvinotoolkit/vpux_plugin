@@ -68,7 +68,7 @@ func.func @main() -> () {
             }
         } PPE : {
             PPETask {
-                opaque_ppe = #VPU.PPEStub<>
+                ppe = #VPU.PPEStub<>
             }
         }
     }
@@ -168,7 +168,7 @@ func.func @main() -> () {
             }
         } PPE : {
             PPETask {
-                opaque_ppe = #VPU.PPEStub<>
+                ppe = #VPU.PPEStub<>
             }
         }
     }
@@ -256,7 +256,7 @@ func.func @main() -> () {
             }
         } PPE : {
             PPETask {
-                opaque_ppe = #VPU.PPEStub<>
+                ppe = #VPU.PPEStub<>
             }
         }
     }

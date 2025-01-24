@@ -4,7 +4,7 @@
 //
 
 #include "vpux/compiler/dialect/VPU/transforms/factories/vf_axis_increment.hpp"
-#include "vpux/compiler/dialect/VPU/utils/vertical_fusion_axis_increment.hpp"
+#include "vpux/compiler/dialect/VPU/utils/vertical_fusion/vertical_fusion_axis_increment.hpp"
 
 using namespace vpux::VPU;
 

@@ -25,7 +25,7 @@ mlir::FailureOr<int64_t> extractAxis(mlir::Location loc, VPU::GatherOpAdaptor ga
             return errorAt(loc, "Only constant input is supported for axis");
         }
 
-        if (const auto attr = axisConst.getContentAttr(); !attr.isSplat()) {
+        if (const auto& attr = axisConst.getContentAttr(); !attr.isSplat()) {
             return errorAt(loc, "Axis value must be a scalar");
         }
 

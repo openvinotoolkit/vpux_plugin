@@ -175,5 +175,4 @@ INSTANTIATE_TEST_SUITE_P(smoke_TwoScatterUpdateInDDR, TwoScatterUpdateTest_NPU40
                                  {1, 64, 32, 514}  // in_shape
                          }),
                          TwoScatterUpdateTest_NPU3720::getTestCaseName);
-
 }  // namespace ov::test

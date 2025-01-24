@@ -4,7 +4,7 @@
 //
 
 #include "common/npu_test_env_cfg.hpp"
-#include "intel_npu/al/config/common.hpp"
+#include "intel_npu/config/common.hpp"
 #include "vpux/utils/IE/config.hpp"
 
 #include <cstdlib>

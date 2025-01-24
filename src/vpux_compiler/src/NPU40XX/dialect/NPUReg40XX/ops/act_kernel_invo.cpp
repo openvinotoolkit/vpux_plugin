@@ -19,28 +19,31 @@ void vpux::NPUReg40XX::ActKernelInvocationOp::serialize(elf::writer::BinaryDataS
     nn_public::VpuActKernelInvocation actKernelInvo;
 
     auto actKernInvoDescriptor = getActInvoDescriptorAttr().getRegMapped();
-    auto serializedActKernInvoDesc = actKernInvoDescriptor.serialize();
+    auto serializedActKernInvoDesc = actKernInvoDescriptor.getStorage();
     memcpy(reinterpret_cast<uint8_t*>(&actKernelInvo), serializedActKernInvoDesc.data(),
            serializedActKernInvoDesc.size());
 
     uint8_t* ptrCharTmp = reinterpret_cast<uint8_t*>(&actKernelInvo);
-    binDataSection.appendData(ptrCharTmp, getBinarySize());
+    binDataSection.appendData(ptrCharTmp, getBinarySize(VPU::ArchKind::NPU40XX));
 }
 
-size_t vpux::NPUReg40XX::ActKernelInvocationOp::getBinarySize() {
+size_t vpux::NPUReg40XX::ActKernelInvocationOp::getBinarySize(VPU::ArchKind) {
     return sizeof(nn_public::VpuActKernelInvocation);
 }
 
-size_t vpux::NPUReg40XX::ActKernelInvocationOp::getAlignmentRequirements() {
-    return alignof(nn_public::VpuActKernelInvocation);
+size_t vpux::NPUReg40XX::ActKernelInvocationOp::getAlignmentRequirements(VPU::ArchKind) {
+    // TODO: E#80148
+    VPUX_THROW("WrappableInterface method should not be called at this point! E#80148");
 }
 
 std::optional<ELF::SectionSignature> vpux::NPUReg40XX::ActKernelInvocationOp::getSectionSignature() {
-    return {};
+    // TODO: E#80148
+    VPUX_THROW("WrappableInterface method should not be called at this point! E#80148");
 }
 
 bool vpux::NPUReg40XX::ActKernelInvocationOp::hasMemoryFootprint() {
-    return true;
+    // TODO: E#80148
+    VPUX_THROW("WrappableInterface method should not be called at this point! E#80148");
 }
 
 namespace {
@@ -71,27 +74,33 @@ std::vector<ELF::RelocationInfo> vpux::NPUReg40XX::ActKernelInvocationOp::getRel
     ELF::ElfSectionInterface targetSection = mlir::dyn_cast<ELF::ElfSectionInterface>(getOperation()->getParentOp());
     VPUX_THROW_UNLESS(targetSection, "The relocation info can be retrieved only if the op is included into a section");
 
-    relocs.push_back(ELF::RelocationInfo(
-            getKernelRange(), targetSection, getSymRefOffsetForReloc(thisInvo, getKernelRange()),
-            ELF::RelocationType::R_VPU_64_BIT_OR_B21_B26_UNSET, ELF::getOffsetOfSymRef(symRefMap, getKernelRange()),
-            "Kernel range in act kernel invocation reloc"));
+    relocs.emplace_back(getKernelRange(), targetSection, getSymRefOffsetForReloc(thisInvo, getKernelRange()),
+                        ELF::RelocationType::R_VPU_64_BIT_OR_B21_B26_UNSET,
+                        ELF::getOffsetOfSymRef(symRefMap, getKernelRange()),
+                        "Kernel range in act kernel invocation reloc");
 
     if (auto kernelData = getKernelData().value_or(nullptr)) {
-        relocs.push_back(ELF::RelocationInfo(
-                kernelData, targetSection, getSymRefOffsetForReloc(thisInvo, kernelData), ELF::RelocationType::R_VPU_64,
-                ELF::getOffsetOfSymRef(symRefMap, kernelData), "Kernel data in act kernel invocation reloc"));
+        relocs.emplace_back(kernelData, targetSection, getSymRefOffsetForReloc(thisInvo, kernelData),
+                            ELF::RelocationType::R_VPU_64, ELF::getOffsetOfSymRef(symRefMap, kernelData),
+                            "Kernel data in act kernel invocation reloc");
     }
 
-    relocs.push_back(
-            ELF::RelocationInfo(getKernelParams(), targetSection, getSymRefOffsetForReloc(thisInvo, getKernelParams()),
-                                ELF::RelocationType::R_VPU_64, ELF::getOffsetOfSymRef(symRefMap, getKernelParams()),
-                                "Kernel params in act kernel invocation reloc"));
+    relocs.emplace_back(getKernelParams(), targetSection, getSymRefOffsetForReloc(thisInvo, getKernelParams()),
+                        ELF::RelocationType::R_VPU_64, ELF::getOffsetOfSymRef(symRefMap, getKernelParams()),
+                        "Kernel params in act kernel invocation reloc");
 
     if (auto profilingData = getProfilingData().value_or(nullptr)) {
-        relocs.push_back(ELF::RelocationInfo(
-                profilingData, targetSection, getSymRefOffsetForReloc(thisInvo, profilingData),
-                ELF::RelocationType::R_VPU_64_BIT_OR_B21_B26_UNSET, ELF::getOffsetOfSymRef(symRefMap, profilingData),
-                "Profiling data in act kernel invocation reloc"));
+        relocs.emplace_back(profilingData, targetSection, getSymRefOffsetForReloc(thisInvo, profilingData),
+                            ELF::RelocationType::R_VPU_64_BIT_OR_B21_B26_UNSET,
+                            ELF::getOffsetOfSymRef(symRefMap, profilingData),
+                            "Profiling data in act kernel invocation reloc");
+    }
+
+    if (auto nextLink = getNextLinkAttr()) {
+        auto addend = ELF::getOffsetOfSymRef(symRefMap, nextLink);
+        relocs.push_back(ELF::RelocationInfo(nextLink, targetSection,
+                                             offsetof(nn_public::VpuActKernelInvocation, next_aki_wl_addr),
+                                             ELF::RelocationType::R_VPU_32_BIT_OR_B21_B26_UNSET, addend));
     }
 
     return relocs;

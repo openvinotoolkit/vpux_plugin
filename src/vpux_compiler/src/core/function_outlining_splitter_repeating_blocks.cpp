@@ -11,6 +11,12 @@
 #include "vpux/utils/core/array_ref.hpp"
 #include "vpux/utils/core/dense_map.hpp"
 
+#include <llvm/ADT/STLExtras.h>
+#include <mlir/Support/LLVM.h>
+#include <mlir/Support/LogicalResult.h>
+
+#include <deque>
+
 using namespace vpux;
 
 namespace {
@@ -95,6 +101,7 @@ private:
                                            SmallVector<OpValuePair>& instanceInputs,
                                            SmallVector<OpValuePair>& instanceOutputs);
     SmallVector<OutliningInstance> prepareOutliningInstances(mlir::func::FuncOp mainFunction);
+    mlir::LogicalResult validateOutliningInstances(ArrayRef<OutliningInstance> outliningInstances);
 
     void printBlocks(StringLiteral note);
 
@@ -469,6 +476,9 @@ std::optional<RepeatingBlocksIdentifier::InstanceId> RepeatingBlocksIdentifier::
 }
 
 SmallVector<mlir::Operation*> getConstantParents(mlir::Operation* op, SmallVector<mlir::Value>& blockArgs) {
+    if (op == nullptr) {
+        return {};
+    }
     if (mlir::isa<Const::DeclareOp>(op)) {
         return SmallVector<mlir::Operation*>{op};
     }
@@ -479,7 +489,8 @@ SmallVector<mlir::Operation*> getConstantParents(mlir::Operation* op, SmallVecto
     // Weights -> Subtract -> Multiply -> [user]
     // These subgraphs are included into the outlined function, so that the low-precision pipeline can correctly
     // quantize the user operation
-    if (mlir::isa<IE::SubtractOp, IE::MultiplyOp, IE::ConvertOp, IE::FakeQuantizeOp>(op)) {
+    if (mlir::isa<IE::SubtractOp, IE::MultiplyOp, IE::ConvertOp, IE::FakeQuantizeOp, IE::ReshapeOp,
+                  IE::AffineReshapeOp>(op)) {
         SmallVector<mlir::Operation*> parentConstOps;
         for (auto operand : op->getOperands()) {
             const auto parentOp = operand.getDefiningOp();
@@ -500,6 +511,28 @@ SmallVector<mlir::Operation*> getConstantParents(mlir::Operation* op, SmallVecto
     return {};
 }
 
+mlir::LogicalResult duplicateNeededParentOps(IRSlice& instance, mlir::Operation* parentOp) {
+    // In case the parent operation is a constant (or constant subgraph), it should be placed in the current instance
+    // regardless of where it was placed initially
+    SmallVector<mlir::Value> blockArgs;
+    const auto constParents = getConstantParents(parentOp, blockArgs);
+    if (!constParents.empty()) {
+        for (auto constParent : constParents) {
+            if (llvm::find(instance.operations, constParent) == instance.operations.end()) {
+                instance.operations.push_back(constParent);
+            }
+        }
+        for (auto blockArg : blockArgs) {
+            if (llvm::find(instance.inputs, blockArg) == instance.inputs.end()) {
+                instance.inputs.push_back(blockArg);
+            }
+        }
+        return mlir::success();
+    }
+
+    return mlir::failure();
+}
+
 void RepeatingBlocksIdentifier::addInputsOutputsForSeparateFunctions(IRSlice& instance, InstanceId instanceId,
                                                                      mlir::Operation* op) {
     // Add the dependencies of the operation to the current instance or mark them input values
@@ -508,37 +541,23 @@ void RepeatingBlocksIdentifier::addInputsOutputsForSeparateFunctions(IRSlice& in
         if (operandAlreadyCovered) {
             continue;
         }
-
         auto parentOp = operand.getDefiningOp();
         // Operand is a block argument in the original function
         if (parentOp == nullptr) {
             instance.inputs.push_back(operand);
             continue;
         }
-
-        const auto maybeParentInstanceId = getInstanceId(parentOp);
-        // Parent operation is not placed in the current instance
-        if (!maybeParentInstanceId.has_value() || maybeParentInstanceId.value() != instanceId) {
-            // An exception is the case where the parent operation is a constant; this operations should be
-            // placed in the current instance regardless of where it was placed initially
-            SmallVector<mlir::Value> blockArgs;
-            const auto constParents = getConstantParents(parentOp, blockArgs);
-            if (!constParents.empty()) {
-                for (auto constParent : constParents) {
-                    if (llvm::find(instance.operations, constParent) == instance.operations.end()) {
-                        instance.operations.push_back(constParent);
-                    }
-                }
-                for (auto blockArg : blockArgs) {
-                    if (llvm::find(instance.inputs, blockArg) == instance.inputs.end()) {
-                        instance.inputs.push_back(blockArg);
-                    }
-                }
+        const auto parentInstanceId = getInstanceId(parentOp);
+        bool parentOutsideInstance = !parentInstanceId.has_value() || parentInstanceId.value() != instanceId;
+        if (parentOutsideInstance) {
+            if (mlir::succeeded(duplicateNeededParentOps(instance, parentOp))) {
                 continue;
             }
             instance.inputs.push_back(operand);
         }
     }
+
+    instance.operations.push_back(op);
 
     // Mark the results of the operation as outputs if they have users outside the current instance
     for (auto result : op->getResults()) {
@@ -547,16 +566,15 @@ void RepeatingBlocksIdentifier::addInputsOutputsForSeparateFunctions(IRSlice& in
         if (resultAlreadyCovered) {
             continue;
         }
-
-        auto anyUserOutside = llvm::any_of(result.getUsers(), [&](mlir::Operation* userOp) {
-            const auto maybeUserInstanceId = getInstanceId(userOp);
-            return !maybeUserInstanceId.has_value() || maybeUserInstanceId.value() != instanceId;
+        const auto userOutsideInstance = llvm::any_of(result.getUsers(), [&](mlir::Operation* userOp) {
+            const auto userInstanceId = getInstanceId(userOp);
+            return !userInstanceId.has_value() || userInstanceId.value() != instanceId;
         });
-        if (anyUserOutside) {
+        if (userOutsideInstance) {
             instance.outputs.push_back(result);
         }
     }
-}
+}  // namespace
 
 void RepeatingBlocksIdentifier::addInputsOutputsForSharedFunction(IRSlice& instance, InstanceId instanceId,
                                                                   mlir::Operation* op,
@@ -598,6 +616,8 @@ void RepeatingBlocksIdentifier::addInputsOutputsForSharedFunction(IRSlice& insta
             instanceInputs.emplace_back(_opHash[op], operand.getOperandNumber());
         }
     }
+
+    instance.operations.push_back(op);
 
     // Similar to the inputs, collect all the output connection types across all instances, since each instance
     // must have the same number of output values. After all connections are collected, the output values will
@@ -676,8 +696,6 @@ SmallVector<OutliningInstance> RepeatingBlocksIdentifier::prepareOutliningInstan
             auto& instanceOutputs = outliningInstancesOutputs[outliningInstanceIdx];
             addInputsOutputsForSharedFunction(instance, instanceId, op, instanceInputs, instanceOutputs);
         }
-
-        instance.operations.push_back(op);
     });
 
     if (!_separateFunctions) {
@@ -723,6 +741,76 @@ SmallVector<OutliningInstance> RepeatingBlocksIdentifier::prepareOutliningInstan
     }
 
     return outliningInstances;
+}
+
+/**
+ * @brief Check whether the instances are valid in terms of the IR order
+ * @details Outlining some patterns could lead to cyclical dependencies, which cannot be correctly represented in the
+ * form of an IR. For example, for the following IR:
+ *   %0 = op(...)
+ *   %1 = op(%0)
+ *   %2 = op(%0, %1)
+ * If operations %0 and %2 are part of a repeating block and get outlined into a function, the resulting IR would be:
+ *   %1 = op(%call)
+ *   %call = call(..., %1)
+ */
+mlir::LogicalResult RepeatingBlocksIdentifier::validateOutliningInstances(
+        ArrayRef<OutliningInstance> outliningInstances) {
+    const auto validateParentOperation = [](const IRSlice& slice, mlir::Operation* firstOutputOpInIR,
+                                            mlir::Value operand) -> mlir::LogicalResult {
+        if (operand.getDefiningOp() == nullptr) {
+            return mlir::success();
+        }
+
+        mlir::DenseSet<mlir::Operation*> sliceOps(slice.operations.begin(), slice.operations.end());
+
+        mlir::DenseSet<mlir::Operation*> visitedOps;
+        std::deque<mlir::Operation*> parentOps;
+        parentOps.push_back(operand.getDefiningOp());
+
+        while (!parentOps.empty()) {
+            const auto parentOp = parentOps.front();
+            parentOps.pop_front();
+            visitedOps.insert(parentOp);
+
+            if (parentOp == nullptr) {
+                continue;
+            }
+            if (parentOp->isBeforeInBlock(firstOutputOpInIR)) {
+                continue;
+            }
+            if (sliceOps.contains(parentOp)) {
+                continue;
+            }
+            for (auto operand : parentOp->getOperands()) {
+                if (llvm::find(slice.outputs, operand) != slice.outputs.end()) {
+                    return mlir::failure();
+                }
+                if (auto op = operand.getDefiningOp(); op != nullptr && !visitedOps.contains(op)) {
+                    parentOps.push_back(operand.getDefiningOp());
+                }
+            }
+        }
+        return mlir::success();
+    };
+
+    for (auto& instance : outliningInstances) {
+        for (auto slice : instance) {
+            auto firstOutputOpInIR = slice.operations.front();
+            for (auto output : slice.outputs) {
+                auto op = output.getDefiningOp();
+                if (op != nullptr && op->isBeforeInBlock(firstOutputOpInIR)) {
+                    firstOutputOpInIR = op;
+                }
+            }
+            for (auto input : slice.inputs) {
+                if (mlir::failed(validateParentOperation(slice, firstOutputOpInIR, input))) {
+                    return mlir::failure();
+                }
+            }
+        }
+    }
+    return mlir::success();
 }
 
 void RepeatingBlocksIdentifier::printBlocks(StringLiteral note) {
@@ -776,9 +864,16 @@ SmallVector<OutliningInstance> RepeatingBlocksIdentifier::getOutliningInstances(
     removeLeftoverBlocks();
 
     // Step 4. Sort the instances in each repeating block topologically and include all dependencies
-    return prepareOutliningInstances(mainFunction);
-}
+    const auto outliningInstances = prepareOutliningInstances(mainFunction);
 
+    // Step5 5. Check whether the identified instances are valid
+    if (mlir::failed(validateOutliningInstances(outliningInstances))) {
+        _log.debug("The identified instances are invalid");
+        return {};
+    }
+
+    return outliningInstances;
+}
 };  // namespace
 
 FunctionOutlinerRepeatingBlocks::FunctionOutlinerRepeatingBlocks(size_t minOpsInBlock, size_t maxNumIterations,

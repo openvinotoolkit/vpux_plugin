@@ -33,6 +33,23 @@ The moment a pass starts and ends will be printed, along with a timestamp. At th
 - the percentage of time spent in each pass, relative to the entire compilation
 - the total compilation time
 
+### Pass Instrumentation
+
+#### Memory Usage Collector
+
+This instrumentation checks whether the peak memory consumption of the process has grown after the execution of every pass. If it did, a log will be printed to inform the user. The peak memory usage of the process will also be printed at the start and end of the compilation.
+
+This feature can be configured with the `enable-memory-usage-collector` compilation option. By default, this instrumentation is enabled for developer builds.
+
+#### Function Statistics
+
+This instrumentation prints information about the function(s) found in the IR, after each pass. It targets two types of data:
+
+1. Under the `function-statistics-instrumentation-ops` log, it keeps track of the number of operations for each function in the IR. In case the number of operations changed after the execution of a pass, a log will be printed. Additionally, the current number of operations for all functions is printed after a ModulePass is executed.
+2. Under the `function-statistics-instrumentation-const` log, it prints how many constants are found in a function and what the total size of the constants is. In case the pass is a ModulePass, this information will be printed for each function.
+
+This feature can be configured with the `enable-function-statistics-instrumentation` compilation option. By default, this instrumentation is disabled.
+
 ## IR Printing
 
 One of the most useful debug features of MLIR is by printing the Intermediate Representation (IR) of a model. During compilation, the printing can be done before or after passes and can be controlled using the following variables:
@@ -53,12 +70,16 @@ One of the most useful debug features of MLIR is by printing the Intermediate Re
 
 - `IE_NPU_PRINT_FULL_IR`: controls the scope of printing
     - `export IE_NPU_PRINT_FULL_IR=0` (default) - only the affected scope will be printed (e.g. only the main Function of the IR, without the parent Module)
-    - `export IE_NPU_PRINT_FULL_IR=1` - the entire IR will be printed, including the parent Module operation (this mode disables MLIR multi-threading)
+    - `export IE_NPU_PRINT_FULL_IR=1` - the entire IR will be printed, including the parent Module operation and dialect dictionary which holds dense resource values (this mode disables MLIR multi-threading)
 
 - `IE_NPU_PRINT_FULL_CONSTANT`: controls whether to print large constants
     - `export IE_NPU_PRINT_FULL_CONSTANT=0` (default) - avoids printing constants whose number of elements is larger than the upper limit (by default 16)
     - `export IE_NPU_PRINT_FULL_CONSTANT=1` - prints the entire content of all constants, regardless of their size
-        - this mode is useful when a printed IR is intended to be used for further execution (e.g. running another pass on it), as it cannot be parsed without the full constants
+        - this mode is useful when a printed IR is intended to be used for further execution (e.g. running another pass on it), as it cannot be parsed without the full constants.
+
+- `IE_NPU_USE_SHARED_CONSTANTS`: controls whether to share constants with openvino. Note that
+    - `export IE_NPU_USE_SHARED_CONSTANTS=0` - copy OV constants into MLIR context and represent them as DenseElementsAttr in the IR. This allows pretty-printing of constants but will result in higher memory usage and potentially change in schedule due to the identical constants being uniqued in the IR by the GreedyPatternRewriter.
+    - `export IE_NPU_USE_SHARED_CONSTANTS=1` (default) - use OV constants without copying them. Internally constants are represented as DenseResourceElementsAttr.
 
 - `IE_NPU_PRINT_HEX_CONSTANT`: controls whether to allow printing constants as hex values
     - `export IE_NPU_PRINT_HEX_CONSTANT=0` - prints the individual values of the constants in a human-readable format
@@ -69,6 +90,10 @@ One of the most useful debug features of MLIR is by printing the Intermediate Re
     - `export IE_NPU_PRINT_DEBUG_INFO=1` - locations will be printed for each operation
         - this is useful in order to cross-reference an operation from the IR with the layers found in the original OpenVINO IR used for compilation; for each operation, the first string in the location should correspond with the name of the original OpenVINO layer
 
+- `IE_NPU_PRINT_DEBUG_INFO_PRETTY_FORM`: controls whether to print the locations of the operations inline with the operations; this variable is only applicable when `IE_NPU_PRINT_DEBUG_INFO` is enabled
+    - `export IE_NPU_PRINT_DEBUG_INFO_PRETTY_FORM=0` (default) - the locations will be printed after the module opration, with the operation having an alias after it instead of the direct location
+    - `export IE_NPU_PRINT_DEBUG_INFO_PRETTY_FORM=1` - locations will be printed inline with each operation
+
 ## vpux-opt and vpux-translate
 
 These tools can be used to call specific parts of the compiler (frontend, backend, passes) from the command-line.
@@ -77,7 +102,7 @@ These tools can be used to call specific parts of the compiler (frontend, backen
 
 `vpux-translate` allows calling the frontend and backend of the compiler. For example:
 
-- importing OpenVINO IR into IE dialect IR: `vpux-translate --vpu-arch=NPU37XX--import-IE <path to xml> -o <MLIR file name>`
+- importing OpenVINO IR into IE dialect IR: `vpux-translate --vpu-arch=NPU37XX --import-IE <path to xml> -o <MLIR file name>`
 - exporting VPUIP dialect IR into ELF file: `vpux-translate --vpu-arch=NPU37XX --export-ELF <input MLIR file> > <output ELF file>`
 
 The full list of supported frontends and backends can be found in [vpux-translate.cpp](../../../../tools/vpux-translate/vpux-translate.cpp).

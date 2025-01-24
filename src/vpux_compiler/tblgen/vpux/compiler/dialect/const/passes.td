@@ -12,7 +12,7 @@ include "mlir/Pass/PassBase.td"
 // ConstantFolding
 //
 
-def ConstantFolding : Pass<"constant-folding", "Const::DeclareOp"> {
+def ConstantFolding : PassBase<"constant-folding", "vpux::FunctionPass"> {
     let summary = "Constant folding";
 
     let description = [{

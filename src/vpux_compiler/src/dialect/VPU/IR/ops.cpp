@@ -162,7 +162,7 @@ bool VPU::isVFNCESupported(VPU::NCEOpInterface op) {
 
 mlir::Operation* vpux::VPU::VPUDialect::materializeConstant(mlir::OpBuilder& builder, mlir::Attribute value,
                                                             mlir::Type type, mlir::Location loc) {
-    if (!mlir::isa<Const::EphemeralContentAttr>(value)) {
+    if (!mlir::isa<Const::ContentAttr>(value)) {
         (void)errorAt(loc, "Can't materialize VPU Constant from Attribute '{0}'", value);
         return nullptr;
     }
@@ -172,8 +172,7 @@ mlir::Operation* vpux::VPU::VPUDialect::materializeConstant(mlir::OpBuilder& bui
         return nullptr;
     }
 
-    return builder.create<Const::DeclareOp>(
-            loc, type, static_cast<Const::ContentAttr>(mlir::cast<Const::EphemeralContentAttr>(value)));
+    return builder.create<Const::DeclareOp>(loc, type, mlir::cast<Const::ContentAttr>(value));
 }
 
 bool VPU::isNCEWithInt4Weights(mlir::Operation* op) {

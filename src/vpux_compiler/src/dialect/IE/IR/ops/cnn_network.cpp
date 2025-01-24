@@ -11,6 +11,8 @@
 
 #include "vpux/utils/core/range.hpp"
 
+#include "vpux/compiler/core/types/quantile_float/types.hpp"
+
 #include <mlir/IR/BuiltinOps.h>
 
 using namespace vpux;
@@ -261,9 +263,11 @@ mlir::LogicalResult vpux::IE::DataInfoOp::verify() {
     const auto precision = opUserType.getElementType();
 
     if (!(precision.isSignedInteger() || precision.isUnsignedInteger() || precision.isSignlessInteger() ||
-          precision.isa<mlir::FloatType>())) {
-        return errorAt(op, "Operation has unsupported userType precision '{0}', it must be either Float or Integer",
-                       precision);
+          precision.isa<mlir::FloatType>() || mlir::isa<vpux::type::QuantileFloatType>(precision))) {
+        return errorAt(
+                op,
+                "Operation has unsupported userType precision '{0}', it must be either Float, Integer or QuantileFloat",
+                precision);
     }
 
     return mlir::success();

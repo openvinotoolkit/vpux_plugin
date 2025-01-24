@@ -31,7 +31,7 @@ mlir::LogicalResult vpux::VPU::LSTMCellOp::inferReturnTypes(mlir::MLIRContext* c
 namespace {
 
 bool isSupported(VPU::ArchKind arch, ShapeRef inputDataShape, ShapeRef initialHiddenStateShape) {
-    auto maxHiddenSize = getMaxLstmHiddenSizeConstant(arch);
+    auto maxHiddenSize = getMaxLstmCellHiddenSizeConstant(arch);
     // shave implementation allow reduced size. Bigger size can be map on DPU.
     // Cost model can be interrogate.
     constexpr int64_t maxInputSize(256);

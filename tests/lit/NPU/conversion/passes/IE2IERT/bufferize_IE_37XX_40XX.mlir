@@ -40,7 +40,7 @@ func.func @Reshape(%arg0 : tensor<1x512x1x1xf32>) -> tensor<1x512xf32> {
     %0 = IE.Reshape(%arg0) { shape_value = [1, 512] } : tensor<1x512x1x1xf32> -> tensor<1x512xf32>
     return %0 : tensor<1x512xf32>
 
-    // CHECK: [[VAR1:%.*]] = IERT.GenericReshape inputs({{[^:]+}} : memref<1x512x1x1xf32>) -> memref<1x512xf32>
+    // CHECK: [[VAR1:%.*]] = IERT.GenericReshape inputs({{[^:]+}} : memref<1x512x1x1xf32>) outputs({{[^:]+}} : memref<1x512xf32>) -> memref<1x512xf32>
 
     // CHECK: return
     // CHECK-SAME: tensor<1x512xf32>

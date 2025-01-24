@@ -56,24 +56,6 @@ TileInfo getWeightsTableTile(ConcreteOp* origOp, const vpux::TileInfo& outputTil
     return weightsTableTile;
 }
 
-// Returns an getInstructionListTableTile tile required to produce the specific output tile
-template <typename ConcreteOp>
-TileInfo getInstructionListTableTile(ConcreteOp* origOp, const vpux::TileInfo& /*outputTile*/) {
-    const auto origInstructionListTable = origOp->getInstructionListTable();
-    VPUX_THROW_UNLESS(origInstructionListTable != nullptr, "The operation {0} doesn't have an InstructionListTable",
-                      *origOp);
-
-    const auto origInstructionListTableShape = getShape(origInstructionListTable);
-    VPUX_THROW_UNLESS(origInstructionListTableShape[Dim(0)] == 1 && origInstructionListTableShape[Dim(1)] == 1 &&
-                              origInstructionListTableShape[Dim(2)] == 1,
-                      "Unexpected InstructionListTable shape type or order: {0} with output shape of {1}"
-                      "\nProbably, we need to update this logic",
-                      origInstructionListTableShape, getShape(origOp->getOutput()));
-
-    // All output channels use the same only-one string in the table, so we just copy the whole thing
-    return TileInfo(origInstructionListTableShape);
-}
-
 // Adjust paddings attributes for tiled input
 template <typename ConcreteOp>
 void adjustPaddings(ConcreteOp* op, const TilingInfo& inputTiling) {

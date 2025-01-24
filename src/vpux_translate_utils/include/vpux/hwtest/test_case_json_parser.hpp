@@ -8,6 +8,7 @@
 #pragma once
 
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
+#include "vpux/compiler/dialect/VPUIP/IR/attributes.hpp"
 #include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPUIP/device.hpp"
 
@@ -15,6 +16,7 @@
 
 #include <array>
 #include <fstream>
+#include <optional>
 #include <set>
 #include <string>
 
@@ -55,6 +57,7 @@ enum class CaseType {
     GenerateScaleTable,
     ReduceMean,
     ReduceSumSquare,
+    ReduceOut,
     Unknown
 };
 
@@ -64,7 +67,12 @@ CaseType to_case(llvm::StringRef str);
 enum class BackendFlow { Default, WLMPartial };
 std::string to_string(BackendFlow backendFlow);
 
-enum class DType { U1, U4, I4, U8, I8, I32, BF8, HF8, FP16, FP32, BF16, I64, U64, UNK };
+enum class WeightTableFormats { WT_DEFAULT, WT_LEGACY };
+std::string to_string(WeightTableFormats weightTableFormat);
+
+enum class DType { U1, U2, U3, U4, U5, U6, I4, U8, I8, I32, BF8, HF8, FP16, FP32, BF16, I64, U64, UNK };
+
+enum class PalletMode { NO_PLT = 0, ONE_BIT_PLT = 1, TWO_BIT_PLT = 2, FOUR_BIT_PLT = 3 };
 
 // For CMX the enum constant values correspond to the tile indexes
 enum class MemoryLocation { CMX0 = 0, CMX1 = 1, CMX2 = 2, CMX3 = 3, CMX4 = 4, CMX5 = 5, DDR, Unknown };
@@ -73,6 +81,8 @@ std::string to_string(MemoryLocation memoryLocation);
 
 DType to_dtype(llvm::StringRef str);
 std::string to_string(DType dtype);
+PalletMode to_palletMode(llvm::StringRef str);
+unsigned to_pltDataWidth(PalletMode mode);
 vpux::VPUIP::Permutation to_odu_permutation(llvm::StringRef str);
 struct QuantParams {
     bool present = false;
@@ -80,6 +90,16 @@ struct QuantParams {
     std::int64_t zeropoint = 0;
     std::int64_t low_range = 0;
     std::int64_t high_range = 0;
+};
+
+struct PalletTableInfo {
+    PalletMode pMode{PalletMode::NO_PLT};
+    DType quantileType{DType::UNK};
+    unsigned quantileLUTSize{};
+    // it might be preferable to not carry the quantile table directly in the
+    // type itself due to the fact that it can have u8/i8/bf16/fp16 types
+    std::vector<double> quantileLUT;
+    std::string filename;
 };
 
 enum class SegmentationType { SOK = 1, SOH = 2, SOW = 3, SOHW = 4, SOHK = 5, SOHK3 = 6, SOHW3 = 7 };
@@ -104,6 +124,7 @@ struct InputLayer {
 struct WeightLayer {
     DType dtype = DType::UNK;
     QuantParams qp;
+    PalletTableInfo plt;
     std::array<std::int64_t, 4> shape = {0};
     std::string filename;
 };
@@ -125,6 +146,7 @@ struct DMAparams {
     MemoryLocation indicesLocation = MemoryLocation::Unknown;
     int64_t engine = 0;
     bool doConvert = false;
+    bool zeroSizeTask = false;
     bool testMemSideCache = false;
     bool cacheTrashing = false;
     bool cacheEnabled = false;
@@ -201,6 +223,14 @@ struct OutputLayer {
     QuantParams qp;
 };
 
+struct ReduceOutLayer {
+    bool doReduceMaxPerXY = false;
+    bool doReduceMinPerXY = false;
+    bool doReduceMinMaxPerTensor = false;
+    llvm::SmallVector<OutputLayer> output;
+    bool isMultiTile = false;
+};
+
 enum class ActivationType {
     None,
     ReLU,
@@ -211,10 +241,14 @@ enum class ActivationType {
     Sigmoid,
     Softmax,
     round_trip_b8h8_to_fp16,
+    sau_sumx_fp16_to_fp32,
+    cmu_perm_x8,
+    cmu_perm,
     PopulateWeightTable,
     Rsqrt,
     Sin,
     Tanh,
+    Cos,
     Unknown
 };
 
@@ -223,12 +257,13 @@ std::string to_string(ActivationType activationType);
 
 struct ActivationLayer {
     ActivationType activationType = ActivationType::None;
-    double alpha = 0.;
+    double alpha = 1.0;
     double maximum = 0;
     size_t axis = 0;
     std::optional<int64_t> weightsOffset = std::nullopt;
     std::optional<int64_t> weightsPtrStep = std::nullopt;
     // TODO: add support for activation functions that take parameters
+    int64_t permBlend = 0;
 };
 
 // M2I i/o color formats
@@ -387,6 +422,14 @@ public:
         return profilingParams_;
     }
 
+    vpux::VPUIP::NCETaskType getReductionType() const {
+        return reductionType_;
+    }
+
+    ReduceOutLayer getReduceOutLayer() const {
+        return reduceOutLayer_;
+    }
+
     WLMParams getWLMParams() const {
         return WLMParams_;
     }
@@ -394,6 +437,11 @@ public:
     ActShaveBroadcastingParams getActShaveBroadcastingParams() const {
         return actShaveBroadcastingParams_;
     }
+    std::optional<WeightTableFormats> getWeightTableFormat() const {
+        return WeightTableFormat_;
+    }
+
+    bool ArePalletizationTypesLegal(const WeightLayer&) const;
 
 private:
     llvm::SmallVector<InputLayer> loadInputLayer(llvm::json::Object* jsonObj);
@@ -410,6 +458,7 @@ private:
     M2iLayer loadM2iLayer(llvm::json::Object* jsonObj);
     CaseType loadCaseType(llvm::json::Object* jsonObj);
     QuantParams loadQuantizationParams(llvm::json::Object* obj);
+    PalletTableInfo loadPalletTableInfoLayers(llvm::json::Object* obj);
     RaceConditionParams loadRaceConditionParams(llvm::json::Object* obj);
     DPUTaskParams loadDPUTaskParams(llvm::json::Object* obj);
     MultiClusterDPUParams loadMultiClusterDPUParams(llvm::json::Object* obj);
@@ -420,7 +469,10 @@ private:
     SETableParams loadSETableParams(llvm::json::Object* obj);
     SwizzlingKey loadSwizzlingKey(llvm::json::Object* obj, std::string keyType);
     ProfilingParams loadProfilingParams(llvm::json::Object* obj);
+    vpux::VPUIP::NCETaskType loadReductionType(llvm::json::Object* obj);
+    ReduceOutLayer loadReduceOutLayer(llvm::json::Object* obj);
     WLMParams loadWLMParams(llvm::json::Object* obj);
+    std::optional<WeightTableFormats> loadWeightTableFormat(llvm::json::Object* obj);
     ActShaveBroadcastingParams loadActShaveBroadcastingParams(llvm::json::Object* obj);
 
     CaseType caseType_ = CaseType::Unknown;
@@ -453,7 +505,10 @@ private:
     SETableParams seTableParams_;
     vpux::VPU::ArchKind architecture_ = vpux::VPU::ArchKind::UNKNOWN;
     ProfilingParams profilingParams_;
+    vpux::VPUIP::NCETaskType reductionType_ = vpux::VPUIP::NCETaskType::REDUCEMEAN;
+    ReduceOutLayer reduceOutLayer_;
     WLMParams WLMParams_;
+    std::optional<WeightTableFormats> WeightTableFormat_;
     ActShaveBroadcastingParams actShaveBroadcastingParams_;
 };
 

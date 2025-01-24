@@ -92,7 +92,7 @@ mlir::LogicalResult vpux::VPU::NCEInterpolateOp::verify() {
 
 bool isNCEInterpolateSupported(vpux::NDTypeInterface inputType, vpux::NDTypeInterface outputType,
                                IE::InterpolateAttr attr, VPU::ArchKind arch, bool checkLayout,
-                               bool checkChannelAlignment, mlir::Operation* op, vpux::LogCb logCb) {
+                               bool checkChannelAlignment, bool checkBatch, mlir::Operation* op, vpux::LogCb logCb) {
     // TODO E#71403: remove dimension check
     auto dimOver8K = [](ShapeRef shape) {
         for (auto dim : shape) {
@@ -104,6 +104,11 @@ bool isNCEInterpolateSupported(vpux::NDTypeInterface inputType, vpux::NDTypeInte
     };
     auto inputShape = inputType.getShape();
     auto outputShape = outputType.getShape();
+
+    if (checkBatch && inputShape[Dims4D::Act::N] != 1) {
+        return false;
+    }
+
     if (dimOver8K(inputShape) || dimOver8K(outputShape)) {
         logCb(formatv("Dimension sizes over 8192 are not supported. Input shape {0}, output shape {1}", inputShape,
                       outputShape));
@@ -212,21 +217,21 @@ bool isNCEInterpolateSupported(vpux::NDTypeInterface inputType, vpux::NDTypeInte
 }
 
 bool VPU::NCEInterpolateOp::isSupported(IE::InterpolateOp op, vpux::LogCb logCb, bool checkLayout,
-                                        bool checkChannelAlignment) {
+                                        bool checkChannelAlignment, bool checkBatch) {
     auto inputType = op.getInput().getType().cast<vpux::NDTypeInterface>();
     auto outputType = op.getOutput().getType().cast<vpux::NDTypeInterface>();
 
     return isNCEInterpolateSupported(inputType, outputType, op.getAttr(), VPU::getArch(op), checkChannelAlignment,
-                                     checkLayout, op, logCb);
+                                     checkLayout, checkBatch, op, logCb);
 }
 
 bool VPU::NCEInterpolateOp::isSupported(VPU::InterpolateOp op, vpux::LogCb logCb, bool checkLayout,
-                                        bool checkChannelAlignment) {
+                                        bool checkChannelAlignment, bool checkBatch) {
     auto inputType = op.getInput().getType().cast<vpux::NDTypeInterface>();
     auto outputType = op.getOutput().getType().cast<vpux::NDTypeInterface>();
 
     return isNCEInterpolateSupported(inputType, outputType, op.getAttr(), VPU::getArch(op), checkChannelAlignment,
-                                     checkLayout, op, logCb);
+                                     checkLayout, checkBatch, op, logCb);
 }
 
 //

@@ -707,7 +707,7 @@ bool MoveMemPermuteThroughOp<ConcreteOp>::isPropagationBeneficialForConcatAndSli
     const auto parentInShape = getShape(parentOp->getOperand(0));
     const auto parentOutShape = getShape(parentOp->getResult(0));
     const auto benificialStrideDMA = isBeneficialStrideDMA(parentInShape, parentOutShape);
-    const auto benificialPermutation = llvm::all_of(parentOp->getOperands(), isBeneficialPermutation);
+    const auto benificialPermutation = llvm::any_of(parentOp->getOperands(), isBeneficialPermutation);
 
     return benificialStrideDMA && benificialPermutation;
 }

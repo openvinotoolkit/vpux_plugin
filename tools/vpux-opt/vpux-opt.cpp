@@ -32,6 +32,7 @@
 #include "vpux/utils/core/error.hpp"
 
 #include <mlir/Dialect/Func/Transforms/Passes.h>
+#include <mlir/Dialect/MemRef/Transforms/Passes.h>
 #include <mlir/Tools/mlir-opt/MlirOptMain.h>
 #include <mlir/Transforms/Passes.h>
 
@@ -79,8 +80,7 @@ int main(int argc, char* argv[]) {
 
         mlir::registerTransformsPasses();
         mlir::func::registerFuncPasses();
-
-        vpux::Const::registerConstPipelines();
+        mlir::memref::registerResolveShapedTypeResultDims();
 
         return mlir::asMainReturnCode(
                 mlir::MlirOptMain(argc, argv, "NPU Optimizer Testing Tool", registry, hwSpecificRegistration));

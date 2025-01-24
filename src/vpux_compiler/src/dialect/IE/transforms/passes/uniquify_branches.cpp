@@ -5,6 +5,7 @@
 
 #include "vpux/compiler/dialect/IE/transforms/passes.hpp"
 
+#include "vpux/compiler/core/attributes/dims_order.hpp"
 #include "vpux/compiler/dialect/IE/utils/permute_infer.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 
@@ -388,6 +389,8 @@ public:
                                            IE::PermuteCastOp layerOp) const override;
     bool sameAttributes(IE::PermuteCastOp layerOp, IE::PermuteCastOp currLayerOp) const override;
     SmallVector<int64_t> getNewSizes(IE::SliceOp sliceOp, IE::PermuteCastOp layerOp) const override;
+    SmallVector<int64_t> getNewOffsets(IE::SliceOp sliceOp, ArrayRef<uint64_t> sliceAxes,
+                                       IE::PermuteCastOp layerOp) const override;
 };
 
 bool MovePermuteCastBeforeSlice::doesSliceAndLayerOpModifySameAxis(IE::SliceOp, ArrayRef<uint64_t> sliceAxes,
@@ -415,6 +418,22 @@ SmallVector<int64_t> MovePermuteCastBeforeSlice::getNewSizes(IE::SliceOp, IE::Pe
 
     return mlir::SmallVector<int64_t>{dims.begin(), dims.end()};
 }
+
+SmallVector<int64_t> MovePermuteCastBeforeSlice::getNewOffsets(IE::SliceOp sliceOp, ArrayRef<uint64_t>,
+                                                               IE::PermuteCastOp layerOp) const {
+    const auto permuteCastInputType = mlir::cast<vpux::NDTypeInterface>(layerOp.getInput().getType());
+    const auto permuteCastInputOrder = permuteCastInputType.getDimsOrder();
+    const auto permuteCastOutputOrder = DimsOrder::fromAffineMap(layerOp.getDstOrder());
+    const auto finalPermutation =
+            vpux::getPermutationFromOrders(permuteCastInputOrder, permuteCastOutputOrder, sliceOp->getContext());
+    const auto oldOffsets = parseIntArrayAttr<int64_t>(sliceOp.getStaticOffsets());
+    SmallVector<int64_t> newOffsets(oldOffsets.size());
+    for (auto dim : irange(oldOffsets.size())) {
+        newOffsets[finalPermutation.getDimPosition(dim)] = oldOffsets[dim];
+    }
+
+    return newOffsets;
+};
 
 //
 // MoveAffineReshapeBeforeSlice
@@ -464,10 +483,11 @@ bool MoveAffineReshapeBeforeSlice::doesSliceAndLayerOpModifySameAxis(IE::SliceOp
     }
 
     auto sliceAxis = sliceAxes[0];
-    auto inType = sliceOp.getSource().getType().dyn_cast<vpux::NDTypeInterface>();
+    auto inType = mlir::cast<NDTypeInterface>(sliceOp.getSource().getType());
     auto dimOrder = inType.getDimsOrder();
     auto shape = inType.getShape();
-    auto highestDim = getHighestDim(shape, dimOrder);
+
+    const auto highestDim = getHighestNonTrivialDim(shape, dimOrder).value_or(Dim(0));
     return checked_cast<uint64_t>(highestDim.ind()) != sliceAxis;
 }
 
@@ -475,18 +495,15 @@ bool MoveAffineReshapeBeforeSlice::doAffineInputAndOutputShapesMismatch(IE::Slic
                                                                         ArrayRef<uint64_t> sliceAxes,
                                                                         IE::AffineReshapeOp layerOp) const {
     // check if pattern has incompatible tensors for affine reshape given slice dimensions
-    auto outType = layerOp.getOutput().getType().dyn_cast<vpux::NDTypeInterface>();
+    auto outType = mlir::cast<NDTypeInterface>(layerOp.getOutput().getType());
     auto outShape = outType.getShape();
     const auto dimMapping = parseIntArrayOfArrayAttr<int64_t>(layerOp.getDimMapping());
     auto mappedSliceDim = dimMapping[sliceAxes[0]];
     auto sliceDim = Dim(mappedSliceDim[0]);
     auto inShape = getShape(sliceOp.getSource());
     auto restSize = outShape.totalSize() / outShape[sliceDim];
-    if (inShape.totalSize() % restSize != 0) {
-        return true;
-    }
 
-    return false;
+    return inShape.totalSize() % restSize != 0;
 }
 
 bool MoveAffineReshapeBeforeSlice::sameAttributes(IE::AffineReshapeOp layerOp, IE::AffineReshapeOp currLayerOp) const {

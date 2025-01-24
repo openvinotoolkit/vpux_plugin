@@ -8,6 +8,7 @@
 #include "vpux/compiler/dialect/VPU/utils/conv_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/max_kernel_size_utils.hpp"
 #include "vpux/compiler/dialect/VPUIP/interfaces/nce_invariant.hpp"
+#include "vpux/compiler/utils/rewriter.hpp"
 #include "vpux/utils/core/logger.hpp"
 
 namespace vpux {
@@ -126,6 +127,17 @@ mlir::LogicalResult FuseConvAndBias::matchAndRewrite(IE::ScaleShiftOp biasOp, ml
     }
 
     auto* op = biasOp.getInput().getDefiningOp();
+    constexpr auto maxRepeatFq = 2;
+    for (auto _ : irange(maxRepeatFq)) {
+        std::ignore = _;
+        if (!mlir::isa_and_nonnull<IE::FakeQuantizeOp>(op)) {
+            break;
+        }
+        if (!op->getOperand(0).hasOneUse()) {
+            return matchFailed(rewriter, biasOp, "FakeQuantize is not the only user of its operand");
+        }
+        op = op->getOperand(0).getDefiningOp();
+    }
     if (op == nullptr || !mlir::isa<IE::ConvolutionOp, IE::GroupConvolutionOp, IE::TransposedConvolutionOp>(op)) {
         return matchFailed(rewriter, biasOp, "ScaleShift producer is not a Convolution layer");
     }
@@ -175,7 +187,27 @@ mlir::LogicalResult FuseConvAndBias::matchAndRewrite(IE::ScaleShiftOp biasOp, ml
         }
 
         auto* newConv = rewriter.clone(*op);
-        newConv->insertOperands(newConv->getNumOperands(), biasOp.getBiases());
+
+        // HW applied bias before scale, so need to do following transformation to get correct result
+        //   conv * scale + bias ==> (conv + bias/scale) * scale
+        auto biasConst = [&]() -> mlir::Value {
+            auto convolutionOp = mlir::dyn_cast<IE::ConvolutionOp>(op);
+            if (convolutionOp == nullptr || convolutionOp.getStaticScaleAttr() == nullptr) {
+                return biasOp.getBiases();
+            }
+
+            auto staticScale = convolutionOp.getStaticScaleAttr().getValueAsDouble();
+            if (isDoubleEqual(staticScale, 1)) {
+                return biasOp.getBiases();
+            }
+
+            auto biasConst = IE::getConstParentOp(biasOp.getBiases()).value();
+            auto contentAttr = biasConst.transformContentAttr().rescale(1 / staticScale).get();
+            return rewriter.create<Const::DeclareOp>(takeOpLoc(biasConst, "rescaled"), biasConst.getType(), contentAttr)
+                    .getOutput();
+        }();
+
+        newConv->insertOperands(newConv->getNumOperands(), biasConst);
 
         rewriter.replaceOp(biasOp, newConv->getOpResults());
     } else if (auto transposedConv = mlir::dyn_cast<IE::TransposedConvolutionOp>(op)) {

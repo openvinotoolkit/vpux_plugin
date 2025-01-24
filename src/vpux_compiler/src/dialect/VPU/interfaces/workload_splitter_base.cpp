@@ -47,13 +47,13 @@ void vpux::VPU::WorkloadSplitterBase::correctInvalidWorkload(const VPU::Sparsity
             producerNCEOps.insert(invalidSparseOps.begin(), invalidSparseOps.end());
         }
 
-        const auto invalidDepthwiseOps = findInvalidDepthwiseOps(producerNCEOps);
+        const auto supportedChannels = getSupportedChannels(producerNCEOps, sparsityConstraint);
+        const auto invalidDepthwiseOps = findInvalidDepthwiseOps(producerNCEOps, supportedChannels);
         const auto invalidNCEPermuteOps = findInvalidNCEPermuteOps(producerNCEOps);
         if (invalidSparseOps.empty() && invalidDepthwiseOps.empty() && invalidNCEPermuteOps.empty()) {
             return;
         }
 
-        const auto supportedChannels = getSupportedChannels(producerNCEOps, sparsityConstraint);
         _log.trace("supportedChannels {0} for nceOp {1} to correct workloads", supportedChannels, nceOp->getLoc());
         auto channelPadding = 0;  // used for NCEPermute
 
@@ -302,7 +302,7 @@ mlir::DenseSet<mlir::Operation*> vpux::VPU::WorkloadSplitterBase::findInvalidSpa
 
 // Depthwise operations must have variants that produce 16, 32 or 64 channels
 mlir::DenseSet<mlir::Operation*> vpux::VPU::WorkloadSplitterBase::findInvalidDepthwiseOps(
-        const mlir::DenseSet<mlir::Operation*>& nceOps) {
+        const mlir::DenseSet<mlir::Operation*>& nceOps, ArrayRef<int64_t> supportedChannels) {
     mlir::DenseSet<mlir::Operation*> invalidDepthwiseOps;
     for (auto op : nceOps) {
         if (!isDepthwiseOp(op)) {
@@ -310,7 +310,7 @@ mlir::DenseSet<mlir::Operation*> vpux::VPU::WorkloadSplitterBase::findInvalidDep
         }
         const auto workloadsChannels = getWorkloadsChannels({op});
         const auto invalidChannels = llvm::any_of(workloadsChannels, [&](const int64_t channels) -> bool {
-            return llvm::find(_supportedChannelsForDW, channels) == _supportedChannelsForDW.end();
+            return llvm::find(supportedChannels, channels) == supportedChannels.end();
         });
         if (invalidChannels) {
             invalidDepthwiseOps.insert(op);

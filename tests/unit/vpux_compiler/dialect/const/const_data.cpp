@@ -12,7 +12,7 @@ using namespace vpux;
 
 TEST(ConstDataTests, Allocate) {
     auto container = Const::ConstData::allocate<double>(10);
-    ASSERT_FALSE(container.hasExternalOrigin());
+    ASSERT_TRUE(container.isMutable());
     ASSERT_EQ(container.size(), 10 * sizeof(double));
 
     auto rawData = container.data();
@@ -34,7 +34,7 @@ TEST(ConstDataTests, Allocate) {
 TEST(ConstDataTests, FromRawBuffer) {
     std::vector<double> realData = {0.0, 1.0, 2.0, 3.0, 4.0};
     auto container = Const::ConstData::fromRawBuffer(realData.data(), realData.size() * sizeof(double));
-    ASSERT_TRUE(container.hasExternalOrigin());
+    ASSERT_FALSE(container.isMutable());
     ASSERT_EQ(container.data<double>(), ArrayRef<double>(realData));
 
     auto rawData = container.data();
@@ -71,13 +71,13 @@ TEST(ConstDataTests, MoveAssign) {
     ASSERT_EQ(container.size(), 0);
 
     container = Const::ConstData::allocate<int>(90);
-    ASSERT_FALSE(container.hasExternalOrigin());
+    ASSERT_TRUE(container.isMutable());
     ASSERT_EQ(container.size(), 90 * sizeof(int));
     ASSERT_NE(container.data<int>().data(), nullptr);
 
     std::vector<int> realData = {0, 1, 2, 3, 4};
     container = Const::ConstData::fromRawBuffer(realData.data(), realData.size() * sizeof(int));
-    ASSERT_TRUE(container.hasExternalOrigin());
+    ASSERT_FALSE(container.isMutable());
     ASSERT_EQ(container.size() / sizeof(int), realData.size());
     ASSERT_EQ(container.data<int>(), ArrayRef<int>(realData));
 }

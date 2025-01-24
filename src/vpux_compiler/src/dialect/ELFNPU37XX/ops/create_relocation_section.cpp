@@ -13,6 +13,7 @@ void vpux::ELFNPU37XX::CreateRelocationSectionOp::serialize(elf::Writer& writer,
                                                             vpux::ELFNPU37XX::SymbolMapType& symbolMap) {
     const auto name = getSecName().str();
     auto section = writer.addRelocationSection(name);
+    section->setAddrAlign(alignof(elf::RelocationAEntry));
 
     // Look up dependent sections
     auto symTab =

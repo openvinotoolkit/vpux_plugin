@@ -42,6 +42,7 @@ const auto conv2DParamsI8 =
                            ::testing::ValuesIn<std::vector<ptrdiff_t>>({{0, 0}}),    // padEnds
                            ::testing::ValuesIn<std::vector<std::size_t>>({{1, 1}}),  // dilations
                            ::testing::Values(16),                                    // numOutChannels
+                           ::testing::Values(LowFpType::Undefined),                  // lowFpType
                            ::testing::Values(255),                                   // quantLevels
                            ::testing::Values(QuantizationGranularity::Pertensor)     // quantGranularity
         );
@@ -53,7 +54,20 @@ const auto conv2DParamsI4 =
                            ::testing::ValuesIn<std::vector<ptrdiff_t>>({{0, 0}}),    // padEnds
                            ::testing::ValuesIn<std::vector<std::size_t>>({{1, 1}}),  // dilations
                            ::testing::Values(16),                                    // numOutChannels
+                           ::testing::Values(LowFpType::Undefined),                  // lowFpType
                            ::testing::Values(16),                                    // quantLevels
+                           ::testing::Values(QuantizationGranularity::Pertensor)     // quantGranularity
+        );
+
+const auto conv2DParamsNF4 =
+        ::testing::Combine(::testing::ValuesIn<std::vector<std::size_t>>({{1, 1}}),  // kernels
+                           ::testing::ValuesIn<std::vector<std::size_t>>({{1, 1}}),  // strides
+                           ::testing::ValuesIn<std::vector<ptrdiff_t>>({{0, 0}}),    // padBegins
+                           ::testing::ValuesIn<std::vector<ptrdiff_t>>({{0, 0}}),    // padEnds
+                           ::testing::ValuesIn<std::vector<std::size_t>>({{1, 1}}),  // dilations
+                           ::testing::Values(16),                                    // numOutChannels
+                           ::testing::Values(LowFpType::NF4),                        // lowFpType
+                           ::testing::Values(0),                                     // quantLevels
                            ::testing::Values(QuantizationGranularity::Pertensor)     // quantGranularity
         );
 
@@ -80,6 +94,13 @@ INSTANTIATE_TEST_SUITE_P(smoke_precommit_mixed_precision_Convolution2D_I8, Mixed
 
 INSTANTIATE_TEST_SUITE_P(smoke_precommit_mixed_precision_Convolution2D_I4, MixedPrecisionConvSubGraphTest_NPU4000,
                          ::testing::Combine(conv2DParamsI4,
+                                            ::testing::Values(ov::element::f16),              // netPrc
+                                            ::testing::ValuesIn({ov::Shape{1, 16, 16, 16}}),  // inputShapes
+                                            ::testing::Values(DEVICE_NPU)),                   // targetDevice
+                         MixedPrecisionConvSubGraphTest_NPU4000::getTestCaseName);
+
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_mixed_precision_Convolution2D_NF4, MixedPrecisionConvSubGraphTest_NPU4000,
+                         ::testing::Combine(conv2DParamsNF4,
                                             ::testing::Values(ov::element::f16),              // netPrc
                                             ::testing::ValuesIn({ov::Shape{1, 16, 16, 16}}),  // inputShapes
                                             ::testing::Values(DEVICE_NPU)),                   // targetDevice

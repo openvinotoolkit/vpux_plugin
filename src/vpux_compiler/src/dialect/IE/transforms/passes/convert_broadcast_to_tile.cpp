@@ -114,12 +114,7 @@ mlir::LogicalResult ConvertBroadcastToTile<ConcreteOp>::matchAndRewrite(Concrete
         const auto adjustedInputShapeRank = checked_cast<int64_t>(adjustedInputShape.size());
         const auto dataType =
                 mlir::RankedTensorType::get({adjustedInputShapeRank}, getSInt32Type(origOp->getContext()));
-        auto inputShapeValues = mlir::SmallVector<int32_t>(adjustedInputShapeRank);
-
-        const auto dynamicResize = [](int64_t dim) -> int64_t {
-            return dim != mlir::ShapedType::kDynamic ? dim : -1;
-        };
-        llvm::transform(adjustedInputShape, std::begin(inputShapeValues), dynamicResize);
+        auto inputShapeValues = IE::replaceDynamicDimsWithValue<int32_t>(to_small_vector(adjustedInputShape), -1);
 
         const auto shapeTensor = Const::createConst(rewriter, origOp->getLoc(), dataType, ArrayRef(inputShapeValues));
 

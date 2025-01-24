@@ -14,6 +14,7 @@
 #include "vpux/compiler/utils/passes.hpp"
 
 #include "vpux/utils/core/logger.hpp"
+#include "vpux/utils/core/mem_size.hpp"
 #include "vpux/utils/core/optional.hpp"
 
 #include <mlir/Dialect/Quant/QuantOps.h>
@@ -57,13 +58,15 @@ struct WeightsSparsityOptions : mlir::PassPipelineOptions<WeightsSparsityOptions
                                        llvm::cl::init("ratio")};
     DoubleOption weightsSparsityThreshold{*this, "weights-sparsity-threshold",
                                           llvm::cl::desc("Weights sparsity threshold")};
-
+    Int64Option weightsSparsityLargeConstThreshold{*this, "weights-sparsity-large-const-threshold",
+                                                   llvm::cl::desc("Weights sparsity large const threshold")};
     WeightsSparsityOptions() = default;
 
     template <class OtherOptions>
     explicit WeightsSparsityOptions(const OtherOptions& options) {
         weightsSparsityHeuristic = options.weightsSparsityHeuristic;
         weightsSparsityThreshold = options.weightsSparsityThreshold;
+        weightsSparsityLargeConstThreshold = options.weightsSparsityLargeConstThreshold;
     }
 };
 
@@ -75,9 +78,9 @@ struct TilingOptions : mlir::PassPipelineOptions<TilingOptions> {
     BoolOption enablePrefetchTiling{*this, "enable-prefetch", llvm::cl::desc("Enable prefetch mode"),
                                     llvm::cl::init(true)};
 
-    BoolOption enableVPUNNCost{*this, "vpunn-cost",
-                               llvm::cl::desc("Use VPUNN cost model to get the best tiling strategy"),
-                               llvm::cl::init(false)};
+    BoolOption enableVPUNNCostForTiling{*this, "enable-vpunn-cost-for-tiling",
+                                        llvm::cl::desc("Use VPUNN cost model to get the best tiling strategy"),
+                                        llvm::cl::init(false)};
 
     BoolOption enableOutputPipelining{*this, "output-pipelining", llvm::cl::desc("Enable output pipelining"),
                                       llvm::cl::init(false)};
@@ -88,6 +91,26 @@ struct TilingOptions : mlir::PassPipelineOptions<TilingOptions> {
     BoolOption enableVerticalFusionPipelining{*this, "vertical-fusion-pipelining",
                                               llvm::cl::desc("Enable vertical fusion pipelining"),
                                               llvm::cl::init(false)};
+
+    IntOption opTilingCacheThreshold{
+            *this, "op-tiling-cache-threshold",
+            llvm::cl::desc("threshold for number of clustered ops for tiling cache optimization"),
+            llvm::cl::init(CLUSTERED_OP_THRESHOLD_FOR_TILING_CACHE)};
+
+    IntOption vfOutliningInstanceThreshold{
+            *this, "vf-outlining-instance-threshold",
+            llvm::cl::desc("Threshold for number of instances (slices of the graph) to perform outlining"),
+            llvm::cl::init(5)};
+
+    IntOption vfOutliningTileThreshold{
+            *this, "vf-outlining-tile-threshold",
+            llvm::cl::desc("Threshold for outlining vertical fusion regions with accumulated number of tiles"),
+            llvm::cl::init(10)};
+
+    BoolOption enableVerticalFusionOutlining{*this, "vf-outlining", llvm::cl::desc("Enable vertical fusion outlining"),
+                                             llvm::cl::init(true)};
+
+    BoolOption enableProfiling{*this, "profiling", llvm::cl::desc("Enable profiling"), llvm::cl::init(false)};
 
     StrOption enableShaveDDRAccessOptimization{
             *this, "enable-shave-ddr-access-optimization",
@@ -109,9 +132,14 @@ struct TilingOptions : mlir::PassPipelineOptions<TilingOptions> {
     template <class OtherOptions>
     explicit TilingOptions(const OtherOptions& options) {
         enablePrefetchTiling = options.enablePrefetching;
-        enableVPUNNCost = options.enableVPUNNCost;
+        enableVPUNNCostForTiling = options.enableVPUNNCostForTiling;
         enableOutputPipelining = options.enableOutputPipelining;
         enableVerticalFusion = options.enableVerticalFusion;
+        opTilingCacheThreshold = options.opTilingCacheThreshold;
+        vfOutliningInstanceThreshold = options.vfOutliningInstanceThreshold;
+        vfOutliningTileThreshold = options.vfOutliningTileThreshold;
+        enableVerticalFusionOutlining = options.enableVerticalFusionOutlining;
+        enableProfiling = options.enableProfiling;
         enableVerticalFusionPipelining = options.enablePipelining;
         enableShaveDDRAccessOptimization = options.enableShaveDDRAccessOptimization;
         readStrategyFromJson = options.readStrategyFromJson;
@@ -251,19 +279,20 @@ std::unique_ptr<mlir::Pass> createInitResourcesPass(const InitCompilerOptions& i
                                                     Logger log = Logger::global());
 
 std::unique_ptr<mlir::Pass> createOptimizeSharedInputCopyForConcatPass(Logger log = Logger::global());
-std::unique_ptr<mlir::Pass> createCMXConcatPass(Logger log = Logger::global(), bool supportNCEOpInsertion = true);
+std::unique_ptr<mlir::Pass> createCMXConcatPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createSplitNCEOpsOntoWorkloadsPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createResolveEltwiseWithZTiledWorkloadsPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createShiftOutputWorkloadsForHaloPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createMakeOpsWithDistributedTensorPass(bool enableExplicitDistributionInfoAttr = false,
                                                                    Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createMakeDistributedCopiesPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createAdjustDistributedTensorAroundOpsPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createWrapDistributedOpsInNCEClusterTiling(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createAdjustMemorySpacePass(Logger log = Logger::global());
-std::unique_ptr<mlir::Pass> createMultiClusterStrategyAssignmentPass(bool enablePrefetchTiling = true,
-                                                                     bool enableMcSideLoadingDump = false,
-                                                                     StringRef modelHash = "",
-                                                                     Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createMultiClusterStrategyAssignmentPass(
+        bool enablePrefetchTiling = true, bool enableMcSideLoadingDump = false,
+        const int clusteredOpThreshold = CLUSTERED_OP_THRESHOLD_FOR_TILING_CACHE, StringRef modelHash = "",
+        Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createManualStrategyUtilsPass();
 std::unique_ptr<mlir::Pass> createManualStrategyUtilsPass(bool writeStrategyToJSON,
                                                           StringRef writeStrategyFileLocation = "strategy_out.json",
@@ -283,12 +312,18 @@ std::unique_ptr<mlir::Pass> createDetectionOutputDecompositionPass(Logger log = 
 std::unique_ptr<mlir::Pass> createSplitGRUSequencePass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createTileLSTMSequencePass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createAdjustLSTMCellInputsPass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createComputeInterpolateCoordinatesPass(bool enableExplicitDistributionInfoAttr = false,
+                                                                    Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createDetectInPlaceEltwisePass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createFuseNCEInterpolateConsumersPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createAddExplicitPaddingBeforeNCEPermutePass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createOutputPipelineTilingPass(bool enablePrefetchTiling = true,
                                                            Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createLegalizeDynamicShapeConcatForSWLayersPass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createConvertConstArgsToMultiConstantsPass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createConcatRepeatingBlocksOutliningPass(int64_t minSeqLength = 1,
+                                                                     const Logger& log = Logger::global());
+std::unique_ptr<mlir::Pass> createOutlineEntireMainContentPass(const Logger& log = Logger::global());
 
 void buildInitCompilerPipeline(mlir::OpPassManager& pm, const VPU::InitCompilerOptions& options,
                                Logger log = Logger::global());
@@ -299,7 +334,8 @@ void buildInitCompilerPipeline(mlir::OpPassManager& pm, const VPU::InitCompilerO
 
 std::unique_ptr<mlir::Pass> createSparsifyWeightsPass(
         VPU::WeightsSparsityHeuristic heuristic = VPU::WeightsSparsityHeuristic::RATIO,
-        std::optional<double> manualThreshold = std::nullopt, Logger log = Logger::global());
+        std::optional<double> manualThreshold = std::nullopt,
+        int64_t largeConstThreshold = (200_MB).to<vpux::Byte>().count(), Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createRecomputeSparsityPtrsPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createFuseSparsityOpsPass(std::optional<bool> fuseSparsify = std::nullopt,
                                                       Logger log = Logger::global());
@@ -331,7 +367,8 @@ std::unique_ptr<mlir::Pass> createTileGatherPass(Logger log = Logger::global());
 // Tiling
 //
 
-std::unique_ptr<mlir::Pass> createTilingStrategyAssignmentPass(bool enablePrefetchTiling = true, bool vpunnCost = false,
+std::unique_ptr<mlir::Pass> createTilingStrategyAssignmentPass(bool enablePrefetchTiling = true,
+                                                               bool enableVpunnCostForTiling = false,
                                                                StringRef enableShaveDDRAccessOptimization = "true",
                                                                Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createApplyTilingPass(Logger log = Logger::global());
@@ -343,8 +380,12 @@ std::unique_ptr<mlir::Pass> createMergeVfSubgraphsPass(bool enableVerticalFusion
                                                        bool enablePrefetchTiling = true, Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createVfTilingPass(bool enableVerticalFusionPipelining = false,
                                                Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createVerticalFusionOutliningPass();
+std::unique_ptr<mlir::Pass> createVerticalFusionOutliningPass(const TilingOptions& options,
+                                                              Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createUnrollUnusedVerticalFusionRegionPass(Logger log = Logger::global());
-std::unique_ptr<mlir::Pass> createEnsureNCEOpsSizeRequirementsPass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createEnsureNCEOpsSizeRequirementsPass(bool enableOutputEnsurance = true,
+                                                                   Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createFuseClampPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createOptimizeConcatPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createStrategyManagerImplPass(bool enablePrefetchTiling = true,
@@ -416,6 +457,12 @@ std::unique_ptr<mlir::Pass> createSetupEnableFP16CompressedConvPass(const InitCo
                                                                     Logger log = Logger::global());
 
 //
+// Weights separation
+//
+
+std::unique_ptr<mlir::Pass> createIntroduceInitFunctionPass(const Logger& log = Logger::global());
+
+//
 // DefaultHWOptions(for all devices)
 //
 struct DefaultHWOptionsDialectBase : public virtual vpux::DefaultHWOptionsBase {
@@ -433,6 +480,11 @@ struct DefaultHWOptionsDialectBase : public virtual vpux::DefaultHWOptionsBase {
     DoubleOption weightsSparsityThreshold{*this, "weights-sparsity-threshold",
                                           llvm::cl::desc("Threshold for ratio of sparse weights values"),
                                           llvm::cl::init(-1.0)};
+    Int64Option weightsSparsityLargeConstThreshold{
+            *this, "weights-sparsity-large-const-threshold",
+            llvm::cl::desc(
+                    "Sparsify weights using a single thread if the constant's size is larger than this threshold."),
+            llvm::cl::init((200_MB).to<vpux::Byte>().count())};
 
     // TilingOptions
     BoolOption enableVerticalFusion{*this, "vertical-fusion", llvm::cl::desc("Enable vertical fusion feature"),

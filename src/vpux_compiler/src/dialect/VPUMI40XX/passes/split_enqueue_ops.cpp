@@ -3,14 +3,12 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
-#include "vpux/compiler/dialect/IE/utils/resources.hpp"
 #include "vpux/compiler/dialect/VPUMI40XX/ops.hpp"
 #include "vpux/compiler/dialect/VPUMI40XX/passes.hpp"
 #include "vpux/compiler/dialect/VPUMI40XX/utils.hpp"
 #include "vpux/compiler/dialect/VPURegMapped/ops.hpp"
 
 #include <mlir/Transforms/GreedyPatternRewriteDriver.h>
-#include "vpux/compiler/utils/rewriter.hpp"
 
 #include <llvm/ADT/STLExtras.h>
 
@@ -18,9 +16,11 @@ using namespace vpux;
 
 namespace {
 
-// enqueue = [var1, var2(brealingPoint), var3, var4, var5]
-// we are going to replace it in two enqueues
-// lhsEnqueue = [var1, var2] and rhsEnqueue = [var3, var4, var5]
+// enqueue = [var1, var2(breakingPoint), var3, var4(breakingPoint), var5]
+// we are going to replace it with 3 enqueues
+// enqueue1 = [var1, var2]
+// enqueue2 = [var3, var4]
+// enqueue3 = [var5]
 
 class SplitEnqueueOpsPass : public VPUMI40XX::SplitEnqueueOpsBase<SplitEnqueueOpsPass> {
 public:
@@ -36,49 +36,65 @@ void SplitEnqueueOpsPass::safeRunOnFunc() {
     auto netFunc = getOperation();
 
     auto mpi = VPUMI40XX::getMPI(netFunc);
+    auto firstEnqu = mpi.getWorkItemTasks();
+    if (firstEnqu == nullptr) {
+        return;
+    }
+
+    auto firstEnquOp = mlir::cast<VPURegMapped::EnqueueOp>(firstEnqu.getDefiningOp());
+
     for (auto enqueueOp : llvm::make_early_inc_range(netFunc.getOps<VPURegMapped::EnqueueOp>())) {
         auto start = mlir::cast<VPURegMapped::TaskOpInterface>(enqueueOp.getStart().getDefiningOp());
         auto end = mlir::cast<VPURegMapped::TaskOpInterface>(enqueueOp.getEnd().getDefiningOp());
         if (enqueueOp.getStart() == enqueueOp.getEnd()) {
             continue;
         }
-        vpux::VPURegMapped::TaskOpInterface breakingPoint = nullptr;
-        auto taskOp = end;
-        do {
-            taskOp = taskOp.getPreviousTask();
-            if (taskOp->hasAttr(VPUMI40XX::lastSecondaryTaskInExecutionGroup)) {
-                breakingPoint = taskOp;
-                break;
-            }
-        } while (taskOp != start);
-
-        if (breakingPoint == nullptr) {
-            continue;
-        }
 
         mlir::OpBuilder builder(enqueueOp);
-        builder.setInsertionPointAfter(enqueueOp.getOperation());
-        auto lastEnqueue = enqueueOp.getPreviousTaskIdx();
-        auto lhsEnqueue = builder.create<VPURegMapped::EnqueueOp>(start.getLoc(), enqueueOp.getType(), lastEnqueue,
-                                                                  enqueueOp.getBarrier(), enqueueOp.getTaskType(),
-                                                                  start.getResult(), breakingPoint.getResult());
+        builder.setInsertionPoint(enqueueOp.getOperation());
+        auto prevEnqueue = enqueueOp.getPreviousTaskIdx();
 
-        auto rhsStart = VPUMI40XX::getNextOp(breakingPoint);
-        auto rhsEnqueue = builder.create<VPURegMapped::EnqueueOp>(
-                start.getLoc(), enqueueOp.getType(), lhsEnqueue.getResult(), enqueueOp.getBarrier(),
-                enqueueOp.getTaskType(), rhsStart.getResult(), end.getResult());
+        bool breakPointDetected = false;
+        auto taskOp = start;
+        // loop over all tasks covered by enqueue except last
+        // last task shouldn't be checked as even if it has lastSecondaryTaskInExecutionGroup
+        // attribute we don't need to split
+        do {
+            if (taskOp->hasAttr(VPUMI40XX::lastSecondaryTaskInExecutionGroup)) {
+                breakPointDetected = true;
+                auto breakingPoint = taskOp;
 
-        enqueueOp.getResult().replaceUsesWithIf(lhsEnqueue, [](mlir::OpOperand& operand) {
-            return mlir::isa<VPUMI40XX::MappedInferenceOp>(operand.getOwner());
-        });
+                auto newEnque = builder.create<VPURegMapped::EnqueueOp>(
+                        start.getLoc(), enqueueOp.getType(), prevEnqueue, enqueueOp.getBarrier(),
+                        enqueueOp.getTaskType(), start.getResult(), breakingPoint.getResult());
+                start = mlir::cast<VPURegMapped::TaskOpInterface>(breakingPoint).getNextTask();
+                prevEnqueue = newEnque;
 
-        enqueueOp.getResult().replaceUsesWithIf(rhsEnqueue, [](mlir::OpOperand& operand) {
-            return !mlir::isa<VPUMI40XX::MappedInferenceOp>(operand.getOwner());
-        });
+                if (enqueueOp == firstEnquOp) {
+                    enqueueOp.getResult().replaceUsesWithIf(newEnque, [](mlir::OpOperand& operand) {
+                        return mlir::isa<VPUMI40XX::MappedInferenceOp>(operand.getOwner());
+                    });
+                    firstEnquOp = newEnque;
+                }
+            }
+            taskOp = taskOp.getNextTask();
+        } while (taskOp != end);
 
-        enqueueOp->erase();
+        // If breakpoint was detected at least once. Old enqueue is no longer valid and replace it with
+        // one that will properly take int oaccount already created ones
+        if (breakPointDetected) {
+            auto lastNewEnq = builder.create<VPURegMapped::EnqueueOp>(start.getLoc(), enqueueOp.getType(), prevEnqueue,
+                                                                      enqueueOp.getBarrier(), enqueueOp.getTaskType(),
+                                                                      start.getResult(), end.getResult());
+
+            enqueueOp.getResult().replaceUsesWithIf(lastNewEnq, [](mlir::OpOperand& operand) {
+                return !mlir::isa<VPUMI40XX::MappedInferenceOp>(operand.getOwner());
+            });
+
+            enqueueOp->erase();
+        }
     }
-    auto firstEnqu = mpi.getWorkItemTasks();
+    firstEnqu = mpi.getWorkItemTasks();
     auto newCount = VPUMI40XX::reindexEnqueueList(mlir::cast<VPURegMapped::EnqueueOp>(firstEnqu.getDefiningOp()));
     mpi.setWorkItemCount(newCount);
 }

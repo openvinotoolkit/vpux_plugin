@@ -4,10 +4,10 @@
 //
 
 #include "vpux/compiler/dialect/IE/transforms/passes.hpp"
-#include "vpux/compiler/dialect/const/utils/utils.hpp"
-#include "vpux/compiler/utils/quantization.hpp"
-
+#include "vpux/compiler/dialect/IE/utils/quantization.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
+#include "vpux/compiler/dialect/const/utils/utils.hpp"
+
 #include "vpux/compiler/utils/error.hpp"
 #include "vpux/compiler/utils/loop.hpp"
 #include "vpux/compiler/utils/quantization.hpp"
@@ -49,8 +49,11 @@ bool checkRange(const Const::ContentAttr& lowConst, const Const::ContentAttr& hi
 
 bool containsValueZero(const Const::ContentAttr& lowConst, const Const::ContentAttr& highConst,
                        IE::AutoBroadcastType broadcast) {
+    // Also rMin > rMax ranges are valid; they are used to signal the presence of negative scales.
+    // Currently there is no other information in FakeQuantize operation, to deduce back the negative scale
+    // based on just the range information.
     auto containsZero = [](const double low, const double high) {
-        return low <= 0 && high >= 0;
+        return (low <= 0 && high >= 0) || (low >= 0 && high <= 0);
     };
 
     return checkRange(lowConst, highConst, broadcast, containsZero);
@@ -220,52 +223,6 @@ mlir::FailureOr<float> getCommonRatio(const Const::Content& content1, const Cons
     }
 }
 
-bool hasMultiZeroPoint(IE::FakeQuantizeOp fqOp) {
-    auto inLowConst = fqOp.getInputLow().getDefiningOp<Const::DeclareOp>();
-    auto outLowConst = fqOp.getOutputLow().getDefiningOp<Const::DeclareOp>();
-    auto outHighConst = fqOp.getOutputHigh().getDefiningOp<Const::DeclareOp>();
-    if (inLowConst == nullptr || outLowConst == nullptr || outHighConst == nullptr) {
-        return false;
-    }
-
-    const auto inLowAttr = inLowConst.getContentAttr().fold();
-    const auto outLowAttr = outLowConst.getContentAttr().fold();
-    const auto outHighAttr = outHighConst.getContentAttr().fold();
-
-    const auto outLowVals = outLowAttr.getValues<double>();
-    const auto outHighVals = outHighAttr.getValues<double>();
-
-    SmallVector<double> outLows(outLowVals);
-    SmallVector<double> outHighs(outHighVals);
-
-    const auto broadcast = fqOp.getAutoBroadcast();
-    broadcastRange(outLows, outHighs, broadcast);
-
-    mlir::Type storageType;
-    int64_t qMin = 0;
-    int64_t qMax = 0;
-    const auto levels = fqOp.getLevels();
-    const auto lowFpType = fqOp.getLowFpType();
-    if (levels.has_value()) {
-        const auto isSigned = Const::hasNegativeValues(inLowAttr);
-        std::tie(qMin, qMax, storageType) = getStorageParams(inLowConst.getContext(), *levels, isSigned);
-    } else if (lowFpType.has_value()) {
-        std::tie(qMin, qMax, storageType) = getStorageParams(inLowConst.getContext(), *lowFpType);
-    } else {
-        VPUX_THROW("FakeQuantize op doesn't have levels and lowFpType");
-    }
-
-    SmallVector<int64_t> outZeroPoints(outLows.size());
-
-    // unused variable
-    double outScale = 0.0;
-    loop_1d(LoopExecPolicy::Parallel, outLowConst.getContext(), outLows.size(), [&](size_t i) {
-        std::tie(outScale, outZeroPoints[i]) = calcScaleAndZeroPoint(qMin, qMax, outLows[i], outHighs[i]);
-    });
-
-    return outLows.size() > 1 && !std::equal(outZeroPoints.begin() + 1, outZeroPoints.end(), outZeroPoints.begin());
-}
-
 mlir::LogicalResult UseConstDequant::matchAndRewrite(IE::FakeQuantizeOp origOp, mlir::PatternRewriter& rewriter) const {
     _log.trace("[{0}] Got FakeQuantize Operation '{1}'", getDebugName(), origOp->getLoc());
     auto innerLog = _log.nest();
@@ -285,7 +242,7 @@ mlir::LogicalResult UseConstDequant::matchAndRewrite(IE::FakeQuantizeOp origOp, 
     }
 
     auto inConstAttr = inConst.getContentAttr();
-    const auto inBaseVals = inConstAttr.getBaseContent();
+    const auto& inBaseVals = inConstAttr.getBaseContent();
     const auto inBaseElemType = inBaseVals.getShapedType().getElementType();
 
     const auto inLowContent = inLowConst.getContent();
@@ -328,12 +285,18 @@ mlir::LogicalResult UseConstDequant::matchAndRewrite(IE::FakeQuantizeOp origOp, 
         }
     }
 
+    innerLog.trace("Try to use constant dequantize");
+
+    const auto realType = inConstAttr.getType().cast<vpux::NDTypeInterface>();
+    const auto realElemType = realType.getElementType().cast<mlir::FloatType>();
+
+    const auto multiZeroPoint = !IE::hasFQSameZeroPoint(origOp);
+
     {
         // This function patches malfunctioning FQ operation (where in_low and
         // in_high do not align with the FQ levels) that may appear in IR due to
         // some other compiler pass producing garbage (likely candidate is
-        // --convert-subtract-to-add, but also see
-        // --handle-fake-quant-has-negative-scales). Yet, the compiler has to
+        // --convert-subtract-to-add). Yet, the compiler has to
         // deal with this somehow and the best-effort currently is to manually
         // patch the weights of such FQ to align them to the input range of the
         // FQ block. After this, one can split FQ into QDQ.
@@ -346,42 +309,44 @@ mlir::LogicalResult UseConstDequant::matchAndRewrite(IE::FakeQuantizeOp origOp, 
             const auto isSigned = Const::hasNegativeValues(inLowContent);
             if (!isLowPrecisionTypeRange(getContext(), ArrayRef(inLowContent.getSplatValue<float>()),
                                          ArrayRef(inHighContent.getSplatValue<float>()), *levels, isSigned)) {
-                // Bring the constant values in low precision storage type range
-                int64_t intQLow = 0;
-                int64_t intQHigh = 0;
-                std::tie(intQLow, intQHigh, std::ignore) = getStorageParams(getContext(), levels.value(), isSigned);
-                auto qLow = checked_cast<float>(intQLow);
-                auto qHigh = checked_cast<float>(intQHigh);
+                // #E128147: add subbyte type support
+                if (levels > 16) {
+                    const auto quantizedElemType =
+                            getQuantizedType(inLowConst.getContentAttr(), inHighConst.getContentAttr(), levels,
+                                             origOp.getLowFpType(), realElemType, isSigned, origOp.getLoc(),
+                                             origOp.getAutoBroadcast(), multiZeroPoint, innerLog);
+                    inConstAttr = inConst.transformContentAttr().quantize(quantizedElemType).get();
+                } else {
+                    double intQLow = 0.;
+                    double intQHigh = 0.;
+                    std::tie(intQLow, intQHigh, std::ignore) = getStorageParams(getContext(), levels.value(), isSigned);
+                    auto qLow = checked_cast<float>(intQLow);
+                    auto qHigh = checked_cast<float>(intQHigh);
 
-                auto inLow = inLowContent.getSplatValue<float>();
-                auto inHigh = inHighContent.getSplatValue<float>();
-                const auto inConstContent = inConst.getContent();
-                const auto inVals = inConstContent.getValues<float>();
-                SmallVector<float> quantizedVals(inVals.size());
-                float fLevels = checked_cast<float>(levels.value());
-                for (size_t i = 0; i < inVals.size(); ++i) {
-                    quantizedVals[i] = fakeQuantize(inVals[i], inLow, inHigh, qLow, qHigh, fLevels);
+                    auto inLow = inLowContent.getSplatValue<float>();
+                    auto inHigh = inHighContent.getSplatValue<float>();
+                    const auto inConstContent = inConst.getContent();
+                    const auto inVals = inConstContent.getValues<float>();
+                    SmallVector<float> quantizedVals(inVals.size());
+                    float fLevels = checked_cast<float>(levels.value());
+                    for (size_t i = 0; i < inVals.size(); ++i) {
+                        quantizedVals[i] = fakeQuantize(inVals[i], inLow, inHigh, qLow, qHigh, fLevels);
+                    }
+
+                    // Generate the Const::ContentAttr with the adjusted constant content
+                    const auto inConstStorageType = inConstContent.getType().dyn_cast<mlir::RankedTensorType>();
+                    const auto quantizedConstElementVal =
+                            Const::createConstContent(inConstStorageType, ArrayRef(quantizedVals));
+                    inConstAttr = Const::ContentAttr::get(quantizedConstElementVal);
                 }
-
-                // Generate the Const::ContentAttr with the adjusted constant content
-                const auto inConstStorageType = inConstContent.getType().dyn_cast<mlir::RankedTensorType>();
-                const auto quantizedConstElementVal = wrapData(inConstStorageType, quantizedVals);
-                inConstAttr = Const::ContentAttr::get(quantizedConstElementVal);
             }
         }
     }
 
-    innerLog.trace("Try to use constant dequantize");
-
-    const auto realType = inConstAttr.getType().cast<vpux::NDTypeInterface>();
-    const auto realElemType = realType.getElementType().cast<mlir::FloatType>();
-
-    const auto multiZeroPoint = hasMultiZeroPoint(origOp);
     const auto qElemType =
             getQuantizedType(outLowConst.getContentAttr(), outHighConst.getContentAttr(), origOp.getLevels(),
                              origOp.getLowFpType(), realElemType, Const::hasNegativeValues(inLowContent),
                              origOp.getLoc(), origOp.getAutoBroadcast(), multiZeroPoint, innerLog);
-
     if (qElemType == nullptr) {
         return mlir::failure();
     }
@@ -391,7 +356,7 @@ mlir::LogicalResult UseConstDequant::matchAndRewrite(IE::FakeQuantizeOp origOp, 
     const auto qType = realType.changeElemType(qElemType);
 
     auto newInConstAttrSetup = inConstAttr.transform();
-    newInConstAttrSetup = newInConstAttrSetup.castElemType(normalizeQuantStorageType(qElemType)).quantCast(qElemType);
+    newInConstAttrSetup = newInConstAttrSetup.castElemType(qElemType);
 
     // Fuse dequantize to const directly since it could not convert to HW for multi Zero Point case
     if (multiZeroPoint) {
@@ -449,8 +414,9 @@ void SplitFakeQuantPass::safeRunOnFunc() {
                 inLowConst.getContentAttr(), inHighConst.getContentAttr(), fqOp.getLevels(), fqOp.getLowFpType(),
                 realElemType, false, fqOp.getLoc(), fqOp.getAutoBroadcast(), /*ignoreZPCheck=*/isConstInput);
 
-        if (inQuantizeElemType == nullptr)
+        if (inQuantizeElemType == nullptr) {
             return true;
+        }
 
         const auto outQuantizeElemType = getQuantizedType(
                 outLowConst.getContentAttr(), outHighConst.getContentAttr(), fqOp.getLevels(), fqOp.getLowFpType(),

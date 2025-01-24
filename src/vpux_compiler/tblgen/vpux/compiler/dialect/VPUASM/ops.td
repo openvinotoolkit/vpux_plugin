@@ -19,6 +19,8 @@ include "vpux/compiler/dialect/VPUIP/attributes.td"
 include "vpux/compiler/dialect/const/attributes.td"
 include "vpux/compiler/NPU40XX/dialect/ELF/ops_interfaces.td"
 
+include "vpux/compiler/dialect/VPUMI40XX/attributes.td"
+
 include "mlir/Dialect/Quant/QuantOpsBase.td"
 include "mlir/Interfaces/CopyOpInterface.td"
 include "mlir/Interfaces/InferTypeOpInterface.td"
@@ -104,7 +106,7 @@ def VPUASM_ConstBufferOp :
     let builders = [
         OpBuilder<(ins
             "::mlir::StringAttr":$sym_name, "::vpux::VPUASM::BufferType":$buffer_type,
-            "::vpux::Const::ContentAttr&&":$content
+            "::vpux::Const::ContentAttr":$content
         )>
     ];
 
@@ -332,7 +334,6 @@ def VPUASM_MappedInferenceOp :
         VPUASM_Instruction<"MappedInference",
             [
                 DeclareOpInterfaceMethods<ELF_BinaryOpInterface, ["serialize", "getBinarySize"]>,
-                DeclareOpInterfaceMethods<ELF_RelocatableOpInterface>
             ]
         > {
     let summary = "Task representing the MappedInference structure";
@@ -357,7 +358,8 @@ def VPUASM_MappedInferenceOp :
         I64Attr:$mediaCount,
         I64Attr:$barrierCount,
         OptionalAttr<SymbolRefAttr>:$dmaHwpBase,
-        OptionalAttr<SymbolRefAttr>:$hwpWorkpointCfg
+        OptionalAttr<SymbolRefAttr>:$hwpWorkpointCfg,
+        SymbolRefAttr:$mappedInferenceVersion
     );
 
     let assemblyFormat = [{
@@ -380,10 +382,37 @@ def VPUASM_MappedInferenceOp :
         `actKernelInvocationsCount` `(` $actKernelInvocationsCount `)`
         `mediaCount` `(` $mediaCount `)`
         `barrierCount` `(` $barrierCount `)`
+        `mappedInferenceVersion` `(` $mappedInferenceVersion `)`
         (`dmaHwpBase` `(` $dmaHwpBase^ `)`)?
         (`hwpWorkpointCfg` `(` $hwpWorkpointCfg^ `)`)?
     }];
 }
+
+def VPUASM_NNrtConfigOp :
+        VPUASM_Instruction<"nnrtConfig",
+            [
+                DeclareOpInterfaceMethods<ELF_BinaryOpInterface, ["serialize", "getBinarySize"]>,
+            ]
+        > {
+    let summary = "Task representing the MappedInference structure";
+
+    let arguments = (ins
+        SymbolNameAttr:$sym_name,
+        UnitAttr:$isActKernelInvocations,
+        OptionalAttr<SymbolRefAttr>:$actShaveRt,
+        OptionalAttr<SymbolRefArrayAttr>:$actShaveStacks,
+        OptionalAttr<SymbolRefAttr>:$dmaHwpBase,
+        OptionalAttr<SymbolRefAttr>:$hwpWorkpointCfg
+    );
+
+    let assemblyFormat = [{
+    attr-dict
+        $sym_name `:`
+        (`dmaHwpBase` `(` $dmaHwpBase^ `)`)?
+        (`hwpWorkpointCfg` `(` $hwpWorkpointCfg^ `)`)?
+    }];
+}
+
 
 
 //
@@ -393,8 +422,7 @@ def VPUASM_MappedInferenceOp :
 def VPUASM_ManagedMappedInferenceOp :
         VPUASM_Instruction<"ManagedMappedInference",
             [
-                DeclareOpInterfaceMethods<ELF_BinaryOpInterface, ["serialize", "getBinarySize"]>,
-                DeclareOpInterfaceMethods<ELF_RelocatableOpInterface>
+                DeclareOpInterfaceMethods<ELF_BinaryOpInterface, ["serialize", "getBinarySize"]>
             ]
         > {
 
@@ -406,6 +434,9 @@ def VPUASM_ManagedMappedInferenceOp :
         OptionalAttr<SymbolRefAttr>:$workItems,
         OptionalAttr<SymbolRefAttr>:$barrierTasks,
         OptionalAttr<SymbolRefAttr>:$bootstrapTasks,
+        SymbolRefAttr:$nnrtConfig,
+        OptionalAttr<SymbolRefAttr>:$barrierConfigurationTasks,
+        OptionalAttr<SymbolRefAttr>:$numOfBarrierReprogrammings,
 
         I64ArrayOfArraysAttr:$dmaCount,
         I64Attr:$workItemsCount,
@@ -413,11 +444,15 @@ def VPUASM_ManagedMappedInferenceOp :
         IntAttr:$final_barrier_id,
         I64Attr:$bootstrapTasksCount,
         I64Attr:$bootsrapWorkItemsCount,
+        I64Attr:$barrierConfigurationTasksCount,
+        I64Attr:$barriersReprogrammingCount,
+        I64Attr:$barrierConfigurationStride,
         UI8Attr:$actshv_used,
         UI8Attr:$dpu_used,
         UI8Attr:$media_used,
         UI8Attr:$dma_from_ddr_used,
-        UI8Attr:$dma_from_cmx_used
+        UI8Attr:$dma_from_cmx_used,
+        SymbolRefAttr:$mappedInferenceVersion
         );
 
     let assemblyFormat = [{
@@ -426,6 +461,10 @@ def VPUASM_ManagedMappedInferenceOp :
         `workItems` `(` $workItems `)`
         `barrierTasks` `(` $barrierTasks `)`
         (`bootstrapTasks` `(` $bootstrapTasks^ `)`)?
+        `nnrtConfig` `(` $nnrtConfig `)`
+        `mappedInferenceVersion` `(` $mappedInferenceVersion `)`
+        (`barrierConfigurationTasks` `(` $barrierConfigurationTasks^ `)`)?
+        (`numOfBarrierReprogrammings` `(` $numOfBarrierReprogrammings^ `)`)?
 
         attr-dict
     }];
@@ -492,6 +531,7 @@ def VPUASM_BootstrapOp :
     }];
 }
 
+
 //
 // ManagedBarrierOp
 //
@@ -541,8 +581,7 @@ def VPUASM_WorkItemOp :
         VPUASM_Instruction<"WorkItem",
             [
                 DeclareOpInterfaceMethods<ELF_BinaryOpInterface, ["serialize", "getBinarySize"]>,
-                VPUASM_IndexedTaskInterface,
-                DeclareOpInterfaceMethods<ELF_RelocatableOpInterface>,
+                VPUASM_IndexedTaskInterface
             ]
         > {
 
@@ -600,7 +639,10 @@ def VPUASM_NNDMAOp :
         UnitAttr:$enable_msc,
         OptionalAttr<SymbolRefAttr>:$act_compression_size_entry,
         OptionalAttr<SymbolRefAttr>:$act_compression_sparsity_map,
-        VPUIP_DMADescriptorAttr:$dma_descriptor,
+        OptionalAttr<VPUMI40XX_DMATransactionAttr>:$dma_transaction,
+        // dma_descriptor is now optional to allow DMA refactoring to be completed on NPU4
+        // Its functionality is now partially replaced by dma_transaction
+        OptionalAttr<VPUIP_DMADescriptorAttr>:$dma_descriptor,
         OptionalAttr<IntAttr>:$dma_hwp_id,
         OptionalAttr<I64ArrayAttr>:$tile_indexes,
         OptionalAttr<SymbolRefAttr>:$indices
@@ -629,7 +671,8 @@ def VPUASM_NNDMAOp :
         `updates` `(` $updateBarriers `)`
         `start_after` `(` $start_after `)`
         `clean_after` `(` $clean_after `)`
-        `descriptor` `(` $dma_descriptor `)`
+        (`dma_transaction` `(` $dma_transaction^ `)`)?
+        (`dma_descriptor` `(` $dma_descriptor^ `)`)?
         `acceleration_mode` `(` $acceleration_mode `)`
         (`act_compression_size_entry` `(` $act_compression_size_entry^ `)`)?
         (`act_compression_sparsity_map` `(` $act_compression_sparsity_map^ `)`)?
@@ -720,6 +763,31 @@ def VPUASM_DeclareKernelDataOp :
 }
 
 //
+// ShaveStackFrameOp
+//
+
+def VPUASM_ShaveStackFrameOp :
+        VPUASM_Memory<"ActShaveRtStack",
+            [
+                DeclareOpInterfaceMethods<ELF_WrappableOpInterface>,
+                DeclareOpInterfaceMethods<ELF_BinaryOpInterface, ["getBinarySize", "serializeCached", "getBinarySizeCached"]>,
+                DeclareOpInterfaceMethods<ELF_PredefinedPurposeMemoryOpInterface>,
+            ]
+        > {
+    let summary = "Declaration of Act Shave stack frames buffers";
+
+    let arguments = (ins
+        SymbolNameAttr:$sym_name,
+        UI64Attr:$stackSize
+    );
+
+    let assemblyFormat = [{
+         $sym_name attr-dict `:` $stackSize
+    }];
+
+}
+
+//
 // DeclareKernelEntryOp
 //
 
@@ -764,9 +832,12 @@ def VPUASM_KernelParamsOp :
         SymbolNameAttr:$sym_name,
         SymbolRefArrayAttr:$inputs,
         SymbolRefArrayAttr:$outputs,
+        SymbolRefArrayAttr:$dynamicInputShapes,
+        SymbolRefArrayAttr:$dynamicOutputShapes,
         StrAttr:$kernel_type,
         ElementsAttr:$kernel_params,
-        UnitAttr:$is_output_broadcasted
+        UnitAttr:$is_output_broadcasted,
+        UnitAttr:$isJitCompiled
     );
 
     let extraClassDeclaration = [{
@@ -777,6 +848,8 @@ def VPUASM_KernelParamsOp :
         $sym_name
         `inputs` `(` $inputs `)`
         `outputs` `(` $outputs `)`
+        `dynamicInputShapes` `(` $dynamicInputShapes `)`
+        `dynamicOutputShapes` `(` $dynamicOutputShapes `)`
         `kernel_type` `(` $kernel_type `)`
         `kernel_params` `(` $kernel_params `)`
         attr-dict
@@ -831,11 +904,20 @@ def VPUASM_ActKernelInvocationOp :
         > {
     let summary = "Activation Kernel Invocation";
 
+    let description = [{
+        next_link attributes refers to next invocation in the linked list. Since at least non-WLM
+        does not distinguish linked lists for invocations range inside mapped inference and having
+        2 linked lists of invocations per tile, next_link for ActKernelInvocationOp refers not to
+        immediately next task, but one after that if exists (round-robin distribution:
+        invo#0 is linked to invo#2, invo#1 is linked to invo#3, invo#2 is linked to invo#4, etc)
+    }];
+
     let arguments = (ins
         SymbolNameAttr:$sym_name,
         VPUASM_IndexTypeAttr:$task_index,
 
         OptionalAttr<SymbolRefAttr>:$task_location,
+        OptionalAttr<SymbolRefAttr>:$next_link,
         SymbolRefAttr:$kernel_range,
         OptionalAttr<SymbolRefAttr>:$kernel_data,
         SymbolRefAttr:$kernel_params,
@@ -895,7 +977,14 @@ def VPUASM_DPUVariantOp :
         SymbolRefAttr:$invariant_task_location,
 
         OptionalAttr<SymbolRefAttr>:$weights,
+
         OptionalAttr<SymbolRefAttr>:$weight_table,
+        OptionalAttr<SymbolRefAttr>:$weight_table_data_ptr,
+        OptionalAttr<SymbolRefAttr>:$weight_table_sp_ptr,
+        OptionalAttr<SymbolRefAttr>:$weight_table_scale,
+        OptionalAttr<SymbolRefAttr>:$weight_table_bias,
+        OptionalAttr<SymbolRefAttr>:$weight_zero_points,
+
         VPUIP_NCETaskTypeAttr:$nce_task_type,
         I64ArrayAttr:$inStart,
         I64ArrayAttr:$inEnd,
@@ -906,7 +995,8 @@ def VPUASM_DPUVariantOp :
         OptionalAttr<IntAttr>:$cluster_id,
         OptionalAttr<DPUHaloRegionArrayAttr>: $haloRegions,
         OptionalAttr<IntAttr>:$workload_id,
-        UnitAttr:$lut_read
+        UnitAttr:$lut_read,
+        UnitAttr:$force_inv_read
     );
 
     let assemblyFormat = [{
@@ -918,6 +1008,11 @@ def VPUASM_DPUVariantOp :
         `calls` $invariant_task_location
         (`weights` `(` $weights^ `)`)?
         (`weight_table` `(` $weight_table^ `)`)?
+        (`weight_table_data_ptr` `(` $weight_table_data_ptr^ `)`)?
+        (`weight_table_sp_ptr` `(` $weight_table_sp_ptr^ `)`)?
+        (`weight_table_scale` `(` $weight_table_scale^ `)`)?
+        (`weight_table_bias` `(` $weight_table_bias^ `)`)?
+        (`weight_zero_points` `(` $weight_zero_points^ `)`)?
         attr-dict
     }];
 }
@@ -954,12 +1049,24 @@ def VPUASM_DPUInvariantOp :
 
         OptionalAttr<SymbolRefAttr>:$weights,
         OptionalAttr<SymbolRefAttr>:$weights_sparsity_map,
+
         OptionalAttr<SymbolRefAttr>:$weight_table,
+        OptionalAttr<SymbolRefAttr>:$weight_table_data_ptr,
+        OptionalAttr<SymbolRefAttr>:$weight_table_sp_ptr,
+        OptionalAttr<SymbolRefAttr>:$weight_table_scale,
+        OptionalAttr<SymbolRefAttr>:$weight_table_bias,
+        OptionalAttr<SymbolRefAttr>:$weight_zero_points,
+
         OptionalAttr<SymbolRefAttr>:$spr_lookup_table,
 
         OptionalAttr<SymbolRefAttr>:$output,
         OptionalAttr<SymbolRefAttr>:$output_sparsity_map,
         OptionalAttr<SymbolRefAttr>:$profiling_data,
+
+        OptionalAttr<SymbolRefAttr>:$max_per_xy,
+        OptionalAttr<SymbolRefAttr>:$min_per_xy,
+        OptionalAttr<SymbolRefArrayAttr>:$min_max_per_tensor,
+
 
         OptionalAttr<VPUASM_BufferTypeAttr>:$output_type_continued,
 
@@ -969,6 +1076,7 @@ def VPUASM_DPUInvariantOp :
         VPUIP_NCETaskTypeAttr:$nce_task_type,
         OptionalAttr<VPU_EltwiseTypeAttr>:$eltwise_type,
         VPU_MPEModeAttr:$mpe_frequent_mode,
+        OptionalAttr<VPU_MPEEngineAttr>:$mpe_engine,
 
         OptionalAttr<I64ArrayAttr>:$kernel_size,
         OptionalAttr<I64ArrayAttr>:$kernel_strides,
@@ -976,6 +1084,7 @@ def VPUASM_DPUInvariantOp :
         UnitAttr:$is_continued,
         OptionalAttr<IntAttr>:$cm_sp_pattern,
         UnitAttr:$input_channels_compression,
+        UnitAttr:$is_zero_offset_weights_table,
         OptionalAttr<IntAttr>:$out_channel_offset,
         UnitAttr:$is_superdense,
         OptionalAttr<BoolAttr>:$is_inplace,
@@ -1012,10 +1121,18 @@ def VPUASM_DPUInvariantOp :
         (`weights` `(` $weights^ `)`)?
         (`weights_sparsity_map` `(` $weights_sparsity_map^ `)`)?
         (`weight_table` `(` $weight_table^ `)`)?
+        (`weight_table_data_ptr` `(` $weight_table_data_ptr^ `)`)?
+        (`weight_table_sp_ptr` `(` $weight_table_sp_ptr^ `)`)?
+        (`weight_table_scale` `(` $weight_table_scale^ `)`)?
+        (`weight_table_bias` `(` $weight_table_bias^ `)`)?
+        (`weight_zero_points` `(` $weight_zero_points^ `)`)?
         (`spr_lookup_table` `(` $spr_lookup_table^ `)`)?
         (`output` `(` $output^ `)`)?
         (`output_sparsity_map` `(` $output_sparsity_map^ `)`)?
         (`profiling_data` `(` $profiling_data^ `)`)?
+        (`max_per_xy` `(` $max_per_xy^ `)`)?
+        (`min_per_xy` `(` $min_per_xy^ `)`)?
+        (`min_max_per_tensor` `(` $min_max_per_tensor^ `)`)?
         `waits` `(` $waitBarriers `)`
         `updates` `(` $updateBarriers `)`
         attr-dict
@@ -1111,6 +1228,7 @@ def VPUASM_DPUInvariantOp_37XX :
         UnitAttr:$is_continued,
         OptionalAttr<IntAttr>:$cm_sp_pattern,
         UnitAttr:$input_channels_compression,
+        UnitAttr:$is_zero_offset_weights_table,
         UnitAttr:$is_segmented,
         OptionalAttr<IntAttr>:$out_channel_offset,
 
@@ -1315,16 +1433,17 @@ def MappedInferenceVersionOp :
     let summary = "Represents a versioning mechanism for Mapped Inference. Only trivially defined at this level.";
 
     let arguments = (ins
-          SymbolNameAttr:$sym_name
-        );
+        SymbolNameAttr:$sym_name,
+        UI32Attr:$major,
+        UI32Attr:$minor,
+        UI32Attr:$patch
+    );
 
     let assemblyFormat = [{
+        $sym_name
+        `(` $major `_` $minor `_` $patch `)`
         attr-dict
         }];
-
-    let builders = [
-        OpBuilder<(ins)>
-        ];
 }
 
 //
@@ -1341,19 +1460,23 @@ def PlatformInfoOp :
         > {
     let summary = "Represents an op describing various platform information, such as arch, revision, etc.";
 
+    let description = [{
+        PlatformInfoOp is an operation that is meant to encapsulate various information about the NPU. For
+        the moment, this information is limited to the archKind (taken from the module), but can
+        easily be extended with other information such as SKU info, etc.
+    }];
+
     let arguments = (ins
-          SymbolNameAttr:$sym_name,
-          VPU_ArchKindAttr:$archKind
-        );
+        SymbolNameAttr:$sym_name
+    );
 
     let assemblyFormat = [{
         attr-dict
-        }];
+    }];
 
     let builders = [
         OpBuilder<(ins)>,
-        OpBuilder<(ins "vpux::VPU::ArchKind":$archKind)>
-        ];
+    ];
 }
 
 #endif

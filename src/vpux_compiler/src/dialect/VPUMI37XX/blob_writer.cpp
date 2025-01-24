@@ -18,7 +18,6 @@
 #include "vpux/compiler/utils/quantization.hpp"
 #include "vpux/compiler/utils/strings.hpp"
 
-#include "vpux/compiler/act_kernels/invocation_builder.h"
 #include "vpux/utils/core/checked_cast.hpp"
 #include "vpux/utils/core/custom_float.hpp"
 #include "vpux/utils/core/error.hpp"
@@ -29,8 +28,6 @@
 #include "vpux/utils/core/small_vector.hpp"
 
 #include <mlir/Dialect/Quant/QuantTypes.h>
-
-#include <vpux/compiler/act_kernels/compilation.h>
 
 #include <algorithm>
 
@@ -114,7 +111,7 @@ VPUMI37XX::BlobWriter::TensorReference vpux::VPUMI37XX::BlobWriter::createTensor
         int64_t byteOffset, ArrayRef<int64_t> mult, ArrayRef<int64_t> shift, int64_t postShift,
         ArrayRef<uint8_t> zeroPoints, std::optional<int64_t> sparsityMapOffset,
         std::optional<int64_t> storageElementOffset, std::optional<int64_t> storageElementSize,
-        std::optional<int64_t> swizzlingKey) {
+        std::optional<int64_t> swizzlingKey, std::optional<uint64_t> descriptor) {
     const auto serializedName = createString(name);
 
     const auto serializedDataType = static_cast<MVCNN::DType>(createDType(type.getElementType()));
@@ -129,7 +126,12 @@ VPUMI37XX::BlobWriter::TensorReference vpux::VPUMI37XX::BlobWriter::createTensor
     Vector<uint8_t> serializedQuantZero = createVector(zeroPoints);
 
     const auto serializedLocaleIndex = arrayCast<uint32_t>(sectionIndex);
-    const auto serializedQuantMult = arrayCast<uint16_t>(mult);
+    // Unchecked casting of quant_mult since it stores both u16 and i16 values
+    auto castedQuantMult = SmallVector<uint16_t>(mult.size());
+    std::transform(mult.begin(), mult.end(), castedQuantMult.begin(), [](auto value) {
+        return value & 0xFFFF;
+    });
+    const auto serializedQuantMult = createVector(castedQuantMult);
     const auto serializedQuantShift = arrayCast<uint8_t>(shift);
 
     const auto basePtrs = createVector(std::vector<uint16_t>{});
@@ -153,13 +155,17 @@ VPUMI37XX::BlobWriter::TensorReference vpux::VPUMI37XX::BlobWriter::createTensor
     if (swizzlingKey.has_value()) {
         builder.add_swizzling_key(checked_cast<uint8_t>(swizzlingKey.value()));
     }
+    if (descriptor.has_value()) {
+        builder.add_descriptor(checked_cast<uint64_t>(descriptor.value()));
+    }
     return builder.Finish();
 }
 
 VPUMI37XX::BlobWriter::TensorReference vpux::VPUMI37XX::BlobWriter::createTensorRef(
         StringRef name, vpux::NDTypeInterface type, VPURT::BufferSection section, ArrayRef<int64_t> sectionIndex,
         int64_t byteOffset, std::optional<int64_t> sparsityMapOffset, std::optional<int64_t> storageElementOffset,
-        std::optional<int64_t> storageElementSize, std::optional<int64_t> swizzlingKey) {
+        std::optional<int64_t> storageElementSize, std::optional<int64_t> swizzlingKey,
+        std::optional<uint64_t> descriptor) {
     SmallVector<uint8_t> zeroPoints;
     SmallVector<int64_t> mults;
     SmallVector<int64_t> shifts;
@@ -193,25 +199,27 @@ VPUMI37XX::BlobWriter::TensorReference vpux::VPUMI37XX::BlobWriter::createTensor
     }
 
     return createTensorRef(name, type, section, sectionIndex, byteOffset, mults, shifts, 0, zeroPoints,
-                           sparsityMapOffset, storageElementOffset, storageElementSize, swizzlingKey);
+                           sparsityMapOffset, storageElementOffset, storageElementSize, swizzlingKey, descriptor);
 }
 
 VPUMI37XX::BlobWriter::TensorReference vpux::VPUMI37XX::BlobWriter::createTensorRef(
         StringRef name, vpux::NDTypeInterface type, VPURT::BufferSection section, int64_t sectionIndex,
         int64_t byteOffset, std::optional<int64_t> sparsityMapOffset, std::optional<int64_t> storageElementOffset,
-        std::optional<int64_t> storageElementSize, std::optional<int64_t> swizzlingKey) {
+        std::optional<int64_t> storageElementSize, std::optional<int64_t> swizzlingKey,
+        std::optional<uint64_t> descriptor) {
     return createTensorRef(name, type, section, ArrayRef({sectionIndex}), byteOffset, sparsityMapOffset,
-                           storageElementOffset, storageElementSize, swizzlingKey);
+                           storageElementOffset, storageElementSize, swizzlingKey, descriptor);
 }
 
 VPUMI37XX::BlobWriter::TensorReference vpux::VPUMI37XX::BlobWriter::createTensorRef(
         mlir::Value val, StringRef name, VPURT::BufferSection section, ArrayRef<int64_t> sectionIndex,
         int64_t byteOffset, std::optional<int64_t> sparsityMapOffset, std::optional<int64_t> storageElementOffset,
-        std::optional<int64_t> storageElementSize, std::optional<int64_t> swizzlingKey) {
+        std::optional<int64_t> storageElementSize, std::optional<int64_t> swizzlingKey,
+        std::optional<uint64_t> descriptor) {
     VPUX_THROW_UNLESS(_tensors.count(val) == 0, "Value '{0}' was already serialized", val.getLoc());
     const auto ref =
             createTensorRef(name, val.getType().cast<vpux::NDTypeInterface>(), section, sectionIndex, byteOffset,
-                            sparsityMapOffset, storageElementOffset, storageElementSize, swizzlingKey);
+                            sparsityMapOffset, storageElementOffset, storageElementSize, swizzlingKey, descriptor);
     _tensors.insert({val, ref});
     return ref;
 }
@@ -219,9 +227,10 @@ VPUMI37XX::BlobWriter::TensorReference vpux::VPUMI37XX::BlobWriter::createTensor
 VPUMI37XX::BlobWriter::TensorReference vpux::VPUMI37XX::BlobWriter::createTensorRef(
         mlir::Value val, StringRef name, VPURT::BufferSection section, int64_t sectionIndex, int64_t byteOffset,
         std::optional<int64_t> sparsityMapOffset, std::optional<int64_t> storageElementOffset,
-        std::optional<int64_t> storageElementSize, std::optional<int64_t> swizzlingKey) {
+        std::optional<int64_t> storageElementSize, std::optional<int64_t> swizzlingKey,
+        std::optional<uint64_t> descriptor) {
     return createTensorRef(val, name, section, ArrayRef({sectionIndex}), byteOffset, sparsityMapOffset,
-                           storageElementOffset, storageElementSize, swizzlingKey);
+                           storageElementOffset, storageElementSize, swizzlingKey, descriptor);
 }
 
 VPUMI37XX::BlobWriter::Vector<uint32_t> vpux::VPUMI37XX::BlobWriter::createDims(ShapeRef shape) {

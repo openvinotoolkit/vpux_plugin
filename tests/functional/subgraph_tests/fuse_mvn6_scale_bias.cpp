@@ -132,7 +132,6 @@ TEST_P(FuseMvn6ScaleBiasTestCommon, NPU4000) {
     setDefaultHardwareMode();
     run(Platform::NPU4000);
 }
-
 }  // namespace ov::test::subgraph
 
 using namespace ov::test::subgraph;

@@ -81,10 +81,7 @@ public:
 mlir::LogicalResult ConvertConstToAttr::matchAndRewrite(IE::EmbeddingBagOffsetsSumOp embeddingBagOffsetsSumOp,
                                                         mlir::PatternRewriter& rewriter) const {
     const auto arch = VPU::getArch(embeddingBagOffsetsSumOp);
-    const std::set<VPU::ArchKind> compatibleTargets = {
-            VPU::ArchKind::NPU37XX,
-            VPU::ArchKind::NPU40XX,
-    };
+    const std::set<VPU::ArchKind> compatibleTargets = {VPU::ArchKind::NPU37XX, VPU::ArchKind::NPU40XX};
     if (compatibleTargets.count(arch) <= 0) {
         return mlir::failure();
     }

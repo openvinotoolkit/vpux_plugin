@@ -109,7 +109,7 @@ module @DPURelocTest {
 // CHECK:           ELF.Reloc
 // CHECK-SAME:        offset({{[0-9]+}})
 // CHECK-SAME:        sourceSym(@symtab::@elfsym.builtin.tasks.DPUInvariant0)
-// CHECK-SAME:        relocType(<R_VPU_16_LSB_17_RSHIFT_5_LSHIFT_16>)
+// CHECK-SAME:        relocType(<R_VPU_16_LSB_21_RSHIFT_5_LSHIFT_16>)
 // CHECK-SAME:        addend({{[0-9]+}})
 
 // CHECK:       ELF.CreateRelocationSection @rela.text.variants.symtab
@@ -127,14 +127,14 @@ module @DPURelocTest {
 // CHECK:           ELF.Reloc
 // CHECK-SAME:        offset({{[0-9]+}})
 // CHECK-SAME:        sourceSym(@symtab::@elfsym.builtin.tasks.DPUInvariant0)
-// CHECK-SAME:        relocType(<R_VPU_16_LSB_17_RSHIFT_5>)
+// CHECK-SAME:        relocType(<R_VPU_16_LSB_21_RSHIFT_5>)
 // CHECK-SAME:        addend({{[0-9]+}})
 // relocation for preemtion workaround:
 //      dpu_cfg: cfg_Reserved_4, cfg_Reserved_5, cfg_Reserved_6
 // CHECK:           ELF.Reloc
 // CHECK-SAME:        offset({{[0-9]+}})
 // CHECK-SAME:        sourceSym(@symtab::@elfsym.builtin.tasks.DPUVariant0)
-// CHECK-SAME:        relocType(<R_VPU_16_LSB_17_RSHIFT_5_LSHIFT_CUSTOM>)
+// CHECK-SAME:        relocType(<R_VPU_16_LSB_21_RSHIFT_5_LSHIFT_CUSTOM>)
 // CHECK-SAME:        addend({{[0-9]+}})
 
 // -----
@@ -207,5 +207,5 @@ module @DPULLRelocTest {
 // CHECK-SAME:    symtab(@symtab)
 // CHECK:       ELF.Reloc offset(28)
 // CHECK-SAME:    sourceSym(@symtab::@elfsym.text.variants)
-// CHECK-SAME:    relocType(<R_VPU_16_LSB_17_RSHIFT_5_LSHIFT_16>)
+// CHECK-SAME:    relocType(<R_VPU_16_LSB_21_RSHIFT_5_LSHIFT_16>)
 // CHECK-SAME:    addend(0)

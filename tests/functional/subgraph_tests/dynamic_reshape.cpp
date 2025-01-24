@@ -87,8 +87,12 @@ public:
 
 TEST_P(NPUDynamicReshapeTest, NPU3720_HW_TestKindSubgraph) {
     setDefaultHardwareMode();
-    setMLIRCompilerType();
     run(Platform::NPU3720);
+}
+
+TEST_P(NPUDynamicReshapeTest, NPU4000_HW_TestKindSubgraph) {
+    setDefaultHardwareMode();
+    run(Platform::NPU4000);
 }
 
 const std::vector<std::vector<int64_t>> concatValues = {

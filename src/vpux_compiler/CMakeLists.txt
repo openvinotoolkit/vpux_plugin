@@ -58,17 +58,22 @@ execute_process(
     WORKING_DIRECTORY "${IE_MAIN_VPUX_PLUGIN_SOURCE_DIR}/thirdparty/vpucostmodel")
 
 vpux_embed_bin_file(
-    SOURCE_FILE "${IE_MAIN_VPUX_PLUGIN_SOURCE_DIR}/thirdparty/vpucostmodel/models/vpu_2_0.vpunn"
-    HEADER_FILE "${PROJECT_BINARY_DIR}/${gen_base_dst_include_dir}/dialect/VPU/generated/cost_model_data_2_0.hpp.inc"
-    VARIABLE_NAME "COST_MODEL_2_0")
-vpux_embed_bin_file(
-    SOURCE_FILE "${IE_MAIN_VPUX_PLUGIN_SOURCE_DIR}/thirdparty/vpucostmodel/models/vpu_2_7.vpunn"
+    SOURCE_FILE "${IE_MAIN_VPUX_PLUGIN_SOURCE_DIR}/thirdparty/vpucostmodel/models/vpu_2_7_159.vpunn"
     HEADER_FILE "${PROJECT_BINARY_DIR}/${gen_base_dst_include_dir}/dialect/VPU/generated/cost_model_data_2_7.hpp.inc"
     VARIABLE_NAME "COST_MODEL_2_7")
 vpux_embed_bin_file(
-    SOURCE_FILE "${IE_MAIN_VPUX_PLUGIN_SOURCE_DIR}/thirdparty/vpucostmodel/models/vpu_2_7.fast.vpunn"
+    SOURCE_FILE "${IE_MAIN_VPUX_PLUGIN_SOURCE_DIR}/thirdparty/vpucostmodel/models/vpu_2_7_159.fast.vpunn"
     HEADER_FILE "${PROJECT_BINARY_DIR}/${gen_base_dst_include_dir}/dialect/VPU/generated/cost_model_data_2_7_fast.hpp.inc"
     VARIABLE_NAME "COST_MODEL_2_7_FAST")
+
+vpux_embed_bin_file(
+    SOURCE_FILE "${IE_MAIN_VPUX_PLUGIN_SOURCE_DIR}/thirdparty/vpucostmodel/models/vpu_40_159_strict.vpunn"
+    HEADER_FILE "${PROJECT_BINARY_DIR}/${gen_base_dst_include_dir}/dialect/VPU/generated/cost_model_data_4_0.hpp.inc"
+    VARIABLE_NAME "COST_MODEL_4_0")
+vpux_embed_bin_file(
+    SOURCE_FILE "${IE_MAIN_VPUX_PLUGIN_SOURCE_DIR}/thirdparty/vpucostmodel/models/vpu_40_159_strict.fast.vpunn"
+    HEADER_FILE "${PROJECT_BINARY_DIR}/${gen_base_dst_include_dir}/dialect/VPU/generated/cost_model_data_4_0_fast.hpp.inc"
+    VARIABLE_NAME "COST_MODEL_4_0_FAST")
 
 #
 # OBJECT target
@@ -107,26 +112,13 @@ include_directories(
     $<TARGET_PROPERTY:npu_elf,INTERFACE_INCLUDE_DIRECTORIES>
 )
 
-set_property(GLOBAL PROPERTY VPU_SRC_LIB_LIST)
-function(add_src_target name)
-    get_property(lib_list GLOBAL PROPERTY VPU_SRC_LIB_LIST)
-    # Link libs via $<BUILD_INTERFACE> to hide them from ov_add_api_validator_post_build_step
-    # as recursive dependency scan there is hanging on the compiler (E#116670)
-    # Note the dependent targets will not be checked during installation!
-    list(APPEND lib_list $<BUILD_INTERFACE:${name}>)
-    set_property(GLOBAL PROPERTY VPU_SRC_LIB_LIST "${lib_list}")
-    # Ensure generated headers are built before compiler code
-    # elf/schema.hpp
-    add_dependencies(${name} npu_mlir_compiler_schema)
-    # vpunn_generated.h
-    add_dependencies(${name} cpp_schema)
-endfunction()
+include(cmake/add_npu_library.cmake)
 
 set(VPUX_COMPILER_VERSION_FILE ${CMAKE_CURRENT_SOURCE_DIR}/src/compiler_version.cpp)
 
 # Construct source files after BITCOMPACTOR configuration
 add_subdirectory(src)
-get_property(VPU_SRC_LIBS GLOBAL PROPERTY VPU_SRC_LIB_LIST)
+get_property(VPU_SRC_LIBS GLOBAL PROPERTY NPU_SRC_LIB_LIST)
 
 add_library(mlir-dependencies INTERFACE)
 

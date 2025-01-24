@@ -57,7 +57,7 @@ TEST(MLIR_VPU_Sparsity, NCEZMajorConvSparsitySupport) {
             func.func @main(%arg0: tensor<1x16x16x16xf16, {order = #NHWC}>, %wt: tensor<16x1x1x4xsi32>) -> tensor<1x16x16x16xf16, {order = #NHWC}> {
                 %weights = const.Declare tensor<16x16x1x1xf16, {order = #NHWC}> = dense<1.> : tensor<16x16x1x1xf16>, [#const.Reorder<#NHWC>]
                 %1 = VPU.NCE.Convolution(%arg0, %weights, %wt) {
-                        opaque_ppe = #VPU.PPEStub<>,
+                        ppe = #VPU.PPEStub<>,
                         pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
                         rawFilterShape = [16, 16, 1, 1],
                         strides = [1, 1]
@@ -76,7 +76,7 @@ TEST(MLIR_VPU_Sparsity, NCEEltwiseSparsitySupport) {
 
         module @test {
             func.func @main(%arg0: tensor<1x16x16x16xf16, {order = #NHWC}>) -> tensor<1x16x16x16xf16, {order = #NHWC}> {
-                %0 = VPU.NCE.Eltwise(%arg0, %arg0) {op_type = #VPU.eltwise_type<ADD>, opaque_ppe = #VPU.PPEStub<>} -> tensor<1x16x16x16xf16, {order = #NHWC}>
+                %0 = VPU.NCE.Eltwise(%arg0, %arg0) {op_type = #VPU.eltwise_type<ADD>, ppe = #VPU.PPEStub<>} -> tensor<1x16x16x16xf16, {order = #NHWC}>
                 return %0 : tensor<1x16x16x16xf16, {order = #NHWC}>
             }
         }
@@ -96,7 +96,7 @@ TEST(MLIR_VPU_Sparsity, NCEDepthconvSparsitySupport) {
                     dense<1> : tensor<16x1x1x4xsi32>
 
                 %0 = VPU.NCE.DepthConvolution(%arg0, %cst0, %cst1) {
-                        opaque_ppe = #VPU.PPEStub<>,
+                        ppe = #VPU.PPEStub<>,
                         pad = #VPU.Padding<left = 0 , right = 0, top = 0, bottom = 0>,
                         rawFilterShape = [16, 1, 4, 8],
                         strides = [1, 1]
@@ -116,7 +116,7 @@ TEST(MLIR_VPU_Sparsity, NCEMaxpoolSparsitySupport) {
             func.func @main(%arg0: tensor<16x16x16x16xf16, {order = #NHWC}>) -> tensor<16x16x16x16xf16, {order = #NHWC}> {
                 %0 = VPU.MaxPool(%arg0) {
                     kernel_size = [3, 3],
-                    opaque_ppe = #VPU.PPEStub<>,
+                    ppe = #VPU.PPEStub<>,
                     pads_begin = [1, 1],
                     pads_end = [1, 1],
                     rounding_type = #IE.rounding_type<FLOOR>,
@@ -137,7 +137,7 @@ TEST(MLIR_VPU_Sparsity, NCEAvgpoolSparsitySupport) {
             func.func @main(%arg0: tensor<1x16x4x4xf16, {order = #NHWC}>) -> tensor<1x16x4x4xf16, {order = #NHWC}> {
                 %0 = VPU.NCE.AveragePool(%arg0) {
                         kernel_size = [3, 3],
-                        opaque_ppe = #VPU.PPEStub<>,
+                        ppe = #VPU.PPEStub<>,
                         pad = #VPU.Padding<left = 1 , right = 1, top = 1, bottom = 1>,
                         strides = [1, 1]
                     } -> tensor<1x16x4x4xf16, {order = #NHWC}>

@@ -80,7 +80,8 @@ mlir::LogicalResult SwapWithTranspose::matchAndRewrite(IE::TransposeOp originOp,
     rewriter.replaceOpWithNewOp<IE::PadOp>(originOp, newTranspose, nullptr, nullptr, nullptr,
                                            getIntArrayAttr(originOp.getContext(), ArrayRef(beginTransposed)),
                                            getIntArrayAttr(originOp.getContext(), ArrayRef(endTransposed)),
-                                           padLayer.getPadValueAttrAttr(), padLayer.getMode());
+                                           padLayer.getPadValueAttrAttr(), padLayer.getMode(),
+                                           padLayer.getOutputChannelsAttr());
 
     return mlir::success();
 }

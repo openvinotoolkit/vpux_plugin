@@ -3,22 +3,32 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+#include <llvm/ADT/SmallVector.h>
+#include <mlir/IR/BuiltinAttributes.h>
+#include <cstdint>
+#include "vpux/compiler/core/layers.hpp"
+#include "vpux/compiler/dialect/IE/utils/roll_utils.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPU/IR/se_attributes.hpp"
+#include "vpux/compiler/dialect/VPU/interfaces/nce_op_interfaces.hpp"
 #include "vpux/compiler/dialect/VPU/transforms/factories/sparsity_constraint.hpp"
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
+#include "vpux/compiler/dialect/VPU/utils/auto_padding_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/const_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/conv_utils.hpp"
+#include "vpux/compiler/dialect/VPU/utils/distributed_tensor_utils.hpp"
+#include "vpux/compiler/dialect/VPU/utils/mpe_engine_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_interpolate_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/ppe_version_config.hpp"
 #include "vpux/compiler/dialect/VPU/utils/se_padding_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/se_roll_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/sparsity_utils.hpp"
-#include "vpux/compiler/utils/VPU/ppe_utils.hpp"
+#include "vpux/compiler/utils/analysis.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
-
-#include "vpux/compiler/dialect/IE/utils/roll_utils.hpp"
 #include "vpux/compiler/utils/loop.hpp"
+#include "vpux/compiler/utils/rewriter.hpp"
+#include "vpux/utils/core/error.hpp"
+#include "vpux/utils/core/range.hpp"
 
 using namespace vpux;
 
@@ -32,12 +42,27 @@ mlir::Value createWeightsConstantImpl(vpux::NDTypeInterface inputType, float wei
 
     mlir::Type elemType = mlir::Float16Type::get(ctx);
     const auto inputElemType = inputType.getElementType();
-    if (auto qInputElemType = inputElemType.dyn_cast<mlir::quant::QuantizedType>()) {
-        double quantScale = static_cast<double>(weightsValue);
+    if (const auto qInputElemType = mlir::dyn_cast<mlir::quant::QuantizedType>(inputElemType)) {
+        // The weightsValue might not be representable on quantized type, thus the weights tensor is populated with 1's
+        // and later scaled (under high-precision) to obtain the desired weightsValue.
+        const auto quantScale = static_cast<double>(weightsValue);
         weightsValue = 1.0f;
-        elemType = mlir::quant::UniformQuantizedType::get(
-                /*flags=*/0, /*storageType=*/getUInt8Type(ctx), /*expressedType=*/mlir::Float16Type::get(ctx),
-                /*scale=*/quantScale, /*zeroPoint=*/0, /*storageTypeMin=*/0, /*storageTypeMax=*/255);
+
+        if (vpux::isFloat8Quantized(qInputElemType)) {
+            elemType = mlir::quant::UniformQuantizedType::get(
+                    /*flags=*/0, /*storageType=*/qInputElemType.getStorageType(),
+                    /*expressedType=*/mlir::Float16Type::get(ctx),
+                    /*scale=*/quantScale, /*zeroPoint=*/0, /*storageTypeMin=*/qInputElemType.getStorageTypeMin(),
+                    /*storageTypeMax=*/qInputElemType.getStorageTypeMax());
+
+        } else if (qInputElemType.getStorageType().isInteger(8)) {
+            elemType = mlir::quant::UniformQuantizedType::get(
+                    /*flags=*/0, /*storageType=*/getUInt8Type(ctx), /*expressedType=*/mlir::Float16Type::get(ctx),
+                    /*scale=*/quantScale, /*zeroPoint=*/0, /*storageTypeMin=*/0, /*storageTypeMax=*/255);
+
+        } else {
+            VPUX_THROW("Unsupported quantized storage type: {0}", qInputElemType.getStorageType());
+        }
     }
     const auto tensorAttr = vpux::getTensorAttr(ctx, DimsOrder::OYXI, nullptr);
     const auto weightsType =
@@ -56,20 +81,21 @@ mlir::Value createWeightsConstantImpl(vpux::NDTypeInterface inputType, float wei
     });
 
     const auto dataStorageType = mlir::RankedTensorType::get(weightShape.raw(), mlir::Float32Type::get(ctx));
-    const auto dataAttr = mlir::DenseElementsAttr::get(dataStorageType, ArrayRef(content));
+    const auto dataAttr = Const::createConstContent(dataStorageType, ArrayRef(content));
 
-    auto contentAttrSetup = Const::ContentAttr::transform(dataAttr);
+    Const::ContentSetup contentAttrSetup(dataStorageType);
 
-    if (auto qElemType = elemType.dyn_cast<mlir::quant::QuantizedType>()) {
-        contentAttrSetup = contentAttrSetup.castElemType(getUInt8Type(ctx)).quantCast(qElemType);
-    } else if (elemType.isa<mlir::Float16Type>()) {
+    if (const auto qElemType = mlir::dyn_cast<mlir::quant::QuantizedType>(elemType)) {
+        contentAttrSetup = contentAttrSetup.castElemType(qElemType);
+    } else if (mlir::isa<mlir::Float16Type>(elemType)) {
         contentAttrSetup = contentAttrSetup.castElemType(mlir::Float16Type::get(ctx));
     }
     if (order != DimsOrder::fromNumDims(weightShape.size())) {
         contentAttrSetup = contentAttrSetup.reorder(order);
     }
 
-    auto weightsConstOp = rewriter.create<Const::DeclareOp>(loc, weightsType, contentAttrSetup.get());
+    auto weightsConstOp = rewriter.create<Const::DeclareOp>(
+            loc, weightsType, Const::ContentAttr::get(dataAttr, std::move(contentAttrSetup)));
     return weightsConstOp.getOutput();
 }
 
@@ -77,7 +103,8 @@ mlir::Value convertOpToConv(mlir::Operation* origOp, mlir::Value weights, mlir::
                             mlir::PatternRewriter& rewriter) {
     const auto outputType = origOp->getResult(0).getType().cast<vpux::NDTypeInterface>();
     const auto OC = outputType.getShape()[Dims4D::Act::C];
-    const auto ppeOpaqueAttr = VPU::PpeVersionConfig::retrievePPEAttribute(origOp);
+    const auto ppeAttr = VPU::PpeVersionConfig::retrievePPEAttribute(origOp);
+    const auto mpeEngineAttr = VPU::MPEEngineConfig::retrieveMPEEngineAttribute(origOp, arch);
 
     auto ppeConverter = VPU::NCESparsity::getPPEConverterCb(arch);
     auto biasConverter = VPU::NCESparsity::getBiasConverterCb(arch);
@@ -90,11 +117,14 @@ mlir::Value convertOpToConv(mlir::Operation* origOp, mlir::Value weights, mlir::
     const auto padAttr = VPU::getPaddingAttr(origOp->getContext(), PadInfo(0, 0, 0, 0));
     const auto rawFilterShape = getIntArrayAttr(rewriter, getShape(weights));
 
+    auto outputChannelsAttr = origOp->hasAttr(VPU::outChanAttrName)
+                                      ? origOp->getAttr(VPU::outChanAttrName).cast<mlir::IntegerAttr>()
+                                      : nullptr;
+
     return rewriter
             .create<VPU::NCEConvolutionOp>(origOp->getLoc(), outputType, sparseInput, weights, weightsTable,
-                                           /*instructionListTable=*/nullptr, stridesAttr, padAttr, ppeOpaqueAttr,
-                                           rawFilterShape,
-                                           /*multi_cluster_strategyAttr=*/nullptr)
+                                           stridesAttr, padAttr, ppeAttr, mpeEngineAttr, rawFilterShape,
+                                           /*multi_cluster_strategyAttr=*/nullptr, outputChannelsAttr)
             .getResult();
 }
 
@@ -170,14 +200,12 @@ mlir::Value InterpolateToNCE::createSparseInput(VPU::InterpolateOp origOp, mlir:
     smShape[Dims4D::Act::C.ind()] = seSize * seDepth;
     auto smContentElemType = mlir::IntegerType::get(ctx, 8);
     auto smContentType = mlir::RankedTensorType::get(smShape, smContentElemType);
-    auto smElemCount =
-            std::accumulate(smShape.begin(), smShape.end(), static_cast<int64_t>(1), std::multiplies<int64_t>());
-    SmallVector<uint8_t> smContent(smElemCount, 1);
-    const auto baseAttr = mlir::DenseElementsAttr::get(smContentType, ArrayRef(smContent));
+    const auto baseAttr = Const::createConstContent(smContentType, ArrayRef(uint8_t(1)));
     auto tensorAttr = vpux::getTensorAttr(ctx, inputDimsOrder, nullptr);
     auto smElemType = mlir::IntegerType::get(ctx, 1);
     auto smType = mlir::RankedTensorType::get(smShape, smElemType, tensorAttr);
-    auto contentAttr = Const::ContentAttr::transform(baseAttr).reorder(inputDimsOrder).castElemType(smElemType).get();
+    auto contentAttr = Const::ContentAttr::get(
+            baseAttr, Const::ContentSetup(smContentType).reorder(inputDimsOrder).castElemType(smElemType));
     auto smConstOp = rewriter.create<Const::DeclareOp>(origOp.getLoc(), smType, std::move(contentAttr));
 
     auto groupOp = rewriter.create<VPU::GroupSparseTensorOp>(origOp->getLoc(), origOp.getInput(), smConstOp.getOutput(),
@@ -215,7 +243,7 @@ mlir::LogicalResult InterpolateToNCE::matchAndRewrite(VPU::InterpolateOp origOp,
     const auto weightsShape = weights.getType().cast<vpux::NDTypeInterface>().getShape();
     const auto rawFilterShape = getIntArrayAttr(rewriter, weightsShape);
 
-    const auto ppeOpaqueAttr = VPU::PpeVersionConfig::retrievePPEAttribute(origOp);
+    const auto ppeAttr = VPU::PpeVersionConfig::retrievePPEAttribute(origOp);
 
     const auto OC = outputType.getShape()[Dims4D::Act::C];
     auto ppeConverter = VPU::NCESparsity::getPPEConverterCb(_arch);
@@ -227,7 +255,7 @@ mlir::LogicalResult InterpolateToNCE::matchAndRewrite(VPU::InterpolateOp origOp,
     const auto strides = VPU::getNCEInterpolateStrides(scales, modeAttr, origOp.getAttr().getCoordMode());
     auto stridesAttr = getIntArrayAttr(rewriter, strides);
     auto nceOp = rewriter.create<VPU::NCEInterpolateOp>(origOp->getLoc(), outputType, sparseInput, weights,
-                                                        weightsTable, stridesAttr, ppeOpaqueAttr, rawFilterShape,
+                                                        weightsTable, stridesAttr, ppeAttr, rawFilterShape,
                                                         /*multi_cluster_strategyAttr=*/nullptr, modeAttr);
 
     rewriter.replaceOp(origOp, nceOp.getOutput());
@@ -349,11 +377,12 @@ mlir::Value TransposedConvolutionToNCE::createSparseInput(VPU::TransposedConvolu
     auto smContentElemType = mlir::IntegerType::get(ctx, 8);
     auto smContentType = mlir::RankedTensorType::get(smShape, smContentElemType);
     const auto smContent = createSparsityMapContent(smShape, padding, factorH, factorW);
-    const auto baseAttr = mlir::DenseElementsAttr::get(smContentType, ArrayRef(smContent));
+    const auto baseAttr = Const::createConstContent(smContentType, ArrayRef(smContent));
     auto tensorAttr = vpux::getTensorAttr(ctx, inputDimsOrder, nullptr);
     auto smElemType = mlir::IntegerType::get(ctx, 1);
     auto smType = mlir::RankedTensorType::get(smShape, smElemType, tensorAttr);
-    auto contentAttr = Const::ContentAttr::transform(baseAttr).reorder(inputDimsOrder).castElemType(smElemType).get();
+    auto contentAttr = Const::ContentAttr::get(
+            baseAttr, Const::ContentSetup(smContentType).reorder(inputDimsOrder).castElemType(smElemType));
     auto smConstOp = rewriter.create<Const::DeclareOp>(origOp->getLoc(), smType, std::move(contentAttr));
 
     auto groupOp = rewriter.create<VPU::GroupSparseTensorOp>(origOp->getLoc(), origOp.getInput(), smConstOp.getOutput(),
@@ -404,7 +433,8 @@ mlir::LogicalResult TransposedConvolutionToNCE::matchAndRewrite(VPU::TransposedC
         bias = biasConstOp.getContentAttr();
     }
 
-    const auto ppeOpaqueAttr = VPU::PpeVersionConfig::retrievePPEAttribute(origOp);
+    const auto ppeAttr = VPU::PpeVersionConfig::retrievePPEAttribute(origOp);
+    const auto mpeEngineAttr = VPU::MPEEngineConfig::retrieveMPEEngineAttribute(origOp, _arch);
     const auto ppeConverter = VPU::NCESparsity::getPPEConverterCb(_arch);
     const auto biasConverter = VPU::NCESparsity::getBiasConverterCb(_arch);
     const auto weightsTableVec = VPU::createWeightsTableData(origOp.getInput(), origOp.getOutput(), weights, bias, OC,
@@ -412,9 +442,9 @@ mlir::LogicalResult TransposedConvolutionToNCE::matchAndRewrite(VPU::TransposedC
     const auto weightsTable = VPU::createWeightsTableTensor(rewriter, origOp->getLoc(), weightsTableVec);
 
     auto nceOp = rewriter.create<VPU::NCEConvolutionOp>(
-            origOp->getLoc(), outputType, sparseInput, weights, weightsTable,
-            /*instructionListTable=*/nullptr, stridesAttr, padAttr, ppeOpaqueAttr, rawFilterShape,
-            /*multi_cluster_strategyAttr=*/nullptr);
+            origOp->getLoc(), outputType, sparseInput, weights, weightsTable, stridesAttr, padAttr, ppeAttr,
+            mpeEngineAttr, rawFilterShape,
+            /*multi_cluster_strategyAttr=*/nullptr, origOp.getOutputChannelsAttr());
 
     // In case the outputShape is specified, create sliceOp for crop
     const auto nceOutputShape = nceOp.getOutput().getType().cast<vpux::NDTypeInterface>().getShape();
@@ -440,6 +470,219 @@ mlir::LogicalResult TransposedConvolutionToNCE::matchAndRewrite(VPU::TransposedC
     }
 
     rewriter.replaceOp(origOp, nceOp.getOutput());
+    return mlir::success();
+}
+
+//
+// DilatedConvolutionToNCE
+//
+
+class DilatedConvolutionToNCE final : public mlir::OpRewritePattern<VPU::GroupConvolutionOp> {
+public:
+    DilatedConvolutionToNCE(mlir::MLIRContext* ctx, VPU::ArchKind arch, Logger log)
+            : mlir::OpRewritePattern<VPU::GroupConvolutionOp>(ctx), _arch(arch), _log(log) {
+        setDebugName("DilatedConvolutionToNCE");
+    }
+
+public:
+    mlir::LogicalResult matchAndRewrite(VPU::GroupConvolutionOp origOp, mlir::PatternRewriter& rewriter) const final;
+
+private:
+    SmallVector<uint8_t> createSparsityMapContent(ArrayRef<int64_t> shape) const;
+    mlir::Value createSparseInput(Logger log, VPU::GroupConvolutionOp origOp, mlir::PatternRewriter& rewriter,
+                                  const int64_t row, const int64_t column) const;
+
+    VPU::ArchKind _arch;
+    Logger _log;
+};
+
+SmallVector<uint8_t> DilatedConvolutionToNCE::createSparsityMapContent(ArrayRef<int64_t> shape) const {
+    const auto elemCount = std::accumulate(shape.begin(), shape.end(), int64_t(1), std::multiplies<int64_t>());
+
+    SmallVector<uint8_t> content(elemCount, 1);
+    return content;
+}
+
+// Creates a sparse input containing a sparsity map and a storage element table.
+mlir::Value DilatedConvolutionToNCE::createSparseInput(Logger log, VPU::GroupConvolutionOp origOp,
+                                                       mlir::PatternRewriter& rewriter, int64_t x, int64_t y) const {
+    log.trace("DilatedConvolutionToNCE::createSparseInput");
+
+    auto ctx = origOp.getContext();
+
+    auto inputType = mlir::cast<vpux::NDTypeInterface>(origOp.getInput().getType());
+    auto filterType = mlir::cast<vpux::NDTypeInterface>(origOp.getFilter().getType());
+
+    const auto inputShape = inputType.getShape();
+    const auto inputDimsOrder = inputType.getDimsOrder();
+    const auto filterShape = filterType.getShape();
+
+    auto [dilateY, dilateX] = VPU::DilationUtils::extractDilationFactors(origOp.getDilations());
+    auto [strideY, strideX] = VPU::DilationUtils::extractDilationStrides(origOp.getStrides());
+
+    strideX = strideX % dilateX == 0 ? strideX / dilateX : strideX;
+    strideY = strideY % dilateY == 0 ? strideY / dilateY : strideY;
+
+    auto strides = getIntArrayAttr(ctx, SmallVector<int64_t>{strideX, strideY});
+
+    auto kernelSizeAttr = getIntArrayAttr(
+            ctx, SmallVector<int64_t>{filterShape[Dims4D::Filter::KY], filterShape[Dims4D::Filter::KX]});
+
+    auto dataOffset = getIntArrayAttr(ctx, SmallVector<int64_t>{0, 0, y, x});
+
+    const auto rowCount = inputShape[Dims4D::Act::H];
+    const auto colCount = inputShape[Dims4D::Act::W];
+    const auto dataColCount = (colCount - x + dilateX - 1) / dilateX;
+    const auto dataRowCount = (rowCount - y + dilateY - 1) / dilateY;
+    const auto resultSizes =
+            SmallVector<int64_t>{inputShape[Dims4D::Act::N], inputShape[Dims4D::Act::C], dataRowCount, dataColCount};
+
+    auto dataSizes = SmallVector<int64_t>{inputShape[Dims4D::Act::N], inputShape[Dims4D::Act::C],
+                                          inputShape[Dims4D::Act::H] - y, inputShape[Dims4D::Act::W] - x};
+
+    auto seDilatedConvAttr = VPU::SEDilatedConvAttr::get(ctx, origOp.getDilations(), strides, kernelSizeAttr,
+                                                         dataOffset, getIntArrayAttr(ctx, dataSizes),
+                                                         /* offsets = */ nullptr, /* sizes = */ nullptr);
+    auto seAttr = mlir::cast<VPU::SEAttr>(seDilatedConvAttr);
+
+    // Create the StorageElementTable operation
+    const auto arch = VPU::getArch(origOp);
+    const auto sparsityConstraint = VPU::getSparsityConstraint(arch);
+
+    // Depthwise limitation WL size is limited by 64
+    constexpr int64_t depthwiseWorkloadLimit = 64;
+
+    const int64_t seSize = VPU::getSESize(inputShape[Dims4D::Act::C], sparsityConstraint, depthwiseWorkloadLimit);
+
+    const int64_t seDepth = inputShape[Dims4D::Act::C] / seSize;
+
+    auto seTableOp = rewriter.create<VPU::StorageElementTableOp>(origOp->getLoc(), inputShape.raw(),
+                                                                 inputType.getElementType(), seSize, seDepth, seAttr);
+
+    // Create the sparsity map constant
+    auto smContentElemType = mlir::IntegerType::get(ctx, 8);
+
+    auto smContentType = mlir::RankedTensorType::get(resultSizes, smContentElemType);
+    auto smContent = createSparsityMapContent(resultSizes);
+
+    auto baseAttr = mlir::DenseElementsAttr::get(smContentType, ArrayRef(smContent));
+    auto tensorAttr = vpux::getTensorAttr(ctx, inputDimsOrder, nullptr);
+
+    auto smElemType = mlir::IntegerType::get(ctx, 1);
+    auto smType = mlir::RankedTensorType::get(resultSizes, smElemType, tensorAttr);
+
+    auto contentAttr =
+            Const::ContentAttr::get(baseAttr).transform().reorder(inputDimsOrder).castElemType(smElemType).get();
+    auto smConstOp = rewriter.create<Const::DeclareOp>(origOp->getLoc(), smType, std::move(contentAttr));
+    auto groupOp = rewriter.create<VPU::GroupSparseTensorOp>(origOp->getLoc(), origOp.getInput(), smConstOp.getResult(),
+                                                             seTableOp.getOutput(), seAttr);
+
+    return groupOp.getOutput();
+}
+
+mlir::LogicalResult DilatedConvolutionToNCE::matchAndRewrite(VPU::GroupConvolutionOp origOp,
+                                                             mlir::PatternRewriter& rewriter) const {
+    auto ctx = origOp->getContext();
+
+    _log.trace("[{0}] Got '{1}' at '{2}'", getDebugName(), origOp->getName(), origOp->getLoc());
+    auto innerLog = _log.nest();
+
+    const auto outputType = mlir::cast<vpux::NDTypeInterface>(origOp.getOutput().getType());
+
+    const auto outputShape = outputType.getShape();
+    const auto outputChannels = outputShape[Dims4D::Act::C];
+
+    const auto filter = origOp.getFilter();
+    const auto filterType = mlir::cast<vpux::NDTypeInterface>(filter.getType());
+    const auto filterShape = filterType.getShape();
+
+    const auto rawFilterShape = getIntArrayAttr(rewriter, filterShape);
+
+    auto [dilateY, dilateX] = VPU::DilationUtils::extractDilationFactors(origOp.getDilations());
+    auto [strideY, strideX] = VPU::DilationUtils::extractDilationStrides(origOp.getStrides());
+
+    const auto subConvCountX = dilateX;
+    const auto subConvCountY = dilateY;
+
+    strideX = strideX % dilateX == 0 ? strideX / dilateX : strideX;
+    strideY = strideY % dilateY == 0 ? strideY / dilateY : strideY;
+
+    auto strides = getIntArrayAttr(ctx, SmallVector<int64_t>{strideY, strideX});
+
+    auto padStart = Shape(parseIntArrayAttr<int64_t>(origOp.getPadsBegin()));
+    auto padEnd = Shape(parseIntArrayAttr<int64_t>(origOp.getPadsEnd()));
+
+    padStart[Dims4D::PadsBegin::Top] = std::max<int64_t>(padStart[Dims4D::PadsBegin::Top] - dilateY + 1, 0l);
+    padStart[Dims4D::PadsBegin::Left] = std::max<int64_t>(padStart[Dims4D::PadsBegin::Left] - dilateX + 1, 0l);
+    padEnd[Dims4D::PadsEnd::Bottom] = std::max<int64_t>(padEnd[Dims4D::PadsEnd::Bottom] - dilateY + 1, 0l);
+    padEnd[Dims4D::PadsEnd::Right] = std::max<int64_t>(padEnd[Dims4D::PadsEnd::Right] - dilateX + 1, 0l);
+
+    auto padding = PadInfo(padStart[Dims4D::PadsBegin::Left], padEnd[Dims4D::PadsEnd::Right],
+                           padStart[Dims4D::PadsBegin::Top], padEnd[Dims4D::PadsEnd::Bottom]);
+
+    auto padAttr = VPU::getPaddingAttr(getContext(), padding);
+
+    // Create weights table
+    Const::ContentAttr bias;
+
+    if (origOp.getBias() != nullptr) {
+        auto biasConstOp = origOp.getBias().getDefiningOp<Const::DeclareOp>();
+        VPUX_THROW_WHEN(biasConstOp == nullptr, "VPU::GroupConvolutionOp bias input is not constant");
+        bias = biasConstOp.getContentAttr();
+    }
+
+    const auto ppeOpaqueAttr = VPU::PpeVersionConfig::retrievePPEAttribute(origOp);
+
+    auto ppeConverter = VPU::NCESparsity::getPPEConverterCb(_arch);
+    auto biasConverter = VPU::NCESparsity::getBiasConverterCb(_arch);
+
+    auto alignedWeights = VPU::alignDepthWiseWeightsTensor(rewriter, origOp.getLoc(), filter);
+
+    const auto weightsTableVec =
+            VPU::createWeightsTableData(origOp.getInput(), origOp.getOutput(), alignedWeights, bias, outputChannels,
+                                        ppeConverter, biasConverter, /* constScale = */ nullptr);
+    const auto weightsTable = VPU::createWeightsTableTensor(rewriter, origOp->getLoc(), weightsTableVec);
+
+    // Generate sub-convolutions
+    SmallVector<mlir::Value> subConvolutions;
+    SmallVector<Shape> offsets;
+
+    int64_t outputOffsetX = 0;
+    int64_t outputOffsetY = 0;
+
+    auto subConvLog = innerLog.nest();
+    auto subConvOutputHeight{0};
+    for (auto y : irange(subConvCountY)) {
+        for (auto x : irange(subConvCountX)) {
+            // Create sub-convolution.
+            auto sparseInput = createSparseInput(subConvLog, origOp, rewriter, x, y);
+
+            auto nceDepthConvolutionOp = rewriter.create<VPU::NCEDepthConvolutionOp>(
+                    vpux::appendLoc(origOp->getLoc(), "_subconv_y_{0}_x_{1}", y, x), sparseInput, alignedWeights,
+                    weightsTable, strides, padAttr, ppeOpaqueAttr, rawFilterShape,
+                    /* multiClusterStrategyAttr = */ nullptr, origOp.getOutputChannelsAttr());
+            auto originalLayout = origOp.getResult().getType().cast<vpux::NDTypeInterface>().getDimsOrder();
+
+            auto convType = nceDepthConvolutionOp.getResult().getType().cast<vpux::NDTypeInterface>();
+            nceDepthConvolutionOp.getResult().setType(convType.changeDimsOrder(originalLayout));
+            auto outputShape = convType.getShape();
+            auto subConvOutputWidth = outputShape[Dims4D::Act::W];
+            subConvOutputHeight = outputShape[Dims4D::Act::H];
+            offsets.emplace_back(Shape{0, 0, outputOffsetY, outputOffsetX});
+
+            outputOffsetX += subConvOutputWidth;
+            subConvolutions.emplace_back(nceDepthConvolutionOp.getResult());
+        }
+
+        outputOffsetX = 0;
+        outputOffsetY += subConvOutputHeight;
+    }
+
+    // This concat produces inaccurate result, strided concat is being developed to interleave subconvolutions: E#87431
+    auto concatOp = rewriter.create<VPU::ConcatOp>(vpux::appendLoc(origOp->getLoc(), "_concat"),
+                                                   origOp.getOutput().getType(), mlir::ValueRange(subConvolutions),
+                                                   getIntArrayOfArray(rewriter.getContext(), offsets));
+    rewriter.replaceOp(origOp, concatOp.getResult());
     return mlir::success();
 }
 
@@ -532,11 +775,12 @@ mlir::Value PadToNCE::createSparseInput(VPU::PadOp origOp, mlir::PatternRewriter
     auto smContentElemType = mlir::IntegerType::get(ctx, 8);
     auto smContentType = mlir::RankedTensorType::get(smShape, smContentElemType);
     const auto smContent = createSparsityMapContent(padMode, smShape, padding);
-    const auto baseAttr = mlir::DenseElementsAttr::get(smContentType, ArrayRef(smContent));
+    const auto baseAttr = Const::createConstContent(smContentType, ArrayRef(smContent));
     auto tensorAttr = vpux::getTensorAttr(ctx, inputDimsOrder, nullptr);
     auto smElemType = mlir::IntegerType::get(ctx, 1);
     auto smType = mlir::RankedTensorType::get(smShape, smElemType, tensorAttr);
-    auto contentAttr = Const::ContentAttr::transform(baseAttr).reorder(inputDimsOrder).castElemType(smElemType).get();
+    auto contentAttr = Const::ContentAttr::get(
+            baseAttr, Const::ContentSetup(smContentType).reorder(inputDimsOrder).castElemType(smElemType));
     auto smConstOp = rewriter.create<Const::DeclareOp>(origOp->getLoc(), smType, std::move(contentAttr));
 
     auto groupOp = rewriter.create<VPU::GroupSparseTensorOp>(origOp->getLoc(), origOp.getInput(), smConstOp.getOutput(),
@@ -644,14 +888,12 @@ mlir::Value RollToNCE::createSparseInput(VPU::RollOp origOp, SmallVector<int64_t
     auto smContentElemType = mlir::IntegerType::get(ctx, 8);
     auto smContentType = mlir::RankedTensorType::get(smShape, smContentElemType);
 
-    const auto elemCount = std::accumulate(smShape.begin(), smShape.end(), int64_t(1), std::multiplies<int64_t>());
-    SmallVector<uint8_t> smContent(elemCount, 1);
-
-    const auto baseAttr = mlir::DenseElementsAttr::get(smContentType, ArrayRef(smContent));
+    const auto baseAttr = Const::createConstContent(smContentType, ArrayRef(uint8_t(1)));
     auto tensorAttr = vpux::getTensorAttr(ctx, inputDimsOrder, nullptr);
     auto smElemType = mlir::IntegerType::get(ctx, 1);
     auto smType = mlir::RankedTensorType::get(smShape, smElemType, tensorAttr);
-    auto contentAttr = Const::ContentAttr::transform(baseAttr).reorder(inputDimsOrder).castElemType(smElemType).get();
+    auto contentAttr = Const::ContentAttr::get(
+            baseAttr, Const::ContentSetup(smContentType).reorder(inputDimsOrder).castElemType(smElemType));
     auto smConstOp = rewriter.create<Const::DeclareOp>(origOp->getLoc(), smType, std::move(contentAttr));
 
     auto groupOp = rewriter.create<VPU::GroupSparseTensorOp>(origOp->getLoc(), origOp.getData(), smConstOp.getOutput(),
@@ -737,7 +979,8 @@ void LowerOpsToSENCEPass::safeRunOnFunc() {
     mlir::ConversionTarget target(ctx);
     target.addDynamicallyLegalOp<VPU::InterpolateOp>([&](VPU::InterpolateOp op) {
         return !(_seOpsEnabled &&
-                 VPU::NCEInterpolateOp::isSupported(op, logCb, /*checkLayout=*/true, /*checkChannelAlignment=*/true));
+                 VPU::NCEInterpolateOp::isSupported(op, logCb, /*checkLayout=*/true, /*checkChannelAlignment=*/true,
+                                                    /*checkBatch=*/true));
     });
     target.addDynamicallyLegalOp<VPU::TransposedConvolutionOp>([&](VPU::TransposedConvolutionOp op) {
         return !(_seOpsEnabled && VPU::isSupportedSEPTransposedConv(op, logCb, /*checkLayout=*/false,
@@ -751,10 +994,17 @@ void LowerOpsToSENCEPass::safeRunOnFunc() {
         return !(_seExperimentalOpsEnabled && VPU::isSupportedSEPRoll(op, logCb, /*checkLayout=*/true,
                                                                       /*checkChannelAlignment=*/true));
     });
+    target.addDynamicallyLegalOp<VPU::GroupConvolutionOp>([&](VPU::GroupConvolutionOp op) {
+        return !(VPU::isSupportedSEPDilatedConv(op, logCb, /*checkLayout=*/true,
+                                                /*checkChannelAlignment=*/true) &&
+                 VPU::isDilatedGroupConv(op));
+    });
     target.addLegalOp<VPU::NCEInterpolateOp>();
     target.addLegalOp<VPU::NCEConvolutionOp>();
+    target.addLegalOp<VPU::NCEDepthConvolutionOp>();
     target.addLegalOp<VPU::StorageElementTableOp>();
     target.addLegalOp<VPU::GroupSparseTensorOp>();
+    target.addLegalOp<VPU::ConcatOp>();
     target.addLegalOp<Const::DeclareOp>();
     target.addLegalOp<VPU::SliceOp>();
 
@@ -768,6 +1018,7 @@ void LowerOpsToSENCEPass::safeRunOnFunc() {
         patterns.add<PadToNCE>(&ctx, arch, _log);
         patterns.add<RollToNCE>(&ctx, arch, _log);
     }
+    patterns.add<DilatedConvolutionToNCE>(&ctx, arch, _log);
 
     if (mlir::failed(mlir::applyPartialConversion(func, target, std::move(patterns)))) {
         signalPassFailure();

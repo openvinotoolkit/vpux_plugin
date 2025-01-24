@@ -15,7 +15,7 @@
 namespace vpux::VPU {
 
 double computeQuantScale(mlir::Type inputType, mlir::Type outputType);
-double computeQuantScaleForConv(mlir::Type inputType, mlir::Type outputType, mlir::Type weightsType);
+double computeQuantScaleWithWeightedOps(mlir::Type inputType, mlir::Type outputType, mlir::Type weightsType);
 int64_t computeQuantZPForEltwise(mlir::Type type);
 
 double computeAvgPoolQuantScale(mlir::Type inputType, mlir::Type outputType, mlir::ArrayRef<int64_t> filterShape);

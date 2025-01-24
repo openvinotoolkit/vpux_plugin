@@ -57,3 +57,21 @@ func.func @FoldTileBeforeAddWith3DInput(%arg0: tensor<1x1x1xf32>) -> tensor<1x1x
     // CHECK-SAME:       {shape_value = [1, 1, 1, 1]} : tensor<1x1x1xf32> -> tensor<1x1x1x1xf32>
     // CHECK:        IE.Add
 }
+
+//
+// -----
+//
+
+// CHECK-LABEL: @FoldTileBeforeAddWith4DInput
+// CHECK-SAME:    [[INPUT:%.*]]: tensor<1x1x1024x1024xf16>
+func.func @FoldTileBeforeAddWith4DInput(%arg0: tensor<1x1x1024x1024xf16>) -> tensor<1x16x1024x1024xf16> {
+    %cst_0 = const.Declare tensor<1x16x1024x1024xf16> = dense<1.0> : tensor<1x16x1024x1024xf16>
+    %0 = IE.Tile(%arg0) {repeats_values = [1, 16, 1, 1]} : tensor<1x1x1024x1024xf16> -> tensor<1x16x1024x1024xf16>
+    %1 = IE.Add(%0, %cst_0) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<1x16x1024x1024xf16>, tensor<1x16x1024x1024xf16> -> tensor<1x16x1024x1024xf16>
+    return %1 : tensor<1x16x1024x1024xf16>
+    // CHECK:        [[CST:%.+]] = const.Declare tensor<1x16x1024x1024xf16>
+    // CHECK-NOT:    IE.Tile
+    // CHECK:        [[ADD:%.+]] = IE.Add([[INPUT]], [[CST]]) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>}
+    // CHECK-SAME:                     tensor<1x1x1024x1024xf16>, tensor<1x16x1024x1024xf16> -> tensor<1x16x1024x1024xf16>
+    // CHECK:        return [[ADD]] : tensor<1x16x1024x1024xf16>
+}

@@ -63,18 +63,6 @@ mlir::LogicalResult vpux::VPUIP::ShapeCastOp::verify() {
     return mlir::success();
 }
 
-vpux::NDTypeInterface checkAndUpdateDistributedType(VPU::DistributedTypeInterface inTypeDistr, ArrayRef<int64_t> shape,
-                                                    VPU::ArchKind arch) {
-    const auto ctx = inTypeDistr.getContext();
-    auto newDistribution =
-            VPUIP::getDistributedAttrAfterShapeCast<VPUIP::DistributedBufferType>(inTypeDistr, shape, arch);
-    auto outType = inTypeDistr.changeShapeForExplicitDistribution(ShapeRef(shape), newDistribution);
-
-    return VPUIP::DistributedBufferType::get(ctx, shape, outType.getElementType(),
-                                             mlir::AffineMapAttr::get(outType.getDimsOrder().toAffineMap(ctx)),
-                                             outType.getMemSpace(), newDistribution);
-}
-
 // If the ShapeCast input type has strides attribution, the output should infer a strides
 // to ensure it has the same buffer distribution. Otherwise it will has accuracy issue.
 // There is no guarantee that it will always get a legal output strides.
@@ -180,6 +168,16 @@ mlir::LogicalResult VPUIP::ShapeCastOp::inferReturnTypes(mlir::MLIRContext* ctx,
                 origDistribution.getEqualMemoryAndComputeView());
     };
 
+    auto getDistType = [&](VPU::DistributedTypeInterface inDistInterface) {
+        const auto inDistBufferType =
+                inDistInterface.getDistributedTypes().front().cast<VPUIP::DistributedBufferType>();
+        const auto distAttr = hasExplicitOutputShapesAndOffsets
+                                      ? inferExplicitDistributedAttr(inDistBufferType.getDistribution())
+                                      : VPUIP::getDistributedAttrAfterShapeCast<VPUIP::DistributedBufferType>(
+                                                inDistBufferType, outShape, arch);
+        return inDistInterface.changeShapeForExplicitDistribution(ShapeRef(outShape), distAttr);
+    };
+
     const auto updateStrides = [&](const vpux::NDTypeInterface& inType,
                                    const vpux::NDTypeInterface& outType) -> mlir::FailureOr<vpux::NDTypeInterface> {
         const auto outputStrides = inferShapeCastOutputStrides(inType, outType);
@@ -189,20 +187,15 @@ mlir::LogicalResult VPUIP::ShapeCastOp::inferReturnTypes(mlir::MLIRContext* ctx,
         const auto outputStridesVal = outputStrides.value();
         return outType.getStrides() != outputStridesVal ? outType.changeStrides(outputStridesVal) : outType;
     };
-    const auto distributedIn = inType.dyn_cast<VPU::DistributedTypeInterface>();
+
     vpux::NDTypeInterface outType;
+    const auto distributedIn = mlir::dyn_cast<VPU::DistributedTypeInterface>(inType);
     if (distributedIn != nullptr && distributedIn.containsDistributedTypes()) {
-        auto distribution =
-                distributedIn.getDistributedTypes().front().cast<VPUIP::DistributedBufferType>().getDistribution();
-        if (hasExplicitOutputShapesAndOffsets) {
-            const auto explicitDistributedAttr = inferExplicitDistributedAttr(distribution);
-            outType = distributedIn.changeShapeForExplicitDistribution(ShapeRef(outShape), explicitDistributedAttr);
-        } else {
-            outType = checkAndUpdateDistributedType(distributedIn, outShape, arch);
-        }
+        outType = getDistType(distributedIn);
     } else {
         outType = inType.changeShape(ShapeRef(outShape));
     }
+
     const auto strideUpdatedOutType = updateStrides(inType, outType);
     if (mlir::failed(strideUpdatedOutType)) {
         return mlir::failure();

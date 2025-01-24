@@ -6,6 +6,7 @@
 #include "vpux/compiler/dialect/const/utils/content.hpp"
 
 #include "vpux/compiler/core/layers.hpp"
+#include "vpux/compiler/core/types/quantile_float/types.hpp"
 #include "vpux/compiler/utils/loop.hpp"
 #include "vpux/compiler/utils/quantization.hpp"
 #include "vpux/utils/core/numeric.hpp"
@@ -59,7 +60,7 @@ Const::Content vpux::Const::Content::moveBuffer(vpux::NDTypeInterface type, Cons
 // The Content object might not own the referred data. This function ensures the returned Content object owns the
 // referred data by copying it into a new buffer when needed
 Const::Content vpux::Const::Content::copyUnownedBuffer(Const::Content&& origin) {
-    if (!origin._data.hasExternalOrigin()) {  // is internal already
+    if (origin._data.isMutable()) {  // is internal already
         return std::move(origin);
     }
 

@@ -191,6 +191,22 @@ def ConvertAffine2LLVM : PassBase<"convert-Affine-to-LLVM", "vpux::ModulePass"> 
 }
 
 //
+// ConvertIERT2VPUIP
+//
+
+def ConvertIERT2VPUIP : PassBase<"convert-IERT-to-VPUIP", "vpux::ModulePass"> {
+    let summary = "Convert for the entry point function the IERT dialect operations to VPUIP dialect";
+
+    let constructor = "vpux::createConvertIERT2VPUIPPass()";
+
+    let dependentDialects = [
+        "vpux::IERT::IERTDialect",
+        "vpux::VPUIP::VPUIPDialect",
+        "vpux::VPURT::VPURTDialect"
+    ];
+}
+
+//
 // ConvertVPUIP2VPUMI37XX
 //
 
@@ -240,7 +256,7 @@ def ConvertVPUMI37XX2VPUASM : PassBase<"convert-VPUMI37XX-to-VPUASM", "vpux::Mod
 // ConvertVPUIP2VPUMI40XX
 //
 
-def ConvertVPUIP2VPUMI40XX : PassBase<"convert-VPUIP-to-VPUMI40XX", "vpux::ModulePass"> {
+def ConvertVPUIP2VPUMI40XX : PassBase<"convert-VPUIP-to-VPUMI40XX", "vpux::FunctionPass"> {
     let summary = "Convert VPUIP Dialect to VPUMI40XX Dialect";
 
     let constructor = "vpux::createConvertVPUIP2VPUMI40XXPass()";
@@ -249,8 +265,15 @@ def ConvertVPUIP2VPUMI40XX : PassBase<"convert-VPUIP-to-VPUMI40XX", "vpux::Modul
         "vpux::VPUIP::VPUIPDialect",
         "vpux::VPURT::VPURTDialect",
         "vpux::VPUMI40XX::VPUMI40XXDialect",
-        "vpux::VPURegMapped::VPURegMappedDialect",
-        "vpux::ELFNPU37XX::ELFNPU37XXDialect"
+        "vpux::VPURegMapped::VPURegMappedDialect"
+    ];
+
+    let options = [
+        Option<
+            "allocateShaveStackFrames", "allocate-shave-stack-frames",
+            "bool", "false",
+            "Flag to enable shave stack frame allocation."
+        >
     ];
 }
 
@@ -280,6 +303,14 @@ def ConvertVPUMI40XX2VPUASM : PassBase<"convert-VPUMI40XX-to-VPUASM", "vpux::Mod
         "vpux::VPUASM::VPUASMDialect",
         "vpux::VPUIPDPU::VPUIPDPUDialect",
         "vpux::ELFNPU37XX::ELFNPU37XXDialect"
+    ];
+
+    let options = [
+        Option<
+            "enablePWLMOpt", "enable-partial-workload-management",
+            "bool", "false",
+            "Flag which identifies enablement of partial workload management"
+        >
     ];
 }
 
@@ -311,33 +342,12 @@ def ConvertVPUASM2NPUReg40XX : PassBase<"convert-VPUASM-to-NPUReg40XX", "vpux::M
     let summary = "Convert VPUASM dialect to NPUReg40XX";
 
     let description = [{
-        VPUASM level represents ops in their logical form. They have inputs, outputs, associated barriers and so on.
-        NPUReg40XX dialect represents ops in terms of hardware registers.
-    }];
-
-    let constructor = "vpux::createConvertVPUASM2NPUReg40XXPass()";
-    let dependentDialects = [
-        "vpux::VPURegMapped::VPURegMappedDialect",
-        "vpux::VPUASM::VPUASMDialect",
-        "vpux::NPUReg40XX::NPUReg40XXDialect",
-        "vpux::ELF::ELFDialect"
-    ];
-}
-
-//
-// ConvertVPUASM2NPUReg40XXRelocs
-//
-
-def ConvertVPUASM2NPUReg40XXRelocs : PassBase<"convert-VPUASM-to-NPUReg40XX-relocs", "vpux::ModulePass"> {
-    let summary = "Convert VPUASM dialect to NPUReg40XX";
-
-    let description = [{
         VPUASM -> NPUReg40XX lowering that happens before relocation passes. Intended to be exapanded
         with more operations gradually over time. Eventually, planned to be replaced with regular
         VPUASM -> NPUReg40XX lowering.
     }];
 
-    let constructor = "vpux::createConvertVPUASM2NPUReg40XXRelocsPass()";
+    let constructor = "vpux::createConvertVPUASM2NPUReg40XXPass()";
     let dependentDialects = [
         "vpux::VPURegMapped::VPURegMappedDialect",
         "vpux::VPUASM::VPUASMDialect",
@@ -355,7 +365,7 @@ def ConvertVPUASM2NPUReg40XXRelocs : PassBase<"convert-VPUASM-to-NPUReg40XX-relo
 }
 
 //
-// ConvertVPUASM2NPUReg40XX
+// ConvertVPUIPDPU2NPUReg40XX
 //
 
 def ConvertVPUIPDPU2NPUReg40XX : PassBase<"convert-VPUIPDPU-to-NPUReg40XX", "vpux::ModulePass"> {

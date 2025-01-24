@@ -59,10 +59,10 @@ void verify_labels(std::set<std::string>& labels, config_map& config) {
     // Combination validity
     if (arch_type == "NPU27"s) {
         if (mode_fp16_enable == "true"s) {
-            throw std::logic_error{"NPU37XX doesn't support fp16 mode"};
+            throw std::logic_error{"NPU27 doesn't support fp16 mode"};
         }
         if (weight_compress_enable == "false"s) {
-            throw std::logic_error{"NPU37XX doesn't support activation compression"};
+            throw std::logic_error{"NPU27 doesn't support activation compression"};
         }
     }
 }
@@ -154,8 +154,8 @@ config_map parse_config(std::ifstream& config_file) {
     std::set<std::string> labels{"arch_type",
                                  "weight_compress_enable",
                                  "bypass_compression",
-                                 "mode_fp16_enable",
                                  "compressed_data_path",
+                                 "mode_fp16_enable",
                                  "compressed_data",
                                  "decompressed_data_path",
                                  "decompressed_data",
@@ -188,6 +188,6 @@ void print_config(const config_map& config) {
     std::cout << "Configuration: "
               << "\n\t >> Arch type: " << std::get<std::string>(config.at("arch_type"))
               << "\n\t >> Weight compress enabled: " << std::get<std::string>(config.at("weight_compress_enable"))
-              << "\n\t >> Bypass compression: " << std::get<std::string>(config.at("bypass_compression"))
-              << "\n\t >> FP16 Mode enabled: " << std::get<std::string>(config.at("mode_fp16_enable")) << "\n";
+              << "\n\t >> FP16 Mode enabled: " << std::get<std::string>(config.at("mode_fp16_enable"))
+              << "\n\t >> Bypass compression: " << std::get<std::string>(config.at("bypass_compression")) << "\n";
 }

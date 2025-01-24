@@ -1,5 +1,5 @@
 //
-// Copyright (C) Intel Corporation
+// Copyright (C) 2022 - 2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -21,7 +21,6 @@ TEST_P(BatchNormLayerTestCommon, NPU4000_SW) {
     setReferenceSoftwareMode();
     run(Platform::NPU4000);
 }
-
 }  // namespace test
 }  // namespace ov
 

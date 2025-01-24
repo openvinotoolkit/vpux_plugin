@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -144,4 +144,33 @@ func.func @DoNotUpstreamSliceFakeQuantizeSameAxis(%arg0: tensor<1x16x5x5xf16>) -
     // CHECK:       [[SLICE:%.*]] = IE.Slice %0 [0, 0, 0, 0] [1, 8, 5, 5] : tensor<1x16x5x5xf16> to tensor<1x8x5x5xf16>
 
     // CHECK:       return [[SLICE]] : tensor<1x8x5x5xf16>
+}
+
+// -----
+
+#C = affine_map<(d0) -> (d0)>
+
+// CHECK-LABEL: @DoNotUpstreamDynamicSlices
+func.func @DoNotUpstreamDynamicSlices(
+        %DATA: tensor<32xf16>,
+        %SHAPE: tensor<1xsi32>
+) -> tensor<?xf16, {bounds = [32], order = #C}> {
+    // CHECK:   [[DATA:%.+]]: tensor<32xf16>, [[SHAPE:%.+]]: tensor<1xsi32>
+    %GELU = IE.Gelu(%DATA) : tensor<32xf16> -> tensor<32xf16>
+    // CHECK:   [[GELU:%.+]] = IE.Gelu([[DATA]]) : tensor<32xf16> -> tensor<32xf16>
+
+    %SLICE = IE.StridedSlice(%GELU, %SHAPE) {
+        begin_mask = [],
+        begins_attr = [0],
+        ellipsis_mask = [],
+        end_mask = [],
+        new_axis_mask = [],
+        operandSegmentSizes = array<i32: 1, 0, 1, 0>,
+        shrink_axis_mask = [],
+        strides_attr = [1]
+    } : tensor<32xf16>, tensor<1xsi32> -> tensor<?xf16, {bounds = [32], order = #C}>
+    // CHECK:   [[SLICE:%.+]] = IE.StridedSlice([[GELU]], [[SHAPE]])
+
+    return %SLICE : tensor<?xf16, {bounds = [32], order = #C}>
+    // CHECK:   return [[SLICE]] : tensor<?xf16, {bounds = [32], order = #C}>
 }

@@ -6,6 +6,7 @@
 #include "vpux/compiler/dialect/const/attributes/content.hpp"
 #include "vpux/compiler/dialect/const/utils/const_logger.hpp"
 
+#include "vpux/compiler/core/types/quantile_float/types.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
 #include "vpux/compiler/dialect/const/utils/constant_folding_cache.hpp"
 #include "vpux/compiler/dialect/const/utils/sub_byte.hpp"
@@ -21,10 +22,12 @@
 #include <mlir/IR/Builders.h>
 #include <mlir/IR/BuiltinDialect.h>
 #include <mlir/IR/DialectImplementation.h>
+#include <mlir/IR/DialectInterface.h>
 #include <mlir/IR/DialectResourceBlobManager.h>
 
 #include <llvm/ADT/STLExtras.h>
 #include <llvm/ADT/TypeSwitch.h>
+#include <mlir/Support/LLVM.h>
 #include <mlir/Transforms/InliningUtils.h>
 
 #include <cstring>
@@ -56,6 +59,32 @@ struct ConstInlinerInterface : public mlir::DialectInlinerInterface {
     }
 };
 
+/// @brief Caches splatness status for dense_resource<> blobs (for which it is
+/// expensive to calculate manually).
+class SplatnessCache final : public mlir::DialectInterface::Base<SplatnessCache> {
+    using ValueType = std::pair<mlir::ArrayRef<char>, bool>;
+    mlir::DenseMap<StringRef, ValueType> _cache;
+
+public:
+    // required by MLIR's internal type-id infrastructure:
+    MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(SplatnessCache)
+
+    SplatnessCache(mlir::Dialect* dialect): Base(dialect) {
+    }
+
+    void cacheRawDataAndSplatness(mlir::DenseResourceElementsAttr denseResource);
+    ValueType getRawDataAndSplatness(mlir::DenseResourceElementsAttr denseResource);
+};
+
+SplatnessCache& getSplatnessCache(mlir::MLIRContext* ctx) {
+    auto* dialect = ctx->getOrLoadDialect<vpux::Const::ConstDialect>();
+    assert(dialect != nullptr && "ConstDialect must be present in the context");
+
+    auto* iface = dialect->getRegisteredInterface<SplatnessCache>();
+    assert(iface != nullptr && "SplatnessCache must be registered in the context");
+    return *iface;
+}
+
 }  // namespace
 
 //
@@ -81,7 +110,7 @@ void vpux::Const::ConstDialect::initialize() {
             >();
 
     addInterfaces<ConstInlinerInterface>();
-    addInterfaces<Const::ConstDataManagerInterface>();
+    addInterfaces<SplatnessCache>();
 }
 
 //
@@ -90,51 +119,72 @@ void vpux::Const::ConstDialect::initialize() {
 
 mlir::LogicalResult vpux::Const::ContentAttr::verify(FuncRef<mlir::InFlightDiagnostic()> emitError,
                                                      mlir::ElementsAttr baseContent,
-                                                     ArrayRef<vpux::Const::TransformAttrInterface> transformations) {
+                                                     vpux::Const::TransformAttrInterfaceArrayAttr transformations,
+                                                     vpux::NDTypeInterface, mlir::UnitAttr isSplat) {
     if (baseContent == nullptr) {
         return printTo(emitError(), "Got NULL 'baseContent' in 'ContentAttr'");
     }
 
-    if (!baseContent.getShapedType().getElementType().isIntOrFloat()) {
+    auto baseContentElemType = baseContent.getShapedType().getElementType();
+    if (!baseContentElemType.isIntOrFloat() && !mlir::isa<vpux::type::QuantileFloatType>(baseContentElemType)) {
         return printTo(emitError(), "Got unsupported element type for 'baseContent' in 'ContentAttr' : '{0}'",
                        baseContent.getShapedType().getElementType());
     }
 
-    if (baseContent.isa<mlir::DenseElementsAttr>()) {
-        // OK
-    } else if (const auto denseResource = baseContent.dyn_cast<mlir::DenseResourceElementsAttr>()) {
-        // Note: manual checks required since dense resource blob is opaque and does not perform much validation itself
-        const auto bytes = denseResource.getRawHandle().getBlob()->getData();
-
-        auto bitWidth = vpux::getElemTypeSize(baseContent.getShapedType().getElementType()).count();
-        if (vpux::Const::isSubByte(bitWidth)) {
-            auto bufferSize = checked_cast<size_t>(bytes.size());
-            auto numElems = baseContent.getShapedType().getNumElements();
-            auto numBytes = checked_cast<size_t>(Bit(numElems * bitWidth).to<Byte>().count());
-            if (bufferSize != numBytes) {
-                return printTo(emitError(),
-                               "Size of dense resource buffer '{0}' in 'baseContent' doesn't match its type '{1}'",
-                               bytes.size(), denseResource.getShapedType());
-            }
-        } else {
-            bool ignored = false;
-            if (!mlir::DenseElementsAttr::isValidRawBuffer(baseContent.getShapedType(), bytes, ignored)) {
-                return printTo(emitError(),
-                               "Size of dense resource buffer '{0}' in 'baseContent' doesn't match its type '{1}'",
-                               bytes.size(), denseResource.getShapedType());
-            }
-        }
-    } else if (auto symElementsAttr = baseContent.dyn_cast<Const::SymElementsAttr>()) {
-        // OK
-    } else {
+    if (!mlir::isa<mlir::DenseElementsAttr, mlir::DenseResourceElementsAttr, Const::SymElementsAttr>(baseContent)) {
         return printTo(emitError(), "Got unsupported 'baseContent' in 'ContentAttr'");
+    }
+
+    if (auto denseResource = mlir::dyn_cast<mlir::DenseResourceElementsAttr>(baseContent)) {
+        auto blob = denseResource.getRawHandle().getBlob();
+        // If blob is null we might be in the IR parsing scenario where ContentAttr is parsed before
+        // dialect_resources section. For such case Const::DeclareOp::verify will verify dense resource content
+        if (blob != nullptr && mlir::failed(verifyDenseResource(emitError, denseResource, isSplat != nullptr))) {
+            return mlir::failure();
+        }
     }
 
     const auto isValid = [](const vpux::Const::TransformAttrInterface& value) -> bool {
         return value != nullptr;
     };
-    if (!llvm::all_of(transformations, isValid)) {
+    if (!llvm::all_of(transformations.getValue(), isValid)) {
         return printTo(emitError(), "Got invalid transformations attribute in 'ContentAttr'");
+    }
+
+    return mlir::success();
+}
+
+mlir::LogicalResult vpux::Const::ContentAttr::verifyDenseResource(FuncRef<mlir::InFlightDiagnostic()> emitError,
+                                                                  mlir::DenseResourceElementsAttr denseResource,
+                                                                  bool isSplat) {
+    if (denseResource == nullptr) {
+        return printTo(emitError(), "Got NULL 'denseResource' in 'ContentAttr'");
+    }
+    auto blob = denseResource.getRawHandle().getBlob();
+    if (blob == nullptr) {
+        return printTo(emitError(), "Can't access constant content for verification, resource handle : {0}",
+                       denseResource.getRawHandle().getKey());
+    }
+    // Note: manual checks required since dense resource blob is opaque and does not perform much validation itself
+    const auto bytes = blob->getData();
+    auto bitWidth = vpux::getElemTypeSize(denseResource.getShapedType().getElementType()).count();
+    if (vpux::Const::isSubByte(bitWidth)) {
+        const auto bufferSize = checked_cast<size_t>(bytes.size());
+        const auto numBytes = static_cast<size_t>(getExpectedBufferSize(denseResource.getShapedType()).count());
+        // Note: limit sub-byte data splats to 1 byte
+        const bool valid = (isSplat && bufferSize == 1) || (bufferSize == numBytes);
+        if (!valid) {
+            return printTo(emitError(),
+                           "Size of dense resource buffer '{0}' in 'baseContent' doesn't match its type '{1}'",
+                           bytes.size(), denseResource.getShapedType());
+        }
+    } else {
+        bool ignored = false;
+        if (!mlir::DenseElementsAttr::isValidRawBuffer(denseResource.getShapedType(), bytes, ignored)) {
+            return printTo(emitError(),
+                           "Size of dense resource buffer '{0}' in 'baseContent' doesn't match its type '{1}'",
+                           bytes.size(), denseResource.getShapedType());
+        }
     }
 
     return mlir::success();
@@ -229,8 +279,28 @@ std::pair<mlir::ArrayRef<char>, bool> getRawDataAndSplatness(mlir::ElementsAttr 
     }
 
     auto denseResource = mlir::cast<mlir::DenseResourceElementsAttr>(baseContent);
+    return getSplatnessCache(baseContent.getContext()).getRawDataAndSplatness(denseResource);
+}
+
+void SplatnessCache::cacheRawDataAndSplatness(mlir::DenseResourceElementsAttr denseResource) {
+    auto key = denseResource.getRawHandle().getKey();
     // dense resource doesn't support splat detection in MLIR itself
-    return detectSplatManually(baseContent.getShapedType(), denseResource.getRawHandle().getBlob()->getData());
+    auto blob = denseResource.getRawHandle().getBlob();
+    if (blob != nullptr) {
+        _cache[key] = detectSplatManually(denseResource.getShapedType(), blob->getData());
+    }
+}
+
+typename SplatnessCache::ValueType SplatnessCache::getRawDataAndSplatness(
+        mlir::DenseResourceElementsAttr denseResource) {
+    auto key = denseResource.getRawHandle().getKey();
+    auto it = _cache.find(key);
+    if (it == _cache.end()) {
+        cacheRawDataAndSplatness(denseResource);
+        it = _cache.find(key);
+        return it != _cache.end() ? it->second : std::make_pair(ArrayRef<char>{}, false);
+    }
+    return it->second;
 }
 
 //
@@ -247,38 +317,51 @@ Const::Content wrapBaseContent(mlir::ElementsAttr baseContent) {
                                          baseContent.getShapedType().getElementType(), isSplat);
 }
 
-bool canAddQuantCast(Const::TransformAttrInterface* begin, Const::TransformAttrInterface* insertPos) {
-    for (auto it = insertPos - 1; it >= begin; --it) {
-        // Content was explicitly quantized, so can be casted
-        if (mlir::isa<Const::QuantizeAttr>(*it)) {
-            return true;
-        }
-        // Content was dequantized and not quantized again, invalid transformations
-        if (mlir::isa<Const::DequantizeAttr>(*it)) {
-            return false;
-        }
-    }
-    return true;
-}
-
 }  // namespace
 
-// FIXME: should we do ::verify() always - even in ::get()?
-Const::ContentAttr Const::ContentAttr::get(mlir::ElementsAttr base, ArrayRef<TransformAttrInterface> transformations) {
-    Const::ContentAttr content;
-    content._baseContent = base;
-    content._transformations = Const::TransformAttrInterfaceArrayAttr::get(base.getContext(), transformations);
-    std::tie(content._finalType, content._isSplat) = inferFinalTypeAndSplat(base, transformations);
-    return content;
+mlir::DenseResourceElementsAttr Const::createExternalConstContent(mlir::ShapedType type, ArrayRef<char> rawData,
+                                                                  StringRef resourcePrefix) {
+    constexpr size_t defaultAlignment =
+            alignof(std::max_align_t);  // seemingly used nowhere except no-op deleter - use C++ default
+    constexpr auto noopDeleter = [](void*, size_t, size_t) {};
+    constexpr bool isMutable = false;
+    mlir::AsmResourceBlob blob(rawData, defaultAlignment, noopDeleter, isMutable);
+
+    auto& builtinDialectManager = mlir::DenseResourceElementsHandle::getManagerInterface(type.getContext());
+    // assumption (as per MLIR documented behavior): inserting a new blob with the same key would internally cause
+    // the key to change, so that there are no collisions - thus, the blob is never overwritten here
+    auto res =
+            mlir::DenseResourceElementsAttr::get(type, builtinDialectManager.insert(resourcePrefix, std::move(blob)));
+    getSplatnessCache(type.getContext()).cacheRawDataAndSplatness(res);
+    return res;
 }
 
-Const::ContentAttr Const::ContentAttr::getChecked(FuncRef<mlir::InFlightDiagnostic()> emitError,
-                                                  mlir::ElementsAttr base,
-                                                  ArrayRef<TransformAttrInterface> transformations) {
-    if (mlir::failed(Const::ContentAttr::verify(emitError, base, transformations))) {
-        return {};
+mlir::DenseElementsAttr Const::createConstContent(mlir::ShapedType type, ArrayRef<char> values) {
+    return mlir::DenseElementsAttr::getFromRawBuffer(type, values);
+}
+
+mlir::DenseElementsAttr Const::detail::createConstContentWithConversion(mlir::ShapedType type, ArrayRef<float> array) {
+    const auto elemType = type.getElementType();
+    if (elemType.isF32()) {
+        return mlir::DenseElementsAttr::get(type, array);
+    } else if (elemType.isF16()) {
+        const auto arrayFP16 = to_small_vector(array | transformed([](float val) {
+                                                   return static_cast<vpux::type::float16>(val);
+                                               }));
+        return mlir::DenseElementsAttr::get(type, ArrayRef(arrayFP16));
+    } else if (elemType.isFloat8E5M2()) {
+        const auto arrayFloat8E5M2 = to_small_vector(array | transformed([](float val) {
+                                                         return static_cast<vpux::type::float8_e5m2>(val);
+                                                     }));
+        return mlir::DenseElementsAttr::get(type, ArrayRef(arrayFloat8E5M2));
+    } else if (elemType.isFloat8E4M3FN()) {
+        const auto arrayFloat8E4M3FN = to_small_vector(array | transformed([](float val) {
+                                                           return static_cast<vpux::type::float8_e4m3>(val);
+                                                       }));
+        return mlir::DenseElementsAttr::get(type, ArrayRef(arrayFloat8E4M3FN));
     }
-    return get(base, transformations);
+    VPUX_THROW("Unsupported element type '{0}'", elemType);
+    return nullptr;
 }
 
 //
@@ -325,6 +408,14 @@ void vpux::Const::ContentAttr::print(mlir::AsmPrinter& printer) const {
         printer.printAttribute(getBaseContent());
     }
 
+    // For dense resources print splat attribute since dense resource data is not yet
+    // present at the time of const.DeclareOp parsing and splatness can't be inferred from
+    // raw data. This is due to mlir printing and parsing order in which IR is parsed before
+    // dialect_resources section which holds content data.
+    if (mlir::isa<mlir::DenseResourceElementsAttr>(getBaseContent()) && isSplat()) {
+        printer << " isSplat";
+    }
+
     if (const auto transformations = getTransformations(); !transformations.empty()) {
         printer << ", " << '[' << transformations << ']';
     }
@@ -334,7 +425,7 @@ void vpux::Const::ContentAttr::print(mlir::AsmPrinter& printer) const {
 // ContentAttr::parse
 //
 
-mlir::FailureOr<vpux::Const::ContentAttr> vpux::Const::ContentAttr::parse(mlir::AsmParser& parser) {
+mlir::Attribute vpux::Const::ContentAttr::parse(::mlir::AsmParser& parser, ::mlir::Type) {
     // What we are trying to parse:
     // ( ref<@symbol> : type | dense<...> : type | dense_resource<...> : type ) [, list_of_transformations]
 
@@ -345,82 +436,73 @@ mlir::FailureOr<vpux::Const::ContentAttr> vpux::Const::ContentAttr::parse(mlir::
         auto parseResult = mlir::FieldParser<Const::SymElementsAttr>::parse(parser);
 
         if (mlir::failed(parseResult)) {
-            return mlir::failure();
+            return nullptr;
         }
 
         baseContent = parseResult.value();
     } else if (mlir::failed(parser.parseAttribute(baseContent))) {
-        return mlir::failure();
+        return nullptr;
+    }
+
+    bool explicitSplat = false;
+    if (mlir::succeeded(parser.parseOptionalKeyword("isSplat"))) {
+        explicitSplat = true;
     }
 
     // parse list of transformations
+    mlir::SmallVector<vpux::Const::TransformAttrInterface> transformations{};
     if (mlir::succeeded(parser.parseOptionalComma())) {
         mlir::ArrayAttr arrayAttr;
         if (mlir::failed(parser.parseAttribute(arrayAttr))) {
-            return mlir::failure();
+            return nullptr;
         }
 
-        mlir::SmallVector<vpux::Const::TransformAttrInterface> transformations;
         transformations.reserve(arrayAttr.size());
         for (const auto attr : arrayAttr.getValue()) {
             const auto trAttr = attr.dyn_cast<Const::TransformAttrInterface>();
             VPUX_THROW_WHEN(trAttr == nullptr, "Got non transformation attribute : '{0}'", attr);
             transformations.push_back(trAttr);
         }
-
-        return parser.getChecked<Const::ContentAttr>(baseContent, ArrayRef(transformations));
     }
 
-    return parser.getChecked<Const::ContentAttr>(baseContent);
+    if (explicitSplat) {
+        return parser.getChecked<ContentAttr>(baseContent, mlir::UnitAttr::get(baseContent.getContext()),
+                                              ArrayRef(transformations));
+    }
+    return parser.getChecked<ContentAttr>(baseContent, ArrayRef(transformations));
 }
 
 mlir::ParseResult vpux::Const::parseContentAttr(mlir::AsmParser& parser, ContentAttr& content) {
-    auto result = ContentAttr::parse(parser);
-    if (mlir::failed(result)) {
+    auto result = ContentAttr::parse(parser, nullptr);
+    if (result == nullptr) {
         return mlir::failure();
     }
-    content = std::move(*result);
+    content = mlir::cast<ContentAttr>(result);
     return mlir::success();
+}
+
+const mlir::ElementsAttr& vpux::Const::ContentAttr::getBaseContent() const {
+    return getImpl()->baseContent;
+}
+
+mlir::ArrayRef<vpux::Const::TransformAttrInterface> vpux::Const::ContentAttr::getTransformations() const {
+    return getTransformationsAttr().getValue();
+}
+
+vpux::NDTypeInterface vpux::Const::ContentAttr::getType() const {
+    return getImpl()->finalType;
+}
+
+bool vpux::Const::ContentAttr::isSplat() const {
+    return getImpl()->isSplat != nullptr;
+}
+
+vpux::Const::TransformAttrInterfaceArrayAttr vpux::Const::ContentAttr::getTransformationsAttr() const {
+    return getImpl()->transformations;
 }
 
 void vpux::Const::printContentAttr(mlir::AsmPrinter& printer, const ContentAttr& content) {
     content.print(printer);
-}
-
-mlir::LogicalResult vpux::Const::convertFromAttribute(Const::ContentAttr&, mlir::Attribute,
-                                                      llvm::function_ref<mlir::InFlightDiagnostic()>) {
-    VPUX_THROW("Conversion from attribute is not supported");
-    return mlir::success();
-}
-
-mlir::Attribute vpux::Const::convertToAttribute(mlir::MLIRContext* ctx, const ContentAttr& content) {
-    // Note: we *have* to support this because MLIR's AsmPrinter depends on
-    // this: if there's an issue in IR (i.e. some verifier produces an error),
-    // printing is done using fallback mechanism that converts all op's
-    // properties to attributes (the motivation is that it is *safer* than doing
-    // user-specified custom printing since verify error == violated
-    // preconditions, so printing could result in UB). As a downside, this
-    // fallback could be used even when our Const::DeclareOp is valid but some
-    // other op is not (e.g. when we attempt to print the whole main func).
-    return vpux::Const::EphemeralContentAttr::get(
-            ctx, content.getBaseContent(),
-            vpux::Const::TransformAttrInterfaceArrayAttr::get(ctx, content.getTransformations()));
-}
-
-mlir::LogicalResult vpux::Const::readFromMlirBytecode(mlir::DialectBytecodeReader&, ContentAttr&) {
-    VPUX_THROW("MLIR bytecode is not supported for ContentAttr");
-    return mlir::failure();
-}
-
-void vpux::Const::writeToMlirBytecode(mlir::DialectBytecodeWriter&, const ContentAttr&) {
-    VPUX_THROW("MLIR bytecode is not supported for ContentAttr");
-    return;
-}
-
-void vpux::Const::EphemeralContentAttr::print(mlir::AsmPrinter& printer) const {
-    // Note: this is supported due to "generic op printing" (see
-    // Const::convertToAttribute() note for details).
-    printContentAttr(printer, static_cast<vpux::Const::ContentAttr>(*this));
 }
 
 vpux::NDTypeInterface vpux::Const::inferFinalType(vpux::NDTypeInterface contentType,
@@ -445,7 +527,7 @@ std::pair<vpux::NDTypeInterface, bool> vpux::Const::inferFinalTypeAndSplat(
     return {inferredType, inferredSplat};
 }
 
-vpux::Const::ContentSetup vpux::Const::ContentSetup::addTransformation(TransformAttrInterface newTransformation) {
+void vpux::Const::detail::ContentSetupBase::addTransformation(TransformAttrInterface newTransformation) {
     checkInvalidated();
 
     auto comp = [](const vpux::Const::TransformAttrInterface& a, const vpux::Const::TransformAttrInterface& b) {
@@ -465,7 +547,7 @@ vpux::Const::ContentSetup vpux::Const::ContentSetup::addTransformation(Transform
     using OptimizationFunc = FuncRef<std::pair<details::optimization::TransformAttrPos, bool>(
             SmallVector<Const::TransformAttrInterface>&, details::optimization::TransformAttrPos&)>;
 
-    auto baseType = _baseContent.getType().cast<NDTypeInterface>();
+    auto baseType = _baseType;
     auto moveSubViewBefore = [=](SmallVector<Const::TransformAttrInterface>& transformations,
                                  details::optimization::TransformAttrPos& currPos) {
         return details::moveSubViewBefore(transformations, currPos, baseType);
@@ -474,9 +556,17 @@ vpux::Const::ContentSetup vpux::Const::ContentSetup::addTransformation(Transform
                                  details::optimization::TransformAttrPos& currPos) {
         return details::moveReshapeBefore(transformations, currPos, baseType);
     };
-    SmallVector<OptimizationFunc> optimizations{details::fuseConsecutiveTransformations,
-                                                details::convertQuantCastToCastElemType, moveSubViewBefore,
-                                                moveReshapeBefore, details::moveTransformationIntoFuse};
+    auto fuseConsecutiveTransformations = [=](SmallVector<Const::TransformAttrInterface>& transformations,
+                                              details::optimization::TransformAttrPos& currPos) {
+        return details::fuseConsecutiveTransformations(transformations, currPos, baseType);
+    };
+    auto foldTransformation = [=](SmallVector<Const::TransformAttrInterface>& transformations,
+                                  details::optimization::TransformAttrPos& currPos) {
+        return details::foldTransformation(transformations, currPos, baseType);
+    };
+
+    OptimizationFunc optimizations[] = {fuseConsecutiveTransformations, foldTransformation, moveSubViewBefore,
+                                        moveReshapeBefore, details::moveTransformationIntoFuse};
 
     bool optimized = true;
     auto currentPos = insertionPosition;
@@ -490,19 +580,9 @@ vpux::Const::ContentSetup vpux::Const::ContentSetup::addTransformation(Transform
         }
     }
 
-    // end position means that transformation was folded
-    if (insertionPosition != _transformations.end()) {
-        // Check to ensure we won't break constant content
-        const bool hasInvalidQuantizationTransforms = mlir::isa<Const::QuantCastAttr>(newTransformation) &&
-                                                      !canAddQuantCast(_transformations.begin(), insertionPosition);
-        VPUX_THROW_WHEN(hasInvalidQuantizationTransforms, "Can't add QuantCast to explicitly dequantized constant");
-    }
-
     // check single LAST requirement
     bool lastRequirementViolated =
             _transformations.size() >= 2 &&
             (_transformations.end() - 2)->getPositionRequirement() == details::PositionRequirement::LAST;
     VPUX_THROW_WHEN(lastRequirementViolated, "At most 1 attribute with LAST requirement allowed!");
-
-    return ContentSetup(std::move(*this));
 }

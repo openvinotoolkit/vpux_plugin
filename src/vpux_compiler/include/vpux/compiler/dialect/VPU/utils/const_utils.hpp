@@ -20,8 +20,15 @@ std::vector<int32_t> createWeightsTableData(mlir::Value opInput, mlir::Value opO
                                             mlir::FloatAttr constScale);
 mlir::Value createWeightsTableTensor(mlir::OpBuilder& builder, mlir::Location loc, ArrayRef<int32_t> weightsTable);
 
-mlir::Value createInstructionListTableTensor(mlir::OpBuilder& builder, mlir::Location loc,
-                                             const std::optional<SmallVector<int32_t>>& instructionListTable);
+std::vector<float> createScaleTableData(mlir::Value opInput, mlir::Value opOutput, mlir::Value weights, int64_t OC,
+                                        VPU::NCESparsity::PPEConverterCb ppeConverter, mlir::FloatAttr constScale);
+
+std::vector<float> createBiasTableData(mlir::Value opInput, mlir::Value opOutput, mlir::Value weights,
+                                       const Const::ContentAttr& bias, int64_t OC,
+                                       VPU::NCESparsity::BiasConverterCb biasConverter);
+
+mlir::Value createScaleOrBiasTableTensor(mlir::OpBuilder& builder, mlir::Location loc, ArrayRef<float> table,
+                                         mlir::Type elemType);
 
 mlir::Value alignDepthWiseWeightsTensor(mlir::OpBuilder& builder, mlir::Location loc, mlir::Value origFilter);
 mlir::Value alignConvWeightsTensor(mlir::OpBuilder& builder, mlir::Location loc, mlir::Value origFilter);

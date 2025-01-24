@@ -4,13 +4,12 @@
 //
 
 #include "vpux/compiler/core/attributes/tensor_attr.hpp"
-#include <mlir/IR/Value.h>
-#include <mlir/Support/LLVM.h>
 
 #include "vpux/compiler/core/type_interfaces.hpp"
-#include "vpux/compiler/utils/attributes.hpp"
-
 #include "vpux/utils/core/error.hpp"
+
+#include <mlir/IR/Value.h>
+#include <mlir/Support/LLVM.h>
 
 using namespace vpux;
 
@@ -139,7 +138,6 @@ TensorAttr vpux::getTensorAttr(mlir::RankedTensorType type) {
     if (const auto encoding = type.getEncoding()) {
         const auto tensorAttr = encoding.dyn_cast<TensorAttr>();
         VPUX_THROW_UNLESS(tensorAttr != nullptr, "Unsupported tensor encoding attribute '{0}'", encoding);
-
         return tensorAttr;
     }
 

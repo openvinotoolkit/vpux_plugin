@@ -190,26 +190,4 @@ SmallVector<SmallVector<T>> parseFPArrayOfArrayAttr(mlir::ArrayAttr arr) {
     return arrayOfArray;
 }
 
-/// Returns a dense<> attribute of the specified type. Performs value
-/// conversions (e.g. float -> float16) if necessary.
-inline mlir::DenseElementsAttr wrapData(mlir::RankedTensorType type, ArrayRef<float> array) {
-    const auto elemType = type.getElementType();
-    if (elemType.isF32()) {
-        return mlir::DenseElementsAttr::get(type, array);
-    } else if (elemType.isF16()) {
-        const auto arrayFP16 = to_small_vector(array | transformed([](float val) {
-                                                   return static_cast<vpux::type::float16>(val);
-                                               }));
-        return mlir::DenseElementsAttr::get(type, ArrayRef(arrayFP16));
-    }
-    VPUX_THROW("Unsupported element type '{0}'", elemType);
-    return nullptr;
-}
-
-/// Returns a dense<> attribute of the specified type. Performs value
-/// conversions (e.g. float -> float16) if necessary.
-inline mlir::DenseElementsAttr wrapData(mlir::RankedTensorType type, float value) {
-    return wrapData(type, ArrayRef(value));
-}
-
 }  // namespace vpux

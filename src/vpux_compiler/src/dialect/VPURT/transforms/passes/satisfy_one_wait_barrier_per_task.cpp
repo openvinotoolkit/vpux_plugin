@@ -18,10 +18,9 @@ namespace {
 class SatisfyOneWaitBarrierPerTaskPass final :
         public VPURT::SatisfyOneWaitBarrierPerTaskBase<SatisfyOneWaitBarrierPerTaskPass> {
 public:
-    explicit SatisfyOneWaitBarrierPerTaskPass(const bool wlmFlag, std::optional<int> virtualBarrierThresholdforWlm,
+    explicit SatisfyOneWaitBarrierPerTaskPass(std::optional<int> virtualBarrierThresholdforWlm,
                                               const bool unevenVariantSplitFlag, Logger log)
-            : _wlmFlag(wlmFlag),
-              _virtualBarrierThresholdforWlm(virtualBarrierThresholdforWlm),
+            : _virtualBarrierThresholdforWlm(virtualBarrierThresholdforWlm),
               _unevenVariantSplitFlag(unevenVariantSplitFlag) {
         Base::initLogger(log, Base::getArgumentName());
     }
@@ -30,16 +29,30 @@ private:
     void safeRunOnFunc() final;
     bool _mergeWaitBarriersIteratively = false;
     bool _considerTaskExecutorType = false;
-    bool _wlmFlag = false;
     std::optional<int> _virtualBarrierThresholdforWlm;
     bool _unevenVariantSplitFlag;
 };
 
 void SatisfyOneWaitBarrierPerTaskPass::safeRunOnFunc() {
     auto func = getOperation();
+    auto module = func->getParentOfType<mlir::ModuleOp>();
     auto& barrierInfo = getAnalysis<BarrierInfo>();
     if (_unevenVariantSplitFlag) {
         barrierInfo.enableUnevenVariantSplit();
+    }
+
+    auto wlmFlag = vpux::VPUIP::getWlmStatus(module) == vpux::VPUIP::WlmStatus::ENABLED;
+
+    // In case of WLM all tasks need to be driven by single barrier as this is one of the constraints
+    // to make each schedule feasible for WLM enabling
+    // If WLM is enabled but number of barriers is above threshold do not force it as WLM will not be
+    // enabled later nevertheless
+    if (wlmFlag && _virtualBarrierThresholdforWlm.has_value() &&
+        barrierInfo.getNumOfBarrierOps() > static_cast<size_t>(_virtualBarrierThresholdforWlm.value())) {
+        _log.trace("WLM flag turned off because number of barrier is above threshold {0} > {1}",
+                   barrierInfo.getNumOfBarrierOps(), _virtualBarrierThresholdforWlm.value());
+        wlmFlag = false;
+        vpux::VPUIP::setWlmStatus(module, vpux::VPUIP::WlmStatus::FAILED);
     }
 
     const auto maxAvailableSlots = maxVariantCount.hasValue() ? checked_cast<size_t>(maxVariantCount.getValue())
@@ -53,12 +66,7 @@ void SatisfyOneWaitBarrierPerTaskPass::safeRunOnFunc() {
                                             ? checked_cast<bool>(mergeWaitBarriersIteratively.getValue())
                                             : _mergeWaitBarriersIteratively;
 
-    if (_wlmFlag && (!_virtualBarrierThresholdforWlm.has_value() ||
-                     barrierInfo.getNumOfBarrierOps() <= static_cast<size_t>(_virtualBarrierThresholdforWlm.value()))) {
-        // In case of WLM all tasks need to be driven by single barrier as this is one of the constraints
-        // to make each schedule feasible for WLM enabling
-        // If WLM is enabled but number of barriers is above threshold do not force it as WLM will not be
-        // enabled later nevertheless
+    if (wlmFlag) {
         mergeBarriersIteratively = true;
         // For some models, strictly enforcing 1-wait barrier per task can lead to performance regression when tasks
         // executor type is not taken into account when batches of tasks must be linearized. Taking into account tasks
@@ -95,8 +103,7 @@ void SatisfyOneWaitBarrierPerTaskPass::safeRunOnFunc() {
 //
 
 std::unique_ptr<mlir::Pass> vpux::VPURT::createSatisfyOneWaitBarrierPerTaskPass(
-        const bool wlmFlag, std::optional<int> virtualBarrierThresholdforWlm, const bool unevenVariantSplitFlag,
-        Logger log) {
-    return std::make_unique<SatisfyOneWaitBarrierPerTaskPass>(wlmFlag, virtualBarrierThresholdforWlm,
-                                                              unevenVariantSplitFlag, log);
+        std::optional<int> virtualBarrierThresholdforWlm, const bool unevenVariantSplitFlag, Logger log) {
+    return std::make_unique<SatisfyOneWaitBarrierPerTaskPass>(virtualBarrierThresholdforWlm, unevenVariantSplitFlag,
+                                                              log);
 }

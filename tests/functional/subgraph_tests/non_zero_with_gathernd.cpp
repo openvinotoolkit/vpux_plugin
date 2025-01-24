@@ -69,9 +69,8 @@ protected:
     }
 };
 
-TEST_P(NonZeroWithGatherNDNPUTest, VPU3720_HW_TestKindSubgraph) {
+TEST_P(NonZeroWithGatherNDNPUTest, NPU3720_HW_TestKindSubgraph) {
     abs_threshold = 0.0f;
-    setMLIRCompilerType();
     setDefaultHardwareMode();
     run(Platform::NPU3720);
 }

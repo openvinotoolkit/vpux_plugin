@@ -4,10 +4,23 @@
 //
 
 #include "vpux/compiler/core/function_outlining_splitter.hpp"
+#include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/IE/transforms/passes.hpp"
+#include "vpux/compiler/utils/attributes.hpp"
+#include "vpux/compiler/utils/func_dialect.hpp"
 #include "vpux/compiler/utils/logging.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 #include "vpux/utils/core/format.hpp"
+
+#include <llvm/ADT/STLExtras.h>
+#include <llvm/ADT/SmallPtrSet.h>
+#include <mlir/Dialect/Func/IR/FuncOps.h>
+#include <mlir/IR/Builders.h>
+#include <mlir/IR/IRMapping.h>
+#include <mlir/IR/PatternMatch.h>
+#include <mlir/Support/LLVM.h>
+#include <mlir/Support/LogicalResult.h>
+#include <mlir/Transforms/RegionUtils.h>
 
 using namespace vpux;
 
@@ -66,6 +79,8 @@ public:
             _log.debug("Empty outline targets");
             return;
         }
+
+        _log.info("Creating {0} functions", outlinedTargets.size());
 
         SmallVector<SmallVector<FuncInfo>> funcsInfo(outlinedTargets.size());
         for (const auto& [targetIdx, slices] : outlinedTargets | indexed) {
@@ -394,6 +409,12 @@ public:
             return;
         }
 
+        size_t numFunctions = 0;
+        for (const auto& instance : outlinedTargets) {
+            numFunctions += instance.size();
+        }
+        getLogger().info("Creating {0} functions", numFunctions);
+
         SmallVector<SmallVector<FuncInfo>> funcsInfo(outlinedTargets.size());
         for (const auto& [targetIdx, slices] : outlinedTargets | indexed) {
             for (const auto& [sliceIdx, slice] : slices | indexed) {
@@ -435,8 +456,7 @@ private:
                         builder.create<mlir::func::FuncOp>(funcLoc, funcsInfo[targetIdx][sliceIdx].funcNames, funcType);
                 func.setPrivate();
 
-                OpBuilderLogger builderLog(getLogger().nest());
-                auto builder = mlir::OpBuilder::atBlockEnd(func.addEntryBlock(), &builderLog);
+                auto builder = mlir::OpBuilder::atBlockEnd(func.addEntryBlock());
 
                 DenseMap<mlir::Value, mlir::Value> oldToNewMap;
                 for (size_t i = 0; i < slice.inputs.size(); i++) {
@@ -474,8 +494,7 @@ private:
         mlir::func::FuncOp netFunc;
         IE::CNNNetworkOp::getFromModule(moduleOp, netInfo, netFunc);
 
-        OpBuilderLogger builderLog(getLogger().nest());
-        auto builder = mlir::OpBuilder::atBlockBegin(&netFunc.getBody().front(), &builderLog);
+        auto builder = mlir::OpBuilder::atBlockBegin(&netFunc.getBody().front());
         DenseMap<mlir::Value, mlir::Value> oldToNewArgMap;
 
         SmallVector<mlir::Value> prevOutput;
@@ -523,6 +542,9 @@ private:
         for (auto op : opsToMove) {
             moveOperationIfNeeded(op);
         }
+
+        mlir::IRRewriter rewriter(builder);
+        (void)mlir::simplifyRegions(rewriter, netFunc->getRegions().front());
     }
 };
 

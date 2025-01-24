@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation
+// Copyright (C) 2022-2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -7,45 +7,40 @@
 
 #include "single_op_tests/strided_slice.hpp"
 #include "vpu_ov2_layer_test.hpp"
-namespace ov {
 
+namespace ov {
 namespace test {
 
 class StridedSliceLayerTestCommon : public StridedSliceLayerTest, virtual public VpuOv2LayerTest {};
 
-class StridedSliceLayerTest_NPU3720 : public StridedSliceLayerTestCommon {};
-class StridedSliceNCELayerTest_NPU3720 : public StridedSliceLayerTestCommon {};
-class StridedSliceTilingLayerTest_NPU3720 : public StridedSliceLayerTestCommon {};
-class StridedSliceLayerTest_NPU4000 : public StridedSliceLayerTestCommon {};
+class StridedSliceNCELayerTest : public StridedSliceLayerTestCommon {};
+class StridedSliceTilingLayerTest : public StridedSliceLayerTestCommon {};
 
-TEST_P(StridedSliceLayerTest_NPU3720, SW) {
+TEST_P(StridedSliceLayerTestCommon, NPU3720_SW) {
     setReferenceSoftwareMode();
     run(Platform::NPU3720);
 }
 
-TEST_P(StridedSliceNCELayerTest_NPU3720, HW) {
+TEST_P(StridedSliceNCELayerTest, NPU3720_HW) {
     setDefaultHardwareMode();
     run(Platform::NPU3720);
 }
 
-TEST_P(StridedSliceTilingLayerTest_NPU3720, HW) {
+TEST_P(StridedSliceTilingLayerTest, NPU3720_HW) {
     setDefaultHardwareMode();
     run(Platform::NPU3720);
 }
 
-TEST_P(StridedSliceLayerTest_NPU4000, SW) {
+TEST_P(StridedSliceLayerTestCommon, NPU4000_SW) {
     setReferenceSoftwareMode();
     run(Platform::NPU4000);
 }
-
 }  // namespace test
-
 }  // namespace ov
 
-using ov::test::StridedSliceLayerTest_NPU3720;
-using ov::test::StridedSliceLayerTest_NPU4000;
-using ov::test::StridedSliceNCELayerTest_NPU3720;
-using ov::test::StridedSliceTilingLayerTest_NPU3720;
+using ov::test::StridedSliceLayerTestCommon;
+using ov::test::StridedSliceNCELayerTest;
+using ov::test::StridedSliceTilingLayerTest;
 
 namespace {
 
@@ -531,6 +526,33 @@ std::vector<ov::test::StridedSliceSpecificParams> tests_5d = {
          {0, 0, 0, 0, 0},
          {0, 0, 1, 0, 0},
          {0, 0, 0, 0, 0}},
+        {ov::test::static_shapes_to_test_representation(std::vector<ov::Shape>({{1, 5, 20, 32, 32}})),
+         {0, 0, 0, 0, 0},
+         {1, 5, 20, 32, 32},
+         {1, 2, 2, 2, 2},
+         {0, 0, 0, 0, 0},
+         {0, 0, 0, 0, 0},
+         {},
+         {},
+         {}},
+        {ov::test::static_shapes_to_test_representation(std::vector<ov::Shape>({{1, 8, 8, 8, 8}})),
+         {0, 0, 0, 0, 0},
+         {1, 8, 8, 8, 8},
+         {1, 2, 2, 2, 2},
+         {0, 0, 0, 0, 0},
+         {0, 0, 0, 0, 0},
+         {},
+         {},
+         {}},
+        {ov::test::static_shapes_to_test_representation(std::vector<ov::Shape>({{1, 8, 8, 8, 8}})),
+         {0, 2, 3, 1, 1},
+         {1, 8, 8, 8, 8},
+         {1, 2, 2, 2, 2},
+         {0, 0, 0, 0, 0},
+         {0, 0, 0, 0, 0},
+         {},
+         {},
+         {}},
 };
 
 std::vector<ov::test::StridedSliceSpecificParams> tiling_tests = {
@@ -543,9 +565,6 @@ std::vector<ov::test::StridedSliceSpecificParams> tiling_tests = {
          {},
          {},
          {}},
-};
-
-std::vector<ov::test::StridedSliceSpecificParams> precomit_tiling_tests = {
         {ov::test::static_shapes_to_test_representation(std::vector<ov::Shape>({{1, 3, 640, 640}})),
          {0, 0, 0, 0},
          {0, 0, 2147483647, 0},  // The 2147483647 value from ends is supported beacause of ResolveStridedSlice pass.
@@ -677,61 +696,26 @@ std::vector<ov::test::StridedSliceSpecificParams> precomit_tiling_tests = {
          {}},
 };
 
-std::vector<ov::test::StridedSliceSpecificParams> testsConfig = {
-        {ov::test::static_shapes_to_test_representation(std::vector<ov::Shape>({{32, 20}})),
-         {2, 10},
-         {32, 20},
-         {1, 2},
-         {0, 1},
-         {1, 0},
-         {},
-         {},
-         {}},
-        {ov::test::static_shapes_to_test_representation(std::vector<ov::Shape>({{2, 5, 32, 32}})),
-         {0, 0, 0, 20},
-         {1, 2, 30, 30},
-         {1, 1, 2, 1},
-         {0, 0, 0, 1},
-         {0, 1, 0, 1},
-         {},
-         {},
-         {}},
-};
-
 const std::vector<ov::element::Type> modelTypes = {ov::element::f16};
 
-// --------- NPU3720 ---------
-
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_StridedSlice, StridedSliceLayerTest_NPU3720,
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_StridedSlice, StridedSliceLayerTestCommon,
                          ::testing::Combine(::testing::ValuesIn(precommit_tests), ::testing::ValuesIn(modelTypes),
                                             ::testing::Values(ov::test::utils::DEVICE_NPU)),
-                         StridedSliceLayerTest_NPU3720::getTestCaseName);
+                         StridedSliceLayerTestCommon::getTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_StridedSlice, StridedSliceNCELayerTest_NPU3720,
-                         ::testing::Combine(::testing::ValuesIn(nce_tests), ::testing::ValuesIn(modelTypes),
-                                            ::testing::Values(ov::test::utils::DEVICE_NPU)),
-                         StridedSliceNCELayerTest_NPU3720::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_StridedSlice_5D, StridedSliceLayerTest_NPU3720,
+INSTANTIATE_TEST_SUITE_P(smoke_StridedSlice_5D, StridedSliceLayerTestCommon,
                          ::testing::Combine(::testing::ValuesIn(tests_5d), ::testing::ValuesIn(modelTypes),
                                             ::testing::Values(ov::test::utils::DEVICE_NPU)),
-                         StridedSliceLayerTest_NPU3720::getTestCaseName);
+                         StridedSliceLayerTestCommon::getTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(smoke_tiling_StridedSlice, StridedSliceTilingLayerTest_NPU3720,
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_StridedSlice, StridedSliceNCELayerTest,
+                         ::testing::Combine(::testing::ValuesIn(nce_tests), ::testing::ValuesIn(modelTypes),
+                                            ::testing::Values(ov::test::utils::DEVICE_NPU)),
+                         StridedSliceNCELayerTest::getTestCaseName);
+
+INSTANTIATE_TEST_SUITE_P(smoke_tiling_StridedSlice, StridedSliceTilingLayerTest,
                          ::testing::Combine(::testing::ValuesIn(tiling_tests), ::testing::ValuesIn(modelTypes),
                                             ::testing::Values(ov::test::utils::DEVICE_NPU)),
-                         StridedSliceTilingLayerTest_NPU3720::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_tiling_StridedSlice, StridedSliceTilingLayerTest_NPU3720,
-                         ::testing::Combine(::testing::ValuesIn(precomit_tiling_tests), ::testing::ValuesIn(modelTypes),
-                                            ::testing::Values(ov::test::utils::DEVICE_NPU)),
-                         StridedSliceTilingLayerTest_NPU3720::getTestCaseName);
-
-// --------- NPU4000 ---------
-
-INSTANTIATE_TEST_SUITE_P(smoke_StridedSlice, StridedSliceLayerTest_NPU4000,
-                         ::testing::Combine(::testing::ValuesIn(testsConfig), ::testing::ValuesIn(modelTypes),
-                                            ::testing::Values(ov::test::utils::DEVICE_NPU)),
-                         StridedSliceLayerTest_NPU4000::getTestCaseName);
+                         StridedSliceTilingLayerTest::getTestCaseName);
 
 }  // namespace

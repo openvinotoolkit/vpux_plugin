@@ -17,6 +17,7 @@ vpux::VPURT::BufferSection getBufferLocation(mlir::Operation* symTableOp, mlir::
                                              Logger log = Logger::global());
 vpux::VPURT::BufferSection getBufferLocation(ELF::SymbolReferenceMap& symRefMap, mlir::SymbolRefAttr symRef,
                                              Logger log = Logger::global());
+vpux::VPUASM::BufferType getBufferType(ELF::SymbolReferenceMap& symRefMap, mlir::SymbolRefAttr symRef);
 
 }  // namespace VPUASM
 }  // namespace vpux

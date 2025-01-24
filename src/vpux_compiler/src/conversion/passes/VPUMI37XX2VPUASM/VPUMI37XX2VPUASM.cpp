@@ -71,7 +71,8 @@ void ConvertVPUMI37XX2VPUASMPass::safeRunOnModule() {
 
     IE::CNNNetworkOp::getFromModule(moduleOp, cnnOp, netFunc);
 
-    llvm::DenseMap<mlir::Value, mlir::FlatSymbolRefAttr> symbolNameMappings;
+    llvm::DenseMap<mlir::Value, mlir::SymbolRefAttr> symbolNameMappings;
+    std::unordered_map<ELF::SectionSignature, ELF::ElfSectionInterface> sectionMap;
 
     SymbolizationTypeConverter typeConverter;
 
@@ -82,6 +83,7 @@ void ConvertVPUMI37XX2VPUASMPass::safeRunOnModule() {
     target.addIllegalOp<VPUIP::PPETaskOp>();
 
     target.addLegalDialect<VPUASM::VPUASMDialect>();
+    target.addLegalDialect<ELF::ELFDialect>();
     target.addLegalOp<mlir::func::FuncOp>();
     target.addLegalOp<mlir::func::ReturnOp>();
 
@@ -90,20 +92,20 @@ void ConvertVPUMI37XX2VPUASMPass::safeRunOnModule() {
 
     SymbolizationPatternSet patterns(&ctx);
 
-    patterns.add<DeclareBufferRewriter>(netFunc, typeConverter, symbolNameMappings, &ctx, _log);
-    patterns.add<DeclareConstBufferRewriter>(netFunc, typeConverter, symbolNameMappings, &ctx, _log);
-    patterns.add<DeclareTaskBufferRewriter>(netFunc, typeConverter, symbolNameMappings, &ctx, _log);
-    patterns.add<NNDMARewriter>(netFunc, typeConverter, symbolNameMappings, &ctx, _log);
-    patterns.add<KernelTextRewriter>(netFunc, typeConverter, symbolNameMappings, &ctx, _log);
-    patterns.add<KernelDataRewriter>(netFunc, typeConverter, symbolNameMappings, &ctx, _log);
-    patterns.add<KernelEntryRewriter>(netFunc, typeConverter, symbolNameMappings, &ctx, _log);
-    patterns.add<KernelParamsRewriter>(netFunc, typeConverter, symbolNameMappings, &ctx, _log);
-    patterns.add<KernelRangeRewriter>(netFunc, typeConverter, symbolNameMappings, &ctx, _log);
-    patterns.add<KernelInvocationRewriter>(netFunc, typeConverter, symbolNameMappings, &ctx, _log);
-    patterns.add<DPUVariantRewriter>(netFunc, typeConverter, symbolNameMappings, &ctx, _log);
-    patterns.add<DPUInvariantRewriter>(netFunc, typeConverter, symbolNameMappings, &ctx, _log);
-    patterns.add<BarrierRewriter>(netFunc, typeConverter, symbolNameMappings, &ctx, _log);
-    patterns.add<MappedInferenceRewriter>(netFunc, typeConverter, symbolNameMappings, &ctx, _log);
+    patterns.add<DeclareBufferRewriter>(netFunc, typeConverter, symbolNameMappings, sectionMap, &ctx, _log);
+    patterns.add<DeclareConstBufferRewriter>(netFunc, typeConverter, symbolNameMappings, sectionMap, &ctx, _log);
+    patterns.add<DeclareTaskBufferRewriter>(netFunc, typeConverter, symbolNameMappings, sectionMap, &ctx, _log);
+    patterns.add<NNDMARewriter>(netFunc, typeConverter, symbolNameMappings, sectionMap, &ctx, _log);
+    patterns.add<KernelTextRewriter>(netFunc, typeConverter, symbolNameMappings, sectionMap, &ctx, _log);
+    patterns.add<KernelDataRewriter>(netFunc, typeConverter, symbolNameMappings, sectionMap, &ctx, _log);
+    patterns.add<KernelEntryRewriter>(netFunc, typeConverter, symbolNameMappings, sectionMap, &ctx, _log);
+    patterns.add<KernelParamsRewriter>(netFunc, typeConverter, symbolNameMappings, sectionMap, &ctx, _log);
+    patterns.add<KernelRangeRewriter>(netFunc, typeConverter, symbolNameMappings, sectionMap, &ctx, _log);
+    patterns.add<KernelInvocationRewriter>(netFunc, typeConverter, symbolNameMappings, sectionMap, &ctx, _log);
+    patterns.add<DPUVariantRewriter>(netFunc, typeConverter, symbolNameMappings, sectionMap, &ctx, _log);
+    patterns.add<DPUInvariantRewriter>(netFunc, typeConverter, symbolNameMappings, sectionMap, &ctx, _log);
+    patterns.add<BarrierRewriter>(netFunc, typeConverter, symbolNameMappings, sectionMap, &ctx, _log);
+    patterns.add<MappedInferenceRewriter>(netFunc, typeConverter, symbolNameMappings, sectionMap, &ctx, _log);
 
     if (mlir::failed(
                 mlir::applyFullConversion(netFunc, target, SymbolizationPatternSet::freeze(std::move(patterns))))) {

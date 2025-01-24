@@ -44,6 +44,8 @@ constexpr int64_t VPU_CHANNEL_SIZE_FOR_L1OPT = 32;
 
 constexpr int64_t VPU_SPATIAL_ALIGNMENT = 4;
 
+constexpr std::array<int64_t, 3> DEPTHWISE_WORKLOAD_SIZES{16, 32, 64};
+
 //
 // Precision checks
 //

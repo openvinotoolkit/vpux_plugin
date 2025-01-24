@@ -1,4 +1,4 @@
-// Copyright (C) Intel Corporation
+// Copyright (C) 2023 - 2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -6,7 +6,7 @@
 
 #include <common/utils.hpp>
 #include <functional>
-#include <npu_private_properties.hpp>
+#include <intel_npu/npu_private_properties.hpp>
 #include <optional>
 #include <shared_test_classes/base/ov_subgraph.hpp>
 #include <sstream>
@@ -63,6 +63,7 @@ public:
 
     void setSingleClusterMode();
     void setPerformanceHintLatency();
+    void setShaveCodeGenMode();
 
     bool isReferenceSoftwareMode() const;
     bool isDefaultHardwareMode() const;

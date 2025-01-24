@@ -69,5 +69,7 @@ Driver Compiler provides npu_driver_compiler, compilerTest, profilingTest and lo
     - [linux](./docs/how_to_build_driver_compiler_on_linux.md)
     - [windows](./docs/how_to_build_driver_compiler_on_windows.md)
 
-[OpenVINO Project]: https://github.com/openvinotoolkit/openvino
-[NPU-Plugin Project]: https://github.com/openvinotoolkit/npu_plugin
+
+## How to test
+
+Please refer to [How to test](./docs/how_to_test.md).

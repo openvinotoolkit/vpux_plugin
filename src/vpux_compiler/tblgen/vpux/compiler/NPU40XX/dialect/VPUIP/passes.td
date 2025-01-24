@@ -57,7 +57,7 @@ def ConstantDpuProfHwpBase : PassBase<"constant-dpu-prof-hwp-base", "vpux::Funct
     let summary = "Sets single NCE HWP CMX base address";
 
     let description = [{
-        In NPU40XX NCE HWP CMX base address must remain the same for all DPU tasks since
+        In NPU37XX NCE HWP CMX base address must remain the same for all DPU tasks since
         HW may capture the address from a subsequent descriptor before storing the profiling
         record for the task just completed. To prevent from such race condition NCE HWP CMX
         base address for each NCE task will be 0 and profiling slot addressing will be
@@ -220,6 +220,29 @@ def LegalizeScheduleForWlmFetchDmas : PassBase<"legalize-schedule-for-wlm", "vpu
     }];
 
     let constructor = "vpux::VPUIP::arch40xx::createLegalizeScheduleForWlmFetchDmasPass()";
+
+    let options = [
+        Option<
+            "maxVarCountPerGroup", "max-variant-count-per-group",
+            "int", "",
+            "Number of variants in execution group"
+        >,
+        Option<
+            "maxInvarCountPerGroup", "max-invariant-count-per-group",
+            "int", "",
+            "Number of invariants in execution group"
+        >,
+        Option<
+            "maxKernelInvoCountPerGroup", "max-kernel-invo-count-per-group",
+            "int", "",
+            "Number of act shave invocation in execution group"
+        >,
+        Option<
+            "maxKernelRangeCountPerGroup", "max-kernel-range-count-per-group",
+            "int", "",
+            "Number of act shave range in execution group"
+        >,
+    ];
 }
 
 #endif

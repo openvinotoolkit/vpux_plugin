@@ -128,12 +128,13 @@ void buildContinuedConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::Module
     const auto weightsPartialParamType = getMemRef(weightsPartialShape, weightsType, vpux::VPU::MemoryKind::DDR);
     auto weightsPartial0Values = splitWeightsOverC(weightsValues, weightsShape, weightsType, builder.getContext(),
                                                    /*startC*/ 0, /*endC*/ weightsPartialShape[1]);
-    auto weightsPartial0AttributeSetup = Const::ContentAttr::transform(weightsPartial0Values);
+    Const::ContentSetup weightsPartial0AttributeSetup(weightsPartial0Values.getType());
     if (auto qty = weightsType.dyn_cast<mlir::quant::QuantizedType>()) {
-        weightsPartial0AttributeSetup = weightsPartial0AttributeSetup.quantCast(qty);
+        weightsPartial0AttributeSetup = weightsPartial0AttributeSetup.castElemType(qty);
     }
 
-    auto weightsPartial0Attribute = weightsPartial0AttributeSetup.reorder(DimsOrder::NHWC).get();
+    auto weightsPartial0Attribute =
+            Const::ContentAttr::get(weightsPartial0Values, weightsPartial0AttributeSetup.reorder(DimsOrder::NHWC));
     auto weightsPartial0DDR = functionBuilder.create<Const::DeclareOp>(builder.getUnknownLoc(), weightsPartialParamType,
                                                                        std::move(weightsPartial0Attribute));
 
@@ -141,12 +142,13 @@ void buildContinuedConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::Module
     auto weightsPartial1Values =
             splitWeightsOverC(weightsValues, weightsShape, weightsType, ctx,
                               /*startC*/ weightsPartialShape[1], /*endC*/ 2 * weightsPartialShape[1]);
-    auto weightsPartial1AttributeSetup = Const::ContentAttr::transform(weightsPartial1Values);
+    Const::ContentSetup weightsPartial1AttributeSetup(weightsPartial1Values.getType());
     if (auto qty = weightsType.dyn_cast<mlir::quant::QuantizedType>()) {
-        weightsPartial1AttributeSetup = weightsPartial1AttributeSetup.quantCast(qty);
+        weightsPartial1AttributeSetup = weightsPartial1AttributeSetup.castElemType(qty);
     }
 
-    auto weightsPartial1Attribute = weightsPartial1AttributeSetup.reorder(DimsOrder::NHWC).get();
+    auto weightsPartial1Attribute =
+            Const::ContentAttr::get(weightsPartial1Values, weightsPartial1AttributeSetup.reorder(DimsOrder::NHWC));
     auto weightsPartial1DDR = functionBuilder.create<Const::DeclareOp>(builder.getUnknownLoc(), weightsPartialParamType,
                                                                        std::move(weightsPartial1Attribute));
 
@@ -179,7 +181,8 @@ void buildContinuedConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::Module
             mlir::DenseElementsAttr::get(weightsTableDDRType, llvm::ArrayRef<std::int32_t>(weightsTable0));
     auto weightsTable0DDR = functionBuilder.create<vpux::Const::DeclareOp>(
             builder.getUnknownLoc(), weightsTableDDRMemRef,
-            vpux::Const::ContentAttr::transform(weightsTable0Values).reorder(vpux::DimsOrder::NHWC).get());
+            vpux::Const::ContentAttr::get(weightsTable0Values,
+                                          Const::ContentSetup(weightsTableDDRType).reorder(vpux::DimsOrder::NHWC)));
     auto weightsTable0CMX = getCMXTensor(weightsTableShape, int32, WEIGHTSTABLE_0_CMX_OFFSET);
 
     // weights table 1
@@ -195,7 +198,8 @@ void buildContinuedConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::Module
             mlir::DenseElementsAttr::get(weightsTableDDRType, llvm::ArrayRef<std::int32_t>(weightsTable1));
     auto weightsTable1DDR = functionBuilder.create<vpux::Const::DeclareOp>(
             builder.getUnknownLoc(), weightsTableDDRMemRef,
-            vpux::Const::ContentAttr::transform(weightsTable1Values).reorder(vpux::DimsOrder::NHWC).get());
+            vpux::Const::ContentAttr::get(weightsTable1Values,
+                                          Const::ContentSetup(weightsTableDDRType).reorder(vpux::DimsOrder::NHWC)));
     auto weightsTable1CMX = getCMXTensor(weightsTableShape, int32, WEIGHTSTABLE_1_CMX_OFFSET);
 
     auto [waitWLMBarrier, freeBarrierId] =
@@ -243,7 +247,7 @@ void buildContinuedConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::Module
     // NCE Task 0
     auto nceTask_0 = VPURT::wrapIntoTaskOp<NCEClusterTaskOp>(
             functionBuilder, barriers[0], barriers[1], builder.getUnknownLoc(), inputPartial0CMX.getBuffer(),
-            weightsPartial0CMX.getBuffer(), weightsTable0CMX.getBuffer(), /*instruction_table_list=*/nullptr,
+            weightsPartial0CMX.getBuffer(), weightsTable0CMX.getBuffer(),
             /*spr_lookup_table*/ nullptr, inputPartial0CMX.getBuffer(), output0CMX.getBuffer(), output0CMX.getBuffer(),
             VPUIP::NCETaskType::CONV, kernelSize, strides, kernelPaddings, isContinued, /*sp_pattern*/ nullptr);
 
@@ -262,7 +266,7 @@ void buildContinuedConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::Module
     // NCE Task 1
     auto nceTask_1 = VPURT::wrapIntoTaskOp<NCEClusterTaskOp>(
             functionBuilder, barriers[1], barriers[2], builder.getUnknownLoc(), inputPartial1CMX.getBuffer(),
-            weightsPartial1CMX.getBuffer(), weightsTable1CMX.getBuffer(), /*instruction_table_list=*/nullptr,
+            weightsPartial1CMX.getBuffer(), weightsTable1CMX.getBuffer(),
             /*spr_lookup_table*/ nullptr, inputPartial1CMX.getBuffer(), output1CMX.getBuffer(), output1CMX.getBuffer(),
             VPUIP::NCETaskType::CONV, kernelSize, strides, kernelPaddings,
             /*is_continued*/ nullptr, /*sp_pattern*/ nullptr);

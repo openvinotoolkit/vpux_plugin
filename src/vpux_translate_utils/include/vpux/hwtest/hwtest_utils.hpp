@@ -59,7 +59,7 @@ struct ProfilingDataSection {
     int64_t size;
 };
 
-std::vector<uint16_t> computeSprLookupTable(nb::ActivationType activation_type);
+std::vector<uint16_t> computeSprLookupTable(nb::ActivationType activation_type, vpux::VPU::ArchKind arch);
 
 mlir::DenseElementsAttr generateWeights(mlir::OpBuilder builder, llvm::ArrayRef<int64_t> wt_shape, mlir::Type dtype,
                                         mlir::MLIRContext* ctx, const char* weight_file_name);
@@ -91,6 +91,8 @@ void buildDMABroadcast(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleO
                        Logger& log, mlir::Type inputType, mlir::Type outputType);
 void buildSimpleZMajorConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp module, mlir::OpBuilder builder,
                            Logger& log, mlir::Type inputType, mlir::Type weightsType, mlir::Type outputType);
+void buildReductionTest(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp module, mlir::OpBuilder builder,
+                        Logger& log, mlir::Type inputType, mlir::Type outputType);
 void buildContinuedConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp module, mlir::OpBuilder builder,
                         Logger& log, mlir::Type inputType, mlir::Type weightsType, mlir::Type outputType);
 void buildDoubleConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp module, mlir::OpBuilder builder,
@@ -233,6 +235,10 @@ VPU::PaddingAttr getMulticlusteringPaddings(mlir::MLIRContext* ctx, const int64_
 
 std::pair<mlir::SmallVector<mlir::Value>, size_t> insertWLMStartSequence(mlir::OpBuilder& builder, bool isWLMEnabled,
                                                                          bool useVirtualBarriers = false);
+
+bool supportsSmallKernelOpt(vpux::VPU::ArchKind arch, int64_t kernelX, int64_t strideX, int64_t workloadSizeZ,
+                            uint64_t actOffset, int64_t inputTypeSize, int64_t weightsTypeSize,
+                            vpux::VPUIP::NCETaskType nceTaskType);
 
 }  // namespace hwtest
 }  // namespace vpux

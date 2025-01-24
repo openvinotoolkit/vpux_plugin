@@ -9,6 +9,7 @@
 #include "vpux/compiler/dialect/IE/transforms/rewriters/propagate_transpose_affine_reshape_common.hpp"
 
 #include "vpux/compiler/dialect/IE/utils/concat_utils.hpp"
+#include "vpux/compiler/dialect/IE/utils/elem_type_info_utils.hpp"
 #include "vpux/compiler/dialect/IE/utils/pooling_utils.hpp"
 #include "vpux/compiler/dialect/IE/utils/quantization.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
@@ -161,6 +162,169 @@ SmallVector<mlir::Attribute> MoveThroughTranspose::getNewAttrs(IE::TransposeOp o
 
 void MoveThroughTranspose::updateAttrs(mlir::Operation* origOp, ArrayRef<mlir::Attribute> newAttrs) const {
     origOp->setAttr("order_value", newAttrs[0]);
+}
+
+//
+// MoveThroughPermuteCast
+//
+
+// The pattern like below usually converted from decomposed matmul, and due to the AffineReshape -> PermuteCast ->
+// AffineReshape chain, the concat will introduce extra DDR->DDR copies (if cannot concat on CMX), which is low
+// efficient. Convert pattern from:
+//      Ops                      Ops
+//       |                        |
+// AffineReshape            AffineReshape
+//       |                        |
+//  PermuteCast              PermuteCast
+//       |                        |
+// AffineReshape    ...     AffineReshape
+//       \           |           /
+//                Concat
+// To:
+//     Ops         ...         Ops
+//      \           |           /
+//                Concat
+//                  |
+//            AffineReshape
+//                  |
+//             PermuteCast
+//                  |
+//            AffineReshape
+
+class MoveAffineReshapePermuteCastThroughConcat final : public mlir::OpRewritePattern<IE::ConcatOp> {
+public:
+    MoveAffineReshapePermuteCastThroughConcat(mlir::MLIRContext* ctx, Logger log)
+            : mlir::OpRewritePattern<IE::ConcatOp>(ctx), _log(log) {
+        this->setDebugName("MoveAffineReshapePermuteCastThroughConcat");
+    }
+
+private:
+    mlir::LogicalResult matchAndRewrite(IE::ConcatOp origOp, mlir::PatternRewriter& rewriter) const final;
+
+private:
+    Logger _log;
+};
+
+mlir::LogicalResult MoveAffineReshapePermuteCastThroughConcat::matchAndRewrite(IE::ConcatOp origOp,
+                                                                               mlir::PatternRewriter& rewriter) const {
+    _log.trace("Got '{0}' at '{1}'", origOp->getName(), origOp->getLoc());
+
+    auto ctx = rewriter.getContext();
+
+    const auto axis = getConcatAxesFromOffsets(origOp, getShape(origOp.getOutput()));
+    if (axis.size() != 1) {
+        _log.nest().trace("[{0}]: Not only concat on 1 axis", getDebugName());
+        return mlir::failure();
+    }
+    const auto concatAxis = (*axis.begin()).ind();
+
+    auto concatInputs = origOp.getInputs();
+    SmallVector<mlir::Value> newConcatInputs;
+    IE::AffineReshapeOp firstAffineReshapeOp = nullptr;
+    IE::PermuteCastOp permuteCastOp = nullptr;
+    IE::AffineReshapeOp secondAffineReshapeOp = nullptr;
+    for (const auto& input : concatInputs) {
+        secondAffineReshapeOp = input.getDefiningOp<IE::AffineReshapeOp>();
+
+        if (!secondAffineReshapeOp) {
+            _log.nest().trace("[{0}]: There is no child AffineReshape op found for concat", getDebugName());
+            return mlir::failure();
+        }
+
+        // Check the second affinereshape
+        auto affineInShape = getShape(secondAffineReshapeOp.getInput());
+        auto affineOutShape = getShape(secondAffineReshapeOp.getOutput());
+        if (affineInShape.size() != 4 || affineOutShape.size() != 4) {
+            _log.nest().trace("[{0}]: Only 4D rand AffineReshape supported", getDebugName());
+            return mlir::failure();
+        }
+        if (affineInShape[Dims4D::Act::H] != 1 || affineInShape[Dims4D::Act::W] != 1 ||
+            affineOutShape[Dims4D::Act::N] != 1 || affineOutShape[Dims4D::Act::C] != 1) {
+            _log.nest().trace("[{0}]: Input AffineReshape is not eligible", getDebugName());
+            return mlir::failure();
+        }
+
+        permuteCastOp = secondAffineReshapeOp.getInput().getDefiningOp<IE::PermuteCastOp>();
+        if (!permuteCastOp) {
+            _log.nest().trace("[{0}]: There is no PermuteCast op found for concat", getDebugName());
+            return mlir::failure();
+        }
+
+        const auto memPerm = DimsOrder::fromAffineMap(permuteCastOp.getMemPerm());
+        // Check Concat dim is N after permutecast
+        if (memPerm.dimAt(0).ind() != concatAxis) {
+            _log.nest().trace("[{0}]: Concat axis is not N after permute", getDebugName());
+            return mlir::failure();
+        }
+
+        firstAffineReshapeOp = permuteCastOp.getInput().getDefiningOp<IE::AffineReshapeOp>();
+        if (!firstAffineReshapeOp) {
+            _log.nest().trace("[{0}]: There is no parent AffineReshape op found for concat", getDebugName());
+            return mlir::failure();
+        }
+
+        auto inputShape = getShape(firstAffineReshapeOp.getOutput());
+        // If non one dim size is bigger than 2 dims, the mempermute is not trivial after propagated.
+        SmallVector<Dim> nonOneDims = getNonOneDim(inputShape);
+        if (nonOneDims.size() > 2) {
+            return mlir::failure();
+        }
+
+        newConcatInputs.push_back(firstAffineReshapeOp.getInput());
+    }
+
+    auto concatOutputShape = getShape(origOp.getOutput());
+    auto reshape1OutputShape = getShape(firstAffineReshapeOp.getOutput());
+    auto reshape1InputShape = getShape(firstAffineReshapeOp.getInput());
+
+    const auto cmxMemSize = VPU::getTotalCMXSize(origOp.getOperation());
+    auto inNDInterface = mlir::cast<vpux::NDTypeInterface>(secondAffineReshapeOp.getInput().getType());
+    const auto elementSize = inNDInterface.getCompactAllocSize().count() / reshape1InputShape.totalSize();
+
+    auto affreshape1Producer = firstAffineReshapeOp.getInput().getDefiningOp();
+    auto totalProducerInputSize = [&]() {
+        int64_t totalSize = 0;
+        if (affreshape1Producer == nullptr) {
+            return totalSize;  // tensor should be blockarg, so only need concat size
+        }
+
+        for (auto input : affreshape1Producer->getOperands()) {
+            totalSize += mlir::cast<vpux::NDTypeInterface>(input.getType()).getTotalAllocSize().count();
+        }
+        return totalSize;
+    };
+
+    auto concatTotalSize = totalProducerInputSize() + concatOutputShape.totalSize();
+    // If concat op cannot fix into CMX, it's usually need DDR concat which is low efficient, otherwise no need to
+    // propagate and it also introduce accuracy issue for this case. Experimental constraint to ensure this optimization
+    // only process the DDR->DDR copies are the bottleneck.
+    constexpr float threshold = 0.7f;
+    if (concatTotalSize * elementSize * threshold < cmxMemSize.count()) {
+        return mlir::failure();
+    }
+
+    auto newConcat = rewriter.create<IE::ConcatOp>(origOp.getLoc(), newConcatInputs, Dims4D::Act::N);
+
+    SmallVector<int64_t> newShape1 = {concatOutputShape[Dims4D::Act::C], reshape1OutputShape[Dims4D::Act::C],
+                                      reshape1OutputShape[Dims4D::Act::H], 1};
+    auto newAffineReshapeOp = rewriter.create<IE::AffineReshapeOp>(
+            appendLoc(origOp.getLoc(), "_reshape_1"), newConcat.getOutput(), firstAffineReshapeOp.getDimMappingAttr(),
+            getIntArrayAttr(ctx, newShape1));
+
+    auto dstOrder = mlir::AffineMapAttr::get(DimsOrder::NCHW.toAffineMap(ctx));
+    const auto memPerm = mlir::AffineMapAttr::get(DimsOrder::NCHW.toAffineMap(ctx));
+    auto newPermuteCastOp = rewriter.create<IE::PermuteCastOp>(appendLoc(origOp.getLoc(), "_permute_output"),
+                                                               newAffineReshapeOp.getOutput(), dstOrder, memPerm);
+
+    SmallVector<SmallVector<int64_t>> outDimMapping{{Dims4D::Act::N.ind(), Dims4D::Act::C.ind()},
+                                                    {Dims4D::Act::H.ind()},
+                                                    {Dims4D::Act::W.ind()},
+                                                    {Dims4D::Act::W.ind()}};
+    rewriter.replaceOpWithNewOp<IE::AffineReshapeOp>(origOp, newPermuteCastOp.getOutput(),
+                                                     getIntArrayOfArray(ctx, outDimMapping),
+                                                     getIntArrayAttr(ctx, to_small_vector(concatOutputShape)));
+
+    return mlir::success();
 }
 
 //
@@ -495,20 +659,20 @@ mlir::LogicalResult MoveThroughMVN::matchAndRewrite(IE::MVNOp origOp, mlir::Patt
         return mlir::failure();
     }
 
-    // For example, across_channels = false, 1x2x1280x1 -> 1x2560x1x1, it is not equivalent to propagate
-    if (!isAcrossChannels && mvnInShape[Dims4D::Act::C] != 1 &&
-        preAffineReshapeInShape[Dims4D::Act::C] != mvnInShape[Dims4D::Act::C]) {
-        return mlir::failure();
-    }
-
-    if (mvnInShape[Dims4D::Act::N] != preAffineReshapeInShape[Dims4D::Act::N]) {
-        _log.trace("DimN of MVNOp is different from previous AffineReshapeOp");
-        return mlir::failure();
-    }
-
-    if (!isAcrossChannels && mvnInShape[Dims4D::Act::C] == 1 &&
-        preAffineReshapeInShape[Dims4D::Act::C] != mvnInShape[Dims4D::Act::C]) {
-        isAcrossChannels = true;
+    auto inChSize = mvnInShape[Dims4D::Act::H] * mvnInShape[Dims4D::Act::W] *
+                    (isAcrossChannels ? mvnInShape[Dims4D::Act::C] : 1);
+    auto outChSize = preAffineReshapeInShape[Dims4D::Act::H] * preAffineReshapeInShape[Dims4D::Act::W] *
+                     (isAcrossChannels ? preAffineReshapeInShape[Dims4D::Act::C] : 1);
+    if (inChSize != outChSize) {
+        if (!isAcrossChannels && mvnInShape[Dims4D::Act::C] == 1 &&
+            mvnInShape[Dims4D::Act::N] == preAffineReshapeInShape[Dims4D::Act::N]) {
+            // For example, it is equivalent to propagate
+            // across_channels = false, 1x1x1280x1 -> across_channels = true, 1x1280x1x1
+            isAcrossChannels = true;
+        } else {
+            _log.trace("AffineReshapeOp not suitable to propagate");
+            return mlir::failure();
+        }
     }
 
     // Create new MVNOp
@@ -1076,6 +1240,10 @@ mlir::LogicalResult MoveThroughOneInputEltwise::matchAndRewrite(mlir::Operation*
         return matchFailed(_log, rewriter, eltwiseOp, "AffineReshapeOp not found or has multiple uses");
     }
 
+    if (IE::isPerAxisQuant(eltwiseOp->getOperand(0)) || IE::isPerAxisQuant(eltwiseOp->getResult(0))) {
+        return mlir::failure();
+    }
+
     // ConvertShapeTo4D could generate this subgraph
     //   AffineReshape (2D->4D) -> EltwiseOp (4D) -> AffineReshape (4D->2D)
     // Do not change it into
@@ -1165,6 +1333,7 @@ void PropagateAffineReshape::safeRunOnFunc() {
     patterns.add<MoveThroughMultiply>(&ctx, _log);
     patterns.add<MoveThroughSlice>(&ctx, _log);
     patterns.add<IE::MoveTransposeAffineReshapeThroughAdd>(&ctx, vpux::benefitHigh, _log);
+    patterns.add<MoveAffineReshapePermuteCastThroughConcat>(&ctx, _log);
     patterns.add<MoveThroughAdd>(&ctx, _log);
     patterns.add<MoveThroughOneInputEltwise>(&ctx, _log);
     IE::ReshapeOp::getCanonicalizationPatterns(patterns, &ctx);

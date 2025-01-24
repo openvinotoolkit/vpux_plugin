@@ -14,7 +14,7 @@ def VPURegMapped_Dialect : Dialect {
     let description = [{
 The **VPURegMapped Dialect** defines attributes and types common
     for all supported VPU HW architectures. It is used combined with
-    arch specific register map dialects (e.g. NPU37XX, VPU40XX)
+    arch specific register map dialects (e.g. NPU37XX, NPU40XX)
     to represents NN RunTime IR constructs in terms of the MLIR framework.
 
 [./VPURegMapped/_ops_interfaces.md]

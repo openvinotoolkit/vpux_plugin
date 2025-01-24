@@ -9,8 +9,8 @@
 namespace vpux {
 namespace vpumi37xx2vpuasm {
 
-mlir::LogicalResult DeclareBufferRewriter::symbolize(VPURT::DeclareBufferOp op, SymbolMapper& mapper,
-                                                     mlir::ConversionPatternRewriter& rewriter) const {
+mlir::FailureOr<SymbolizationResult> DeclareBufferRewriter::symbolize(VPURT::DeclareBufferOp op, SymbolMapper& mapper,
+                                                                      mlir::ConversionPatternRewriter& rewriter) const {
     mlir::MLIRContext* ctx = rewriter.getContext();
     auto result = op.getResult();
     auto symNameIt = mapper.find(result);
@@ -30,18 +30,18 @@ mlir::LogicalResult DeclareBufferRewriter::symbolize(VPURT::DeclareBufferOp op, 
 
         auto buffType = VPUASM::BufferType::get(ctx, memLocation, memref, traits);
 
-        rewriter.create<VPUASM::DeclareBufferOp>(op.getLoc(), symName, buffType);
+        auto newOp = rewriter.create<VPUASM::DeclareBufferOp>(op.getLoc(), symName, buffType);
 
         rewriter.eraseOp(op);
 
-        return mlir::success();
+        return SymbolizationResult(newOp);
     } else {
         mlir::OpBuilder::InsertionGuard guard(rewriter);
         rewriter.startOpModification(op);
         rewriter.setInsertionPointAfter(op);
         rewriter.create<VPUASM::SymbolizeValueOp>(op.getLoc(), result, symName);
         rewriter.finalizeOpModification(op);
-        return mlir::success();
+        return SymbolizationResult();
     }
 }
 

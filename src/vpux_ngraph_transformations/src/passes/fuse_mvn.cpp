@@ -160,7 +160,7 @@ ConvertLayerNormToMVN::ConvertLayerNormToMVN() {
         auto const_eps_node =
                 std::dynamic_pointer_cast<ov::opset6::Constant>(patternToOutput.at(eps).get_node_shared_ptr());
         float eps_value;
-        if (!ov::op::util::get_single_value(const_eps_node, eps_value)) {
+        if (const_eps_node == nullptr || !ov::op::util::get_single_value(const_eps_node, eps_value)) {
             return false;
         }
 

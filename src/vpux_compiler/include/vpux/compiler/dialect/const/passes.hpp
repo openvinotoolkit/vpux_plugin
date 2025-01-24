@@ -19,10 +19,9 @@ namespace Const {
 // Passes
 //
 
-std::unique_ptr<mlir::Pass> createConstantFoldingPass(Logger log = Logger::global());
+std::unique_ptr<mlir::Pass> createConstantFoldingPass(Logger log = Logger::global(),
+                                                      const int64_t threshold = 300 * 1024 * 1024);  // 300MB
 std::unique_ptr<mlir::Pass> createApplySwizzlingPass();
-
-void registerConstPipelines();
 
 //
 // Generated

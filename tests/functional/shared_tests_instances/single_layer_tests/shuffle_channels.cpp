@@ -1,4 +1,4 @@
-// Copyright (C) 2018-2023 Intel Corporation
+// Copyright (C) 2018-2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -8,29 +8,23 @@
 #include "vpu_ov2_layer_test.hpp"
 
 namespace ov {
-
 namespace test {
+
 class ShuffleChannelsLayerTestCommon : public ShuffleChannelsLayerTest, virtual public VpuOv2LayerTest {};
 
-class ShuffleChannelsLayerTest_NPU3720 : public ShuffleChannelsLayerTestCommon {};
-class ShuffleChannelsLayerTest_NPU4000 : public ShuffleChannelsLayerTestCommon {};
-
-TEST_P(ShuffleChannelsLayerTest_NPU3720, SW) {
+TEST_P(ShuffleChannelsLayerTestCommon, NPU3720_SW) {
     setReferenceSoftwareMode();
     run(Platform::NPU3720);
 }
 
-TEST_P(ShuffleChannelsLayerTest_NPU4000, SW) {
+TEST_P(ShuffleChannelsLayerTestCommon, NPU4000_SW) {
     setReferenceSoftwareMode();
     run(Platform::NPU4000);
 }
-
 }  // namespace test
-
 }  // namespace ov
 
-using ov::test::ShuffleChannelsLayerTest_NPU3720;
-using ov::test::ShuffleChannelsLayerTest_NPU4000;
+using ov::test::ShuffleChannelsLayerTestCommon;
 
 namespace {
 
@@ -46,11 +40,8 @@ const auto params0 = testing::Combine(testing::ValuesIn(shuffleParameters), test
                                       testing::ValuesIn(ov::test::static_shapes_to_test_representation(inputShapes)),
                                       testing::Values(ov::test::utils::DEVICE_NPU));
 
-INSTANTIATE_TEST_CASE_P(smoke_ShuffleChannels, ShuffleChannelsLayerTest_NPU3720, params0,
-                        ShuffleChannelsLayerTest_NPU3720::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_ShuffleChannels, ShuffleChannelsLayerTest_NPU4000, params0,
-                         ShuffleChannelsLayerTest_NPU4000::getTestCaseName);
+INSTANTIATE_TEST_CASE_P(smoke_ShuffleChannels, ShuffleChannelsLayerTestCommon, params0,
+                        ShuffleChannelsLayerTestCommon::getTestCaseName);
 
 }  // namespace
 
@@ -74,20 +65,10 @@ const auto precommit_params = testing::Combine(testing::ValuesIn(shParams), test
                                                        std::vector<std::vector<ov::Shape>>({{{1, 4, 3, 2}}}))),
                                                testing::Values(ov::test::utils::DEVICE_NPU));
 
-// --------- NPU3720 ---------
+INSTANTIATE_TEST_SUITE_P(conform_ShuffleChannels, ShuffleChannelsLayerTestCommon, params1,
+                         ShuffleChannelsLayerTestCommon::getTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(conform_ShuffleChannels, ShuffleChannelsLayerTest_NPU3720, params1,
-                         ShuffleChannelsLayerTest_NPU3720::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(conform_precommit_ShuffleChannels, ShuffleChannelsLayerTest_NPU3720, precommit_params,
-                         ShuffleChannelsLayerTest_NPU3720::getTestCaseName);
-
-// --------- NPU4000 ---------
-
-INSTANTIATE_TEST_SUITE_P(conform_ShuffleChannels, ShuffleChannelsLayerTest_NPU4000, params1,
-                         ShuffleChannelsLayerTest_NPU4000::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(conform_precommit_ShuffleChannels, ShuffleChannelsLayerTest_NPU4000, precommit_params,
-                         ShuffleChannelsLayerTest_NPU4000::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(conform_precommit_ShuffleChannels, ShuffleChannelsLayerTestCommon, precommit_params,
+                         ShuffleChannelsLayerTestCommon::getTestCaseName);
 
 }  // namespace

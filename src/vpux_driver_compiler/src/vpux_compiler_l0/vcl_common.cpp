@@ -13,8 +13,9 @@
 #include <unordered_set>
 #include <utility>
 
-#include "intel_npu/al/config/compiler.hpp"
+#include "intel_npu/config/compiler.hpp"
 #include "npu_driver_compiler.h"
+#include "ov_ops/rms.hpp"
 #include "vcl_compiler.hpp"
 
 namespace {
@@ -528,6 +529,10 @@ vcl_result_t BuildInfo::prepareModel(const uint8_t* modelIR, uint64_t modelIRSiz
         if (weightsSize > 0)
             weightsTensor = ov::Tensor(ov::element::u8, {weightsSize}, const_cast<uint8_t*>(weights));
         ov::Core core;
+        // core needs to add internal operators via extensions
+        // might need to refactor if extension list will have many elements
+        core.add_extension(
+                std::vector<ov::Extension::Ptr>({std::make_shared<ov::OpExtension<ov::op::internal::RMS>>()}));
 
         StopWatch stopWatch;
         if (enableProfiling) {

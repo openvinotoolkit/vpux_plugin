@@ -9,7 +9,6 @@
 #include <npu_40xx_nnrt.hpp>
 
 using namespace vpux;
-using namespace npu40xx;
 
 //
 // DeclareTaskBufferOp
@@ -19,27 +18,27 @@ void VPUASM::DeclareTaskBufferOp::serialize(elf::writer::BinaryDataSection<uint8
     return;
 }
 
-size_t VPUASM::DeclareTaskBufferOp::getBinarySize() {
+size_t VPUASM::DeclareTaskBufferOp::getBinarySize(VPU::ArchKind /*arch*/) {
     switch (getTaskType()) {
     case VPURegMapped::TaskType::DMA:
-        return sizeof(nn_public::VpuDMATask);
+        return sizeof(npu40xx::nn_public::VpuDMATask);
     case VPURegMapped::TaskType::ActKernelInvocation:
-        return sizeof(nn_public::VpuActKernelInvocation);
+        return sizeof(npu40xx::nn_public::VpuActKernelInvocation);
     case VPURegMapped::TaskType::ActKernelRange:
-        return sizeof(nn_public::VpuActKernelRange);
+        return sizeof(npu40xx::nn_public::VpuActKernelRange);
     case VPURegMapped::TaskType::DPUInvariant:
-        return sizeof(nn_public::VpuDPUInvariant);
+        return sizeof(npu40xx::nn_public::VpuDPUInvariant);
     case VPURegMapped::TaskType::DPUVariant:
-        return sizeof(nn_public::VpuDPUVariant);
+        return sizeof(npu40xx::nn_public::VpuDPUVariant);
     case VPURegMapped::TaskType::M2I:
-        return sizeof(nn_public::VpuMediaTask);
+        return sizeof(npu40xx::nn_public::VpuMediaTask);
     default:
         VPUX_THROW("Invalid task type for DeclareTaskBufferOp {0}", *this);
         return 0;
     }
 }
 
-size_t VPUASM::DeclareTaskBufferOp::getAlignmentRequirements() {
+size_t VPUASM::DeclareTaskBufferOp::getAlignmentRequirements(VPU::ArchKind) {
     return ELF::VPUX_NO_ALIGNMENT;
 }
 

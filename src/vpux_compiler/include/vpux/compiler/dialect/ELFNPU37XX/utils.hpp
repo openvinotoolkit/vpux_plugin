@@ -7,7 +7,6 @@
 
 #include <vector>
 #include <vpux_headers/platform.hpp>
-#include "vpux/compiler/act_kernels/nce2p7.h"
 #include "vpux/compiler/dialect/ELFNPU37XX/ops.hpp"
 #include "vpux/compiler/utils/logging.hpp"
 #include "vpux/utils/core/error.hpp"
@@ -94,6 +93,9 @@ size_t lcm(size_t a, size_t b);
 constexpr size_t VPUX_SHAVE_ALIGNMENT = Byte(1_KB).count();
 constexpr size_t VPUX_DEFAULT_ALIGNMENT = (64_Byte).count();
 constexpr size_t VPUX_NO_ALIGNMENT = (1_Byte).count();
+
+constexpr uint32_t CMX_BASE_ADDRESS[]{0x2E000000, 0x2E200000};
+constexpr uint32_t CMX_SLICE_SIZE{CMX_BASE_ADDRESS[1] - CMX_BASE_ADDRESS[0]};
 
 //
 // Platform Information

@@ -102,7 +102,3 @@ Const::Content vpux::Const::TransposeAttr::transform(vpux::Const::Content& input
 
     return Const::details::memPermuteTransformation(input, outType, memPerm);
 }
-
-Const::ContentSetup vpux::Const::ContentSetup::transpose(DimsOrder newOrder) {
-    return addTransformation(Const::TransposeAttr::get(mlir::AffineMapAttr::get(newOrder.toAffineMap(getContext()))));
-}

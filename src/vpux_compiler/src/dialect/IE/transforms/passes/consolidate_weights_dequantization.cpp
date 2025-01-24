@@ -6,7 +6,6 @@
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/IE/transforms/passes.hpp"
 #include "vpux/compiler/dialect/IE/utils/fake_quantize_utils.hpp"
-#include "vpux/compiler/dialect/const/ops.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 
 #include <mlir/IR/BuiltinTypes.h>
@@ -14,7 +13,6 @@
 #include <mlir/IR/Value.h>
 #include <mlir/Support/LogicalResult.h>
 #include <mlir/Transforms/GreedyPatternRewriteDriver.h>
-#include <cstdint>
 
 namespace vpux {
 
@@ -35,9 +33,9 @@ public:
         auto wdInfo = maybeWdInfo.value();
 
         const auto loc = wdInfo.getLastOp()->getLoc();
-        // The only supported weights data type for dynamic quantize is I4 and U4
-        const auto inputElemType = wdInfo.getTrueElemTypeOfWeights();
-        if (!inputElemType.isInteger(4)) {
+        // The only supported weights data type for dynamic quantize is I4, U4 and I8
+        const auto inputElemType = IE::getTrueElemTypeOfWeights(origOp);
+        if (!inputElemType.isInteger(4) && !inputElemType.isSignedInteger(8)) {
             _log.trace("Input data type {0} is not supported.", inputElemType);
             return mlir::failure();
         }
@@ -47,7 +45,7 @@ public:
         rewriter.setInsertionPointAfter(origOp);
 
         const auto ctx = origOp->getContext();
-        auto [int4Min, int4Max, int4Type] = getStorageParams(ctx, wdInfo.getQuantizationLevels(), true);
+        auto [qMin, qMax, storageType] = getStorageParams(ctx, IE::getQuantizationLevels(inputElemType), true);
 
         int64_t shiftValue = 0;
         const auto shift = wdInfo.getShift();
@@ -59,9 +57,9 @@ public:
             shiftValue = shift.fold().getSplatValue<int64_t>();
         }
 
-        auto filterElemType =
-                mlir::quant::UniformQuantizedType::get(mlir::quant::QuantizationFlags::Signed, int4Type,
-                                                       mlir::Float16Type::get(ctx), 1, shiftValue, int4Min, int4Max);
+        auto filterElemType = mlir::quant::UniformQuantizedType::get(
+                mlir::quant::QuantizationFlags::Signed, storageType, mlir::Float16Type::get(ctx), 1, shiftValue,
+                static_cast<int64_t>(qMin), static_cast<int64_t>(qMax));
         auto inputValue = rewriter.create<IE::QuantizeCastOp>(loc, dynamicDequantInput, filterElemType).getOutput();
         if (auto transposeOp = mlir::dyn_cast_or_null<IE::TransposeOp>(wdInfo.getInput().getDefiningOp())) {
             inputValue = rewriter.create<IE::TransposeOp>(loc, inputValue, nullptr, transposeOp.getOrderValueAttr())

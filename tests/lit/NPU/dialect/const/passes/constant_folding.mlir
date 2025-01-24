@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
-// RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --constant-folding-pipeline --mlir-print-elementsattrs-with-hex-if-larger=-1 %s | FileCheck %s
+// RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch%" --constant-folding --mlir-print-elementsattrs-with-hex-if-larger=-1 %s | FileCheck %s
 // REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 !qElemType = !quant.uniform<u8:f16, 0.0039215686274509803>
@@ -164,14 +164,6 @@ func.func @I1SubviewConstFoldNonSplat5D() -> memref<1x1x2x3x1xi1> {
 
 // -----
 
-{-#
-  dialect_resources: {
-    builtin: {
-      blob: "0x040000002222"
-    }
-  }
-#-}
-
 // CHECK-LABEL: @I4SubviewConstFoldSplat1D
 func.func @I4SubviewConstFoldSplat1D() -> tensor<2xi8> {
     %cst = const.Declare tensor<2xi8> =
@@ -186,15 +178,15 @@ func.func @I4SubviewConstFoldSplat1D() -> tensor<2xi8> {
     // CHECK:   return [[CST]]
 }
 
-// -----
-
 {-#
   dialect_resources: {
     builtin: {
-      blob: "0x040000002143"
+      blob: "0x040000002222"
     }
   }
 #-}
+
+// -----
 
 // CHECK-LABEL: @I4SubviewConstFoldNonSplat1D
 func.func @I4SubviewConstFoldNonSplat1D() -> tensor<2xi8> {
@@ -210,15 +202,15 @@ func.func @I4SubviewConstFoldNonSplat1D() -> tensor<2xi8> {
     // CHECK:   return [[CST]]
 }
 
-// -----
-
 {-#
   dialect_resources: {
     builtin: {
-      blob: "0x0400000010325476"
+      blob: "0x040000002143"
     }
   }
 #-}
+
+// -----
 
 // CHECK-LABEL: @I4SubviewConstFoldNonSplat2D
 func.func @I4SubviewConstFoldNonSplat2D() -> tensor<1x2xi8> {
@@ -235,8 +227,6 @@ func.func @I4SubviewConstFoldNonSplat2D() -> tensor<1x2xi8> {
     // CHECK:               return [[CST]]
 }
 
-// -----
-
 {-#
   dialect_resources: {
     builtin: {
@@ -244,6 +234,8 @@ func.func @I4SubviewConstFoldNonSplat2D() -> tensor<1x2xi8> {
     }
   }
 #-}
+
+// -----
 
 // CHECK-LABEL: @I4SubviewConstFoldNonSplat3D
 func.func @I4SubviewConstFoldNonSplat3D() -> tensor<1x2x1xi8> {
@@ -260,15 +252,15 @@ func.func @I4SubviewConstFoldNonSplat3D() -> tensor<1x2x1xi8> {
     // CHECK:               return [[CST]]
 }
 
-// -----
-
 {-#
   dialect_resources: {
     builtin: {
-      blob: "0x040000001032547667452301"
+      blob: "0x0400000010325476"
     }
   }
 #-}
+
+// -----
 
 // CHECK-LABEL: @I4SubviewConstFoldNonSplat4D
 func.func @I4SubviewConstFoldNonSplat4D() -> tensor<1x2x1x1xi8> {
@@ -285,8 +277,6 @@ func.func @I4SubviewConstFoldNonSplat4D() -> tensor<1x2x1x1xi8> {
     // CHECK:               return [[CST]]
 }
 
-// -----
-
 {-#
   dialect_resources: {
     builtin: {
@@ -294,6 +284,8 @@ func.func @I4SubviewConstFoldNonSplat4D() -> tensor<1x2x1x1xi8> {
     }
   }
 #-}
+
+// -----
 
 // CHECK-LABEL: @I4SubviewConstFoldNonSplat5D
 func.func @I4SubviewConstFoldNonSplat5D() -> tensor<1x2x1x1x1xi8> {
@@ -309,6 +301,14 @@ func.func @I4SubviewConstFoldNonSplat5D() -> tensor<1x2x1x1x1xi8> {
     // CHECK-SAME{LITERAL}      = dense<[[[[[2]]], [[[0]]]]]> : tensor<1x2x1x1x1xi8>
     // CHECK:               return [[CST]]
 }
+
+{-#
+  dialect_resources: {
+    builtin: {
+      blob: "0x040000001032547667452301"
+    }
+  }
+#-}
 
 // -----
 
@@ -426,6 +426,40 @@ func.func @ConstFoldI4() -> memref<1x4x1x1x!qElemType, #YXOI> {
     // CHECK-SAME:              {order = #YXOI}>
     // CHECK:       return [[CST]]
 }
+
+
+// -----
+
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
+!quantileFloatType = !QuantileFloat.quantileFloat<4, {-1.000000e+00,-0.69619280099868774,-0.52507305145263672,-0.39491748809814453,-0.28444138169288635,-0.18477343022823334,-0.091050036251544952,0.000000e+00,0.07958029955625534,0.16093020141124725,0.24611230194568634,0.33791524171829224,0.44070982933044434,0.56261700391769409,0.72295683622360229,1.000000e+00}>
+!qElemType = !quant.quantile<i4:f16:f16, {-1.000000e+00,-0.69619280099868774,-0.52507305145263672,-0.39491748809814453,-0.28444138169288635,-0.18477343022823334,-0.091050036251544952,0.000000e+00,0.07958029955625534,0.16093020141124725,0.24611230194568634,0.33791524171829224,0.44070982933044434,0.56261700391769409,0.72295683622360229,1.000000e+00}:0.07874348958333334>
+
+// CHECK-LABEL: @ConstFoldNF4
+func.func @ConstFoldNF4() -> memref<2x2x1x1x!qElemType, #NHWC> {
+    %weights = const.Declare memref<2x2x1x1x!qElemType, #NHWC> = dense_resource<blob> : tensor<2x2x1x1x!quantileFloatType>, [
+        #const.ConvertElemType<si8>,
+        #const.CastElemType<!quantileFloatType> ,
+        #const.CastElemType<f16>,
+        #const.CastElemType<si4>,
+        #const.CastElemType<!qElemType>,
+        #const.Reorder<#NHWC>
+        ]
+    return %weights : memref<2x2x1x1x!qElemType, #NHWC>
+
+    // CHECK:       [[CST:%.*]] = const.Declare memref<2x2x1x1x!qElemType, #NHWC>
+    // CHECK-SAME{LITERAL}:     dense<[[[[16, 50]]]]> :
+    // CHECK-SAME:              tensor<1x1x1x2xui8, {order = #NHWC}>, [#const.ChangeShapeAndElemType<[2, 2, 1, 1], !qElemType>]
+    // CHECK:       return [[CST]]
+}
+
+{-#
+  dialect_resources: {
+    builtin: {
+      blob: "0x040000001032"
+    }
+  }
+#-}
 
 // -----
 
@@ -574,6 +608,19 @@ func.func @RelocateFoldUnfusedMultiCluster() -> (memref<4x1x1x4xsi32>, memref<2x
 
 // -----
 
+func.func @RelocateWithSparsityAndNon0ChannelOffsetFoldSingleCluster() -> memref<5x1x1x4xsi32> {
+    // weightPtrStep = 20, sparsityPtrStep = 2
+    %relocate = const.Declare memref<5x1x1x4xsi32> = dense<[[[[1, 2, 3, 3]]], [[[21, 4, 4, 4]]], [[[41, 6, 5, 5]]], [[[61, 8, 6, 6]]], [[[81, 10, 7, 7]]]]> : tensor<5x1x1x4xsi32>,
+        [#const.RelocateWeightsTable<weightsPtr=[10], sparsityPtr=15 : i64, offsets=[0], weightsTableSize=80 : i64, weightsElemBitSize=16 : i64,
+        weightsCompression=#VPUIP.SparsityCompressionAttr<axis = 0 : i64, numElems = dense<24> : tensor<10xi64>, alignment = 16 : i64>, channelOffset=5 : i64>]
+    return %relocate : memref<5x1x1x4xsi32>
+
+    // CHECK:                   const.Declare memref<5x1x1x4xsi32>
+    // CHECK-SAME{LITERAL}:     dense<[[[[250, 25, 3, 3]]], [[[298, 27, 4, 4]]], [[[346, 29, 5, 5]]], [[[394, 31, 6, 6]]], [[[442, 33, 7, 7]]]]>
+}
+
+// -----
+
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 !qElemType = !quant.uniform<i4:f16, 1.1534313725490195>
 
@@ -696,14 +743,6 @@ func.func @I1ConvertElemTypeConstFoldNonSplat() -> memref<1x2x3x4xi8> {
 
 // -----
 
-{-#
-  dialect_resources: {
-    builtin: {
-      blob: "0x0400000022222222"
-    }
-  }
-#-}
-
 // CHECK-LABEL: @I4ConvertElemTypeConstFoldSplat
 func.func @I4ConvertElemTypeConstFoldSplat() -> tensor<2x4xi8> {
     %cst = const.Declare tensor<2x4xi8> =
@@ -718,15 +757,15 @@ func.func @I4ConvertElemTypeConstFoldSplat() -> tensor<2x4xi8> {
     // CHECK:   return [[CST]]
 }
 
-// -----
-
 {-#
   dialect_resources: {
     builtin: {
-      blob: "0x0400000010325476"
+      blob: "0x0400000022222222"
     }
   }
 #-}
+
+// -----
 
 // CHECK-LABEL: @I4ConvertElemTypeConstFoldNonSplat
 func.func @I4ConvertElemTypeConstFoldNonSplat() -> tensor<2x4xi8> {
@@ -739,6 +778,133 @@ func.func @I4ConvertElemTypeConstFoldNonSplat() -> tensor<2x4xi8> {
     return %cst : tensor<2x4xi8>
 
     // CHECK:               [[CST:%.*]] = const.Declare tensor<2x4xi8>
-    // CHECK-SAME{LITERAL}      = dense<[[0, 1, 2, 3], [4, 5, 6, 7]]> : tensor<2x4xi8>
+    // CHECK-SAME{LITERAL}:     = dense<[[0, 1, 2, 3], [4, 5, 6, 7]]> : tensor<2x4xi8>
     // CHECK:               return [[CST]]
+}
+
+{-#
+  dialect_resources: {
+    builtin: {
+      blob: "0x0400000010325476"
+    }
+  }
+#-}
+
+// -----
+
+// CHECK-LABEL: @SI4ConvertElemTypeConstFoldSplat
+func.func @SI4ConvertElemTypeConstFoldSplat() -> tensor<2x4xsi8> {
+    %cst = const.Declare tensor<2x4xsi8> =
+        dense_resource<blob> : tensor<2x4xsi4>,
+        [
+            #const.ConvertElemType<si8>
+        ]
+
+    return %cst : tensor<2x4xsi8>
+
+    // CHECK:   [[CST:%.+]] = const.Declare tensor<2x4xsi8> = dense<-2> : tensor<2x4xsi8>
+    // CHECK:   return [[CST]]
+}
+
+{-#
+  dialect_resources: {
+    builtin: {
+      blob: "0x10000000EEEEEEEE"
+    }
+  }
+#-}
+
+// -----
+
+// CHECK-LABEL: @SI4ConvertElemTypeConstFoldNonSplat
+func.func @SI4ConvertElemTypeConstFoldNonSplat() -> tensor<2x4xsi8> {
+    %cst = const.Declare tensor<2x4xsi8> =
+        dense_resource<blob> : tensor<2x4xsi4>,
+        [
+            #const.ConvertElemType<si8>
+        ]
+
+    return %cst : tensor<2x4xsi8>
+
+    // CHECK:               [[CST:%.+]] = const.Declare tensor<2x4xsi8>
+    // CHECK-SAME{LITERAL}:     = dense<[[7, -8, -7, -6], [-5, -4, -3, 0]]> : tensor<2x4xsi8>
+    // CHECK:               return [[CST]]
+}
+
+{-#
+  dialect_resources: {
+    builtin: {
+      blob: "0x1000000087A9CB0D"
+    }
+  }
+#-}
+
+// -----
+
+#NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
+
+!BufferDdr = memref<40960x1x1x1xi1, {order = #NCHW, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 512 : i64>}>
+!BufferCmx = memref<40960x1x1x1xi1, {order = #NCHW, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 512 : i64>}, [@CMX_NN, 0]>
+
+func.func @ConstFoldWithSwizzlingSubByte(%input: !BufferDdr, %output: !BufferCmx) -> !BufferCmx {
+  %bar = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+  %cst = const.Declare !BufferDdr = dense<true> : tensor<100x1x1x384xi1>, [#const.SwizzleConstant<5 : i64, 3 : i64>]
+  %buf = VPURT.DeclareBuffer <CMX_NN> [0] <0> {swizzlingKey = 5 : i64} -> !BufferCmx
+
+  VPURT.Task waits(%bar : !VPURT.Barrier) {
+    %0 = VPUIP.NNDMA inputs(%cst : !BufferDdr) outputs(%buf : !BufferCmx) -> !BufferCmx
+  }
+
+  return %buf: !BufferCmx
+
+  // CHECK:      VPURT.DeclareVirtualBarrier
+  // CHECK-DAG:      [[CST:%.+]] = const.Declare memref<40960x1x1x1xi1, {order = #NCHW, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 512 : i64>}> = dense<true> : tensor<40960x1x1x1xi1>
+  // CHECK-NOT:    [#const.SwizzleConstant<5 : i64, 3 : i64>]
+  // CHECK:      [[BUF:%.+]] = VPURT.DeclareBuffer <CMX_NN> [0] <0> {swizzlingKey = 5 : i64} -> memref<40960x1x1x1xi1, {order = #NCHW, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 512 : i64>}, [@CMX_NN, 0]>
+  // CHECK:      VPURT.Task
+  // CHECK:      VPUIP.NNDMA
+  // CHECK-SAME    inputs([[CST]] : memref<40960x1x1x1xi1, {order = #NHWC, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 512 : i64>}, @DDR>)
+  // CHECK-SAME    outputs([[BUF]] : memref<40960x1x1x1xi1, {order = #NCHW, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 512 : i64>}, [@CMX_NN, 0]>)
+  // CHECK:      return [[BUF]]
+
+}
+
+// -----
+
+#NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
+!BufferDdr = memref<512x1x1x1xui8, {order = #NHWC, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 512 : i64>}>
+!BufferCmx = memref<512x1x1x1xui8, {order = #NHWC, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 512 : i64>}, [@CMX_NN, 0]>
+
+// Swizzling transformation needs to use always state of constant buffer which is an input for this transformation
+func.func @ConstFoldWithSwizzlingWhereInputIsDifferentThanRawStorageValue(%input: !BufferDdr, %output: !BufferCmx) -> !BufferCmx {
+
+  %cst = const.Declare memref<512x1x1x1xui8, {order = #NHWC, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 512 : i64>}> = dense<1.000000e+00> : tensor<32x1x1x1xf16>, [#const.CastElemType<ui8>, #const.CastElemType<!quant.uniform<u8<0:254>:f16, 1.000000e+00>>, #const.Reorder<affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>>, #const.Reorder<affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>>, #const.Reshape<[32, 1, 1, 1]>, #const.PadWithZero<[0, 0, 0, 0], [0, 15, 0, 0]>, #const.Reorder<affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>>, #const.SubView<[0, 0, 0, 0], [16, 16, 1, 1]>, #const.SwizzleConstant<5 : i64, 3 : i64>]
+
+  %buf = VPURT.DeclareBuffer <CMX_NN> [0] <0> {swizzlingKey = 5 : i64} -> !BufferCmx
+
+  VPURT.Task {
+    %0 = VPUIP.NNDMA inputs(%cst : !BufferDdr) outputs(%buf : !BufferCmx) -> !BufferCmx
+  }
+
+  return %buf: !BufferCmx
+
+  // CHECK:      const.Declare memref<512x1x1x1xui8, {order = #NHWC, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 512 : i64>}> =
+  // CHECK-SAME    dense<"0x010000000000000000000000000000000
+  // CHECK-NOT:    [#const.SwizzleConstant<5 : i64, 3 : i64>
+}
+
+// -----
+
+#NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
+
+func.func @ConstFoldWithSwizzlingWhereContentShapeIsDifferentFromOpShape() -> memref<768x1x1x1xui8, {order = #NCHW, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 512 : i64>}> {
+
+  %cst = const.Declare memref<768x1x1x1xui8, {order = #NCHW, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 512 : i64>}> = dense<[[[[1], [2], [3]]]]> : tensor<1x1x3x1xui8>, [#const.Reshape<[3, 1, 1, 1]>, #const.Broadcast<0, 768>, #const.SwizzleConstant<5 : i64, 3 : i64>]
+
+  return %cst: memref<768x1x1x1xui8, {order = #NCHW, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 512 : i64>}>
+
+  // CHECK:      [[CST:%.+]] = const.Declare memref<768x1x1x1xui8, {order = #NCHW, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 512 : i64>}>
+  // CHECK-NOT:  [#const.SwizzleConstant<5 : i64, 3 : i64>]
 }

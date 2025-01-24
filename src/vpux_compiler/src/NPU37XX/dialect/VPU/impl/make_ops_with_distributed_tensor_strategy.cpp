@@ -30,8 +30,9 @@ public:
     mlir::LogicalResult matchAndRewrite(VPU::NCEPermuteOp origOp, mlir::PatternRewriter& rewriter) const final;
 
 private:
-    vpux::VPU::CopyOp buildInputCopy(mlir::PatternRewriter& rewriter, VPU::ClusteredOpInterface clusteredOp,
-                                     mlir::Value input, mlir::Type distType) const;
+    vpux::VPU::UnrolledTypeOp buildInputUnrolledType(mlir::PatternRewriter& rewriter,
+                                                     VPU::ClusteredOpInterface clusteredOp, mlir::Value input,
+                                                     mlir::Type distType) const;
     bool _enableExplicitDistributionInfoAttr = false;
     Logger _log;
 };
@@ -77,7 +78,7 @@ mlir::LogicalResult NCEPermuteRewriter::matchAndRewrite(VPU::NCEPermuteOp origOp
     const auto fusedDistType =
             fuseOverlapParams(clusteredOp, inputDistType, nextConv, _enableExplicitDistributionInfoAttr);
 
-    const auto inputCopyOp = buildInputCopy(rewriter, clusteredOp, origOp.getInput(), fusedDistType);
+    const auto inputCopyOp = buildInputUnrolledType(rewriter, clusteredOp, origOp.getInput(), fusedDistType);
 
     const auto distributedOutputTensorType =
             getDistributedOutputTypeFromOp(origOp, origOp->getResult(0).getType(), numClusters, strategy);
@@ -91,19 +92,18 @@ mlir::LogicalResult NCEPermuteRewriter::matchAndRewrite(VPU::NCEPermuteOp origOp
         newOp->removeAttr(vpux::VPU::multiClusterStrategy);
     }
     auto outputCopyOp =
-            rewriter.create<VPU::CopyOp>(newOp->getLoc(), origOp->getResult(0).getType(), newOp->getResult(0), nullptr);
+            rewriter.create<VPU::UnrolledTypeOp>(newOp->getLoc(), origOp->getResult(0).getType(), newOp->getResult(0));
 
     rewriter.replaceOp(origOp, outputCopyOp);
 
     return mlir::success();
 }
 
-vpux::VPU::CopyOp NCEPermuteRewriter::buildInputCopy(mlir::PatternRewriter& rewriter,
-                                                     VPU::ClusteredOpInterface clusteredOp, mlir::Value input,
-                                                     mlir::Type distType) const {
+vpux::VPU::UnrolledTypeOp NCEPermuteRewriter::buildInputUnrolledType(mlir::PatternRewriter& rewriter,
+                                                                     VPU::ClusteredOpInterface clusteredOp,
+                                                                     mlir::Value input, mlir::Type distType) const {
     rewriter.setInsertionPoint(clusteredOp);
-    const auto memSpace = IndexedSymbolAttr::get(rewriter.getContext(), stringifyEnum(VPU::MemoryKind::CMX_NN));
-    auto distributedInputCopyOp = rewriter.create<VPU::CopyOp>(clusteredOp.getLoc(), distType, input, memSpace);
+    auto distributedInputCopyOp = rewriter.create<VPU::UnrolledTypeOp>(clusteredOp.getLoc(), distType, input);
 
     return distributedInputCopyOp;
 }

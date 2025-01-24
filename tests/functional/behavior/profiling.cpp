@@ -6,7 +6,7 @@
 #include "vpux/utils/core/env.hpp"
 #include "vpux/utils/core/logger.hpp"
 
-#include "npu_private_properties.hpp"
+#include "intel_npu/npu_private_properties.hpp"
 #include "vpu_ov2_layer_test.hpp"
 
 #include <algorithm>

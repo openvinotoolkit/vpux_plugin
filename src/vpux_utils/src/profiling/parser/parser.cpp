@@ -6,6 +6,8 @@
 #include "vpux/utils/profiling/parser/parser.hpp"
 #include "vpux/utils/profiling/parser/records.hpp"
 
+#include "vpux/utils/profiling/reports/api.hpp"  // getLayerInfo
+
 #include "vpux/utils/core/error.hpp"
 #include "vpux/utils/profiling/common.hpp"
 #include "vpux/utils/profiling/metadata.hpp"
@@ -156,16 +158,27 @@ RawProfilingRecords parseDmaSwTaskProfiling(
     return rawRecords;
 }
 
+bool hasExtendedActShaveRecord(TargetDevice device) {
+    switch (device) {
+    case TargetDevice::TargetDevice_VPUX37XX:
+        return false;
+    case TargetDevice::TargetDevice_VPUX40XX:
+        return true;
+    default:
+        VPUX_THROW("TargetDevice {0} is not supported ", EnumNameTargetDevice(device));
+    }
+}
+
 RawProfilingRecords parseActShaveTaskProfiling(
         const flatbuffers::Vector<flatbuffers::Offset<ProfilingFB::SWTask>>* shaveTaskList, const void* output,
-        size_t outputLen) {
+        size_t outputLen, TargetDevice device) {
     if (shaveTaskList == nullptr) {
         return {};
     }
 
-    const ActShaveData_t* outputShave = reinterpret_cast<const ActShaveData_t*>(output);
-    VPUX_THROW_UNLESS(outputLen % sizeof(ActShaveData_t) == 0, "Invalid profiling data");
-    const size_t numOfActShaveTasks = outputLen / sizeof(ActShaveData_t);
+    const auto recordSize = sizeof(ActShaveData_t);
+    VPUX_THROW_UNLESS(outputLen % recordSize == 0, "Invalid profiling data");
+    const size_t numOfActShaveTasks = outputLen / recordSize;
     size_t foundActShaveTasks = 0;
 
     RawProfilingRecords rawRecords;
@@ -175,7 +188,15 @@ RawProfilingRecords parseActShaveTaskProfiling(
 
         VPUX_THROW_UNLESS(currentPos < numOfActShaveTasks, "Unexpected end of blob in ACT section.");
         foundActShaveTasks++;
-        const auto record = std::make_shared<RawProfilingACTRecord>(outputShave[currentPos], taskMeta, currentPos);
+
+        std::shared_ptr<RawProfilingRecord> record;
+        if (hasExtendedActShaveRecord(device)) {
+            const ActShaveDataEx_t outputShave = reinterpret_cast<const ActShaveDataEx_t*>(output)[currentPos];
+            record = std::make_shared<RawProfilingACTExRecord>(outputShave, taskMeta, currentPos);
+        } else {
+            const ActShaveData_t outputShave = reinterpret_cast<const ActShaveData_t*>(output)[currentPos];
+            record = std::make_shared<RawProfilingACTRecord>(outputShave, taskMeta, currentPos);
+        }
         record->checkDataOrDie();
         rawRecords.push_back(record);
     }
@@ -319,7 +340,8 @@ RawProfilingData parseProfilingTaskLists(const RawDataLayout& sections, TargetDe
             break;
         }
         case ExecutorType::ACTSHAVE: {
-            rawProfData.swTasks = parseActShaveTaskProfiling(profilingSchema->swTasks(), profData + offset, length);
+            rawProfData.swTasks =
+                    parseActShaveTaskProfiling(profilingSchema->swTasks(), profData + offset, length, device);
             rawProfData.parseOrder.emplace_back(ExecutorType::ACTSHAVE, offset);
             break;
         }
@@ -548,63 +570,6 @@ std::vector<TaskInfo> getTaskInfo(const uint8_t* blobData, size_t blobSize, cons
     return convertRawTasksToTaskInfo(rawData.rawRecords, frequenciesSetup, verbosity, log);
 } catch (const std::exception& ex) {
     VPUX_THROW("Profiling post-processing failed. {0}", ex.what());
-}
-
-std::vector<LayerInfo> getLayerInfo(const uint8_t* blobData, size_t blobSize, const uint8_t* profData, size_t profSize,
-                                    bool fpga, bool highFreqPerfClk) {
-    std::vector<TaskInfo> taskInfo =
-            getTaskInfo(blobData, blobSize, profData, profSize, VerbosityLevel::LOW, fpga, highFreqPerfClk);
-    return getLayerInfo(taskInfo);
-}
-
-std::vector<LayerInfo> getLayerInfo(const std::vector<TaskInfo>& taskInfo) {
-    std::vector<LayerInfo> layerInfo;
-    for (const auto& task : taskInfo) {
-        LayerInfo* layer;
-        if (!getVariantFromName(task.name).empty()) {
-            // Skipping high verbose tasks with variant info
-            continue;
-        }
-
-        std::string layerName = getLayerName(task.name);
-        auto result = std::find_if(begin(layerInfo), end(layerInfo), [&](const LayerInfo& item) {
-            return layerName == item.name;
-        });
-        if (result == end(layerInfo)) {
-            layer = &layerInfo.emplace_back();
-            layer->status = LayerInfo::layer_status_t::EXECUTED;
-            layer->start_time_ns = task.start_time_ns;
-            layer->duration_ns = 0;
-
-            const auto nameLen = layerName.copy(layer->name, sizeof(layer->name) - 1);
-            layer->name[nameLen] = 0;
-
-            const std::string layerTypeStr(task.layer_type);
-            const auto typeLen = layerTypeStr.copy(layer->layer_type, sizeof(layer->layer_type) - 1);
-            layer->layer_type[typeLen] = 0;
-        } else {
-            layer = &(*result);
-        }
-        if (task.start_time_ns < layer->start_time_ns) {
-            layer->duration_ns += layer->start_time_ns - task.start_time_ns;
-            layer->start_time_ns = task.start_time_ns;
-        }
-        auto duration = (int64_t)task.start_time_ns + task.duration_ns - layer->start_time_ns;
-        if (duration > layer->duration_ns) {
-            layer->duration_ns = duration;
-        }
-
-        if (task.exec_type == TaskInfo::ExecType::DPU) {
-            layer->dpu_ns += task.duration_ns;
-        } else if (task.exec_type == TaskInfo::ExecType::SW) {
-            layer->sw_ns += task.duration_ns;
-        } else if (task.exec_type == TaskInfo::ExecType::DMA) {
-            layer->dma_ns += task.duration_ns;
-        }
-    }
-
-    std::sort(layerInfo.begin(), layerInfo.end(), profilingTaskStartTimeComparator<LayerInfo>);
-    return layerInfo;
 }
 
 }  // namespace vpux::profiling

@@ -195,8 +195,17 @@ bool isCopyFusable(VPUIP::CopyOp copyOp, bool enableOptimizeConstCopy, Logger& l
             log.trace("Is not fusable because has one use");
             return false;
         }
+
         auto copyOutput = copyOp.getOutput();
         for (const auto& user : copyUsers) {
+            if (auto swKernelOp = mlir::dyn_cast<VPUIP::SwKernelOp>(user)) {
+                if (VPUIP::hasDynamicShape(swKernelOp) || swKernelOp.getDynamicInputShapesMap().has_value()) {
+                    log.trace("Is not fusable because swKernelOp is a dynamic operation");
+                    return false;
+                }
+            }
+
+            // TODO: to adjust codes for the two branchs with same condition.
             if (auto nceOp = mlir::dyn_cast<VPUIP::NCEClusterTaskOp>(user)) {
                 if (nceOp.getWeights() != copyOutput || VPUIP::canWeightsBeCompressed(nceOp) ||
                     nceOp.getWeightsSparsityMap() != nullptr) {

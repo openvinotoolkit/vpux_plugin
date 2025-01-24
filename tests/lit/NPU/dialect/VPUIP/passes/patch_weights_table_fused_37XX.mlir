@@ -50,7 +50,7 @@ func.func @PatchFusedConstantWithSwizzling() -> !IpOp_Stub {
             DPUTask {outEnd = [103, 103, 63], mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, outStart = [0, 0, 0]}
         }
         PPE : {
-            PPETask {opaque_ppe = #VPU.PPEStub<>}
+            PPETask {ppe = #VPU.PPEStub<>}
         }
     async.yield %out : !IpOp_Stub
     }

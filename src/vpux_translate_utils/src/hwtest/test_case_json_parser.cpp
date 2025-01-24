@@ -7,6 +7,7 @@
 
 #include <fstream>
 #include <iostream>
+#include <optional>
 #include <sstream>
 #include <vpux/utils/core/error.hpp>
 
@@ -16,6 +17,9 @@
 
 #include "vpux/hwtest/test_case_json_parser.hpp"
 
+#include <vpux/utils/core/type/float8_e4m3.hpp>
+#include <vpux/utils/core/type/float8_e5m2.hpp>
+#include "vpux/compiler/dialect/VPUIP/IR/attributes.hpp"
 #include "vpux/utils/core/format.hpp"
 #include "vpux/utils/core/string_ref.hpp"
 
@@ -89,6 +93,16 @@ nb::DType nb::to_dtype(StringRef str) {
         return nb::DType::FP32;
     if (isEqual(str, "bfloat16"))
         return nb::DType::BF16;
+    if (isEqual(str, "u1"))
+        return nb::DType::U1;
+    if (isEqual(str, "u2"))
+        return nb::DType::U2;
+    if (isEqual(str, "u3"))
+        return nb::DType::U3;
+    if (isEqual(str, "u5"))
+        return nb::DType::U5;
+    if (isEqual(str, "u6"))
+        return nb::DType::U6;
 
     return nb::DType::UNK;
 }
@@ -115,9 +129,44 @@ std::string nb::to_string(nb::DType dtype) {
         return "fp32";
     case nb::DType::BF16:
         return "bfloat16";
+    case nb::DType::U1:
+        return "u1";
+    case nb::DType::U2:
+        return "u2";
+    case nb::DType::U3:
+        return "u3";
+    case nb::DType::U5:
+        return "u5";
+    case nb::DType::U6:
+        return "u6";
     default:
         return "UNK";
     }
+}
+
+unsigned nb::to_pltDataWidth(nb::PalletMode mode) {
+    switch (mode) {
+    case PalletMode::ONE_BIT_PLT:
+        return 1;
+    case PalletMode::TWO_BIT_PLT:
+        return 2;
+    case PalletMode::FOUR_BIT_PLT:
+        return 4;
+    default:
+        throw std::runtime_error("to_dataWidth called with Palletization disabled");
+        return 4;
+    }
+}
+
+nb::PalletMode nb::to_palletMode(StringRef str) {
+    if (isEqual(str, "ONE_BIT_PLT"))
+        return nb::PalletMode::ONE_BIT_PLT;
+    if (isEqual(str, "TWO_BIT_PLT"))
+        return nb::PalletMode::TWO_BIT_PLT;
+    if (isEqual(str, "FOUR_BIT_PLT"))
+        return nb::PalletMode::FOUR_BIT_PLT;
+
+    return nb::PalletMode::NO_PLT;
 }
 
 vpux::VPUIP::Permutation nb::to_odu_permutation(StringRef str) {
@@ -213,6 +262,15 @@ nb::ActivationType nb::to_activation_type(StringRef str) {
     if (isEqual(str, "round_trip_b8h8_to_fp16")) {
         return nb::ActivationType::round_trip_b8h8_to_fp16;
     }
+    if (isEqual(str, "sau_sumx_fp16_to_fp32")) {
+        return nb::ActivationType::sau_sumx_fp16_to_fp32;
+    }
+    if (isEqual(str, "cmu_perm_x8")) {
+        return nb::ActivationType::cmu_perm_x8;
+    }
+    if (isEqual(str, "cmu_perm")) {
+        return nb::ActivationType::cmu_perm;
+    }
     if (isEqual(str, "PopulateWeightTable")) {
         return nb::ActivationType::PopulateWeightTable;
     }
@@ -224,6 +282,9 @@ nb::ActivationType nb::to_activation_type(StringRef str) {
     }
     if (isEqual(str, "Tanh")) {
         return nb::ActivationType::Tanh;
+    }
+    if (isEqual(str, "Cos")) {
+        return nb::ActivationType::Cos;
     }
     return nb::ActivationType::Unknown;
 }
@@ -248,10 +309,20 @@ std::string nb::to_string(nb::ActivationType activationType) {
         return "Softmax";
     case ActivationType::round_trip_b8h8_to_fp16:
         return "round_trip_b8h8_to_fp16";
+    case ActivationType::sau_sumx_fp16_to_fp32:
+        return "sau_sumx_fp16_to_fp32";
+    case ActivationType::cmu_perm_x8:
+        return "cmu_perm_x8";
+    case ActivationType::cmu_perm:
+        return "cmu_perm";
     case ActivationType::PopulateWeightTable:
         return "PopulateWeightTable";
     case ActivationType::Rsqrt:
         return "Rsqrt";
+    case ActivationType::Cos:
+        return "Cos";
+    case ActivationType::Sin:
+        return "Sin";
     default:
         return "Unknown";
     }
@@ -325,6 +396,8 @@ std::string nb::to_string(CaseType case_) {
         return "ReduceMean";
     case CaseType::ReduceSumSquare:
         return "ReduceSumSquare";
+    case CaseType::ReduceOut:
+        return "ReduceOut";
     default:
         return "unknown";
     }
@@ -401,6 +474,8 @@ nb::CaseType nb::to_case(StringRef str) {
         return CaseType::ReduceMean;
     if (isEqual(str, "ReduceSumSquare"))
         return CaseType::ReduceSumSquare;
+    if (isEqual(str, "ReduceOut"))
+        return CaseType::ReduceOut;
     return CaseType::Unknown;
 };
 
@@ -455,6 +530,17 @@ std::string nb::to_string(nb::BackendFlow backendFlow) {
         return "Default";
     case nb::BackendFlow::WLMPartial:
         return "WLMPartial";
+    default:
+        return "Unknown";
+    }
+}
+
+std::string nb::to_string(nb::WeightTableFormats weightTableFormat) {
+    switch (weightTableFormat) {
+    case nb::WeightTableFormats::WT_DEFAULT:
+        return "WT_DEFAULT";
+    case nb::WeightTableFormats::WT_LEGACY:
+        return "WT_LEGACY";
     default:
         return "Unknown";
     }
@@ -576,6 +662,43 @@ nb::HaloParams nb::TestCaseJsonDescriptor::loadHaloTaskParams(llvm::json::Object
     return params;
 }
 
+vpux::VPUIP::NCETaskType nb::TestCaseJsonDescriptor::loadReductionType(llvm::json::Object* obj) {
+    const std::unordered_map<llvm::StringRef, vpux::VPUIP::NCETaskType> reductionType = {
+            {"MEAN", vpux::VPUIP::NCETaskType::REDUCEMEAN},
+            {"SUMSQUARE", vpux::VPUIP::NCETaskType::REDUCESUMSQUARE},
+            // MAX & MIN are ODU operations, which are done on top of another NCE type operation
+            {"OUTPUT", vpux::VPUIP::NCETaskType::CONV}};
+
+    auto mode = obj->getString("reduction");
+    VPUX_THROW_UNLESS(mode.has_value() && reductionType.find(mode.value()) != reductionType.end(),
+                      "loadReduceType: failed to get valid reduction type");
+
+    return reductionType.at(mode.value().str());
+}
+
+nb::ReduceOutLayer nb::TestCaseJsonDescriptor::loadReduceOutLayer(llvm::json::Object* obj) {
+    nb::ReduceOutLayer result;
+
+    auto* op = obj->getObject("reduction_out_op");
+    VPUX_THROW_UNLESS(op != nullptr, "loadReduceOutLayer: missing reduce_out_op config");
+
+    const auto reductionOp = op->getString("reduce_op");
+    const auto isMultiTile = op->getBoolean("is_multi_tile");
+    VPUX_THROW_UNLESS(reductionOp.has_value(), "reduce_op not provided !");
+    VPUX_THROW_UNLESS(isMultiTile.has_value(), "is_multi_tile not provided !");
+
+    if (reductionOp.value() == "MAX_XY") {
+        result.doReduceMaxPerXY = true;
+    } else if (reductionOp.value() == "MIN_XY") {
+        result.doReduceMinPerXY = true;
+    } else if (reductionOp.value() == "MAX_MIN_TENSOR") {
+        result.doReduceMinMaxPerTensor = true;
+    }
+    result.isMultiTile = isMultiTile.value();
+    result.output = loadOutputLayer(op);
+    return result;
+}
+
 SmallVector<nb::InputLayer> nb::TestCaseJsonDescriptor::loadInputLayer(llvm::json::Object* jsonObj) {
     SmallVector<nb::InputLayer> result;
 
@@ -620,11 +743,102 @@ SmallVector<nb::WeightLayer> nb::TestCaseJsonDescriptor::loadWeightLayer(llvm::j
         }
 
         result[inIdx].qp = loadQuantizationParams(weightObj);
+        result[inIdx].plt = loadPalletTableInfoLayers(weightObj);
         result[inIdx].dtype = to_dtype(weightObj->getString("dtype").value().str());
 
         auto filename = weightObj->getString("file_path");
         if (filename) {
             result[inIdx].filename = filename.value().str();
+        }
+
+        // check if the types are legal for palletization
+        VPUX_THROW_UNLESS(ArePalletizationTypesLegal(result[inIdx]),
+                          "Unsupported combination of storageType {0} and quantileType {1}",
+                          to_string(result[inIdx].dtype), to_string(result[inIdx].plt.quantileType));
+
+        if (result[inIdx].plt.pMode != PalletMode::NO_PLT) {
+            auto weightBitWidth = to_pltDataWidth(result[inIdx].plt.pMode);
+            unsigned weightSEBitSize = result[inIdx].shape[vpux::Dims4D::Act::C.ind()] * weightBitWidth;
+
+            VPUX_THROW_UNLESS(weightSEBitSize % 128 == 0,
+                              "Weight SE size must be multiple of 16 bytes, found {0} bytes", weightSEBitSize / 8);
+        }
+    }
+
+    return result;
+}
+
+bool nb::TestCaseJsonDescriptor::ArePalletizationTypesLegal(const WeightLayer& wgt) const {
+    bool isLegal = true;
+    const bool isPalletized = wgt.plt.pMode != PalletMode::NO_PLT;
+    if (isPalletized) {
+        const bool isStorageTypeSupported =
+                (wgt.dtype == DType::U1 || wgt.dtype == DType::U2 || wgt.dtype == DType::U4);
+
+        const bool isQuantileTypeSupported =
+                (wgt.plt.quantileType == DType::U8 || wgt.plt.quantileType == DType::I8 ||
+                 wgt.plt.quantileType == DType::FP16 || wgt.plt.quantileType == DType::BF16);
+
+        isLegal = isStorageTypeSupported && isQuantileTypeSupported;
+    }
+
+    return isLegal;
+}
+
+nb::PalletTableInfo nb::TestCaseJsonDescriptor::loadPalletTableInfoLayers(llvm::json::Object* obj) {
+    nb::PalletTableInfo result;
+
+    auto* quantileLUTObj = obj->getObject("quantileLUT");
+    if (quantileLUTObj) {
+        result.pMode = to_palletMode(quantileLUTObj->getString("pltMode").value().str());
+        result.quantileType = to_dtype(quantileLUTObj->getString("dtype").value().str());
+        result.quantileLUTSize = quantileLUTObj->getInteger("quantileLUTSize").value();
+
+        // temporary solution to have the table passed in the config
+        auto* quantileLUT = quantileLUTObj->getArray("quantileLUT");
+        VPUX_THROW_UNLESS(quantileLUT != nullptr, "loadPalletTableInfoLayers: missing quantileLUT");
+
+        for (size_t i = 0; i < quantileLUT->size(); i++) {
+            switch (result.quantileType) {
+            case DType::U8:
+            case DType::I8:
+            case DType::BF16:
+            case DType::FP16: {
+                auto elem = (*quantileLUT)[i].getAsNumber();  // double
+                if (elem.has_value()) {
+                    result.quantileLUT.push_back(static_cast<double>(elem.value()));
+                }
+                break;
+            }
+            case DType::BF8: {
+                auto elem = (*quantileLUT)[i].getAsUINT64();
+                if (elem.has_value()) {
+                    auto bf8 = vpux::type::float8_e5m2::from_bits(elem.value() & 0xFF);
+                    // using float8_e5m2::operator float()
+                    result.quantileLUT.push_back(static_cast<float>(bf8));
+                }
+                break;
+            }
+            case DType::HF8: {
+                auto elem = (*quantileLUT)[i].getAsUINT64();
+                if (elem.has_value()) {
+                    auto hf8 = vpux::type::float8_e4m3::from_bits(elem.value() & 0xFF);
+                    // using float8_e4m3::operator float()
+                    result.quantileLUT.push_back(static_cast<float>(hf8));
+                }
+                break;
+            }
+
+            default:
+                VPUX_THROW("loadPalletTableInfoLayers: Unexpected quantileType {0}",
+                           nb::to_string(result.quantileType));
+                break;
+            }
+        }
+
+        auto filename = quantileLUTObj->getString("file_path");
+        if (filename) {
+            result.filename = filename.value().str();
         }
     }
 
@@ -733,6 +947,8 @@ nb::DMAparams nb::TestCaseJsonDescriptor::loadDMAParams(llvm::json::Object* json
         result.indicesLocation = indicesMemLoc.has_value() ? result.dstLocations.front() : MemoryLocation::Unknown;
         auto convertDatatypeEn = params->getBoolean("convert_datatype_en");
         result.doConvert = convertDatatypeEn.has_value() ? convertDatatypeEn.value() : false;
+        auto zeroSizeTaskEnabled = params->getBoolean("zeroSizeTask");
+        result.zeroSizeTask = zeroSizeTaskEnabled.has_value() ? zeroSizeTaskEnabled.value() : false;
         auto testMemSideCache = params->getBoolean("memory_side_cache");
         result.testMemSideCache = testMemSideCache.has_value() ? testMemSideCache.value() : false;
         auto cacheTrashing = params->getBoolean("cache_trashing");
@@ -951,11 +1167,12 @@ nb::PoolLayer nb::TestCaseJsonDescriptor::loadPoolLayer(llvm::json::Object* json
 nb::ActivationLayer nb::TestCaseJsonDescriptor::loadActivationLayer(llvm::json::Object* jsonObj) {
     nb::ActivationLayer result = {
             /*activationType=*/ActivationType::None,
-            /*alpha=*/0,
+            /*alpha=*/1.0,
             /*maximum=*/0,
             /*axis=*/0,
             /*weightsOffset=*/std::nullopt,
             /*weightsPtrStep=*/std::nullopt,
+            /*permBlend*/ 0,
     };
 
     auto* act = jsonObj->getObject("activation");
@@ -979,6 +1196,11 @@ nb::ActivationLayer nb::TestCaseJsonDescriptor::loadActivationLayer(llvm::json::
     auto axis = act->getNumber("axis");
     if (axis.has_value()) {
         result.axis = vpux::checked_cast<size_t>(axis.value());
+    }
+
+    auto permBlend = act->getNumber("permBlend");
+    if (permBlend.has_value()) {
+        result.permBlend = permBlend.value();
     }
 
     auto weightsOffset = act->getInteger("weights_offset");
@@ -1058,6 +1280,23 @@ nb::WLMParams nb::TestCaseJsonDescriptor::loadWLMParams(llvm::json::Object* json
     return wlmParams;
 }
 
+std::optional<nb::WeightTableFormats> nb::TestCaseJsonDescriptor::loadWeightTableFormat(llvm::json::Object* jsonObj) {
+    std::optional<nb::WeightTableFormats> weightTableFormat;
+    auto strWeightTableFormat = jsonObj->getString("weight_table_format");
+
+    if (strWeightTableFormat.has_value()) {
+        if (strWeightTableFormat == "WT_DEFAULT") {
+            weightTableFormat = WeightTableFormats::WT_DEFAULT;
+        } else if (strWeightTableFormat == "WT_LEGACY") {
+            weightTableFormat = WeightTableFormats::WT_LEGACY;
+        } else {
+            VPUX_THROW("Unsupported weight table format: {}", strWeightTableFormat);
+        }
+    }
+
+    return weightTableFormat;
+}
+
 nb::ActShaveBroadcastingParams nb::TestCaseJsonDescriptor::loadActShaveBroadcastingParams(llvm::json::Object* jsonObj) {
     nb::ActShaveBroadcastingParams result;
 
@@ -1099,6 +1338,7 @@ void nb::TestCaseJsonDescriptor::parse(llvm::json::Object json_obj) {
     auto archValue = architecture.value();
 
     architectureSymbol = vpux::VPU::symbolizeArchKind(archValue);
+
     architecture_ = architectureSymbol.value();
 
     auto case_type = json_obj.getString("case_type");
@@ -1112,6 +1352,7 @@ void nb::TestCaseJsonDescriptor::parse(llvm::json::Object json_obj) {
     outLayers_ = loadOutputLayer(&json_obj);
     activationLayer_ = loadActivationLayer(&json_obj);
     WLMParams_ = loadWLMParams(&json_obj);
+    WeightTableFormat_ = loadWeightTableFormat(&json_obj);
 
     // Load conv json attribute values. Similar implementation for ALL HW layers (DW, group conv, Av/Max pooling and
     // eltwise needed).
@@ -1129,6 +1370,17 @@ void nb::TestCaseJsonDescriptor::parse(llvm::json::Object json_obj) {
     case CaseType::DMACompressActDense:
     case CaseType::DMA: {
         DMAparams_ = loadDMAParams(&json_obj);
+        break;
+    }
+    case CaseType::ReduceSumSquare:
+    case CaseType::ReduceMean:
+    case CaseType::ReduceOut: {
+        convLayer_ = loadConvLayer(&json_obj);
+        reductionType_ = loadReductionType(&json_obj);
+        if (caseType_ == CaseType::ReduceOut) {
+            wtLayer_ = loadWeightLayer(&json_obj);
+            reduceOutLayer_ = loadReduceOutLayer(&json_obj);
+        }
         break;
     }
     case CaseType::ZMajorConvolution:

@@ -50,30 +50,6 @@ def VPUIP_PoolLayerType :
 def VPUIP_PoolLayerTypeAttr : VPUIP_EnumAttr<VPUIP_PoolLayerType, "pool_layer_type">;
 
 //
-// ReduceLayerType
-//
-
-def VPUIP_ReduceLayerType :
-    VPUIP_I64EnumAttr<
-        "ReduceLayerType",
-        "Type of Reduce layer",
-        [
-            I64EnumAttrCase<"MAX",         0>,
-            I64EnumAttrCase<"MEAN",        1>,
-            I64EnumAttrCase<"LOGICAL_OR",  2>,
-            I64EnumAttrCase<"LOGICAL_AND", 3>,
-            I64EnumAttrCase<"PROD",        4>,
-            I64EnumAttrCase<"SUM",         5>,
-            I64EnumAttrCase<"MIN",         6>,
-            I64EnumAttrCase<"L1",          7>,
-            I64EnumAttrCase<"L2",          8>,
-        ]
-    > {
-}
-
-def VPUIP_ReduceLayerTypeAttr : VPUIP_EnumAttr<VPUIP_ReduceLayerType, "reduce_layer_type">;
-
-//
 // NCETaskType
 //
 
@@ -88,6 +64,8 @@ def VPUIP_NCETaskType :
             I64EnumAttrCase<"AVEPOOL",          3>,
             I64EnumAttrCase<"ELTWISE",          4>,
             I64EnumAttrCase<"IDENTITY",         5>,
+            I64EnumAttrCase<"REDUCEMEAN",       6>,
+            I64EnumAttrCase<"REDUCESUMSQUARE",  7>,
         ]
     > {
 }
@@ -359,5 +337,23 @@ def VPUIP_CompressionStateAttr : VPUIP_EnumAttr<VPUIP_CompressionState, "Compres
             for worst case scenario during runtime.
         }];
     }
+
+//
+// WlmStatus
+//
+
+def VPUIP_WlmStatus :
+    VPUIP_I64EnumAttr<
+        "WlmStatus",
+        "WLM status",
+        [
+            I64EnumAttrCase<"ENABLED",  0>,
+            I64EnumAttrCase<"DISABLED", 1>,
+            I64EnumAttrCase<"FAILED",   2>
+        ]
+    > {
+}
+
+def VPUIP_WlmStatusAttr : VPUIP_EnumAttr<VPUIP_WlmStatus, "wlm_status">;
 
 #endif

@@ -26,7 +26,7 @@ static constexpr uint32_t INVALID_COST_BASE = MAX_VAL - 100;
 static constexpr uint32_t ERROR_INPUT_TOO_BIG = MAX_VAL - 0;
 
 std::shared_ptr<VPUNN::VPUCostModel> createCostModel(ArchKind arch);
-std::shared_ptr<VPUNN::VPULayerCostModel> createLayerCostModel(ArchKind arch, bool isFastModel = true);
+std::shared_ptr<VPUNN::VPULayerCostModel> createLayerCostModel(ArchKind arch);
 uint32_t checkAndReturnCost(const VPUNN::CyclesInterfaceType& cost, vpux::Logger log, bool beSilent = false);
 void printVPUNNLayerConfig(const VPUNN::DPULayer& layer, const VPUNN::VPULayerStrategy& strategy, vpux::Logger log);
 void printVPUNNWorkloadConfig(const VPUNN::DPUWorkload& wl, LogCb logCb = globalLogCb);

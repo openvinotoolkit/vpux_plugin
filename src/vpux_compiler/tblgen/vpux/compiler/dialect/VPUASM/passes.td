@@ -60,18 +60,4 @@ def AddProfilingSection : PassBase<"add-profiling-section", "vpux::ModulePass"> 
     ];
 }
 
-//
-// BarriersToManagedBarriers
-//
-
-def BarriersToManagedBarriers : PassBase<"barriers-to-managed-barriers", "vpux::FunctionPass"> {
-    let summary = "Rewrites ConfigureBarrierTasks to ManagedBarrierTasks";
-
-    let constructor = "vpux::VPUASM::createBarriersToManagedBarriersPass()";
-
-    let dependentDialects = [
-        "vpux::VPUASM::VPUASMDialect"
-    ];
-}
-
 #endif // VPUX_COMPILER_DIALECT_VPUASM_PASSES

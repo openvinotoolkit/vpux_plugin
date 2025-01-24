@@ -4,6 +4,8 @@
 //
 
 #include "vpux/compiler/NPU40XX/dialect/NPUReg40XX/utils.hpp"
+#include <mlir/IR/BuiltinAttributes.h>
+#include "vpux/compiler/dialect/VPUMI40XX/utils.hpp"
 
 uint32_t vpux::NPUReg40XX::getTileSelectMaskForBuffer(VPUASM::DeclareBufferOp buffer) {
     auto bufferLocation = buffer.getBufferType().getLocation();
@@ -11,12 +13,11 @@ uint32_t vpux::NPUReg40XX::getTileSelectMaskForBuffer(VPUASM::DeclareBufferOp bu
         return 0;
     }
 
-    auto tileIndex = bufferLocation.getSectionIndex();
-    return 1 << (tileIndex + NPUReg40XX::CMX_TILE_SELECT_OFFSET);
+    return VPUMI40XX::generateTileMask({static_cast<uint32_t>(bufferLocation.getSectionIndex())});
 }
 
 uint32_t vpux::NPUReg40XX::getTileSelectMaskForBuffer(VPUASM::DeclareTaskBufferOp taskBuffer) {
-    return 1 << (taskBuffer.getTileIndex() + NPUReg40XX::CMX_TILE_SELECT_OFFSET);
+    return VPUMI40XX::generateTileMask({static_cast<uint32_t>(taskBuffer.getTileIndex())});
 }
 
 template <class OpType>
@@ -37,7 +38,7 @@ uint32_t vpux::NPUReg40XX::getKernelEntry(vpux::ELF::SymbolReferenceMap& _symRef
 uint64_t vpux::NPUReg40XX::getKernelTextSize(vpux::ELF::SymbolReferenceMap& _symRefMap,
                                              std::optional<mlir::SymbolRefAttr> attr) {
     auto kernelTextOp = getOpFrom<vpux::VPUASM::DeclareKernelTextOp>(_symRefMap, attr);
-    return kernelTextOp ? kernelTextOp.getBinarySize() : 0;
+    return kernelTextOp ? kernelTextOp.getBinarySize(VPU::ArchKind::NPU40XX) : 0;
 }
 
 llvm::StringRef vpux::NPUReg40XX::getKernelPath(vpux::ELF::SymbolReferenceMap& _symRefMap,

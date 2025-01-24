@@ -30,6 +30,7 @@
 #include <ov_ops/rms.hpp>
 
 // Utils
+#include "vpux/compiler/utils/range_bound.hpp"
 #include "vpux/utils/IE/hash.hpp"
 
 namespace vpux {
@@ -41,7 +42,7 @@ mlir::OwningOpRef<mlir::ModuleOp> importNetwork(mlir::MLIRContext* ctx, const st
                                                 const std::vector<std::shared_ptr<const ov::Node>>& originalResults,
                                                 bool sharedConstants, mlir::TimingScope& rootTiming,
                                                 bool enableProfiling, DummyOpMode stubLayers, bool dynamicShapeToStatic,
-                                                vpux::VPU::ArchKind arch, Logger log = Logger::global());
+                                                Logger log = Logger::global());
 
 std::vector<std::shared_ptr<const ov::Node>> buildOVParams(const std::shared_ptr<const ov::Model>& model);
 std::vector<std::shared_ptr<const ov::Node>> buildOVResults(const std::shared_ptr<const ov::Model>& model);
@@ -49,8 +50,7 @@ std::vector<std::shared_ptr<const ov::Node>> buildOVResults(const std::shared_pt
 // TODO Move to separate file NGraphPasses
 class NGraphPasses final {
 public:
-    static void runNGraphPasses(const std::shared_ptr<ov::Model>& netGraph, mlir::TimingScope& rootTiming,
-                                const vpux::VPU::ArchKind arch);
+    static void runNGraphPasses(const std::shared_ptr<ov::Model>& netGraph, mlir::TimingScope& rootTiming);
 };
 
 class NGraphImporter final {
@@ -147,6 +147,7 @@ private:
     void parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::FloorMod>& origNode);
     void parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::Mod>& origNode);
     void parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset4::Proposal>& origNode);
+    void parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::Reverse>& origNode);
     void parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset7::FakeQuantize>& origNode);
     void parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::op::v13::FakeConvert>& origNode);
     void parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::MatMul>& origNode);
@@ -252,6 +253,7 @@ private:
     void parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset9::IRDFT>& origNode);
     void parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset8::If>& origNode);
     void parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset1::ShapeOf>& origNode);
+    void parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset4::Range>& origNode);
     void parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset3::NonZero>& origNode);
     void parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::op::internal::RMS>& origNode);
     void parseNode(mlir::OpBuilder& builder, const std::shared_ptr<ov::opset14::Inverse>& origNode);
@@ -273,6 +275,7 @@ private:
     IE::GridSampleModeAttr importGridSampleMode(const ov::op::v9::GridSample::InterpolationMode& val);
     IE::GridSamplePaddingModeAttr importGridSamplePaddingMode(const ov::op::v9::GridSample::PaddingMode& val);
     IE::ProposalAttr importProposalAttrs(const ov::op::v0::Proposal::Attributes& val);
+    IE::ReverseModeAttr importReverseMode(const ov::op::v1::Reverse::Mode mode);
     IE::InterpolateAttr importInterpolateAttrs(const ov::opset4::Interpolate::InterpolateAttrs& val);
     IE::DetectionOutputAttr importDetectionOutputAttrs(const ov::op::v0::DetectionOutput::Attributes& val);
     IE::ROIPoolingMethodAttr importROIPoolingMethod(const std::string& method);

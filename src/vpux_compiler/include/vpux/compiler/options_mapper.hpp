@@ -30,7 +30,9 @@ std::optional<bool> getEnableAutoPaddingIDU(const intel_npu::Config& config);
 std::optional<bool> getEnableAutoPaddingODU(const intel_npu::Config& config);
 std::optional<bool> getEnableVerifiers(const intel_npu::Config& config);
 std::optional<bool> getEnableMemoryUsageCollector(const intel_npu::Config& config);
+std::optional<bool> getEnableFunctionStatisticsInstrumentation(const intel_npu::Config& config);
 std::optional<DummyOpMode> getDummyOpReplacement(const intel_npu::Config& config);
+bool getEnableExtraShapeBoundOps(const intel_npu::Config& config);
 
 #ifdef BACKGROUND_FOLDING_ENABLED
 struct ConstantFoldingConfig {

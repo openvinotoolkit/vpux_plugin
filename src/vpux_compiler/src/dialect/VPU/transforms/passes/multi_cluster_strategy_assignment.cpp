@@ -5,6 +5,7 @@
 
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
 #include "vpux/compiler/dialect/VPU/utils/manual_strategy_utils.hpp"
+#include "vpux/compiler/dialect/VPU/utils/op_tiling_cache.hpp"
 #include "vpux/compiler/dialect/VPU/utils/strategy_manager/strategy_manager.hpp"
 
 using namespace vpux;
@@ -20,10 +21,10 @@ class MultiClusterStrategyAssignmentPass final :
         public MultiClusterStrategyAssignmentBase<MultiClusterStrategyAssignmentPass> {
 public:
     explicit MultiClusterStrategyAssignmentPass(bool enablePrefetchTiling, bool enableMcSideLoadingDump,
-                                                StringRef modelHash, Logger log)
+                                                const int clusteredOpThreshold, StringRef modelHash, Logger log)
             : _enablePrefetchTiling(enablePrefetchTiling),
-
               _enableMcSideLoadingDump(enableMcSideLoadingDump),
+              _clusteredOpThreshold(clusteredOpThreshold),
               _modelHash(modelHash) {
         Base::initLogger(log, Base::getArgumentName());
     }
@@ -35,6 +36,7 @@ private:
 private:
     bool _enablePrefetchTiling = true;
     bool _enableMcSideLoadingDump;
+    int _clusteredOpThreshold;
     std::string _modelHash;
 };
 
@@ -69,10 +71,15 @@ void MultiClusterStrategyAssignmentPass::safeRunOnFunc() {
         _log.trace("Found pre-defined strategy for model hash '{0}'", _modelHash);
         mcSideLoadSucceeded = loadPreConfiguredStrategy(_log, func, _modelHash);
     }
-    _log.warning("Compiler strategy match: {0}", mcSideLoadSucceeded);
+    _log.trace("Compiler strategy match: {0}", mcSideLoadSucceeded);
     if (mcSideLoadSucceeded) {
         return;
     }
+
+    auto clusteredOps = func.getOps<ClusteredOpInterface>();
+    auto clusteredOpCount = std::distance(clusteredOps.begin(), clusteredOps.end());
+    auto& cache = VPU::OpTilingCache::instance();
+    cache.enableIfNecessary(clusteredOpCount > _clusteredOpThreshold);
 
     auto& siblingAnalysis = getAnalysis<SiblingOpsAnalysis>();
     StrategyManager strategyManager(func, tileOp.getCount(), _enablePrefetchTiling, _log.nest(), siblingAnalysis);
@@ -84,6 +91,8 @@ void MultiClusterStrategyAssignmentPass::safeRunOnFunc() {
     strategyManager.optimizeMulticlusterStrategy();
     _log.trace("Remove Temporary Strategy");
     strategyManager.removeTemporaryMulticlusterStrategy();
+
+    VPU::OpTilingCache::instance().printStats(_log);
 }
 
 }  // namespace
@@ -94,7 +103,8 @@ void MultiClusterStrategyAssignmentPass::safeRunOnFunc() {
 
 std::unique_ptr<mlir::Pass> VPU::createMultiClusterStrategyAssignmentPass(bool enablePrefetchTiling,
                                                                           bool enableMcSideLoadingDump,
+                                                                          const int clusteredOpThreshold,
                                                                           StringRef modelHash, Logger log) {
     return std::make_unique<MultiClusterStrategyAssignmentPass>(enablePrefetchTiling, enableMcSideLoadingDump,
-                                                                modelHash, log);
+                                                                clusteredOpThreshold, modelHash, log);
 }

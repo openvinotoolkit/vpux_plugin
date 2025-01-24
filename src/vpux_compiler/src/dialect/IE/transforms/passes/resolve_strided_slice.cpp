@@ -179,6 +179,12 @@ void ResolveStridedSlicePass::safeRunOnFunc() {
             return true;
         }
 
+        // Do not convert dynamic strided slice to IE.Slice with IE.Reshape.
+        // Dynamic strided slice must be converted to an activation shave layer.
+        if (getShape(slice.getInput()).isDynamic()) {
+            return true;
+        }
+
         auto isOne = [](auto val) {
             return val == 1;
         };

@@ -8,6 +8,7 @@
 #include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPUIP/transforms/passes.hpp"
 #include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
+#include "vpux/compiler/dialect/const/utils/utils.hpp"
 #include "vpux/compiler/utils/codec_factory.hpp"
 #include "vpux/compiler/utils/compression_utils.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
@@ -156,7 +157,7 @@ mlir::LogicalResult NNDMAOpConverter::matchAndRewrite(VPUIP::NNDMAOp origOp, mli
         newSrcType = mlir::cast<mlir::MemRefType>(
                 vpux::setCompressionState(newSrcType, VPUIP::CompressionState::CompiletimeCompressed));
         const auto newSrcStorageType = mlir::RankedTensorType::get(compressedDataShape.raw(), u8Type);
-        newSrcContentAttr = mlir::DenseElementsAttr::get(newSrcStorageType, ArrayRef(compressedData));
+        newSrcContentAttr = Const::createConstContent(newSrcStorageType, ArrayRef(compressedData));
     } else if (compressionMode == ICodec::CompressionMode::FP16) {
         unsigned f16TypeSizeBytes = f16Type.getWidth() / CHAR_BIT;
         const Shape newDstShape{totalInputSize.count() / f16TypeSizeBytes, 1, 1, 1};
@@ -170,7 +171,7 @@ mlir::LogicalResult NNDMAOpConverter::matchAndRewrite(VPUIP::NNDMAOp origOp, mli
         newSrcType = mlir::cast<mlir::MemRefType>(
                 vpux::setCompressionState(newSrcType, VPUIP::CompressionState::CompiletimeCompressed));
         const auto newSrcStorageType = mlir::RankedTensorType::get(compressedDataShape.raw(), f16Type);
-        newSrcContentAttr = mlir::DenseElementsAttr::get(
+        newSrcContentAttr = Const::createConstContent(
                 newSrcStorageType, ArrayRef<vpux::type::float16>(
                                            const_cast<vpux::type::float16*>(
                                                    reinterpret_cast<const vpux::type::float16*>(compressedData.data())),

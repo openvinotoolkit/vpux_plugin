@@ -64,9 +64,9 @@ mlir::LogicalResult GroupTransposedConvConverter::matchAndRewrite(IE::GroupTrans
                            origFilterShape.size());
     }
 
-    auto dwConvFilter = origOp.getFilter().getDefiningOp<Const::DeclareOp>();
+    auto dwConvFilter = origOp.getFilter().getDefiningOp();
     if (dwConvFilter == nullptr) {
-        return matchFailed(rewriter, origOp, "[Unsupported]Filter is not Const::DeclareOp at {0}", origOp->getLoc());
+        return matchFailed(rewriter, origOp, "GroupTransposedConvolutionOp has no filter Op");
     }
 
     auto featureUpScale = IE::createUpsampling(rewriter, takeOpLoc(origOp, "upscale_in"), origOp, padsOutput, true);
@@ -88,7 +88,7 @@ mlir::LogicalResult GroupTransposedConvConverter::matchAndRewrite(IE::GroupTrans
 
     const auto filter4DShapeAttr = getIntArrayAttr(rewriter.getContext(), origFilterShape);
     auto reshaped4DFilter = rewriter.createOrFold<IE::ReshapeOp>(
-            takeOpLoc(origOp, "reshape_filter"), dwConvFilter.getOutput(), nullptr, false, filter4DShapeAttr);
+            takeOpLoc(origOp, "reshape_filter"), dwConvFilter->getResult(0), nullptr, false, filter4DShapeAttr);
 
     const auto postOp = origOp.getPostOpAttr();
     const auto clampOp = origOp.getClampAttr();

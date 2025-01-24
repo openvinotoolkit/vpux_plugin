@@ -71,9 +71,9 @@ struct ReferenceHWOptions37XX final : public ReferenceHWOptions<ReferenceHWOptio
     BoolOption enableFuseClampOperations{*this, "enable-fuse-clamp-op", llvm::cl::desc("Enable fuse clamp operations"),
                                          llvm::cl::init(false)};
 
-    BoolOption enableVPUNNCost{*this, "vpunn-cost",
-                               llvm::cl::desc("Use VPUNN cost model to get the best tiling strategy"),
-                               llvm::cl::init(false)};
+    BoolOption enableVPUNNCostForTiling{*this, "enable-vpunn-cost-for-tiling",
+                                        llvm::cl::desc("Use VPUNN cost model to get the best tiling strategy"),
+                                        llvm::cl::init(false)};
 
     BoolOption enableOutputPipelining{*this, "output-pipelining", llvm::cl::desc("Enable output pipelining"),
                                       llvm::cl::init(false)};
@@ -87,11 +87,23 @@ struct ReferenceHWOptions37XX final : public ReferenceHWOptions<ReferenceHWOptio
                                    llvm::cl::desc("Enable execution of grouped MatMul as a single operation."),
                                    llvm::cl::init(false)};
 
-    BoolOption supportNCEOpInsertion{
-            *this, "support-nce-op-insertion",
-            llvm::cl::desc("Insert a new NCE operation with single user for CMX-Concat to handle the"
-                           "complex case when parent NCE has an extra non-Copy user."),
+    BoolOption enableRuntimeDequant{*this, "enable-runtime-dequant",
+                                    llvm::cl::desc("Enable runtime dequantization of mixed precision weights"),
+                                    llvm::cl::init(false)};
+    Int64Option runtimeDequantizationLimit{
+            *this, "runtime-dequantization-limit",
+            llvm::cl::desc("Lower limit on weight size for runtime dequantization"
+                           "Weights smaller than the limit will be statically dequantized"),
+            llvm::cl::init(524'288)};  // 512kb
+
+    BoolOption enableOutputEnsurance{
+            *this, "enable-output-ensurance",
+            llvm::cl::desc(
+                    "Enable output size ensurance when checking nce op shapes in EnsureNCEOpsSizeRequirements pass"),
             llvm::cl::init(true)};
+
+    BoolOption mergeUnrolledMatmul{*this, "merge-unrolled-matmul", llvm::cl::desc("Enable merging urolled Matmul ops"),
+                                   llvm::cl::init(false)};
 };
 
 void buildReferenceHWModePipeline(mlir::OpPassManager& pm, const ReferenceHWOptions37XX& options,
@@ -111,9 +123,16 @@ struct DefaultHWOptions37XX final :
     using mlir::PassPipelineOptions<DefaultHWOptions37XX>::createFromString;
 };
 
-void buildShaveCodeGenPipeline37XX(mlir::OpPassManager& pm, Logger log = Logger::global());
-
 void buildDefaultHWModePipeline(mlir::OpPassManager& pm, const DefaultHWOptions37XX& options,
                                 Logger log = Logger::global());
+
+//
+// ShaveCodeGenPipeline
+//
+
+struct ShaveCodeGenOptions37XX final : public ShaveCodeGenOptionsBase<ShaveCodeGenOptions37XX> {};
+
+void buildShaveCodeGenPipeline(mlir::OpPassManager& pm, const ShaveCodeGenOptions37XX& options,
+                               Logger log = Logger::global());
 
 }  // namespace vpux

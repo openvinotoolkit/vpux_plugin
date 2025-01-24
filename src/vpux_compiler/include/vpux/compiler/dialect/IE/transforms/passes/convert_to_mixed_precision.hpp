@@ -8,7 +8,6 @@
 #include "vpux/compiler/NPU37XX/dialect/IE/utils/quantization.hpp"
 #include "vpux/compiler/dialect/IE/utils/quantization.hpp"
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
-#include "vpux/compiler/utils/VPU/ppe_utils.hpp"
 #include "vpux/compiler/utils/logging.hpp"
 #include "vpux/compiler/utils/passes.hpp"
 #include "vpux/compiler/utils/types.hpp"

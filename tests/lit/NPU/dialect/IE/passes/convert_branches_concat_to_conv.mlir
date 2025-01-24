@@ -501,3 +501,32 @@ func.func @NotOptimizeSliceMultiplyConcatForNonSplatScale(%arg0: tensor<1x24x1x6
 
     // CHECK:           return [[CONCAT]] : tensor<1x24x1x64xf16>
 }
+
+!qElemType = !quant.uniform<u8:f16, 3.1906749834032623E-5>
+!qElemType1 = !quant.uniform<u8:f16:0, {0.04918184093400544:128,0.072342521069096583:128,0.056963582132376879:128}>
+!qElemType2 = !quant.uniform<u8:f16:0, {0.064222440532609532:128,0.063976377599379602:128,0.057332676532221773:128}>
+!qElemType3 = !quant.uniform<i8:f16:1, {0.04918184093400544,0.072342521069096583,0.056963582132376879}>
+!qElemType4 = !quant.uniform<i8:f16:0, {0.04918184093400544,0.072342521069096583,0.056963582132376879}>
+!qElemType5 = !quant.uniform<i8:f16:1, {0.064222440532609532,0.063976377599379602,0.057332676532221773}>
+!qElemType6 = !quant.uniform<i8:f16:0, {0.064222440532609532,0.063976377599379602,0.057332676532221773}>
+
+// CHECK-LABEL: func.func @PropagateOutputTypeOfInputTensorIntoOutputConvType
+// CHECK-SAME:        [[INPUT:%.+]]:  tensor<1x512x1x1x!qElemType>
+func.func @PropagateOutputTypeOfInputTensorIntoOutputConvType(%arg0: tensor<1x512x1x1x!qElemType>) -> tensor<1x6x1x1xf16> {
+  %cst = const.Declare tensor<3x512x1x1x!qElemType1> = dense<1> : tensor<3x512xsi8>, [#const.Reshape<[1, 3, 1, 512]>, #const.CastElemType<f32>, #const.CastElemType<f16>, #const.CastElemType<si8>, #const.CastElemType<!qElemType3>, #const.ChangeShapeAndElemType<[3, 512, 1, 1], !qElemType4>, #const.CastElemType<si8>, #const.CastElemType<i32>, #const.Add<1.280000e+02 : f64>, #const.CastElemType<ui8>, #const.CastElemType<!qElemType1>]
+  %cst_0 = const.Declare tensor<3x512x1x1x!qElemType2> = dense<1> : tensor<3x512xsi8>, [#const.Reshape<[1, 3, 1, 512]>, #const.CastElemType<f32>, #const.CastElemType<f16>, #const.CastElemType<si8>, #const.CastElemType<!qElemType5>, #const.ChangeShapeAndElemType<[3, 512, 1, 1], !qElemType6>, #const.CastElemType<si8>, #const.CastElemType<i32>, #const.Add<1.280000e+02 : f64>, #const.CastElemType<ui8>, #const.CastElemType<!qElemType2>]
+  %cst_1 = const.Declare tensor<1x3x1x1xf16> = dense<1.0> : tensor<1x3xf32>, [#const.Reshape<[1, 3, 1, 1]>, #const.CastElemType<f16>]
+  %cst_2 = const.Declare tensor<1x3x1x1xf16> = dense<1.0> : tensor<1x3xf32>, [#const.Reshape<[1, 3, 1, 1]>, #const.CastElemType<f16>]
+  %0 = IE.Convolution(%arg0, %cst_0, %cst_2) {dilations = [1, 1], pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]} : tensor<1x512x1x1x!qElemType>, tensor<3x512x1x1x!qElemType2>, tensor<1x3x1x1xf16> -> tensor<1x3x1x1xf16>
+  %1 = IE.Convolution(%arg0, %cst, %cst_1) {dilations = [1, 1], pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]} : tensor<1x512x1x1x!qElemType>, tensor<3x512x1x1x!qElemType1>, tensor<1x3x1x1xf16> -> tensor<1x3x1x1xf16>
+  %2 = IE.Concat(%0, %1) {static_offsets = [[0, 0, 0, 0], [0, 3, 0, 0]]} : tensor<1x3x1x1xf16>, tensor<1x3x1x1xf16> -> tensor<1x6x1x1xf16>
+  return %2 : tensor<1x6x1x1xf16>
+
+  // CHECK-DAG:       [[CST:%.+]] = const.Declare tensor<6x512x1x1x!qElemType1> = dense<129> : tensor<6x512x1x1xui8>, [#const.CastElemType<!qElemType1>]
+  // CHECK-DAG:       [[CST_0:%.+]] =  const.Declare tensor<1x6x1x1xf16> = dense<1.000000e+00> : tensor<1x6x1x1xf16>
+
+  // CHECK:    [[CONVOLUTION:%.+]] = IE.Convolution([[INPUT]], [[CST]], [[CST_0]]) {
+  // CHECK-SAME: dilations = [1, 1], pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]
+  // CHECK-SAME: } : tensor<1x512x1x1x!qElemType>, tensor<6x512x1x1x!qElemType1>, tensor<1x6x1x1xf16> -> tensor<1x6x1x1xf16>
+  // CHECK:    return [[CONVOLUTION]] : tensor<1x6x1x1xf16>
+}

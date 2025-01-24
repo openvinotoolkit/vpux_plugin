@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2022-2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
@@ -26,6 +26,9 @@ mlir::LogicalResult vpux::VPU::LSTMSequenceOp::inferReturnTypes(
         return mlir::failure();
     }
 
+    const auto inDataType = lstm.getInputData().getType();
+    const auto inDataShape = mlir::cast<vpux::NDTypeInterface>(inDataType).getShape();
+
     const auto initialHiddenStateType = mlir::cast<vpux::NDTypeInterface>(lstm.getInitialHiddenState().getType());
     const auto initialHiddenStateShape = initialHiddenStateType.getShape();
     const auto elementType = initialHiddenStateType.getElementType();
@@ -33,16 +36,35 @@ mlir::LogicalResult vpux::VPU::LSTMSequenceOp::inferReturnTypes(
 
     const auto batchSize = initialHiddenStateShape[Dims4D::Act::N];
     const auto numDirections = initialHiddenStateShape[Dims4D::Act::C];
-    const auto sequenceLength = lstm.getSequenceLength();
     const auto hiddenSize = initialHiddenStateShape.back();
+
+    const auto lengthIndex = inDataShape.size() - 2;
+    int64_t sequenceLength = inDataShape[Dim(lengthIndex)];
 
     const SmallVector<int64_t> outputHiddenValuesShape{batchSize, numDirections, sequenceLength, hiddenSize};
 
-    const auto outputHiddenValuesType = mlir::RankedTensorType::get(outputHiddenValuesShape, elementType, tensorAttr);
+    auto outputHiddenValuesType = mlir::RankedTensorType::get(outputHiddenValuesShape, elementType, tensorAttr);
     const auto outputHiddenStateType = mlir::RankedTensorType::get(initialHiddenStateShape, elementType, tensorAttr);
     const auto outputCellStateType = mlir::RankedTensorType::get(initialHiddenStateShape, elementType, tensorAttr);
 
-    inferredReturnTypes.push_back(outputHiddenValuesType);
+    if (inDataShape.isStatic()) {
+        inferredReturnTypes.push_back(outputHiddenValuesType);
+    } else {
+        const auto outputHVRank = outputHiddenValuesShape.size();
+        auto outHVBounds = SmallVector<int64_t>(outputHVRank);
+        const auto inDataBoundedType = mlir::cast<vpux::BoundedTypeInterface>(inDataType);
+
+        for (size_t i = 0; i < outputHVRank; i++) {
+            if (outputHiddenValuesShape[i] == mlir::ShapedType::kDynamic) {
+                outHVBounds[i] = parseIntArrayAttr<int64_t>(inDataBoundedType.getBounds())[lengthIndex];
+            } else {
+                outHVBounds[i] = outputHiddenValuesShape[i];
+            }
+        }
+        inferredReturnTypes.push_back(mlir::cast<vpux::BoundedTypeInterface>(outputHiddenValuesType)
+                                              .changeBounds(getIntArrayAttr(ctx, outHVBounds)));
+    }
+
     inferredReturnTypes.push_back(outputHiddenStateType);
     inferredReturnTypes.push_back(outputCellStateType);
 
@@ -76,6 +98,7 @@ void vpux::VPU::LSTMSequenceOp::build(::mlir::OpBuilder& odsBuilder, ::mlir::Ope
                                       vpux::VPU::MultiClusterStrategyAttr multiClusterStrategy) {
     const auto module = getModule(odsBuilder);
     auto tileOp = IE::getTileExecutor(module);
+
     const auto numShavesPerTile = tileOp.getSubExecutor(VPU::ExecutorKind::SHAVE_ACT).getCount();
     const auto syncBuffer = createSyncBuffer(odsBuilder, Shape{1, 1, 1, numShavesPerTile});
 
@@ -88,7 +111,7 @@ bool vpux::VPU::LSTMSequenceOp::isSupported(vpux::IE::LSTMSequenceOp op) {
         return false;
     }
 
-    auto maxHiddenSize = getMaxLstmHiddenSizeConstant(VPU::getArch(op), true /* is Lstm Sequence op*/);
+    auto maxHiddenSize = getMaxLstmSequenceHiddenSizeConstant(VPU::getArch(op));
 
     // shave implementation allow reduced size. Bigger size can and are map on DPU.
     const auto initialHiddenStateShape = getShape(op.getInitialHiddenState());

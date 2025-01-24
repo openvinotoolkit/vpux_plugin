@@ -1229,3 +1229,334 @@ std::vector<SERollAttrParams> rollParams = {
 // clang-format on
 
 INSTANTIATE_TEST_SUITE_P(unit, SERollAttrTests, testing::ValuesIn(rollParams));
+
+// SEDilatedConvAttr
+struct SEDilatedConvAttrParams {
+    // SEDilatedConvAttr parameters
+    SmallVector<int64_t> dilation;
+    SmallVector<int64_t> kernelStride;
+    SmallVector<int64_t> kernelSize;
+    SmallVector<int64_t> dataOffset;
+    SmallVector<int64_t> dataSizes;
+
+    SmallVector<int64_t> offsets;
+    SmallVector<int64_t> sizes;
+
+    // Input data
+    SmallVector<int64_t> dataShape;
+    SmallVector<Bit> dataStrides;
+    int64_t dataElemByteSize;
+    int64_t seSize;
+    SmallVector<int64_t> outputTileOffset;
+    SmallVector<int64_t> outputTileShape;
+
+    // Expected results
+    SmallVector<int64_t> expectedOutputShape;
+    SmallVector<int64_t> expectedBackInferredInputShape;
+    SmallVector<int64_t> expectedInputTileOffset;
+    SmallVector<int64_t> expectedInputTileShape;
+    SmallVector<int64_t> expectedAttrOffsets;
+    SmallVector<int64_t> expectedAttrSizes;
+    std::vector<std::vector<int64_t>> expectedInputCoords;
+    std::vector<int32_t> expectedSEOffsets;
+};
+
+class SEDilatedConvAttrTests : public testing::TestWithParam<SEDilatedConvAttrParams> {};
+
+TEST_P(SEDilatedConvAttrTests, SEAttrInterface) {
+    auto registry = vpux::createDialectRegistry();
+
+    mlir::MLIRContext ctx(registry);
+    ctx.loadDialect<VPU::VPUDialect>();
+
+    const auto params = GetParam();
+
+    auto dilationAttr = getIntArrayAttr(&ctx, params.dilation);
+
+    auto kernelStrideAttr = params.kernelStride.empty() ? nullptr : getIntArrayAttr(&ctx, params.kernelStride);
+    auto kernelSizeAttr = params.kernelSize.empty() ? nullptr : getIntArrayAttr(&ctx, params.kernelSize);
+
+    auto dataOffsetAttr = params.dataOffset.empty() ? nullptr : getIntArrayAttr(&ctx, params.dataOffset);
+    auto dataSizesAttr = params.dataSizes.empty() ? nullptr : getIntArrayAttr(&ctx, params.dataSizes);
+
+    auto offsetsAttr = params.offsets.empty() ? nullptr : getIntArrayAttr(&ctx, params.offsets);
+    auto sizesAttr = params.sizes.empty() ? nullptr : getIntArrayAttr(&ctx, params.sizes);
+
+    auto dilatedConvAttr = VPU::SEDilatedConvAttr::get(&ctx, dilationAttr, kernelStrideAttr, kernelSizeAttr,
+                                                       dataOffsetAttr, dataSizesAttr, offsetsAttr, sizesAttr);
+
+    auto seAttrInterface = dilatedConvAttr.dyn_cast<VPU::SEAttr>();
+    ASSERT_TRUE(seAttrInterface != nullptr);
+
+    // inferOutputShape
+    const Shape dataShape(params.dataShape);
+    const auto outputShape = seAttrInterface.inferOutputShape(dataShape);
+    EXPECT_EQ(outputShape.raw(), params.expectedOutputShape);
+
+    // backInferInputShape
+    if (offsetsAttr == nullptr && sizesAttr == nullptr) {
+        const auto inputShape = seAttrInterface.backInferInputShape(outputShape);
+        EXPECT_EQ(inputShape.raw(), params.expectedBackInferredInputShape);
+    }
+
+    // backInferInputCoord
+    const auto offsets = params.offsets.empty() ? SmallVector<int64_t>(outputShape.size(), 0) : params.offsets;
+    const auto sizes = params.sizes.empty() ? SmallVector<int64_t>(outputShape.raw()) : params.sizes;
+
+    const auto outputH = sizes[Dims4D::Act::H.ind()];
+    const auto outputW = sizes[Dims4D::Act::W.ind()];
+
+    ASSERT_EQ(params.expectedInputCoords.size(), outputH * outputW);
+
+    for (auto h : irange(outputH)) {
+        for (auto w : irange(outputW)) {
+            const auto actualH = h + offsets[Dims4D::Act::H.ind()];
+            const auto actualW = w + offsets[Dims4D::Act::W.ind()];
+
+            const Shape outputCoord({0, 0, actualH, actualW});
+
+            const auto inputCoord = seAttrInterface.backInferInputCoord(outputCoord, dataShape);
+
+            const auto& expectedCoord = params.expectedInputCoords[h * outputW + w];
+            const Shape expectedInputCoord({0, 0, expectedCoord[0], expectedCoord[1]});
+
+            EXPECT_EQ(inputCoord, expectedInputCoord)
+                    << "Invalid input coordinates for output coordinate [" << actualH << ", " << actualW << "]";
+        }
+    }
+
+    // extractTile
+    if (!params.outputTileOffset.empty() && !params.outputTileShape.empty()) {
+        const Shape outputTileOffset(params.outputTileOffset);
+        const Shape outputTileShape(params.outputTileShape);
+
+        Shape inputTileOffset{};
+        Shape inputTileShape{};
+
+        auto newSEAttr = seAttrInterface.extractTile(outputTileOffset, outputTileShape, dataShape, inputTileOffset,
+                                                     inputTileShape);
+
+        auto newSEDilatedConvAttr = newSEAttr.dyn_cast_or_null<VPU::SEDilatedConvAttr>();
+        ASSERT_TRUE(newSEDilatedConvAttr != nullptr);
+
+        EXPECT_EQ(inputTileOffset.raw(), params.expectedInputTileOffset);
+        EXPECT_EQ(inputTileShape.raw(), params.expectedInputTileShape);
+    }
+
+    // computeSEOffsets
+    const Strides dataStrides(params.dataStrides);
+    const Byte elemSize(params.dataElemByteSize);
+
+    const auto seOffsets = seAttrInterface.computeSEOffsets(dataShape, dataStrides, elemSize, params.seSize);
+
+    EXPECT_EQ(seOffsets, params.expectedSEOffsets);
+}
+
+// clang-format off
+
+std::vector<SEDilatedConvAttrParams> dilatedConvParams = {
+//                                                 EXAMPLE SUB-GRAPH
+
+//
+//                          NOTE: We use HxW and YxX format to align with other SEAttrs.
+//
+
+//
+//      Input                     Subviews                     Sub-convolution        Outputs     Re-constructed Output
+//
+//                              N = 4  (Dy * Dx)               N = 4  (Dy * Dx)
+//
+//     Size = 8x8         Size = 8x8        Size = 8x7                              Size = 2x2       Size = 4x4
+//   Dilation = 2,2      Offset = 0,0      Offset = 0,1
+//                                                              4x4        4x4
+//  1 2 1 2 1 2 1 2     1 2 1 2 1 2 1 2    2 1 2 1 2 1 2      1 1 1 1    2 2 2 2     1 1  2 2         1 2 1 2
+//  3 4 3 4 3 4 3 4     3 4 3 4 3 4 3 4    4 3 4 3 4 3 4      1 1 1 1    2 2 2 2     1 1  2 2         3 4 3 4
+//  1 2 1 2 1 2 1 2     1 2 1 2 1 2 1 2    2 1 2 1 2 1 2      1 1 1 1    2 2 2 2                      1 2 1 2
+//  3 4 3 4 3 4 3 4     3 4 3 4 3 4 3 4    4 3 4 3 4 3 4      1 1 1 1    2 2 2 2     3 3  4 4         3 4 3 4
+//  1 2 1 2 1 2 1 2     1 2 1 2 1 2 1 2    2 1 2 1 2 1 2                             3 3  4 4
+//  3 4 3 4 3 4 3 4     3 4 3 4 3 4 3 4    4 3 4 3 4 3 4        4x4        4x4
+//  1 2 1 2 1 2 1 2     1 2 1 2 1 2 1 2    2 1 2 1 2 1 2      3 3 3 3    4 4 4 4
+//  3 4 3 4 3 4 3 4     3 4 3 4 3 4 3 4    4 3 4 3 4 3 4      3 3 3 3    4 4 4 4
+//                                                            3 3 3 3    4 4 4 4
+//      Kernel            Size = 7x8        Size = 7x7        3 3 3 3    4 4 4 4
+//                       Offset = 1,0      Offset = 1,1
+//    Size = 3x3
+//                      3 4 3 4 3 4 3 4    4 3 4 3 4 3 4
+//      1 2 3           1 2 1 2 1 2 1 2    2 1 2 1 2 1 2
+//      4 5 6           3 4 3 4 3 4 3 4    4 3 4 3 4 3 4
+//      7 8 9           1 2 1 2 1 2 1 2    2 1 2 1 2 1 2
+//                      3 4 3 4 3 4 3 4    4 3 4 3 4 3 4
+//                      1 2 1 2 1 2 1 2    2 1 2 1 2 1 2
+//                      3 4 3 4 3 4 3 4    4 3 4 3 4 3 4
+
+
+    // TEST-CASE 1
+
+    {/* dilation = */ { 2, 2 },
+
+     /* kernelStride = */ { 1, 1 },
+     /* kernelSize */     { 3, 3 },
+
+     /* dataOffset = */ { 0, 0,  0, 1 },
+     /* dataSizes */    { 1, 16, 8, 7 },
+
+     /* offsets = */ {},
+     /* sizes = */ {},
+
+     /* dataShape = */ { 1, 16, 8, 7 },
+     /* dataStrides = */ {},
+     /* dataElemByteSize = */ 1,
+     /* seSize = */ 16,
+
+     /* outputTileOffset = */ { 0, 0,  0, 0 },
+     /* outputTileShape = */  { 1, 16, 4, 4 },
+
+     /* expectedOutputShape = */            { 1, 16, 4, 3 },
+     /* expectedBackInferredInputShape = */ { 1, 16, 7, 6 },
+
+     /* expectedInputTileOffset = */ { 0, 0,  0, 1 },
+     /* expectedInputTileShape = */  { 1, 16, 7, 8 },
+
+     /* expectedAttrOffsets = */ { 0, 0,  0, 0 },
+     /* expectedAttrSizes = */   { 1, 16, 8, 7 },
+
+     /* expectedInputCoords = */ { {0, 1}, {0, 3}, {0, 5},
+                                   {2, 1}, {2, 3}, {2, 5},
+                                   {4, 1}, {4, 3}, {4, 5},
+                                   {6, 1}, {6, 3}, {6, 5} },
+
+     /* expectedSEOffsets = */ { 16,  48,  80,
+                                 240, 272, 304,
+                                 464, 496, 528,
+                                 688, 720, 752 }},
+
+
+    // TEST-CASE 2
+
+    {/* dilation = */ { 2, 2 },
+
+     /* kernelStride = */ { 1, 1 },
+     /* kernelSize */     { 2, 2 },
+
+     /* dataOffset = */ { 0, 0,  0,  0 },
+     /* dataSizes */    { 1, 16, 12, 12 },
+
+     /* offsets = */ {},
+     /* sizes = */ {},
+
+     /* dataShape = */ { 1, 16, 12, 12 },
+     /* dataStrides = */ {},
+     /* dataElemByteSize = */ 1,
+     /* seSize = */ 16,
+
+     /* outputTileOffset = */ { 0, 0,  0, 0 },
+     /* outputTileShape = */  { 1, 16, 6, 6 },
+
+     /* expectedOutputShape = */            { 1, 16, 6,  6 },
+     /* expectedBackInferredInputShape = */ { 1, 16, 11, 11 },
+
+     /* expectedInputTileOffset = */ { 0, 0,  0,  0 },
+     /* expectedInputTileShape = */  { 1, 16, 11, 11 },
+
+     /* expectedAttrOffsets = */ { 0, 0,  0,  0 },
+     /* expectedAttrSizes = */   { 1, 16, 12, 12 },
+
+     /* expectedInputCoords = */ { {0,  0}, {0,  2}, {0,  4}, {0, 6},  {0, 8},  {0,  10},
+                                   {2,  0}, {2,  2}, {2,  4}, {2, 6},  {2, 8},  {2,  10},
+                                   {4,  0}, {4,  2}, {4,  4}, {4, 6},  {4, 8},  {4,  10},
+                                   {6,  0}, {6,  2}, {6,  4}, {6, 6},  {6, 8},  {6,  10},
+                                   {8,  0}, {8,  2}, {8,  4}, {8, 6},  {8, 8},  {8,  10},
+                                   {10, 0}, {10, 2}, {10, 4}, {10, 6}, {10, 8}, {10, 10} },
+
+     /* expectedSEOffsets = */ { 0,    32,   64,   96,   128,  160,
+                                 384,  416,  448,  480,  512,  544,
+                                 768,  800,  832,  864,  896,  928,
+                                 1152, 1184, 1216, 1248, 1280, 1312,
+                                 1536, 1568, 1600, 1632, 1664, 1696,
+                                 1920, 1952, 1984, 2016, 2048, 2080 }},
+
+
+    // TEST-CASE 3
+
+    {/* dilation = */ { 2, 1 },
+
+     /* kernelStride = */ { 1, 1 },
+     /* kernelSize */     { 1, 1 },
+
+     /* dataOffset = */ { 0, 0,  0,  0 },
+     /* dataSizes */    { 1, 16, 32, 1 },
+
+     /* offsets = */ {},
+     /* sizes = */ {},
+
+     /* dataShape = */ { 1, 16, 32, 1 },
+     /* dataStrides = */ {},
+     /* dataElemByteSize = */ 1,
+     /* seSize = */ 16,
+
+     /* outputTileOffset = */ { 0, 0,  0,  0 },
+     /* outputTileShape = */  { 1, 16, 16, 1 },
+
+     /* expectedOutputShape = */            { 1, 16, 16, 1 },
+     /* expectedBackInferredInputShape = */ { 1, 16, 31, 1 },
+
+     /* expectedInputTileOffset = */ { 0, 0,  0,  0 },
+     /* expectedInputTileShape = */  { 1, 16, 31, 1 },
+
+     /* expectedAttrOffsets = */ { 0, 0,  0,  0 },
+     /* expectedAttrSizes = */   { 1, 16, 16, 1 },
+
+     /* expectedInputCoords = */ { {0,  0}, {2,  0}, {4,  0}, {6,  0},
+                                   {8,  0}, {10, 0}, {12, 0}, {14, 0},
+                                   {16, 0}, {18, 0}, {20, 0}, {22, 0},
+                                   {24, 0}, {26, 0}, {28, 0}, {30, 0} },
+
+     /* expectedSEOffsets = */ { 0,   32,  64,  96,
+                                 128, 160, 192, 224,
+                                 256, 288, 320, 352,
+                                 384, 416, 448, 480 }},
+
+    // TEST-CASE 4
+
+    {/* dilation = */ { 2, 2 },
+
+     /* kernelStride = */ { 1, 1 },
+     /* kernelSize */     { 3, 3 },
+
+     /* dataOffset = */ { 0, 0,  1, 1 },
+     /* dataSizes */    { 1, 16, 7, 7 },
+
+     /* offsets = */ {},
+     /* sizes = */ {},
+
+     /* dataShape = */ { 1, 16, 8, 8 },
+     /* dataStrides = */ {},
+     /* dataElemByteSize = */ 1,
+     /* seSize = */ 16,
+
+     /* outputTileOffset = */ { 0, 0,  0, 0 },
+     /* outputTileShape = */  { 1, 16, 4, 4 },
+
+     /* expectedOutputShape = */            { 1, 16, 4, 4 },
+     /* expectedBackInferredInputShape = */ { 1, 16, 8, 8 },
+
+     /* expectedInputTileOffset = */ { 0, 0,  1, 1 },
+     /* expectedInputTileShape = */  { 1, 16, 8, 8 },
+
+     /* expectedAttrOffsets = */ { 0, 0,  0, 0 },
+     /* expectedAttrSizes = */   { 1, 16, 8, 7 },
+
+     /* expectedInputCoords = */ { {1, 1}, {1, 3}, {1, 5}, {1, 7},
+                                   {3, 1}, {3, 3}, {3, 5}, {3, 7},
+                                   {5, 1}, {5, 3}, {5, 5}, {5, 7},
+                                   {7, 1}, {7, 3}, {7, 5}, {7, 7} },
+
+     /* expectedSEOffsets = */ { 144, 176, 208, 240,
+                                 400, 432, 464, 496,
+                                 656, 688, 720, 752,
+                                 912, 944, 976, 1008}},
+};
+
+// clang-format on
+
+INSTANTIATE_TEST_SUITE_P(unit, SEDilatedConvAttrTests, testing::ValuesIn(dilatedConvParams));

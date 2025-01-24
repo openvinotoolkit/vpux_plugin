@@ -10,7 +10,9 @@
 #include "vpux/compiler/dialect/VPU/interfaces/workload_splitter_base.hpp"
 #include "vpux/compiler/dialect/VPU/transforms/factories/sparsity_constraint.hpp"
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
+#include "vpux/compiler/dialect/VPU/utils/distributed_tensor_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_invariant.hpp"
+#include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
 
 using namespace vpux;
 using namespace VPU;
@@ -45,21 +47,36 @@ SmallVector<int64_t> vpux::VPU::WorkloadSplitter40XX::getSupportedChannels(
         const auto outputType = nceOp.getOperation()->getResult(0).getType().cast<NDTypeInterface>();
         const auto OC = outputType.getShape()[vpux::Dims4D::Act::C];
 
-        mlir::DenseSet<int64_t> workloadsChannels = {OC};
+        SmallVector<int64_t> workloadsChannels = {OC};
         // Get a set containing all the channels from the workloads of the given NCE operation if workloads has created
         // in current phase
         auto workloads = nceOp.getWorkloads().getOps<VPU::DPUWorkloadOp>();
         if (!workloads.empty()) {  // Already owns workloads
-            workloadsChannels = to_container<mlir::DenseSet<int64_t>>(
+            workloadsChannels = to_container<SmallVector<int64_t>>(
                     workloads | transformed([](VPU::DPUWorkloadOp workload) -> int64_t {
                         const auto wlSizes = parseIntArrayAttr<int64_t>(workload.getOutSizes());
                         return wlSizes[Dims4D::Act::C.ind()];
                     }));
-        } else {  // No workloads splitted, consider each cluster channels in SOK case when tiling phase
-            auto perClusterShapes = getPerClusterShapesWhenSOK(nceOp);
+        } else {  // No workloads splitted
+            const auto getPerClusterShapes = [&]() {
+                auto clusterOp = mlir::dyn_cast<VPU::ClusteredOpInterface>(*nceOps.begin());
+                if (clusterOp == nullptr || !clusterOp.getMultiClusterStrategy().has_value()) {
+                    return SmallVector<Shape>{outputType.getShape().raw()};
+                }
+                // multi cluster case
+                auto strategy = clusterOp.getMultiClusterStrategy().value();
+                auto numClusters = VPU::getOptimalNumClusters(clusterOp, outputType.getShape(), strategy);
+                auto distributedType = mlir::cast<VPU::DistributedTensorType>(
+                        getDistributedOutputTypeFromOp(clusterOp, outputType, numClusters, strategy)
+                                .getDistributedTypes()
+                                .front());
+                return distributedType.getPerClusterComputeShapes();
+            };
+
+            const auto perClusterShapes = getPerClusterShapes();
             if (!perClusterShapes.empty()) {
-                workloadsChannels = to_container<mlir::DenseSet<int64_t>>(
-                        perClusterShapes | transformed([](Shape clusterShape) -> int64_t {
+                workloadsChannels = to_container<SmallVector<int64_t>>(
+                        perClusterShapes | transformed([](ShapeRef clusterShape) -> int64_t {
                             return clusterShape[Dims4D::Act::C];
                         }));
             }
@@ -69,9 +86,26 @@ SmallVector<int64_t> vpux::VPU::WorkloadSplitter40XX::getSupportedChannels(
             return channel % VPU::NCEInvariant::VPU_CHANNEL_SIZE_FOR_L1OPT == 0;
         });
 
+        size_t workloadNumInTotal = 0;
+        for (auto channel : workloadsChannels) {
+            workloadNumInTotal += (channel / VPU::NCEInvariant::VPU_CHANNEL_SIZE_FOR_L1OPT);
+        }
+
         // This is a performance opt to use VPU_CHANNEL_SIZE_FOR_L1OPT as supportedChannels on 40XX
         // for DW ops with KX = 3 and SX = 1. Hardware has a specific support for that kind of workloads
-        if (KX == 3 && SX == 1 && workloadChannelsMeetRequirement) {
+        // Note that if the total workload num is greater than the max barrier slot num, which means that the workload
+        // will be executed in linearization, so disable the optimization under this case.
+        // One more limitation: do not split sparse inputs.
+        // If the compiler split 64x16x16 workload, each slice would need to access storage element table.
+        // Storage element table access introduces an overhead.
+        // There are two valid configurations:
+        // 1. seDepth = 2 with 2 * 32x16x16 workloads
+        // 2. seDepth = 1 with 1 * 64x16x16 workload
+        // The latter is preferable since this way DPU tries to access storage element table for only one workload.
+        const auto hasSparseInput = mlir::isa<VPU::SparseTensorType>(nceOp->getOperand(0).getType());
+        const auto maxSlotsSum = VPUIP::getBarrierMaxVariantSum(nceOp);
+        if (KX == 3 && SX == 1 && workloadChannelsMeetRequirement && workloadNumInTotal < maxSlotsSum &&
+            !hasSparseInput) {
             supportedChannels = {VPU::NCEInvariant::VPU_CHANNEL_SIZE_FOR_L1OPT};
         }
     }

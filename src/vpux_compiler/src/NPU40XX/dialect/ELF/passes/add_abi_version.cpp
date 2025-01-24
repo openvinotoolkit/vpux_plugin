@@ -5,9 +5,6 @@
 #include <cstdint>
 #include "vpux/compiler/NPU40XX/dialect/ELF/passes.hpp"
 
-#include "vpux/compiler/utils/ELF/utils.hpp"
-#include "vpux/compiler/utils/logging.hpp"
-
 using namespace vpux;
 
 namespace {

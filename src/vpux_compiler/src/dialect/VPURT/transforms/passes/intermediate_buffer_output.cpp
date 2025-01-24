@@ -6,6 +6,7 @@
 #include "vpux/compiler/dialect/IE/utils/resources.hpp"
 #include "vpux/compiler/dialect/VPURT/interfaces/inference_execution_simulator.hpp"
 #include "vpux/compiler/dialect/VPURT/transforms/passes.hpp"
+#include "vpux/compiler/utils/rewriter.hpp"
 #include "vpux/compiler/utils/stl_extras.hpp"
 #include "vpux/compiler/utils/strings.hpp"
 
@@ -36,7 +37,7 @@ SmallVector<mlir::Value> getUniqueVals(mlir::Operation* op, Logger log) {
 
         inputs.push_back(val);
         uniqueVals.insert(val);
-        log.nest().trace("Index={0}, buffer {1}", index, val);
+        log.nest().trace("Index={0}, buffer {1}", uniqueVals.size(), val);
     }
     return inputs;
 }
@@ -48,7 +49,11 @@ std::map<size_t, VPURT::TaskOp> assignIndicesToTasks(mlir::func::FuncOp funcOp) 
     size_t opIndex = 0;
     funcOp->walk([&](VPURT::TaskOp taskOp) {
         indexToTaskMap[opIndex] = taskOp;
-        taskOp->setAttr("opIndex", getIntAttr(taskOp.getContext(), opIndex++));
+        // enable identification in dot and schedule trace
+        taskOp->setAttr("opIndex", getIntAttr(taskOp.getContext(), opIndex));
+        taskOp->setLoc(appendLoc(taskOp->getLoc(), "taskIndex={0}", opIndex));
+        taskOp.getInnerTaskOp()->setLoc(appendLoc(taskOp.getInnerTaskOp()->getLoc(), "taskIndex={0}", opIndex));
+        ++opIndex;
     });
     return indexToTaskMap;
 }
@@ -191,30 +196,24 @@ void updateOutputType(mlir::Type newOutType, mlir::func::FuncOp funcOp) {
     }
 }
 
-std::set<VPURT::ConfigureBarrierOp> filterUsedBarriers(std::set<VPURT::ConfigureBarrierOp>& usedBarriers,
-                                                       mlir::func::FuncOp funcOp) {
-    auto barrierOps = to_small_vector(funcOp.getOps<VPURT::ConfigureBarrierOp>());
-    std::set<VPURT::ConfigureBarrierOp> toRemove;
-    for (auto& barrierOp : barrierOps) {
-        // remove barriers with no use
-        if (usedBarriers.find(barrierOp) == usedBarriers.end()) {
-            for (auto* user : barrierOp.getBarrier().getUsers()) {
-                auto taskOp = mlir::dyn_cast<VPURT::TaskOp>(user);
-                auto updateBarriers = taskOp.getUpdateBarriers();
-                // also filter update barriers
-                taskOp.getUpdateBarriersMutable().clear();
-                for (auto bar : updateBarriers) {
-                    auto childBarrierOp = bar.getDefiningOp<VPURT::ConfigureBarrierOp>();
-                    if (usedBarriers.find(childBarrierOp) != usedBarriers.end()) {
-                        taskOp.getUpdateBarriersMutable().append(childBarrierOp.getBarrier());
-                    }
-                }
+void filterUsedBarriers(std::set<VPURT::ConfigureBarrierOp>& usedBarriers, mlir::func::FuncOp funcOp) {
+    auto taskOps = to_small_vector(funcOp.getOps<VPURT::TaskOp>());
+    mlir::DenseMap<VPURT::TaskOp, mlir::DenseSet<VPURT::ConfigureBarrierOp>> filteredTaskBarriers;
+
+    for (auto& taskOp : taskOps) {
+        auto updateBarriers = taskOp.getUpdateBarriers();
+        for (auto bar : updateBarriers) {
+            auto childBarrierOp = bar.getDefiningOp<VPURT::ConfigureBarrierOp>();
+            if (usedBarriers.find(childBarrierOp) != usedBarriers.end()) {
+                filteredTaskBarriers[taskOp].insert(childBarrierOp);
             }
-            // tasks must be removed first
-            toRemove.insert(barrierOp);
+        }
+
+        taskOp.getUpdateBarriersMutable().clear();
+        for (auto bar : filteredTaskBarriers[taskOp]) {
+            taskOp.getUpdateBarriersMutable().append(bar.getBarrier());
         }
     }
-    return toRemove;
 }
 
 void filterUsedTasks(size_t insertionIndex, std::map<size_t, VPURT::TaskOp>& indexToTaskMap) {
@@ -230,7 +229,7 @@ void removeUnusedBarriers(std::set<VPURT::ConfigureBarrierOp>& toRemove, mlir::f
         // remove barriers with no use
         if (barrierOp.getBarrier().use_empty()) {
             barrierOp->erase();
-        } else if (toRemove.find(barrierOp) != toRemove.end()) {
+        } else if (toRemove.find(barrierOp) == toRemove.end()) {
             barrierOp->erase();
         }
     }
@@ -337,9 +336,9 @@ void IntermediateBufferOutputPass::safeRunOnFunc() {
     updateOutputType(newOutType, funcOp);
 
     // remove tasks and unused barriers after insertion point
-    auto barToRemove = filterUsedBarriers(usedWaitBarriers, funcOp);
+    filterUsedBarriers(usedWaitBarriers, funcOp);
     filterUsedTasks(insertionIndex, indexToTaskMap);
-    removeUnusedBarriers(barToRemove, funcOp);
+    removeUnusedBarriers(usedWaitBarriers, funcOp);
 }
 
 }  // namespace

@@ -59,29 +59,6 @@ std::vector<TaskInfo> getTaskInfo(const uint8_t* blobData, size_t blobSize, cons
 ProfInfo getProfInfo(const uint8_t* blobData, size_t blobSize, const uint8_t* profData, size_t profSize,
                      VerbosityLevel verbosity, bool fpga = false, bool highFreqPerfClk = false);
 
-/**
- * @fn getLayerInfo
- * @brief Parse raw profiling output to get per-layer info.
- * @param blobData pointer to the buffer with blob binary
- * @param blobSize blob size in bytes
- * @param profData pointer to the buffer with raw profiling data
- * @param profSize raw profiling data size
- * @param fpga whether buffer was obtained from FPGA
- * @param highFreqPerfClk use the high frequency perf_clk value (NPU40XX only)
- * @return std::vector of LayerInfo structures
- */
-std::vector<LayerInfo> getLayerInfo(const uint8_t* blobData, size_t blobSize, const uint8_t* profData, size_t profSize,
-                                    bool fpga = false, bool highFreqPerfClk = false);
-
-/**
- * @fn getLayerInfo
- * @brief Parse raw profiling output to get per-layer info. Reuses precomputed info about tasks.
- * @param taskInfo output from \b getTaskInfo function.
- * @return std::vector of LayerInfo structures
- * @see getTaskInfo
- */
-std::vector<LayerInfo> getLayerInfo(const std::vector<TaskInfo>& taskInfo);
-
 void writeDebugProfilingInfo(std::ostream& outStream, const uint8_t* blobData, size_t blobSize, const uint8_t* profData,
                              size_t profSize);
 

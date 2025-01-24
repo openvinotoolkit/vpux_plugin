@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation
+// Copyright (C) 2022-2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -9,35 +9,32 @@
 #include "vpu_ov2_layer_test.hpp"
 
 namespace ov {
-
 namespace test {
 
 class TopKLayerTestCommon : virtual public TopKLayerTest, virtual public VpuOv2LayerTest {};
 class TopK11LayerTestCommon : public TopK11LayerTest, virtual public VpuOv2LayerTest {};
-class TopKLayerTest_NPU3720 : public TopKLayerTestCommon {};
-class TopKLayerTest_NPU4000 : public TopKLayerTestCommon {};
 class TopKLayerTest_SW_FP32 : public TopKLayerTestCommon {
     void configure_model() override {
         configuration[ov::intel_npu::compilation_mode_params.name()] = "convert-precision-to-fp16=false";
     }
 };
 
-TEST_P(TopKLayerTest_NPU3720, HW) {
+TEST_P(TopKLayerTestCommon, NPU3720_HW) {
     setDefaultHardwareMode();
     run(Platform::NPU3720);
 }
 
-TEST_P(TopKLayerTest_NPU4000, SW) {
+TEST_P(TopKLayerTestCommon, NPU4000_SW) {
     setReferenceSoftwareMode();
     run(Platform::NPU4000);
 }
 
-TEST_P(TopKLayerTest_SW_FP32, NPU3720) {
+TEST_P(TopKLayerTest_SW_FP32, NPU3720_SW) {
     setReferenceSoftwareMode();
     run(Platform::NPU3720);
 }
 
-TEST_P(TopKLayerTest_SW_FP32, NPU4000) {
+TEST_P(TopKLayerTest_SW_FP32, NPU4000_SW) {
     setReferenceSoftwareMode();
     run(Platform::NPU4000);
 }
@@ -51,8 +48,7 @@ TEST_P(TopK11LayerTestCommon, NPU4000_SW) {
     setReferenceSoftwareMode();
     run(Platform::NPU4000);
 }
-
-class TopK1LayerTest_NPU3720 : public TopKLayerTest, virtual public VpuOv2LayerTest {
+class TopK1LayerTest : public TopKLayerTest, virtual public VpuOv2LayerTest {
     void SetUp() override {
         std::vector<InputShape> inputShape;
         ov::element::Type modelType;
@@ -75,20 +71,18 @@ class TopK1LayerTest_NPU3720 : public TopKLayerTest, virtual public VpuOv2LayerT
     }
 };
 
-TEST_P(TopK1LayerTest_NPU3720, HW) {
+TEST_P(TopK1LayerTest, NPU3720_HW) {
     setDefaultHardwareMode();
     run(Platform::NPU3720);
 }
 
 }  // namespace test
-
 }  // namespace ov
 
 using ov::test::TopK11LayerTestCommon;
-using ov::test::TopK1LayerTest_NPU3720;
-using ov::test::TopKLayerTest_NPU3720;
-using ov::test::TopKLayerTest_NPU4000;
+using ov::test::TopK1LayerTest;
 using ov::test::TopKLayerTest_SW_FP32;
+using ov::test::TopKLayerTestCommon;
 
 namespace {
 
@@ -125,12 +119,8 @@ const auto paramsConfigPrecommit = ::testing::Combine(
                 ov::test::static_shapes_to_test_representation(std::vector<std::vector<ov::Shape>>({{{5, 5, 5}}}))),
         ::testing::Values(ov::test::utils::DEVICE_NPU));
 
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_TopK, TopKLayerTest_NPU3720, paramsConfig,
-                         TopKLayerTest_NPU3720::getTestCaseName);
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_TopK1, TopK1LayerTest_NPU3720, paramsConfig,
-                         TopK1LayerTest_NPU3720::getTestCaseName);
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_TopK, TopKLayerTest_NPU4000, paramsConfigPrecommit,
-                         TopKLayerTest_NPU4000::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_TopK, TopKLayerTestCommon, paramsConfig, TopKLayerTestCommon::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_TopK1, TopK1LayerTest, paramsConfig, TopK1LayerTest::getTestCaseName);
 
 const auto paramsConfigPrecommitFP32 = ::testing::Combine(
         ::testing::ValuesIn(std::vector<int64_t>{1}), ::testing::ValuesIn(std::vector<int64_t>{2}),
@@ -151,14 +141,14 @@ const std::vector<ov::op::v3::TopK::SortType> sortTypes_Tilling = {
 };
 const std::vector<ov::element::Type> modelTypes_Tilling = {ov::element::f16};
 
-INSTANTIATE_TEST_SUITE_P(smoke_TopK_Tilling, TopKLayerTest_NPU3720,
+INSTANTIATE_TEST_SUITE_P(smoke_TopK_Tilling, TopKLayerTestCommon,
                          ::testing::Combine(::testing::ValuesIn(k_Tilling), ::testing::ValuesIn(axes_Tilling),
                                             ::testing::ValuesIn(modes_Tilling), ::testing::ValuesIn(sortTypes_Tilling),
                                             ::testing::ValuesIn(modelTypes_Tilling),
                                             ::testing::ValuesIn(ov::test::static_shapes_to_test_representation(
                                                     std::vector<std::vector<ov::Shape>>({{{1, 5, 512, 512}}}))),
                                             ::testing::Values(ov::test::utils::DEVICE_NPU)),
-                         TopKLayerTest_NPU3720::getTestCaseName);
+                         TopKLayerTestCommon::getTestCaseName);
 
 }  // namespace
 

@@ -4,7 +4,7 @@
 
 #include <vector>
 
-#include "npu_private_properties.hpp"
+#include "intel_npu/npu_private_properties.hpp"
 #include "single_op_tests/interpolate.hpp"
 #include "vpu_ov2_layer_test.hpp"
 
@@ -854,6 +854,26 @@ auto interpolateCasesLinearOnnxModeAsymmtric = [](auto scales) {
             ::testing::ValuesIn(cubeCoefs), ::testing::ValuesIn(nchwAxes), ::testing::ValuesIn(scales));
 };
 
+const auto interpolateCasesLinearOnnxModeAsymmtricInstantiateParamsW1H2 = ::testing::Combine(
+        interpolateCasesLinearOnnxModeAsymmtric(makeScales(1.f)), ::testing::ValuesIn(modelTypes),
+        ::testing::ValuesIn(
+                static_shapes_to_test_representation(std::vector<std::vector<ov::Shape>>({{{1, 1, 2, 1}}}))),
+        ::testing::Values(ov::Shape{3, 1}), ::testing::Values(DEVICE_NPU), ::testing::Values(additional_config));
+
+INSTANTIATE_TEST_SUITE_P(smoke_Interpolate_Linear_Asymmetric_W1H2, InterpolateLayerTest_NPU3720,
+                         interpolateCasesLinearOnnxModeAsymmtricInstantiateParamsW1H2,
+                         InterpolateLayerTest_NPU3720::getTestCaseName);
+
+const auto interpolateCasesLinearOnnxModeAsymmtricInstantiateParamsW1H6 = ::testing::Combine(
+        interpolateCasesLinearOnnxModeAsymmtric(makeScales(1.f)), ::testing::ValuesIn(modelTypes),
+        ::testing::ValuesIn(
+                static_shapes_to_test_representation(std::vector<std::vector<ov::Shape>>({{{1, 1, 6, 1}}}))),
+        ::testing::Values(ov::Shape{9, 1}), ::testing::Values(DEVICE_NPU), ::testing::Values(additional_config));
+
+INSTANTIATE_TEST_SUITE_P(smoke_Interpolate_Linear_Asymmetric_W1H6, InterpolateLayerTest_NPU3720,
+                         interpolateCasesLinearOnnxModeAsymmtricInstantiateParamsW1H6,
+                         InterpolateLayerTest_NPU3720::getTestCaseName);
+
 const auto interpolateCasesLinearOnnxModeAsymmtricInstantiateParams2x = ::testing::Combine(
         interpolateCasesLinearOnnxModeAsymmtric(makeScales(1.f)), ::testing::ValuesIn(modelTypes),
         ::testing::ValuesIn(
@@ -1087,7 +1107,6 @@ INSTANTIATE_TEST_SUITE_P(smoke_Interpolate_Tiling_Nearest_Align_Corner, Interpol
 
 INSTANTIATE_TEST_SUITE_P(smoke_Interpolate_Tiling_Nearest_Align_Corner, InterpolateLayerTest_NPU4000,
                          interpolateNearestTilingAlignCorner, InterpolateLayerTest_NPU4000::getTestCaseName);
-
 // --------------------------------------------------
 // ------ NPU3720 NoTiling Interpolate Testing ------
 // --------------------------------------------------
@@ -1571,5 +1590,4 @@ INSTANTIATE_TEST_SUITE_P(smoke_Interpolate_Tiling_NCHW_Downscale_axes12_tileH, I
                          interpolateLinearNCHWDownscaleAxes12TileH, InterpolateLayerTest_NPU4000::getTestCaseName);
 INSTANTIATE_TEST_SUITE_P(smoke_Interpolate_Tiling_NHWC_Downscale_axes12_tileW, InterpolateLayerTest_NPU4000,
                          interpolateLinearNHWCDownscaleAxes12TileW, InterpolateLayerTest_NPU4000::getTestCaseName);
-
 }  // namespace

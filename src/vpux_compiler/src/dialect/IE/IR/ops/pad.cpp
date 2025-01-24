@@ -40,7 +40,8 @@ mlir::LogicalResult vpux::IE::PadOp::inferReturnTypeComponents(
 
     const auto newType = inType.pad(ShapeRef(padBegin.value()), ShapeRef(padEnd.value()));
     const auto newTensorType = newType.cast<mlir::RankedTensorType>();
-    inferredReturnShapes.emplace_back(newTensorType.getShape(), newTensorType.getElementType());
+    inferredReturnShapes.emplace_back(newTensorType.getShape(), newTensorType.getElementType(),
+                                      getTensorAttr(newTensorType));
 
     return mlir::success();
 }
@@ -98,7 +99,7 @@ mlir::LogicalResult ConvertConstToAttr::matchAndRewrite(IE::PadOp padOp, mlir::P
             return errorAt(padOp.getLoc(), "Only constant input is supported for 'pad_value'");
         }
 
-        if (const auto attr = padValueConst.getContentAttr(); !attr.isSplat()) {
+        if (const auto& attr = padValueConst.getContentAttr(); !attr.isSplat()) {
             return errorAt(padOp.getLoc(), "Only splat input is supported for 'pad_value'");
         }
 
@@ -107,10 +108,11 @@ mlir::LogicalResult ConvertConstToAttr::matchAndRewrite(IE::PadOp padOp, mlir::P
         const auto padValueAttr = getFPAttr(padOp.getContext(), padValue);
 
         rewriter.replaceOpWithNewOp<IE::PadOp>(padOp, padOp.getInput(), nullptr, nullptr, nullptr, padsBeginAttr,
-                                               padsEndAttr, padValueAttr, padOp.getMode());
+                                               padsEndAttr, padValueAttr, padOp.getMode(),
+                                               padOp.getOutputChannelsAttr());
     } else {
         rewriter.replaceOpWithNewOp<IE::PadOp>(padOp, padOp.getInput(), nullptr, nullptr, nullptr, padsBeginAttr,
-                                               padsEndAttr, nullptr, padOp.getMode());
+                                               padsEndAttr, nullptr, padOp.getMode(), padOp.getOutputChannelsAttr());
     }
     return mlir::success();
 }
@@ -137,7 +139,7 @@ mlir::OpFoldResult vpux::IE::PadOp::fold(FoldAdaptor adaptor) {
 
     VPUX_THROW_UNLESS(!operands.empty(), "Wrong number of operands : {0}", operands.size());
 
-    if (const auto attr = operands[0].dyn_cast_or_null<Const::EphemeralContentAttr>()) {
+    if (const auto attr = operands[0].dyn_cast_or_null<Const::ContentAttr>()) {
         if (getMode() == IE::PadMode::CONSTANT) {
             if (getPadsBeginAttr().has_value() && getPadsEndAttr().has_value() && getPadValueAttr().has_value()) {
                 if (getPadValueAttr()->convertToDouble() == 0.0) {

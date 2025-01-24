@@ -5,8 +5,10 @@
 
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/IE/transforms/passes.hpp"
+#include "vpux/compiler/dialect/IE/transforms/rewriters/propagate_transpose_affine_reshape_common.hpp"
 #include "vpux/compiler/dialect/IE/utils/const_attributes.hpp"
 #include "vpux/compiler/dialect/IE/utils/elem_type_info_utils.hpp"
+#include "vpux/compiler/dialect/IE/utils/quantization.hpp"
 #include "vpux/compiler/dialect/IE/utils/transpose_op_utils.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 
@@ -489,6 +491,152 @@ mlir::LogicalResult SwapTanhShapeCast::matchAndRewrite(IE::TanhOp origOp, mlir::
     return mlir::success();
 }
 
+class SwapDequantMemPermute final : public mlir::OpRewritePattern<IE::MemPermuteOp> {
+public:
+    SwapDequantMemPermute(mlir::MLIRContext* ctx, Logger log)
+            : mlir::OpRewritePattern<IE::MemPermuteOp>(ctx), _log(log) {
+        this->setDebugName("SwapDequantMemPermute");
+    }
+
+private:
+    mlir::LogicalResult matchAndRewrite(IE::MemPermuteOp memPermuteOp, mlir::PatternRewriter& rewriter) const final;
+
+private:
+    Logger _log;
+};
+
+mlir::LogicalResult SwapDequantMemPermute::matchAndRewrite(IE::MemPermuteOp memPermuteOp,
+                                                           mlir::PatternRewriter& rewriter) const {
+    _log.trace("[{0}] Got '{0}' at '{1}'", getDebugName(), memPermuteOp->getName(), memPermuteOp->getLoc());
+    // const -> IE.Dequantize -> IE.MemPermute
+    // const -> IE.MemPermute -> IE.Dequantize
+    // const [IE.MemPermute] -> IE.Dequantize
+    auto dequant = memPermuteOp.getInput().getDefiningOp<IE::DequantizeOp>();
+    if (dequant == nullptr) {
+        return mlir::failure();
+    }
+
+    auto newPermute = rewriter.create<IE::MemPermuteOp>(memPermuteOp.getLoc(), dequant.getInput(),
+                                                        memPermuteOp.getDstOrderAttr(), memPermuteOp.getMemPermAttr());
+
+    auto newDequant =
+            rewriter.create<IE::DequantizeOp>(dequant.getLoc(), newPermute.getOutput(), dequant.getDstElemType());
+
+    rewriter.replaceOp(memPermuteOp, newDequant.getOutput());
+    return mlir::success();
+}
+
+//
+// SwapAffineReshapeFakeQuantize
+//
+
+class SwapAffineReshapeFakeQuantize final : public mlir::OpRewritePattern<IE::FakeQuantizeOp> {
+public:
+    SwapAffineReshapeFakeQuantize(mlir::MLIRContext* ctx, Logger log)
+            : mlir::OpRewritePattern<IE::FakeQuantizeOp>(ctx), _log(log) {
+        setDebugName("SwapAffineReshapeFakeQuantize");
+    }
+
+private:
+    mlir::LogicalResult matchAndRewrite(IE::FakeQuantizeOp fakeQuantizeOp, mlir::PatternRewriter& rewriter) const final;
+
+private:
+    Logger _log;
+};
+
+template <class ConcreteOp>
+mlir::FailureOr<ConcreteOp> hasSingleValueBiasUser(mlir::Operation* operation) {
+    auto user = std::find_if(operation->user_begin(), operation->user_end(), [](mlir::Operation* user) {
+        if (!mlir::isa<ConcreteOp>(user)) {
+            return false;
+        }
+        auto concreteOp = mlir::cast<ConcreteOp>(user);
+        bool lhsIsActivation = mlir::failed(IE::getConstParentOp(concreteOp.getInput1()));
+        auto biasInput = lhsIsActivation ? concreteOp.getInput2() : concreteOp.getInput1();
+        return isSingleValueBias(biasInput);
+    });
+
+    if (user != operation->user_end()) {
+        return mlir::cast<ConcreteOp>(*user);
+    } else {
+        return mlir::failure();
+    }
+}
+
+mlir::LogicalResult SwapAffineReshapeFakeQuantize::matchAndRewrite(IE::FakeQuantizeOp fakeQuantizeOp,
+                                                                   mlir::PatternRewriter& rewriter) const {
+    _log.trace("[{0}] Got '{1}' at '{2}'", getDebugName(), fakeQuantizeOp->getName(), fakeQuantizeOp->getLoc());
+
+    if (getShape(fakeQuantizeOp.getInput()) != getShape(fakeQuantizeOp.getOutput())) {
+        return matchFailed(_log, rewriter, fakeQuantizeOp, "FakeQuantizeOp shape changed");
+    }
+
+    // IE::isPerTensorFQ returns false if any of arguments is Per Axis
+    if (!IE::isPerTensorFQ({fakeQuantizeOp})) {
+        return matchFailed(_log, rewriter, fakeQuantizeOp, "FakeQuantizeOp is per-axis");
+    }
+
+    auto affineReshapeOp = fakeQuantizeOp.getInput().getDefiningOp<IE::AffineReshapeOp>();
+    if (affineReshapeOp == nullptr) {
+        return matchFailed(_log, rewriter, fakeQuantizeOp, "AffineReshapeOp not found");
+    }
+    if (!affineReshapeOp->hasOneUse()) {
+        return matchFailed(_log, rewriter, fakeQuantizeOp, "AffineReshapeOp has multiple uses");
+    }
+
+    // Swap with FQ-Gelu-FQ could result in worse performance
+    // TODO(E#144643): confirm if it's possible to remove this constraint
+    auto hasGeluUser = [fakeQuantizeOp]() {
+        auto geluUser =
+                std::find_if(fakeQuantizeOp->user_begin(), fakeQuantizeOp->user_end(), [](mlir::Operation* user) {
+                    return mlir::isa<IE::GeluOp>(user);
+                });
+        return geluUser != fakeQuantizeOp->user_end();
+    }();
+    if (hasGeluUser) {
+        return matchFailed(_log, rewriter, fakeQuantizeOp, "Do not swap with FQ when user has Gelu");
+    }
+
+    // Swap with FQ-Add-Mul could result in worse performance
+    // TODO(E#144643): confirm if it's possible to remove this constraint
+    auto hasSingleValueBiasAddMulUser = [fakeQuantizeOp]() {
+        auto addOp = hasSingleValueBiasUser<IE::AddOp>(fakeQuantizeOp);
+        if (mlir::failed(addOp)) {
+            return false;
+        };
+        auto multiplyOp = hasSingleValueBiasUser<IE::MultiplyOp>(addOp.value());
+        return mlir::succeeded(multiplyOp);
+    }();
+    if (hasSingleValueBiasAddMulUser) {
+        return matchFailed(_log, rewriter, fakeQuantizeOp,
+                           "Do not swap FQ when user has singleValueBias Add and Multiply");
+    }
+
+    if (IE::doesAffineReshapeChangeRank(affineReshapeOp)) {
+        return matchFailed(_log, rewriter, fakeQuantizeOp, "AffineReshapeOp changes rank");
+    }
+
+    _log.trace("[{0}] Swap '{1}' at '{2}' with  '{3}' at '{4}'", getDebugName(), affineReshapeOp->getName(),
+               affineReshapeOp->getLoc(), fakeQuantizeOp->getName(), fakeQuantizeOp->getLoc());
+
+    auto newFakeQuantizeOp = rewriter.create<IE::FakeQuantizeOp>(
+            fakeQuantizeOp->getLoc(), affineReshapeOp.getInput(), fakeQuantizeOp.getInputLow(),
+            fakeQuantizeOp.getInputHigh(), fakeQuantizeOp.getOutputLow(), fakeQuantizeOp.getOutputHigh(),
+            fakeQuantizeOp.getLevelsAttr(), fakeQuantizeOp.getLowFpTypeAttr(), fakeQuantizeOp.getAutoBroadcastAttr());
+    // Similar to GeLU, FakeQuantizeOp::inferReturnTypeComponents also doesn't forward layout info
+    // so need to set manually
+    auto dimsOrder = DimsOrder::fromValue(newFakeQuantizeOp.getInput());
+    auto newOutType = mlir::cast<NDTypeInterface>(newFakeQuantizeOp.getOutput().getType()).changeDimsOrder(dimsOrder);
+    newFakeQuantizeOp->getResult(0).setType(newOutType);
+
+    auto newAffineReshapeOp = rewriter.create<IE::AffineReshapeOp>(
+            affineReshapeOp.getLoc(), newFakeQuantizeOp.getOutput(), affineReshapeOp.getDimMappingAttr(),
+            affineReshapeOp.getShapeValueAttr());
+    fakeQuantizeOp.replaceAllUsesWith(newAffineReshapeOp.getOutput());
+
+    return mlir::success();
+}
+
 //
 // SwapOperationsPass
 //
@@ -536,6 +684,9 @@ void SwapOperationsPass::safeRunOnFunc() {
     patterns.add<SwapTanhSlice>(&ctx, _log.nest());
     patterns.add<SwapTanhShapeCast>(&ctx, _log.nest());
     patterns.add<SwapExpandQuantizeCast>(&ctx, _log.nest());
+    patterns.add<SwapDequantMemPermute>(&ctx, _log.nest());
+    patterns.add<SwapAffineReshapeFakeQuantize>(&ctx, _log.nest());
+    IE::AffineReshapeOp::getCanonicalizationPatterns(patterns, &ctx);
 
     auto func = getOperation();
     if (mlir::failed(applyPatternsAndFoldGreedily(func, std::move(patterns), getDefaultGreedyRewriteConfig()))) {

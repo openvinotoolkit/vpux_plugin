@@ -94,7 +94,8 @@ mlir::LogicalResult SplitInterpolate::matchAndRewrite(VPU::InterpolateOp origOp,
         _log.trace("{0}", msg.str());
     };
 
-    if (!VPU::NCEInterpolateOp::isSupported(origOp, logCb, /*checkLayout=*/true, /*checkChannelAlignment=*/true)) {
+    if (!VPU::NCEInterpolateOp::isSupported(origOp, logCb, /*checkLayout=*/true, /*checkChannelAlignment=*/true,
+                                            /*checkBatch=*/true)) {
         return matchFailed(rewriter, origOp, "It is not NCEInterpolateOp");
     }
 
@@ -139,9 +140,10 @@ mlir::LogicalResult SplitInterpolate::matchAndRewrite(VPU::InterpolateOp origOp,
         auto newLoc = appendLoc(origOp.getLoc(), "_interpolate_on_Dim_{0}", dim.ind());
         return rewriter
                 .create<VPU::InterpolateOp>(newLoc, inputVal, origOp.getSizes(), origOp.getScales(), origOp.getAxes(),
-                                            newSizesAttr, newScalesAttr, origOp.getAxesAttrAttr(),
-                                            origOp.getTileOffsetAttrAttr(), origOp.getInitialInputDimsAttrAttr(),
-                                            origOp.getInitialOutputDimsAttrAttr(), origOp.getAttr())
+                                            origOp.getCoordinates(), origOp.getLambdas(), newSizesAttr, newScalesAttr,
+                                            origOp.getAxesAttrAttr(), origOp.getTileOffsetAttrAttr(),
+                                            origOp.getInitialInputDimsAttrAttr(), origOp.getInitialOutputDimsAttrAttr(),
+                                            origOp.getAttr(), origOp.getOutputChannelsAttr())
                 .getOutput();
     };
 

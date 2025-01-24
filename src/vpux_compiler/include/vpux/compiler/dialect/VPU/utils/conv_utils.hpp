@@ -64,6 +64,22 @@ static bool areConvInputOutputs4d(ConvTypeOp convOp, LogCb logCb) {
     return true;
 }
 
+inline bool isSupportedSEPDilatedConvPadding(PadInfo pads, ArrayRef<int64_t> dilations) {
+    const auto paddingZero = pads.bottom == 0 && pads.top == 0 && pads.left == 0 && pads.right == 0;
+
+    const auto dilationY = dilations[Dims4D::Dilation::Y.ind()];
+    const auto dilationX = dilations[Dims4D::Dilation::X.ind()];
+
+    const auto symmetricDilation = dilationY == dilationX;
+
+    const auto paddingYEqualtoDilationY = pads.top == dilationY && pads.bottom == dilationY;
+    const auto paddingXEqualtoDilationX = pads.right == dilationX && pads.left == dilationX;
+
+    const auto paddingEqualDilation = symmetricDilation && paddingYEqualtoDilationY && paddingXEqualtoDilationX;
+
+    return paddingZero || paddingEqualDilation;
+}
+
 template <typename GroupConvOpType>
 bool isSupportedSEPDilatedConv(GroupConvOpType groupConvOp, LogCb logCb, bool checkLayout, bool checkChannelAlignment) {
     if (!areConvInputOutputs4d(groupConvOp, logCb)) {
@@ -73,6 +89,10 @@ bool isSupportedSEPDilatedConv(GroupConvOpType groupConvOp, LogCb logCb, bool ch
     const auto dilationY = dilations[Dims4D::Dilation::Y.ind()];
     const auto dilationX = dilations[Dims4D::Dilation::X.ind()];
     if (dilationY == 1 && dilationX == 1) {
+        return false;
+    }
+    auto pads = PadInfo(groupConvOp.getPadsBegin(), groupConvOp.getPadsEnd());
+    if (!isSupportedSEPDilatedConvPadding(pads, dilations)) {
         return false;
     }
     const auto filterShape = getShape(groupConvOp.getFilter());
@@ -86,7 +106,6 @@ bool isSupportedSEPDilatedConv(GroupConvOpType groupConvOp, LogCb logCb, bool ch
     const auto SY = kernelStrides[Dims4D::Strides::Y];
     const auto SX = kernelStrides[Dims4D::Strides::X];
 
-    auto pads = PadInfo(groupConvOp.getPadsBegin(), groupConvOp.getPadsEnd());
     pads = shrinkPadsForDilatedConvolution(pads, dilations);
 
     // Normal isNCEConvSupported can be used to check if Op can be run on NCE,

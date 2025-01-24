@@ -221,11 +221,6 @@ Const::details::PositionRequirement Const::SwizzleConstantAttr::getPositionRequi
     return Const::details::PositionRequirement::LAST;
 }
 
-Const::ContentSetup vpux::Const::ContentSetup::swizzleConstant(uint64_t swizzleKey, uint64_t arch) {
-    return addTransformation(
-            Const::SwizzleConstantAttr::get(getIntAttr(getContext(), swizzleKey), getIntAttr(getContext(), arch)));
-}
-
 //
 // SwizzleConstantAttr::supportsSubByteStorageType
 //

@@ -107,14 +107,14 @@ func.func @MoveConvertAfterShapeCastMultipleUsers(%arg0: tensor<1x32x8x8xf32, {o
 
     %2 = VPU.NCE.MaxPool(%1, %weights_table) {
         kernel_size = [3, 3],
-        opaque_ppe = #VPU.PPEStub<>,
+        ppe = #VPU.PPEStub<>,
         pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
         strides = [1, 1]
     } -> tensor<1x32x8x8xf16, {order = #NHWC}>
 
     %3 = VPU.NCE.MaxPool(%1, %weights_table) {
         kernel_size = [3, 3],
-        opaque_ppe = #VPU.PPEStub<>,
+        ppe = #VPU.PPEStub<>,
         pad = #VPU.Padding<left = 1 : i64, right = 1 : i64, top = 1 : i64, bottom = 1 : i64>,
         strides = [1, 1]
     } -> tensor<1x32x8x8xf16, {order = #NHWC}>

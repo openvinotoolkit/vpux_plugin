@@ -134,7 +134,8 @@ def VPURT_DeclareVirtualBarrierOp :
             ]
         > {
     let arguments = (ins
-                      UnitAttr:$isFinalBarrier
+                      UnitAttr:$isFinalBarrier,
+                      UnitAttr:$isStartBarrier
                     );
 
     let summary = "VPURT virtual Barrier declaration";
@@ -165,7 +166,8 @@ def VPURT_ConfigureBarrierOp :
 
     let arguments = (ins
         IntAttr:$id,
-        UnitAttr:$isFinalBarrier
+        UnitAttr:$isFinalBarrier,
+        UnitAttr:$isStartBarrier
     );
 
     let results = (outs

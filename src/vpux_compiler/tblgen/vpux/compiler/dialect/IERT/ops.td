@@ -2667,7 +2667,8 @@ def IERT_GenericReshapeOp :
     let summary = "InferenceEngine run-time generic Reshape layer";
 
     let arguments = (ins
-        AnyMemRef:$input
+        AnyMemRef:$input,
+        AnyMemRef:$output_buff
     );
 
     let results = (outs
@@ -2679,6 +2680,7 @@ def IERT_GenericReshapeOp :
     let assemblyFormat = [{
         attr-dict
         `inputs` `(` $input `:` type($input) `)`
+        `outputs` `(` $output_buff `:` type($output_buff) `)`
         `->` type(results)
     }];
 
@@ -4665,15 +4667,15 @@ def ExtendedCallOp : IERT_Op<"ExtendedCall",
 }
 
 //
-// PackMemrefOp
+// PackMemrefsOp
 //
 
-def PackMemrefOp : IERT_Op<"PackMemref",
+def PackMemrefsOp : IERT_Op<"PackMemrefs",
     []> {
     let summary = "packs memrefs";
     let description = [{
-        The `PackMemref` operation puts inside an object type of IERT.PackedParams
-		a variadic number of MemRefs.
+        The `PackMemrefs` operation puts inside an object type of IERT.PackedParams
+		a variable number of MemRefs.
     }];
 
     let arguments = (ins Variadic<AnyMemRef>:$operands);
@@ -4719,15 +4721,16 @@ def SpecialCastOp : IERT_Op<"SpecialCast",
     let summary = "special cast operation";
     let description = [{
         The `SpecialCast` operation represents a cast operation from
-	  llvm.struct to memref.
+        an object of a given type to a MemRef type (normally from an
+	    llvm.struct to MemRef).
     }];
 
-    let arguments = (ins AnyType:$inputs);
+    let arguments = (ins AnyType:$operandToConvert);
 
     let results = (outs AnyMemRef);
 
     let assemblyFormat = [{
-        `(` $inputs `:` type($inputs) `)`
+        `(` $operandToConvert `:` type($operandToConvert) `)`
         attr-dict
         `->` type(results)
     }];

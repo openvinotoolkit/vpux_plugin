@@ -51,16 +51,17 @@ def VPUIPDPU_IDUInActivationsOp :
 }
 
 //
-// IDUWeights
+// IDUWeights37XX
 //
 
-def VPUIPDPU_IDUWeightsOp :
-        VPUIPDPU_Op<"IDUWeights",
+def VPUIPDPU_IDUWeights37XXOp :
+        VPUIPDPU_Op<"IDUWeights37XX",
             [
-                HasParent<"vpux::VPUIPDPU::IDUCfgOp">
+                HasParent<"vpux::VPUIPDPU::IDUCfgOp">,
+                LimitedToArch<["vpux::VPU::ArchKind::NPU37XX"]>
             ]
         > {
-    let summary = "IDU Weight offset";
+    let summary = "IDU Weight offset NPU37XX";
 
     let description = [{
 wt_offset - This is added to the weight sparsity and weight data address
@@ -1195,9 +1196,9 @@ def VPUIPDPU_ODUOutActivationsOp :
 
     let description = [{
 Data type specification:
-| attr name  | value range                                | vpu arch |
-|:-----------|:-------------------------------------------|:---------|
-| data_type  | fp16, u8f, g8, i8, i32, i4, i2, log, bin   | VPU2.7   |
+| attr name  | value range                                |   vpu arch  |
+|:-----------|:-------------------------------------------|:------------|
+| data_type  | fp16, u8f, g8, i8, i32, i4, i2, log, bin   | NPU37XX     |
 | data_width | 1-bit, 2-bit, 4-bit, 8-bit, 16-bit, 32-bit | NPU40XX     |
 If data_type/data_width is not specified then ODU output data type should be inferred from %out_activations.
         }];

@@ -85,5 +85,4 @@ TEST_F(FqWithTwoAxesLayerTestCommon, NPU4000) {
     setDefaultHardwareMode();
     run(Platform::NPU4000);
 }
-
 }  // namespace ov::test::subgraph

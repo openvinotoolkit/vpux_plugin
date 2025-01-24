@@ -3,31 +3,55 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
-#include "vpux/compiler/core/type_interfaces.hpp"
-#include "vpux/compiler/dialect/IE/IR/ops.hpp"
-#include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
-#include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
-#include "vpux/compiler/init.hpp"
-
-#include "vpux/utils/core/mem_size.hpp"
-#include "vpux/utils/core/numeric.hpp"
-#include "vpux/utils/core/small_vector.hpp"
-
 #include "common/ppe_utils.hpp"
-#include "common/utils.hpp"
-
-#include <mlir/IR/MLIRContext.h>
-#include <mlir/IR/Types.h>
-#include <mlir/Parser/Parser.h>
-#include <mlir/Pass/PassManager.h>
 
 #include "vpux/compiler/NPU37XX/dialect/VPU/impl/ppe_factory.hpp"
-#include "vpux/compiler/dialect/VPU/interfaces/ppe_factory.hpp"
 #include "vpux/compiler/dialect/VPU/utils/ppe_utils.hpp"
 
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 using namespace vpux;
+
+#define EXPECT_INT_ATTR_EQ(act, ref)                   \
+    {                                                  \
+        ASSERT_NE(act, nullptr);                       \
+        EXPECT_EQ(act.getValue().getSExtValue(), ref); \
+    }
+
+#define EXPECT_FP_ATTR_NEAR(act, ref)                     \
+    {                                                     \
+        ASSERT_NE(act, nullptr);                          \
+        EXPECT_NEAR(act.getValueAsDouble(), ref, 1.0e-8); \
+    }
+
+#define EXPECT_PACKED_CLAMP_EQ(act, refLow, refHigh)                                               \
+    {                                                                                              \
+        ASSERT_NE(act, nullptr);                                                                   \
+        const auto unpackedClamp = VPU::unpackClamp<type::float16>(act.getValue().getSExtValue()); \
+        EXPECT_NEAR(unpackedClamp.first, refLow, 1.0e-8);                                          \
+        EXPECT_NEAR(unpackedClamp.second, refHigh, 1.0e-8);                                        \
+    }
+
+#define EXPECT_INT_ATTR_ARRAY_EQ(act, ref)                                            \
+    {                                                                                 \
+        ASSERT_NE(act, nullptr);                                                      \
+        std::vector<int64_t> values(act.size());                                      \
+        llvm::transform(act, values.begin(), [](const auto attr) {                    \
+            return attr.template cast<mlir::IntegerAttr>().getValue().getSExtValue(); \
+        });                                                                           \
+        EXPECT_THAT(values, ::testing::Pointwise(::testing::Eq(), ref));              \
+    }
+
+#define EXPECT_FP_ATTR_ARRAY_NEAR(act, ref)                                        \
+    {                                                                              \
+        ASSERT_NE(act, nullptr);                                                   \
+        std::vector<double> values(act.size());                                    \
+        llvm::transform(act, values.begin(), [](const auto attr) {                 \
+            return attr.template cast<mlir::FloatAttr>().getValueAsDouble();       \
+        });                                                                        \
+        EXPECT_THAT(values, testing::Pointwise(testing::DoubleNear(1.0e-8), ref)); \
+    }
 
 class NPU37xxPpeIfcUnitTest : public VPU_PpeUnitBase {
 public:
@@ -35,554 +59,853 @@ public:
     }
 };
 
-TEST_F(NPU37xxPpeIfcUnitTest, MaxPool_InputFp16_WithPostOp_RELU) {
-    auto maxPoolOp =
-            _operationFactory.createMaxPoolWithFp16Input(_location, &_ctx, VPU_PpeUnitBase::createPostOpAttrRELU());
-    ASSERT_NE(maxPoolOp, nullptr);
-    auto ppeAttr = _ppeIfc->retrievePPEAttribute(maxPoolOp);
+TEST_F(NPU37xxPpeIfcUnitTest, IntPPE_Adapters) {
+    auto op = createAdd(getF16Type(), getF16Type(), getU8Type(), nullptr);
+    ASSERT_NE(op, nullptr);
+    auto ppeAttr = _ppeIfc->retrievePPEAttribute(op);
     ASSERT_NE(ppeAttr, nullptr);
     auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(ppeAttr);
-    ;
     ASSERT_NE(intPpeAttr, nullptr) << "Failed to specialize PPE attribute";
 
-    EXPECT_EQ(intPpeAttr.getClampLow().getValue().getSExtValue(), std::numeric_limits<int32_t>::min());
-    EXPECT_EQ(intPpeAttr.getClampHigh().getValue().getSExtValue(), std::numeric_limits<int32_t>::max());
-    EXPECT_EQ(intPpeAttr.getLreluMult().getValue().getSExtValue(), 1);
-    EXPECT_EQ(intPpeAttr.getLreluShift().getValue().getSExtValue(), 0);
-    EXPECT_EQ(intPpeAttr.getFpPreluAlpha().getValueAsDouble(), 1.0f);
-    EXPECT_EQ(intPpeAttr.getMode().getValue(), vpux::VPU::PPEMode::LRELU);
+    const auto clampAdapter = dynamic_cast<const vpux::VPU::IPpeAdapterClamp*>(_ppeIfc.get());
+    ASSERT_NE(clampAdapter, nullptr);
 
-    // test update
+    const auto newClampsAttr = vpux::VPU::PPEIntAttr::get(
+            &_ctx, intPpeAttr.getMode(), vpux::getIntAttr(&_ctx, std::numeric_limits<int32_t>::min()),
+            vpux::getIntAttr(&_ctx, 14), intPpeAttr.getLreluMult(), intPpeAttr.getLreluShift(),
+            intPpeAttr.getQuantScale(), intPpeAttr.getQuantMult(), intPpeAttr.getQuantShift(),
+            intPpeAttr.getQuantPostShift(), intPpeAttr.getIn1QuantMult(), intPpeAttr.getIn2QuantMult(),
+            intPpeAttr.getFpPreluAlpha());
 
-    if (auto adapter = dynamic_cast<const vpux::VPU::IPpeAdapterClamp*>(_ppeIfc.get())) {
-        auto newClampsAttr = vpux::VPU::PPEIntAttr::get(
-                &_ctx, intPpeAttr.getMode(), vpux::getIntAttr(&_ctx, std::numeric_limits<int32_t>::min()),
-                vpux::getIntAttr(&_ctx, 14.0), intPpeAttr.getLreluMult(), intPpeAttr.getLreluShift(),
-                intPpeAttr.getQuantScale(), intPpeAttr.getQuantMult(), intPpeAttr.getQuantShift(),
-                intPpeAttr.getQuantPostShift(), intPpeAttr.getIn1QuantMult(), intPpeAttr.getIn2QuantMult(),
-                intPpeAttr.getFpPreluAlpha());
+    auto updatedPpe = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(clampAdapter->updateClamps(intPpeAttr, newClampsAttr));
+    ASSERT_NE(updatedPpe, nullptr);
+    EXPECT_EQ(updatedPpe.getClampLow().getValue().getSExtValue(), std::numeric_limits<int32_t>::min());
+    EXPECT_EQ(updatedPpe.getClampHigh().getValue().getSExtValue(), 14);
 
-        auto newPpe = adapter->updateClamps(intPpeAttr, newClampsAttr);
-        auto newIntPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(newPpe);
+    updatedPpe =
+            mlir::dyn_cast<vpux::VPU::PPEIntAttr>(clampAdapter->intersectClamps(updatedPpe, -16.0, 16.0, getU8Type()));
+    ASSERT_NE(updatedPpe, nullptr);
+    EXPECT_EQ(updatedPpe.getClampLow().getValue().getSExtValue(), -7872);
+    EXPECT_EQ(updatedPpe.getClampHigh().getValue().getSExtValue(), 14);
 
-        EXPECT_EQ(newIntPpeAttr.getClampLow().getValue().getSExtValue(), std::numeric_limits<int32_t>::min());
-        EXPECT_EQ(newIntPpeAttr.getClampHigh().getValue().getSExtValue(), 14);
-        EXPECT_EQ(newIntPpeAttr.getLreluMult().getValue().getSExtValue(), 1);
-        EXPECT_EQ(newIntPpeAttr.getLreluShift().getValue().getSExtValue(), 0);
-        EXPECT_EQ(newIntPpeAttr.getFpPreluAlpha().getValueAsDouble(), 1.0f);
-        EXPECT_EQ(newIntPpeAttr.getMode().getValue(), vpux::VPU::PPEMode::LRELU);
-    }
+    const auto adapterScale = dynamic_cast<const vpux::VPU::IPpeAdapterScale*>(_ppeIfc.get());
+    ASSERT_NE(adapterScale, nullptr);
+    updatedPpe = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(adapterScale->updateScale(intPpeAttr, {0.1}));
+    ASSERT_NE(updatedPpe, nullptr);
+    EXPECT_FP_ATTR_ARRAY_NEAR(updatedPpe.getQuantScale(), {0.1});
 
-    if (auto adapter = dynamic_cast<const vpux::VPU::IPpeAdapterScale*>(_ppeIfc.get())) {
-        auto newPpe = adapter->updateScale(intPpeAttr, {0.1f});
-        auto newIntPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(newPpe);
+    const auto adapterPreluAlpha = dynamic_cast<const vpux::VPU::IPpeAdapterFpPreluAlpha*>(_ppeIfc.get());
+    ASSERT_NE(adapterPreluAlpha, nullptr);
+    updatedPpe = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(adapterPreluAlpha->updateFpPreluAlpha(intPpeAttr, {0.1}));
+    ASSERT_NE(updatedPpe, nullptr);
+    EXPECT_FP_ATTR_NEAR(updatedPpe.getFpPreluAlpha(), 0.1);
 
-        EXPECT_EQ(newIntPpeAttr.getClampLow().getValue().getSExtValue(), std::numeric_limits<int32_t>::min());
-        EXPECT_EQ(newIntPpeAttr.getClampHigh().getValue().getSExtValue(), std::numeric_limits<int32_t>::max());
-        EXPECT_EQ(newIntPpeAttr.getLreluMult().getValue().getSExtValue(), 1);
-        EXPECT_EQ(newIntPpeAttr.getLreluShift().getValue().getSExtValue(), 0);
-        EXPECT_EQ(newIntPpeAttr.getFpPreluAlpha().getValueAsDouble(), 1.0f);
-        EXPECT_EQ(newIntPpeAttr.getMode().getValue(), vpux::VPU::PPEMode::LRELU);
-        EXPECT_EQ(parseFPArrayAttr<double>(newIntPpeAttr.getQuantScale())[0], static_cast<double>(0.1f));
-    }
+    const auto adapterMode = dynamic_cast<const vpux::VPU::IPpeAdapterMode*>(_ppeIfc.get());
+    ASSERT_NE(adapterMode, nullptr);
+    updatedPpe = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(adapterMode->updateMode(intPpeAttr, vpux::VPU::PPEMode::LRELUX));
+    ASSERT_NE(updatedPpe, nullptr);
+    EXPECT_EQ(updatedPpe.getMode().getValue(), vpux::VPU::PPEMode::LRELUX);
 
-    if (auto adapter = dynamic_cast<const vpux::VPU::IPpeAdapterMode*>(_ppeIfc.get())) {
-        auto newPpe = adapter->updateMode(intPpeAttr, vpux::VPU::PPEMode::LRELUX);
-        auto newIntPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(newPpe);
-
-        EXPECT_EQ(newIntPpeAttr.getClampLow().getValue().getSExtValue(), std::numeric_limits<int32_t>::min());
-        EXPECT_EQ(newIntPpeAttr.getClampHigh().getValue().getSExtValue(), std::numeric_limits<int32_t>::max());
-        EXPECT_EQ(newIntPpeAttr.getLreluMult().getValue().getSExtValue(), 1);
-        EXPECT_EQ(newIntPpeAttr.getLreluShift().getValue().getSExtValue(), 0);
-        EXPECT_EQ(newIntPpeAttr.getFpPreluAlpha().getValueAsDouble(), 1.0f);
-        EXPECT_EQ(newIntPpeAttr.getMode().getValue(), vpux::VPU::PPEMode::LRELUX);
-    }
+    const auto adapterQuantParams = dynamic_cast<const vpux::VPU::IPpeAdapterQuantParams*>(_ppeIfc.get());
+    ASSERT_NE(adapterQuantParams, nullptr);
+    updatedPpe = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(
+            adapterQuantParams->recomputeQuantParams(intPpeAttr, getF16Type(), getU8Type(), {2, 2}));
+    ASSERT_NE(updatedPpe, nullptr);
+    EXPECT_INT_ATTR_ARRAY_EQ(updatedPpe.getQuantMult(), {32000});
+    EXPECT_INT_ATTR_ARRAY_EQ(updatedPpe.getQuantShift(), {8});
+    EXPECT_EQ(intPpeAttr.getIn1QuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getIn2QuantMult(), nullptr);
+    EXPECT_INT_ATTR_EQ(updatedPpe.getQuantPostShift(), 0.0);
 }
 
-TEST_F(NPU37xxPpeIfcUnitTest, MaxPool_InputI4_WithPostOp_RELU) {
-    auto maxPoolOp =
-            _operationFactory.createMaxPoolWithI4Input(_location, &_ctx, VPU_PpeUnitBase::createPostOpAttrRELU());
-    ASSERT_NE(maxPoolOp, nullptr);
-    auto ppeAttr = _ppeIfc->retrievePPEAttribute(maxPoolOp);
+TEST_F(NPU37xxPpeIfcUnitTest, IntPPE_Add_F16_F16_F16_NOOP) {
+    auto op = createAdd(getF16Type(), getF16Type(), getF16Type(), nullptr);
+    ASSERT_NE(op, nullptr);
+    auto ppeAttr = _ppeIfc->retrievePPEAttribute(op);
     ASSERT_NE(ppeAttr, nullptr);
     auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(ppeAttr);
     ASSERT_NE(intPpeAttr, nullptr) << "Failed to specialize PPE attribute";
 
-    EXPECT_EQ(intPpeAttr.getClampLow().getValue().getSExtValue(), 1);
-    EXPECT_EQ(intPpeAttr.getClampHigh().getValue().getSExtValue(), 3);
-    EXPECT_EQ(intPpeAttr.getLreluMult().getValue().getSExtValue(), 1);
-    EXPECT_EQ(intPpeAttr.getLreluShift().getValue().getSExtValue(), 0);
-    EXPECT_EQ(intPpeAttr.getFpPreluAlpha().getValueAsDouble(), 1.0f);
     EXPECT_EQ(intPpeAttr.getMode().getValue(), vpux::VPU::PPEMode::NOOP);
-}
-
-TEST_F(NPU37xxPpeIfcUnitTest, MaxPool_InputFp16_WithoutPostOp) {
-    vpux::IE::PostOpAttr postOpAttr = nullptr;
-    auto maxPoolOp = _operationFactory.createMaxPoolWithFp16Input(_location, &_ctx, postOpAttr);
-    ASSERT_NE(maxPoolOp, nullptr);
-
-    auto ppeAttr = _ppeIfc->retrievePPEAttribute(maxPoolOp);
-    ASSERT_NE(ppeAttr, nullptr);
-    auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(ppeAttr);
-    ASSERT_NE(intPpeAttr, nullptr) << "Failed to specialize PPE attribute";
-
     EXPECT_EQ(intPpeAttr.getClampLow().getValue().getSExtValue(), std::numeric_limits<int32_t>::min());
     EXPECT_EQ(intPpeAttr.getClampHigh().getValue().getSExtValue(), std::numeric_limits<int32_t>::max());
     EXPECT_EQ(intPpeAttr.getLreluMult().getValue().getSExtValue(), 1);
     EXPECT_EQ(intPpeAttr.getLreluShift().getValue().getSExtValue(), 0);
-    EXPECT_EQ(intPpeAttr.getFpPreluAlpha().getValueAsDouble(), 1.0f);
+    EXPECT_FP_ATTR_ARRAY_NEAR(intPpeAttr.getQuantScale(), {1.0});
+    EXPECT_EQ(intPpeAttr.getQuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getQuantShift(), nullptr);
+    EXPECT_EQ(intPpeAttr.getIn1QuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getIn2QuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getQuantPostShift(), nullptr);
+    EXPECT_FP_ATTR_NEAR(intPpeAttr.getFpPreluAlpha(), 1.0);
+}
+
+TEST_F(NPU37xxPpeIfcUnitTest, IntPPE_Add_F16_F16_U8_NOOP) {
+    auto op = createAdd(getF16Type(), getF16Type(), getU8Type(), nullptr);
+    ASSERT_NE(op, nullptr);
+    auto ppeAttr = _ppeIfc->retrievePPEAttribute(op);
+    ASSERT_NE(ppeAttr, nullptr);
+    auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(ppeAttr);
+    ASSERT_NE(intPpeAttr, nullptr) << "Failed to specialize PPE attribute";
+
     EXPECT_EQ(intPpeAttr.getMode().getValue(), vpux::VPU::PPEMode::NOOP);
-}
-
-TEST_F(NPU37xxPpeIfcUnitTest, MaxPool_InputI4_WithoutPostOp) {
-    vpux::IE::PostOpAttr postOpAttr = nullptr;
-
-    auto maxPoolOp = _operationFactory.createMaxPoolWithI4Input(_location, &_ctx, postOpAttr);
-    ASSERT_NE(maxPoolOp, nullptr);
-
-    auto ppeAttr = _ppeIfc->retrievePPEAttribute(maxPoolOp);
-    ASSERT_NE(ppeAttr, nullptr);
-    auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(ppeAttr);
-    ASSERT_NE(intPpeAttr, nullptr) << "Failed to specialize PPE attribute";
-
-    EXPECT_EQ(intPpeAttr.getClampLow().getValue().getSExtValue(), -2);
-    EXPECT_EQ(intPpeAttr.getClampHigh().getValue().getSExtValue(), 3);
-    EXPECT_EQ(intPpeAttr.getLreluMult().getValue().getSExtValue(), 1);
-    EXPECT_EQ(intPpeAttr.getLreluShift().getValue().getSExtValue(), 0);
-    EXPECT_EQ(intPpeAttr.getFpPreluAlpha().getValueAsDouble(), 1.0f);
-    EXPECT_EQ(intPpeAttr.getMode().getValue(), vpux::VPU::PPEMode::NOOP);
-}
-
-TEST_F(NPU37xxPpeIfcUnitTest, MaxPool_InputFp16_WithPostOp_LPRELU) {
-    auto maxPoolOp = _operationFactory.createMaxPoolWithFp16Input(_location, &_ctx,
-                                                                  VPU_PpeUnitBase::createPostOpAttrLPRELU(0.25f));
-    ASSERT_NE(maxPoolOp, nullptr);
-
-    auto ppeAttr = _ppeIfc->retrievePPEAttribute(maxPoolOp);
-    ASSERT_NE(ppeAttr, nullptr);
-
-    auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(ppeAttr);
-    ASSERT_NE(intPpeAttr, nullptr) << "Failed to specialize PPE attribute";
-
-    EXPECT_EQ(intPpeAttr.getClampLow().getValue().getSExtValue(), std::numeric_limits<int32_t>::min());
-    EXPECT_EQ(intPpeAttr.getClampHigh().getValue().getSExtValue(), std::numeric_limits<int32_t>::max());
-    EXPECT_EQ(intPpeAttr.getLreluMult().getValue().getSExtValue(), 1024);
-    EXPECT_EQ(intPpeAttr.getLreluShift().getValue().getSExtValue(), 12);
-    EXPECT_EQ(intPpeAttr.getFpPreluAlpha().getValueAsDouble(), 0.25f);
-    EXPECT_EQ(intPpeAttr.getMode().getValue(), vpux::VPU::PPEMode::LPRELU);
-}
-
-TEST_F(NPU37xxPpeIfcUnitTest, MaxPool_InputI4_WithPostOp_LPRELU) {
-    auto maxPoolOp = _operationFactory.createMaxPoolWithI4Input(_location, &_ctx,
-                                                                VPU_PpeUnitBase::createPostOpAttrLPRELU(0.25f));
-    ASSERT_NE(maxPoolOp, nullptr);
-
-    auto ppeAttr = _ppeIfc->retrievePPEAttribute(maxPoolOp);
-    ASSERT_NE(ppeAttr, nullptr);
-    auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(ppeAttr);
-    ASSERT_NE(intPpeAttr, nullptr) << "Failed to specialize PPE attribute";
-
-    EXPECT_EQ(intPpeAttr.getClampLow().getValue().getSExtValue(), -2);
-    EXPECT_EQ(intPpeAttr.getClampHigh().getValue().getSExtValue(), 3);
-    EXPECT_EQ(intPpeAttr.getLreluMult().getValue().getSExtValue(), 1024);
-    EXPECT_EQ(intPpeAttr.getLreluShift().getValue().getSExtValue(), 12);
-    EXPECT_EQ(intPpeAttr.getFpPreluAlpha().getValueAsDouble(), 0.25f);
-    EXPECT_EQ(intPpeAttr.getMode().getValue(), vpux::VPU::PPEMode::LPRELU);
-}
-
-TEST_F(NPU37xxPpeIfcUnitTest, MaxPool_InputFp16_WithPostOp_CLAMP) {
-    auto maxPoolOp = _operationFactory.createMaxPoolWithFp16Input(_location, &_ctx,
-                                                                  VPU_PpeUnitBase::createPostOpAttrCLAMP(0.0f, 1.25f));
-    ASSERT_NE(maxPoolOp, nullptr);
-
-    auto ppeAttr = _ppeIfc->retrievePPEAttribute(maxPoolOp);
-    ASSERT_NE(ppeAttr, nullptr);
-    auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(ppeAttr);
-    ASSERT_NE(intPpeAttr, nullptr) << "Failed to specialize PPE attribute";
-
-    const auto clampLowHigh = VPU::unpackClamp<type::float16>(intPpeAttr.getClampHigh().getValue().getSExtValue());
-
-    EXPECT_EQ(intPpeAttr.getClampLow().getValue().getSExtValue(), std::numeric_limits<int32_t>::min());
-    EXPECT_NEAR(clampLowHigh.first, 0.0f, 1.0e-8);
-    EXPECT_NEAR(clampLowHigh.second, 1.25f, 1.0e-8);
-    EXPECT_EQ(intPpeAttr.getLreluMult().getValue().getSExtValue(), 1);
-    EXPECT_EQ(intPpeAttr.getLreluShift().getValue().getSExtValue(), 0);
-    EXPECT_EQ(intPpeAttr.getFpPreluAlpha().getValueAsDouble(), 1);
-    EXPECT_EQ(intPpeAttr.getMode().getValue(), vpux::VPU::PPEMode::LRELUX);
-}
-
-TEST_F(NPU37xxPpeIfcUnitTest, MaxPool_InputFp16_WithPostOp_CLAMP_HIGH_MAX_FP16) {
-    auto maxPoolOp = _operationFactory.createMaxPoolWithFp16Input(
-            _location, &_ctx, VPU_PpeUnitBase::createPostOpAttrCLAMP(0.0f, 65504.0f));
-    ASSERT_NE(maxPoolOp, nullptr);
-
-    auto ppeAttr = _ppeIfc->retrievePPEAttribute(maxPoolOp);
-    ASSERT_NE(ppeAttr, nullptr);
-    auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(ppeAttr);
-    ASSERT_NE(intPpeAttr, nullptr) << "Failed to specialize PPE attribute";
-
-    EXPECT_EQ(intPpeAttr.getClampLow().getValue().getSExtValue(), std::numeric_limits<int32_t>::min());
-    EXPECT_EQ(intPpeAttr.getClampHigh().getValue().getSExtValue(), std::numeric_limits<int32_t>::max());
-    EXPECT_EQ(intPpeAttr.getLreluMult().getValue().getSExtValue(), 1);
-    EXPECT_EQ(intPpeAttr.getLreluShift().getValue().getSExtValue(), 0);
-    EXPECT_EQ(intPpeAttr.getFpPreluAlpha().getValueAsDouble(), 1);
-    EXPECT_EQ(intPpeAttr.getMode().getValue(), vpux::VPU::PPEMode::LRELU);
-}
-
-TEST_F(NPU37xxPpeIfcUnitTest, MaxPool_InputI4_WithPostOp_CLAMP) {
-    auto maxPoolOp = _operationFactory.createMaxPoolWithI4Input(_location, &_ctx,
-                                                                VPU_PpeUnitBase::createPostOpAttrCLAMP(-1.0f, 1.0f));
-    ASSERT_NE(maxPoolOp, nullptr);
-
-    auto ppeAttr = _ppeIfc->retrievePPEAttribute(maxPoolOp);
-    ASSERT_NE(ppeAttr, nullptr);
-
-    auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(ppeAttr);
-    ASSERT_NE(intPpeAttr, nullptr) << "Failed to specialize PPE attribute";
-
-    EXPECT_EQ(intPpeAttr.getClampLow().getValue().getSExtValue(), -2);
-    EXPECT_EQ(intPpeAttr.getClampHigh().getValue().getSExtValue(), 3);
-    EXPECT_EQ(intPpeAttr.getLreluMult().getValue().getSExtValue(), 1);
-    EXPECT_EQ(intPpeAttr.getLreluShift().getValue().getSExtValue(), 0);
-    EXPECT_EQ(intPpeAttr.getFpPreluAlpha().getValueAsDouble(), 1.0f);
-    EXPECT_EQ(intPpeAttr.getMode().getValue(), vpux::VPU::PPEMode::NOOP);
-}
-
-TEST_F(NPU37xxPpeIfcUnitTest, Convolution_InputFp16_WithPostOp_RELU) {
-    auto convolutionOp =
-            _operationFactory.createConvolutionFp16Input(_location, &_ctx, VPU_PpeUnitBase::createPostOpAttrRELU());
-    ASSERT_NE(convolutionOp, nullptr);
-
-    auto ppeAttr = _ppeIfc->retrievePPEAttribute(convolutionOp);
-    ASSERT_NE(ppeAttr, nullptr);
-    auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(ppeAttr);
-    ASSERT_NE(intPpeAttr, nullptr) << "Failed to specialize PPE attribute";
-
-    EXPECT_EQ(intPpeAttr.getClampLow().getValue().getSExtValue(), std::numeric_limits<int32_t>::min());
-    EXPECT_EQ(intPpeAttr.getClampHigh().getValue().getSExtValue(), std::numeric_limits<int32_t>::max());
-    EXPECT_EQ(intPpeAttr.getLreluMult().getValue().getSExtValue(), 1);
-    EXPECT_EQ(intPpeAttr.getLreluShift().getValue().getSExtValue(), 0);
-    EXPECT_EQ(intPpeAttr.getFpPreluAlpha().getValueAsDouble(), 1.0f);
-    EXPECT_EQ(intPpeAttr.getMode().getValue(), vpux::VPU::PPEMode::LRELU);
-}
-
-TEST_F(NPU37xxPpeIfcUnitTest, Convolution_InputI4_WithPostOp_RELU) {
-    auto convolutionOp =
-            _operationFactory.createConvolutionI4Input(_location, &_ctx, VPU_PpeUnitBase::createPostOpAttrRELU());
-    ASSERT_NE(convolutionOp, nullptr);
-
-    auto ppeAttr = _ppeIfc->retrievePPEAttribute(convolutionOp);
-    ASSERT_NE(ppeAttr, nullptr);
-    auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(ppeAttr);
-    ASSERT_NE(intPpeAttr, nullptr) << "Failed to specialize PPE attribute";
-
     EXPECT_EQ(intPpeAttr.getClampLow().getValue().getSExtValue(), 0);
-    EXPECT_EQ(intPpeAttr.getClampHigh().getValue().getSExtValue(), 7);
+    EXPECT_EQ(intPpeAttr.getClampHigh().getValue().getSExtValue(), 255);
     EXPECT_EQ(intPpeAttr.getLreluMult().getValue().getSExtValue(), 1);
     EXPECT_EQ(intPpeAttr.getLreluShift().getValue().getSExtValue(), 0);
-    EXPECT_EQ(intPpeAttr.getFpPreluAlpha().getValueAsDouble(), 1.0f);
-    EXPECT_EQ(intPpeAttr.getMode().getValue(), vpux::VPU::PPEMode::NOOP);
+    EXPECT_FP_ATTR_ARRAY_NEAR(intPpeAttr.getQuantScale(), {500.0});
+    EXPECT_EQ(intPpeAttr.getQuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getQuantShift(), nullptr);
+    EXPECT_EQ(intPpeAttr.getIn1QuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getIn2QuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getQuantPostShift(), nullptr);
+    EXPECT_FP_ATTR_NEAR(intPpeAttr.getFpPreluAlpha(), 499.99996948242188);
 }
 
-TEST_F(NPU37xxPpeIfcUnitTest, Convolution_InputFp16_WithoutPostOp) {
-    vpux::IE::PostOpAttr postOpAttr = nullptr;
-    auto convolutionOp = _operationFactory.createConvolutionFp16Input(_location, &_ctx, postOpAttr);
-    ASSERT_NE(convolutionOp, nullptr);
-
-    auto ppeAttr = _ppeIfc->retrievePPEAttribute(convolutionOp);
+TEST_F(NPU37xxPpeIfcUnitTest, IntPPE_Add_U8_U8_F16_NOOP) {
+    auto op = createAdd(getU8Type(), getU8Type(), getF16Type(), nullptr);
+    ASSERT_NE(op, nullptr);
+    auto ppeAttr = _ppeIfc->retrievePPEAttribute(op);
     ASSERT_NE(ppeAttr, nullptr);
     auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(ppeAttr);
     ASSERT_NE(intPpeAttr, nullptr) << "Failed to specialize PPE attribute";
 
+    EXPECT_EQ(intPpeAttr.getMode().getValue(), vpux::VPU::PPEMode::NOOP);
     EXPECT_EQ(intPpeAttr.getClampLow().getValue().getSExtValue(), std::numeric_limits<int32_t>::min());
     EXPECT_EQ(intPpeAttr.getClampHigh().getValue().getSExtValue(), std::numeric_limits<int32_t>::max());
     EXPECT_EQ(intPpeAttr.getLreluMult().getValue().getSExtValue(), 1);
     EXPECT_EQ(intPpeAttr.getLreluShift().getValue().getSExtValue(), 0);
-    EXPECT_EQ(intPpeAttr.getFpPreluAlpha().getValueAsDouble(), 1.0f);
+    EXPECT_EQ(intPpeAttr.getQuantScale(), nullptr);
+    EXPECT_INT_ATTR_ARRAY_EQ(intPpeAttr.getQuantMult(), {16384});
+    EXPECT_INT_ATTR_ARRAY_EQ(intPpeAttr.getQuantShift(), {37});
+    EXPECT_INT_ATTR_ARRAY_EQ(intPpeAttr.getIn1QuantMult(), {16777});
+    EXPECT_INT_ATTR_ARRAY_EQ(intPpeAttr.getIn2QuantMult(), {16777});
+    EXPECT_INT_ATTR_EQ(intPpeAttr.getQuantPostShift(), 0.0);
+    EXPECT_FP_ATTR_NEAR(intPpeAttr.getFpPreluAlpha(), 1.0);
+}
+
+TEST_F(NPU37xxPpeIfcUnitTest, IntPPE_Add_U8_U8_U8_NOOP) {
+    auto op = createAdd(getU8Type(), getU8Type(), getU8Type(), nullptr);
+    ASSERT_NE(op, nullptr);
+    auto ppeAttr = _ppeIfc->retrievePPEAttribute(op);
+    ASSERT_NE(ppeAttr, nullptr);
+    auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(ppeAttr);
+    ASSERT_NE(intPpeAttr, nullptr) << "Failed to specialize PPE attribute";
+
     EXPECT_EQ(intPpeAttr.getMode().getValue(), vpux::VPU::PPEMode::NOOP);
-}
-
-TEST_F(NPU37xxPpeIfcUnitTest, Convolution_InputI4_WithoutPostOp) {
-    vpux::IE::PostOpAttr postOpAttr = nullptr;
-
-    auto convolutionOp = _operationFactory.createConvolutionI4Input(_location, &_ctx, postOpAttr);
-    ASSERT_NE(convolutionOp, nullptr);
-
-    auto ppeAttr = _ppeIfc->retrievePPEAttribute(convolutionOp);
-    ASSERT_NE(ppeAttr, nullptr);
-    auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(ppeAttr);
-    ASSERT_NE(intPpeAttr, nullptr) << "Failed to specialize PPE attribute";
-
-    EXPECT_EQ(intPpeAttr.getClampLow().getValue().getSExtValue(), -7);
-    EXPECT_EQ(intPpeAttr.getClampHigh().getValue().getSExtValue(), 7);
-    EXPECT_EQ(intPpeAttr.getLreluMult().getValue().getSExtValue(), 1);
-    EXPECT_EQ(intPpeAttr.getLreluShift().getValue().getSExtValue(), 0);
-    EXPECT_EQ(intPpeAttr.getFpPreluAlpha().getValueAsDouble(), 1.0f);
-    EXPECT_EQ(intPpeAttr.getMode().getValue(), vpux::VPU::PPEMode::NOOP);
-}
-
-TEST_F(NPU37xxPpeIfcUnitTest, Convolution_InputFp16_WithPostOp_LPRELU) {
-    auto convolutionOp = _operationFactory.createConvolutionFp16Input(_location, &_ctx,
-                                                                      VPU_PpeUnitBase::createPostOpAttrLPRELU(0.25f));
-    ASSERT_NE(convolutionOp, nullptr);
-
-    auto ppeAttr = _ppeIfc->retrievePPEAttribute(convolutionOp);
-    ASSERT_NE(ppeAttr, nullptr);
-    auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(ppeAttr);
-    ASSERT_NE(intPpeAttr, nullptr) << "Failed to specialize PPE attribute";
-
-    EXPECT_EQ(intPpeAttr.getClampLow().getValue().getSExtValue(), std::numeric_limits<int32_t>::min());
-    EXPECT_EQ(intPpeAttr.getClampHigh().getValue().getSExtValue(), std::numeric_limits<int32_t>::max());
-    EXPECT_EQ(intPpeAttr.getLreluMult().getValue().getSExtValue(), 1024);
-    EXPECT_EQ(intPpeAttr.getLreluShift().getValue().getSExtValue(), 12);
-    EXPECT_EQ(intPpeAttr.getFpPreluAlpha().getValueAsDouble(), 0.25f);
-    EXPECT_EQ(intPpeAttr.getMode().getValue(), vpux::VPU::PPEMode::LPRELU);
-}
-
-TEST_F(NPU37xxPpeIfcUnitTest, Convolution_InputI4_WithPostOp_LPRELU) {
-    auto convolutionOp = _operationFactory.createConvolutionI4Input(_location, &_ctx,
-                                                                    VPU_PpeUnitBase::createPostOpAttrLPRELU(0.25f));
-    ASSERT_NE(convolutionOp, nullptr);
-
-    auto ppeAttr = _ppeIfc->retrievePPEAttribute(convolutionOp);
-    ASSERT_NE(ppeAttr, nullptr);
-    auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(ppeAttr);
-    ASSERT_NE(intPpeAttr, nullptr) << "Failed to specialize PPE attribute";
-
-    EXPECT_EQ(intPpeAttr.getClampLow().getValue().getSExtValue(), -7);
-    EXPECT_EQ(intPpeAttr.getClampHigh().getValue().getSExtValue(), 7);
-    EXPECT_EQ(intPpeAttr.getLreluMult().getValue().getSExtValue(), 1024);
-    EXPECT_EQ(intPpeAttr.getLreluShift().getValue().getSExtValue(), 12);
-    EXPECT_EQ(intPpeAttr.getFpPreluAlpha().getValueAsDouble(), 0.25f);
-    EXPECT_EQ(intPpeAttr.getMode().getValue(), vpux::VPU::PPEMode::LPRELU);
-}
-
-TEST_F(NPU37xxPpeIfcUnitTest, AvgPool_InputFp16_WithPostOp_RELU) {
-    auto avgPoolOp =
-            _operationFactory.createAvgPoolWithFp16Input(_location, &_ctx, VPU_PpeUnitBase::createPostOpAttrRELU());
-    ASSERT_NE(avgPoolOp, nullptr);
-
-    auto ppeAttr = _ppeIfc->retrievePPEAttribute(avgPoolOp);
-    ASSERT_NE(ppeAttr, nullptr);
-    auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(ppeAttr);
-    ASSERT_NE(intPpeAttr, nullptr) << "Failed to specialize PPE attribute";
-
-    EXPECT_EQ(intPpeAttr.getClampLow().getValue().getSExtValue(), std::numeric_limits<int32_t>::min());
-    EXPECT_EQ(intPpeAttr.getClampHigh().getValue().getSExtValue(), std::numeric_limits<int32_t>::max());
-    EXPECT_EQ(intPpeAttr.getLreluMult().getValue().getSExtValue(), 1);
-    EXPECT_EQ(intPpeAttr.getLreluShift().getValue().getSExtValue(), 0);
-    EXPECT_EQ(intPpeAttr.getFpPreluAlpha().getValueAsDouble(), 1.0f);
-    EXPECT_EQ(intPpeAttr.getMode().getValue(), vpux::VPU::PPEMode::LRELU);
-}
-
-TEST_F(NPU37xxPpeIfcUnitTest, AvgPool_InputI4_WithPostOp_RELU) {
-    auto avgPoolOp =
-            _operationFactory.createAvgPoolWithI4Input(_location, &_ctx, VPU_PpeUnitBase::createPostOpAttrRELU());
-    auto ppeAttr = _ppeIfc->retrievePPEAttribute(avgPoolOp);
-
-    ASSERT_NE(ppeAttr, nullptr);
-    auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(ppeAttr);
-    ASSERT_NE(intPpeAttr, nullptr) << "Failed to specialize PPE attribute";
-
     EXPECT_EQ(intPpeAttr.getClampLow().getValue().getSExtValue(), 0);
-    EXPECT_EQ(intPpeAttr.getClampHigh().getValue().getSExtValue(), 7);
+    EXPECT_EQ(intPpeAttr.getClampHigh().getValue().getSExtValue(), 255);
     EXPECT_EQ(intPpeAttr.getLreluMult().getValue().getSExtValue(), 1);
     EXPECT_EQ(intPpeAttr.getLreluShift().getValue().getSExtValue(), 0);
-    EXPECT_EQ(intPpeAttr.getFpPreluAlpha().getValueAsDouble(), 1.0f);
-    EXPECT_EQ(intPpeAttr.getMode().getValue(), vpux::VPU::PPEMode::NOOP);
+    EXPECT_EQ(intPpeAttr.getQuantScale(), nullptr);
+    EXPECT_INT_ATTR_ARRAY_EQ(intPpeAttr.getQuantMult(), {32000});
+    EXPECT_INT_ATTR_ARRAY_EQ(intPpeAttr.getQuantShift(), {29});
+    EXPECT_INT_ATTR_ARRAY_EQ(intPpeAttr.getIn1QuantMult(), {16777});
+    EXPECT_INT_ATTR_ARRAY_EQ(intPpeAttr.getIn2QuantMult(), {16777});
+    EXPECT_INT_ATTR_EQ(intPpeAttr.getQuantPostShift(), 0.0);
+    EXPECT_FP_ATTR_NEAR(intPpeAttr.getFpPreluAlpha(), 1.0);
 }
 
-TEST_F(NPU37xxPpeIfcUnitTest, AvgPool_InputFp16_WithoutPostOp) {
-    vpux::IE::PostOpAttr postOpAttr = nullptr;
-    auto avgPool = _operationFactory.createAvgPoolWithFp16Input(_location, &_ctx, postOpAttr);
-    ASSERT_NE(avgPool, nullptr);
-
-    auto ppeAttr = _ppeIfc->retrievePPEAttribute(avgPool);
+TEST_F(NPU37xxPpeIfcUnitTest, IntPPE_Add_F16_F16_F16_RELU) {
+    auto op = createAdd(getF16Type(), getF16Type(), getF16Type(), createRelu());
+    ASSERT_NE(op, nullptr);
+    auto ppeAttr = _ppeIfc->retrievePPEAttribute(op);
     ASSERT_NE(ppeAttr, nullptr);
     auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(ppeAttr);
     ASSERT_NE(intPpeAttr, nullptr) << "Failed to specialize PPE attribute";
 
+    EXPECT_EQ(intPpeAttr.getMode().getValue(), vpux::VPU::PPEMode::LRELU);
     EXPECT_EQ(intPpeAttr.getClampLow().getValue().getSExtValue(), std::numeric_limits<int32_t>::min());
     EXPECT_EQ(intPpeAttr.getClampHigh().getValue().getSExtValue(), std::numeric_limits<int32_t>::max());
     EXPECT_EQ(intPpeAttr.getLreluMult().getValue().getSExtValue(), 1);
     EXPECT_EQ(intPpeAttr.getLreluShift().getValue().getSExtValue(), 0);
-    EXPECT_EQ(intPpeAttr.getFpPreluAlpha().getValueAsDouble(), 1.0f);
-    EXPECT_EQ(intPpeAttr.getMode().getValue(), vpux::VPU::PPEMode::NOOP);
+    EXPECT_FP_ATTR_ARRAY_NEAR(intPpeAttr.getQuantScale(), {1.0});
+    EXPECT_EQ(intPpeAttr.getQuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getQuantShift(), nullptr);
+    EXPECT_EQ(intPpeAttr.getIn1QuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getIn2QuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getQuantPostShift(), nullptr);
+    EXPECT_FP_ATTR_NEAR(intPpeAttr.getFpPreluAlpha(), 1.0);
 }
 
-TEST_F(NPU37xxPpeIfcUnitTest, AvgPool_InputI4_WithoutPostOp) {
-    vpux::IE::PostOpAttr postOpAttr = nullptr;
-
-    auto avgPoolOp = _operationFactory.createAvgPoolWithI4Input(_location, &_ctx, postOpAttr);
-    auto ppeAttr = _ppeIfc->retrievePPEAttribute(avgPoolOp);
+TEST_F(NPU37xxPpeIfcUnitTest, IntPPE_Add_F16_F16_U8_RELU) {
+    auto op = createAdd(getF16Type(), getF16Type(), getU8Type(), createRelu());
+    ASSERT_NE(op, nullptr);
+    auto ppeAttr = _ppeIfc->retrievePPEAttribute(op);
     ASSERT_NE(ppeAttr, nullptr);
     auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(ppeAttr);
     ASSERT_NE(intPpeAttr, nullptr) << "Failed to specialize PPE attribute";
 
-    EXPECT_EQ(intPpeAttr.getClampLow().getValue().getSExtValue(), -7);
-    EXPECT_EQ(intPpeAttr.getClampHigh().getValue().getSExtValue(), 7);
+    EXPECT_EQ(intPpeAttr.getMode().getValue(), vpux::VPU::PPEMode::NOOP);
+    EXPECT_EQ(intPpeAttr.getClampLow().getValue().getSExtValue(), 128);
+    EXPECT_EQ(intPpeAttr.getClampHigh().getValue().getSExtValue(), 255);
     EXPECT_EQ(intPpeAttr.getLreluMult().getValue().getSExtValue(), 1);
     EXPECT_EQ(intPpeAttr.getLreluShift().getValue().getSExtValue(), 0);
-    EXPECT_EQ(intPpeAttr.getFpPreluAlpha().getValueAsDouble(), 1.0f);
-    EXPECT_EQ(intPpeAttr.getMode().getValue(), vpux::VPU::PPEMode::NOOP);
+    EXPECT_FP_ATTR_ARRAY_NEAR(intPpeAttr.getQuantScale(), {500.0});
+    EXPECT_EQ(intPpeAttr.getQuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getQuantShift(), nullptr);
+    EXPECT_EQ(intPpeAttr.getIn1QuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getIn2QuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getQuantPostShift(), nullptr);
+    EXPECT_FP_ATTR_NEAR(intPpeAttr.getFpPreluAlpha(), 499.99996948242188);
 }
 
-TEST_F(NPU37xxPpeIfcUnitTest, AvgPool_InputFp16_WithPostOp_LPRELU) {
-    auto avgPoolOp = _operationFactory.createAvgPoolWithFp16Input(_location, &_ctx, createPostOpAttrLPRELU(0.25f));
-    ASSERT_NE(avgPoolOp, nullptr);
-    auto ppeAttr = _ppeIfc->retrievePPEAttribute(avgPoolOp);
+TEST_F(NPU37xxPpeIfcUnitTest, IntPPE_Add_U8_U8_F16_RELU) {
+    auto op = createAdd(getU8Type(), getU8Type(), getF16Type(), createRelu());
+    ASSERT_NE(op, nullptr);
+    auto ppeAttr = _ppeIfc->retrievePPEAttribute(op);
     ASSERT_NE(ppeAttr, nullptr);
     auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(ppeAttr);
     ASSERT_NE(intPpeAttr, nullptr) << "Failed to specialize PPE attribute";
 
+    EXPECT_EQ(intPpeAttr.getMode().getValue(), vpux::VPU::PPEMode::LRELU);
     EXPECT_EQ(intPpeAttr.getClampLow().getValue().getSExtValue(), std::numeric_limits<int32_t>::min());
     EXPECT_EQ(intPpeAttr.getClampHigh().getValue().getSExtValue(), std::numeric_limits<int32_t>::max());
-    EXPECT_EQ(intPpeAttr.getLreluMult().getValue().getSExtValue(), 1024);
-    EXPECT_EQ(intPpeAttr.getLreluShift().getValue().getSExtValue(), 12);
-    EXPECT_EQ(intPpeAttr.getFpPreluAlpha().getValueAsDouble(), 0.25f);
+    EXPECT_EQ(intPpeAttr.getLreluMult().getValue().getSExtValue(), 1);
+    EXPECT_EQ(intPpeAttr.getLreluShift().getValue().getSExtValue(), 0);
+    EXPECT_EQ(intPpeAttr.getQuantScale(), nullptr);
+    EXPECT_INT_ATTR_ARRAY_EQ(intPpeAttr.getQuantMult(), {16384});
+    EXPECT_INT_ATTR_ARRAY_EQ(intPpeAttr.getQuantShift(), {37});
+    EXPECT_INT_ATTR_ARRAY_EQ(intPpeAttr.getIn1QuantMult(), {16777});
+    EXPECT_INT_ATTR_ARRAY_EQ(intPpeAttr.getIn2QuantMult(), {16777});
+    EXPECT_INT_ATTR_EQ(intPpeAttr.getQuantPostShift(), 0.0);
+    EXPECT_FP_ATTR_NEAR(intPpeAttr.getFpPreluAlpha(), 1.0);
+}
+
+TEST_F(NPU37xxPpeIfcUnitTest, IntPPE_Add_U8_U8_U8_RELU) {
+    auto op = createAdd(getU8Type(), getU8Type(), getU8Type(), createRelu());
+    ASSERT_NE(op, nullptr);
+    auto ppeAttr = _ppeIfc->retrievePPEAttribute(op);
+    ASSERT_NE(ppeAttr, nullptr);
+    auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(ppeAttr);
+    ASSERT_NE(intPpeAttr, nullptr) << "Failed to specialize PPE attribute";
+
+    EXPECT_EQ(intPpeAttr.getMode().getValue(), vpux::VPU::PPEMode::NOOP);
+    EXPECT_EQ(intPpeAttr.getClampLow().getValue().getSExtValue(), 128);
+    EXPECT_EQ(intPpeAttr.getClampHigh().getValue().getSExtValue(), 255);
+    EXPECT_EQ(intPpeAttr.getLreluMult().getValue().getSExtValue(), 1);
+    EXPECT_EQ(intPpeAttr.getLreluShift().getValue().getSExtValue(), 0);
+    EXPECT_EQ(intPpeAttr.getQuantScale(), nullptr);
+    EXPECT_INT_ATTR_ARRAY_EQ(intPpeAttr.getQuantMult(), {32000});
+    EXPECT_INT_ATTR_ARRAY_EQ(intPpeAttr.getQuantShift(), {29});
+    EXPECT_INT_ATTR_ARRAY_EQ(intPpeAttr.getIn1QuantMult(), {16777});
+    EXPECT_INT_ATTR_ARRAY_EQ(intPpeAttr.getIn2QuantMult(), {16777});
+    EXPECT_INT_ATTR_EQ(intPpeAttr.getQuantPostShift(), 0.0);
+    EXPECT_FP_ATTR_NEAR(intPpeAttr.getFpPreluAlpha(), 1.0);
+}
+
+TEST_F(NPU37xxPpeIfcUnitTest, IntPPE_Add_F16_F16_F16_LEAKY_RELU) {
+    auto op = createAdd(getF16Type(), getF16Type(), getF16Type(), createLeakyRelu(0.1));
+    ASSERT_NE(op, nullptr);
+    auto ppeAttr = _ppeIfc->retrievePPEAttribute(op);
+    ASSERT_NE(ppeAttr, nullptr);
+    auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(ppeAttr);
+    ASSERT_NE(intPpeAttr, nullptr) << "Failed to specialize PPE attribute";
+
     EXPECT_EQ(intPpeAttr.getMode().getValue(), vpux::VPU::PPEMode::LPRELU);
-    EXPECT_EQ(parseFPArrayAttr<double>(intPpeAttr.getQuantScale())[0], 1 / (2.0f * 2.0f));  // quant scale
-}
-
-TEST_F(NPU37xxPpeIfcUnitTest, AvgPool_InputFp16I8Output_WithPostOp_LPRELU) {
-    auto avgPoolOp =
-            _operationFactory.createAvgPoolWithFp16InputI8Output(_location, &_ctx, createPostOpAttrLPRELU(0.1f));
-    ASSERT_NE(avgPoolOp, nullptr);
-    auto ppeAttr = _ppeIfc->retrievePPEAttribute(avgPoolOp);
-    ASSERT_NE(ppeAttr, nullptr);
-    auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(ppeAttr);
-    ASSERT_NE(intPpeAttr, nullptr) << "Failed to specialize PPE attribute";
-
-    EXPECT_EQ(intPpeAttr.getClampLow().getValue().getSExtValue(), -128);
-    EXPECT_EQ(intPpeAttr.getClampHigh().getValue().getSExtValue(), 127);
+    EXPECT_EQ(intPpeAttr.getClampLow().getValue().getSExtValue(), std::numeric_limits<int32_t>::min());
+    EXPECT_EQ(intPpeAttr.getClampHigh().getValue().getSExtValue(), std::numeric_limits<int32_t>::max());
     EXPECT_EQ(intPpeAttr.getLreluMult().getValue().getSExtValue(), 1638);
     EXPECT_EQ(intPpeAttr.getLreluShift().getValue().getSExtValue(), 14);
-    EXPECT_NEAR(intPpeAttr.getFpPreluAlpha().getValueAsDouble(), 2.0f, 1.0e-8);
+    EXPECT_FP_ATTR_ARRAY_NEAR(intPpeAttr.getQuantScale(), {1.0});
+    EXPECT_EQ(intPpeAttr.getQuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getQuantShift(), nullptr);
+    EXPECT_EQ(intPpeAttr.getIn1QuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getIn2QuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getQuantPostShift(), nullptr);
+    EXPECT_FP_ATTR_NEAR(intPpeAttr.getFpPreluAlpha(), 0.1);
+}
+
+TEST_F(NPU37xxPpeIfcUnitTest, IntPPE_Add_F16_F16_U8_LEAKY_RELU) {
+    auto op = createAdd(getF16Type(), getF16Type(), getU8Type(), createLeakyRelu(0.1));
+    ASSERT_NE(op, nullptr);
+    auto ppeAttr = _ppeIfc->retrievePPEAttribute(op);
+    ASSERT_NE(ppeAttr, nullptr);
+    auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(ppeAttr);
+    ASSERT_NE(intPpeAttr, nullptr) << "Failed to specialize PPE attribute";
+
     EXPECT_EQ(intPpeAttr.getMode().getValue(), vpux::VPU::PPEMode::LPRELU);
-    EXPECT_NEAR(parseFPArrayAttr<double>(intPpeAttr.getQuantScale())[0], 5.0f, 1.0e-8);
-    ppeAttr.print(_output);
+    EXPECT_EQ(intPpeAttr.getClampLow().getValue().getSExtValue(), 0);
+    EXPECT_EQ(intPpeAttr.getClampHigh().getValue().getSExtValue(), 255);
+    EXPECT_EQ(intPpeAttr.getLreluMult().getValue().getSExtValue(), 1638);
+    EXPECT_EQ(intPpeAttr.getLreluShift().getValue().getSExtValue(), 14);
+    EXPECT_FP_ATTR_ARRAY_NEAR(intPpeAttr.getQuantScale(), {500.0});
+    EXPECT_EQ(intPpeAttr.getQuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getQuantShift(), nullptr);
+    EXPECT_EQ(intPpeAttr.getIn1QuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getIn2QuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getQuantPostShift(), nullptr);
+    EXPECT_FP_ATTR_NEAR(intPpeAttr.getFpPreluAlpha(), 50.0);
 }
 
-TEST_F(NPU37xxPpeIfcUnitTest, AvgPool_InputI4_WithPostOp_LPRELU) {
-    auto avgPoolOp = _operationFactory.createAvgPoolWithI4Input(_location, &_ctx, createPostOpAttrLPRELU(0.25f));
-    auto ppeAttr = _ppeIfc->retrievePPEAttribute(avgPoolOp);
+TEST_F(NPU37xxPpeIfcUnitTest, IntPPE_Add_U8_U8_F16_LEAKY_RELU) {
+    auto op = createAdd(getU8Type(), getU8Type(), getF16Type(), createLeakyRelu(0.1));
+    ASSERT_NE(op, nullptr);
+    auto ppeAttr = _ppeIfc->retrievePPEAttribute(op);
     ASSERT_NE(ppeAttr, nullptr);
     auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(ppeAttr);
     ASSERT_NE(intPpeAttr, nullptr) << "Failed to specialize PPE attribute";
 
-    EXPECT_EQ(intPpeAttr.getClampLow().getValue().getSExtValue(), -7);
-    EXPECT_EQ(intPpeAttr.getClampHigh().getValue().getSExtValue(), 7);
-    EXPECT_EQ(intPpeAttr.getLreluMult().getValue().getSExtValue(), 1024);
-    EXPECT_EQ(intPpeAttr.getLreluShift().getValue().getSExtValue(), 12);
-    EXPECT_EQ(intPpeAttr.getFpPreluAlpha().getValueAsDouble(), 0.25f);
     EXPECT_EQ(intPpeAttr.getMode().getValue(), vpux::VPU::PPEMode::LPRELU);
-}
-
-TEST_F(NPU37xxPpeIfcUnitTest, AddOp_InputFp16_WithPostOp_RELU) {
-    auto addOp = _operationFactory.createAddWithFp16Input(_location, &_ctx, VPU_PpeUnitBase::createPostOpAttrRELU());
-    auto ppeAttr = _ppeIfc->retrievePPEAttribute(addOp);
-
-    ASSERT_NE(ppeAttr, nullptr);
-    auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(ppeAttr);
-    ASSERT_NE(intPpeAttr, nullptr) << "Failed to specialize PPE attribute";
-
     EXPECT_EQ(intPpeAttr.getClampLow().getValue().getSExtValue(), std::numeric_limits<int32_t>::min());
     EXPECT_EQ(intPpeAttr.getClampHigh().getValue().getSExtValue(), std::numeric_limits<int32_t>::max());
-
-    ppeAttr.print(_output);
-    EXPECT_EQ(
-            _ppeAttrIR,
-            "#VPU.PPEInt<mode = <LRELU>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 "
-            ": i64, lrelu_shift = 0 : i64, quant_scale = [1.000000e+00], fp_prelu_alpha = 1.000000e+00 : f64>")
-            << "Unexpected PPE attribute IR!";
+    EXPECT_EQ(intPpeAttr.getLreluMult().getValue().getSExtValue(), 1638);
+    EXPECT_EQ(intPpeAttr.getLreluShift().getValue().getSExtValue(), 14);
+    EXPECT_EQ(intPpeAttr.getQuantScale(), nullptr);
+    EXPECT_INT_ATTR_ARRAY_EQ(intPpeAttr.getQuantMult(), {16384});
+    EXPECT_INT_ATTR_ARRAY_EQ(intPpeAttr.getQuantShift(), {37});
+    EXPECT_INT_ATTR_ARRAY_EQ(intPpeAttr.getIn1QuantMult(), {16777});
+    EXPECT_INT_ATTR_ARRAY_EQ(intPpeAttr.getIn2QuantMult(), {16777});
+    EXPECT_INT_ATTR_EQ(intPpeAttr.getQuantPostShift(), 0.0);
+    EXPECT_FP_ATTR_NEAR(intPpeAttr.getFpPreluAlpha(), 0.1);
 }
 
-TEST_F(NPU37xxPpeIfcUnitTest, AddOp_InputI4_WithPostOp_RELU) {
-    auto addOp = _operationFactory.createAddWithI4Input(_location, &_ctx, VPU_PpeUnitBase::createPostOpAttrRELU());
-    auto ppeAttr = _ppeIfc->retrievePPEAttribute(addOp);
-
+TEST_F(NPU37xxPpeIfcUnitTest, IntPPE_Add_U8_U8_U8_LEAKY_RELU) {
+    auto op = createAdd(getU8Type(), getU8Type(), getU8Type(), createLeakyRelu(0.1));
+    ASSERT_NE(op, nullptr);
+    auto ppeAttr = _ppeIfc->retrievePPEAttribute(op);
     ASSERT_NE(ppeAttr, nullptr);
     auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(ppeAttr);
     ASSERT_NE(intPpeAttr, nullptr) << "Failed to specialize PPE attribute";
 
-    ppeAttr.print(_output);
-    EXPECT_EQ(_ppeAttrIR,
-              "#VPU.PPEInt<mode = <NOOP>, clamp_low = 0 : i64, clamp_high = 7 : i64, lrelu_mult = 1 : i64, lrelu_shift "
-              "= 0 : i64, quant_mult = [20480], quant_shift = [29], quant_post_shift = 0 : i64, in1_quant_mult = "
-              "[26214], in2_quant_mult = [26214], fp_prelu_alpha = 1.000000e+00 : f64>")
-            << "Unexpected PPE attribute IR!";
+    EXPECT_EQ(intPpeAttr.getMode().getValue(), vpux::VPU::PPEMode::LPRELU);
+    EXPECT_EQ(intPpeAttr.getClampLow().getValue().getSExtValue(), 0);
+    EXPECT_EQ(intPpeAttr.getClampHigh().getValue().getSExtValue(), 255);
+    EXPECT_EQ(intPpeAttr.getLreluMult().getValue().getSExtValue(), 1638);
+    EXPECT_EQ(intPpeAttr.getLreluShift().getValue().getSExtValue(), 14);
+    EXPECT_EQ(intPpeAttr.getQuantScale(), nullptr);
+    EXPECT_INT_ATTR_ARRAY_EQ(intPpeAttr.getQuantMult(), {32000});
+    EXPECT_INT_ATTR_ARRAY_EQ(intPpeAttr.getQuantShift(), {29});
+    EXPECT_INT_ATTR_ARRAY_EQ(intPpeAttr.getIn1QuantMult(), {16777});
+    EXPECT_INT_ATTR_ARRAY_EQ(intPpeAttr.getIn2QuantMult(), {16777});
+    EXPECT_INT_ATTR_EQ(intPpeAttr.getQuantPostShift(), 0.0);
+    EXPECT_FP_ATTR_NEAR(intPpeAttr.getFpPreluAlpha(), 0.1);
 }
 
-TEST_F(NPU37xxPpeIfcUnitTest, AddOp_InputFp16_WithoutPostOp) {
-    vpux::IE::PostOpAttr postOpAttr = nullptr;
-    auto addOp = _operationFactory.createAddWithFp16Input(_location, &_ctx, postOpAttr);
-
-    auto ppeAttr = _ppeIfc->retrievePPEAttribute(addOp);
+TEST_F(NPU37xxPpeIfcUnitTest, IntPPE_Add_F16_F16_F16_CLAMP) {
+    auto op = createAdd(getF16Type(), getF16Type(), getF16Type(), createClamp(20.0, 300.0));
+    ASSERT_NE(op, nullptr);
+    auto ppeAttr = _ppeIfc->retrievePPEAttribute(op);
     ASSERT_NE(ppeAttr, nullptr);
     auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(ppeAttr);
     ASSERT_NE(intPpeAttr, nullptr) << "Failed to specialize PPE attribute";
 
+    EXPECT_EQ(intPpeAttr.getMode().getValue(), vpux::VPU::PPEMode::LRELUX);
+    EXPECT_EQ(intPpeAttr.getClampLow().getValue().getSExtValue(), std::numeric_limits<int32_t>::min());
+    EXPECT_PACKED_CLAMP_EQ(intPpeAttr.getClampHigh(), 20.0, 300.0f);
+    EXPECT_EQ(intPpeAttr.getLreluMult().getValue().getSExtValue(), 1);
+    EXPECT_EQ(intPpeAttr.getLreluShift().getValue().getSExtValue(), 0);
+    EXPECT_FP_ATTR_ARRAY_NEAR(intPpeAttr.getQuantScale(), {1.0});
+    EXPECT_EQ(intPpeAttr.getQuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getQuantShift(), nullptr);
+    EXPECT_EQ(intPpeAttr.getIn1QuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getIn2QuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getQuantPostShift(), nullptr);
+    EXPECT_FP_ATTR_NEAR(intPpeAttr.getFpPreluAlpha(), 1.0);
+}
+
+TEST_F(NPU37xxPpeIfcUnitTest, IntPPE_Add_F16_F16_U8_CLAMP) {
+    auto op = createAdd(getF16Type(), getF16Type(), getU8Type(), createClamp(20.0, 300.0));
+    ASSERT_NE(op, nullptr);
+    auto ppeAttr = _ppeIfc->retrievePPEAttribute(op);
+    ASSERT_NE(ppeAttr, nullptr);
+    auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(ppeAttr);
+    ASSERT_NE(intPpeAttr, nullptr) << "Failed to specialize PPE attribute";
+
+    EXPECT_EQ(intPpeAttr.getMode().getValue(), vpux::VPU::PPEMode::NOOP);
+    EXPECT_EQ(intPpeAttr.getClampLow().getValue().getSExtValue(), 10128);
+    EXPECT_EQ(intPpeAttr.getClampHigh().getValue().getSExtValue(), 255);
+    EXPECT_EQ(intPpeAttr.getLreluMult().getValue().getSExtValue(), 1);
+    EXPECT_EQ(intPpeAttr.getLreluShift().getValue().getSExtValue(), 0);
+    EXPECT_FP_ATTR_ARRAY_NEAR(intPpeAttr.getQuantScale(), {500.0});
+    EXPECT_EQ(intPpeAttr.getQuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getQuantShift(), nullptr);
+    EXPECT_EQ(intPpeAttr.getIn1QuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getIn2QuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getQuantPostShift(), nullptr);
+    EXPECT_FP_ATTR_NEAR(intPpeAttr.getFpPreluAlpha(), 499.99996948242188);
+}
+
+TEST_F(NPU37xxPpeIfcUnitTest, IntPPE_Add_U8_U8_F16_CLAMP) {
+    auto op = createAdd(getU8Type(), getU8Type(), getF16Type(), createClamp(20.0, 300.0));
+    ASSERT_NE(op, nullptr);
+    auto ppeAttr = _ppeIfc->retrievePPEAttribute(op);
+    ASSERT_NE(ppeAttr, nullptr);
+    auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(ppeAttr);
+    ASSERT_NE(intPpeAttr, nullptr) << "Failed to specialize PPE attribute";
+
+    EXPECT_EQ(intPpeAttr.getMode().getValue(), vpux::VPU::PPEMode::LRELUX);
+    EXPECT_EQ(intPpeAttr.getClampLow().getValue().getSExtValue(), std::numeric_limits<int32_t>::min());
+    EXPECT_PACKED_CLAMP_EQ(intPpeAttr.getClampHigh(), 20.0, 300.0);
+    EXPECT_EQ(intPpeAttr.getLreluMult().getValue().getSExtValue(), 1);
+    EXPECT_EQ(intPpeAttr.getLreluShift().getValue().getSExtValue(), 0);
+    EXPECT_EQ(intPpeAttr.getQuantScale(), nullptr);
+    EXPECT_INT_ATTR_ARRAY_EQ(intPpeAttr.getQuantMult(), {16384});
+    EXPECT_INT_ATTR_ARRAY_EQ(intPpeAttr.getQuantShift(), {37});
+    EXPECT_INT_ATTR_ARRAY_EQ(intPpeAttr.getIn1QuantMult(), {16777});
+    EXPECT_INT_ATTR_ARRAY_EQ(intPpeAttr.getIn2QuantMult(), {16777});
+    EXPECT_INT_ATTR_EQ(intPpeAttr.getQuantPostShift(), 0.0);
+    EXPECT_FP_ATTR_NEAR(intPpeAttr.getFpPreluAlpha(), 1.0);
+}
+
+TEST_F(NPU37xxPpeIfcUnitTest, IntPPE_Add_U8_U8_U8_CLAMP) {
+    auto op = createAdd(getU8Type(), getU8Type(), getU8Type(), createClamp(20.0, 300.0));
+    ASSERT_NE(op, nullptr);
+    auto ppeAttr = _ppeIfc->retrievePPEAttribute(op);
+    ASSERT_NE(ppeAttr, nullptr);
+    auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(ppeAttr);
+    ASSERT_NE(intPpeAttr, nullptr) << "Failed to specialize PPE attribute";
+
+    EXPECT_EQ(intPpeAttr.getMode().getValue(), vpux::VPU::PPEMode::NOOP);
+    EXPECT_EQ(intPpeAttr.getClampLow().getValue().getSExtValue(), 10128);
+    EXPECT_EQ(intPpeAttr.getClampHigh().getValue().getSExtValue(), 255);
+    EXPECT_EQ(intPpeAttr.getLreluMult().getValue().getSExtValue(), 1);
+    EXPECT_EQ(intPpeAttr.getLreluShift().getValue().getSExtValue(), 0);
+    EXPECT_EQ(intPpeAttr.getQuantScale(), nullptr);
+    EXPECT_INT_ATTR_ARRAY_EQ(intPpeAttr.getQuantMult(), {32000});
+    EXPECT_INT_ATTR_ARRAY_EQ(intPpeAttr.getQuantShift(), {29});
+    EXPECT_INT_ATTR_ARRAY_EQ(intPpeAttr.getIn1QuantMult(), {16777});
+    EXPECT_INT_ATTR_ARRAY_EQ(intPpeAttr.getIn2QuantMult(), {16777});
+    EXPECT_INT_ATTR_EQ(intPpeAttr.getQuantPostShift(), 0.0);
+    EXPECT_FP_ATTR_NEAR(intPpeAttr.getFpPreluAlpha(), 1.0);
+}
+
+TEST_F(NPU37xxPpeIfcUnitTest, IntPPE_Conv_F16_F16_F16_NOOP) {
+    auto op = createConvolution(getF16Type(), getF16Type(), getF16Type(), 0.5, nullptr, nullptr);
+    ASSERT_NE(op, nullptr);
+    auto ppeAttr = _ppeIfc->retrievePPEAttribute(op);
+    ASSERT_NE(ppeAttr, nullptr);
+    auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(ppeAttr);
+    ASSERT_NE(intPpeAttr, nullptr) << "Failed to specialize PPE attribute";
+
+    EXPECT_EQ(intPpeAttr.getMode().getValue(), vpux::VPU::PPEMode::NOOP);
     EXPECT_EQ(intPpeAttr.getClampLow().getValue().getSExtValue(), std::numeric_limits<int32_t>::min());
     EXPECT_EQ(intPpeAttr.getClampHigh().getValue().getSExtValue(), std::numeric_limits<int32_t>::max());
-
-    ppeAttr.print(_output);
-    EXPECT_EQ(_ppeAttrIR,
-              "#VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 "
-              ": i64, lrelu_shift = 0 : i64, quant_scale = [1.000000e+00], fp_prelu_alpha = 1.000000e+00 : f64>")
-            << "Unexpected PPE attribute IR!";
+    EXPECT_EQ(intPpeAttr.getLreluMult().getValue().getSExtValue(), 1);
+    EXPECT_EQ(intPpeAttr.getLreluShift().getValue().getSExtValue(), 0);
+    EXPECT_FP_ATTR_ARRAY_NEAR(intPpeAttr.getQuantScale(), {0.5});
+    EXPECT_EQ(intPpeAttr.getQuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getQuantShift(), nullptr);
+    EXPECT_EQ(intPpeAttr.getIn1QuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getIn2QuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getQuantPostShift(), nullptr);
+    EXPECT_FP_ATTR_NEAR(intPpeAttr.getFpPreluAlpha(), 1.0);
 }
 
-TEST_F(NPU37xxPpeIfcUnitTest, AddOp_InputI4_WithoutPostOp) {
-    vpux::IE::PostOpAttr postOpAttr = nullptr;
-
-    auto addOp = _operationFactory.createAddWithI4Input(_location, &_ctx, postOpAttr);
-    auto ppeAttr = _ppeIfc->retrievePPEAttribute(addOp);
-
+TEST_F(NPU37xxPpeIfcUnitTest, IntPPE_Conv_F16_F16_U8_NOOP) {
+    auto op = createConvolution(getF16Type(), getF16Type(), getU8Type(), 0.5, nullptr, nullptr);
+    ASSERT_NE(op, nullptr);
+    auto ppeAttr = _ppeIfc->retrievePPEAttribute(op);
     ASSERT_NE(ppeAttr, nullptr);
     auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(ppeAttr);
     ASSERT_NE(intPpeAttr, nullptr) << "Failed to specialize PPE attribute";
 
-    ppeAttr.print(_output);
-    EXPECT_EQ(
-            _ppeAttrIR,
-            "#VPU.PPEInt<mode = <NOOP>, clamp_low = -7 : i64, clamp_high = 7 : i64, lrelu_mult = 1 : i64, lrelu_shift "
-            "= 0 : i64, quant_mult = [20480], quant_shift = [29], quant_post_shift = 0 : i64, in1_quant_mult = "
-            "[26214], in2_quant_mult = [26214], fp_prelu_alpha = 1.000000e+00 : f64>")
-            << "Unexpected PPE attribute IR!";
+    EXPECT_EQ(intPpeAttr.getMode().getValue(), vpux::VPU::PPEMode::NOOP);
+    EXPECT_EQ(intPpeAttr.getClampLow().getValue().getSExtValue(), 0);
+    EXPECT_EQ(intPpeAttr.getClampHigh().getValue().getSExtValue(), 255);
+    EXPECT_EQ(intPpeAttr.getLreluMult().getValue().getSExtValue(), 1);
+    EXPECT_EQ(intPpeAttr.getLreluShift().getValue().getSExtValue(), 0);
+    EXPECT_FP_ATTR_ARRAY_NEAR(intPpeAttr.getQuantScale(), {0.5});
+    EXPECT_EQ(intPpeAttr.getQuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getQuantShift(), nullptr);
+    EXPECT_EQ(intPpeAttr.getIn1QuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getIn2QuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getQuantPostShift(), nullptr);
+    EXPECT_FP_ATTR_NEAR(intPpeAttr.getFpPreluAlpha(), 499.99996948242188);
 }
 
-TEST_F(NPU37xxPpeIfcUnitTest, AddOp_InputFp16_WithPostOp_LPRELU) {
-    auto addOp =
-            _operationFactory.createAddWithFp16Input(_location, &_ctx, VPU_PpeUnitBase::createPostOpAttrLPRELU(0.25f));
-    auto ppeAttr = _ppeIfc->retrievePPEAttribute(addOp);
-
+TEST_F(NPU37xxPpeIfcUnitTest, IntPPE_Conv_U8_U8_F16_NOOP) {
+    auto op = createConvolution(getU8Type(), getU8Type(), getF16Type(), 0.5, nullptr, nullptr);
+    ASSERT_NE(op, nullptr);
+    auto ppeAttr = _ppeIfc->retrievePPEAttribute(op);
     ASSERT_NE(ppeAttr, nullptr);
     auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(ppeAttr);
     ASSERT_NE(intPpeAttr, nullptr) << "Failed to specialize PPE attribute";
 
+    EXPECT_EQ(intPpeAttr.getMode().getValue(), vpux::VPU::PPEMode::NOOP);
     EXPECT_EQ(intPpeAttr.getClampLow().getValue().getSExtValue(), std::numeric_limits<int32_t>::min());
     EXPECT_EQ(intPpeAttr.getClampHigh().getValue().getSExtValue(), std::numeric_limits<int32_t>::max());
-
-    ppeAttr.print(_output);
-    EXPECT_EQ(_ppeAttrIR,
-              "#VPU.PPEInt<mode = <LPRELU>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = "
-              "1024 : i64, lrelu_shift = 12 : i64, quant_scale = [1.000000e+00], fp_prelu_alpha = 2.500000e-01 : f64>")
-            << "Unexpected PPE attribute IR!";
+    EXPECT_EQ(intPpeAttr.getLreluMult().getValue().getSExtValue(), 1);
+    EXPECT_EQ(intPpeAttr.getLreluShift().getValue().getSExtValue(), 0);
+    EXPECT_FP_ATTR_ARRAY_NEAR(intPpeAttr.getQuantScale(), {0.5});
+    EXPECT_EQ(intPpeAttr.getQuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getQuantShift(), nullptr);
+    EXPECT_EQ(intPpeAttr.getIn1QuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getIn2QuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getQuantPostShift(), nullptr);
+    EXPECT_FP_ATTR_NEAR(intPpeAttr.getFpPreluAlpha(), 1.0);
 }
 
-TEST_F(NPU37xxPpeIfcUnitTest, AddOp_InputI4_WithPostOp_LPRELU) {
-    auto addOp =
-            _operationFactory.createAddWithI4Input(_location, &_ctx, VPU_PpeUnitBase::createPostOpAttrLPRELU(0.25f));
-    auto ppeAttr = _ppeIfc->retrievePPEAttribute(addOp);
-
+TEST_F(NPU37xxPpeIfcUnitTest, IntPPE_Conv_U8_U8_U8_NOOP) {
+    auto op = createConvolution(getU8Type(), getU8Type(), getU8Type(), 0.5, nullptr, nullptr);
+    ASSERT_NE(op, nullptr);
+    auto ppeAttr = _ppeIfc->retrievePPEAttribute(op);
     ASSERT_NE(ppeAttr, nullptr);
     auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(ppeAttr);
     ASSERT_NE(intPpeAttr, nullptr) << "Failed to specialize PPE attribute";
 
-    ppeAttr.print(_output);
-    EXPECT_EQ(_ppeAttrIR,
-              "#VPU.PPEInt<mode = <LPRELU>, clamp_low = -7 : i64, clamp_high = 7 : i64, lrelu_mult = 1024 : i64, "
-              "lrelu_shift = 12 : i64, quant_mult = [20480], quant_shift = [29], quant_post_shift = 0 : i64, "
-              "in1_quant_mult = [26214], in2_quant_mult = [26214], fp_prelu_alpha = 2.500000e-01 : f64>")
-            << "Unexpected PPE attribute IR!";
+    EXPECT_EQ(intPpeAttr.getMode().getValue(), vpux::VPU::PPEMode::NOOP);
+    EXPECT_EQ(intPpeAttr.getClampLow().getValue().getSExtValue(), 0);
+    EXPECT_EQ(intPpeAttr.getClampHigh().getValue().getSExtValue(), 255);
+    EXPECT_EQ(intPpeAttr.getLreluMult().getValue().getSExtValue(), 1);
+    EXPECT_EQ(intPpeAttr.getLreluShift().getValue().getSExtValue(), 0);
+    EXPECT_FP_ATTR_ARRAY_NEAR(intPpeAttr.getQuantScale(), {0.5});
+    EXPECT_EQ(intPpeAttr.getQuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getQuantShift(), nullptr);
+    EXPECT_EQ(intPpeAttr.getIn1QuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getIn2QuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getQuantPostShift(), nullptr);
+    EXPECT_FP_ATTR_NEAR(intPpeAttr.getFpPreluAlpha(), 1.0);
+}
+
+TEST_F(NPU37xxPpeIfcUnitTest, IntPPE_Conv_F16_F16_F16_RELU) {
+    auto op = createConvolution(getF16Type(), getF16Type(), getF16Type(), 0.5, createRelu(), nullptr);
+    ASSERT_NE(op, nullptr);
+    auto ppeAttr = _ppeIfc->retrievePPEAttribute(op);
+    ASSERT_NE(ppeAttr, nullptr);
+    auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(ppeAttr);
+    ASSERT_NE(intPpeAttr, nullptr) << "Failed to specialize PPE attribute";
+
+    EXPECT_EQ(intPpeAttr.getMode().getValue(), vpux::VPU::PPEMode::LRELU);
+    EXPECT_EQ(intPpeAttr.getClampLow().getValue().getSExtValue(), std::numeric_limits<int32_t>::min());
+    EXPECT_EQ(intPpeAttr.getClampHigh().getValue().getSExtValue(), std::numeric_limits<int32_t>::max());
+    EXPECT_EQ(intPpeAttr.getLreluMult().getValue().getSExtValue(), 1);
+    EXPECT_EQ(intPpeAttr.getLreluShift().getValue().getSExtValue(), 0);
+    EXPECT_FP_ATTR_ARRAY_NEAR(intPpeAttr.getQuantScale(), {0.5});
+    EXPECT_EQ(intPpeAttr.getQuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getQuantShift(), nullptr);
+    EXPECT_EQ(intPpeAttr.getIn1QuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getIn2QuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getQuantPostShift(), nullptr);
+    EXPECT_FP_ATTR_NEAR(intPpeAttr.getFpPreluAlpha(), 1.0);
+}
+
+TEST_F(NPU37xxPpeIfcUnitTest, IntPPE_Conv_F16_F16_U8_RELU) {
+    auto op = createConvolution(getF16Type(), getF16Type(), getU8Type(), 0.5, createRelu(), nullptr);
+    ASSERT_NE(op, nullptr);
+    auto ppeAttr = _ppeIfc->retrievePPEAttribute(op);
+    ASSERT_NE(ppeAttr, nullptr);
+    auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(ppeAttr);
+    ASSERT_NE(intPpeAttr, nullptr) << "Failed to specialize PPE attribute";
+
+    EXPECT_EQ(intPpeAttr.getMode().getValue(), vpux::VPU::PPEMode::NOOP);
+    EXPECT_EQ(intPpeAttr.getClampLow().getValue().getSExtValue(), 128);
+    EXPECT_EQ(intPpeAttr.getClampHigh().getValue().getSExtValue(), 255);
+    EXPECT_EQ(intPpeAttr.getLreluMult().getValue().getSExtValue(), 1);
+    EXPECT_EQ(intPpeAttr.getLreluShift().getValue().getSExtValue(), 0);
+    EXPECT_FP_ATTR_ARRAY_NEAR(intPpeAttr.getQuantScale(), {0.5});
+    EXPECT_EQ(intPpeAttr.getQuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getQuantShift(), nullptr);
+    EXPECT_EQ(intPpeAttr.getIn1QuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getIn2QuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getQuantPostShift(), nullptr);
+    EXPECT_FP_ATTR_NEAR(intPpeAttr.getFpPreluAlpha(), 499.99996948242188);
+}
+
+TEST_F(NPU37xxPpeIfcUnitTest, IntPPE_Conv_U8_U8_F16_RELU) {
+    auto op = createConvolution(getU8Type(), getU8Type(), getF16Type(), 0.5, createRelu(), nullptr);
+    ASSERT_NE(op, nullptr);
+    auto ppeAttr = _ppeIfc->retrievePPEAttribute(op);
+    ASSERT_NE(ppeAttr, nullptr);
+    auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(ppeAttr);
+    ASSERT_NE(intPpeAttr, nullptr) << "Failed to specialize PPE attribute";
+
+    EXPECT_EQ(intPpeAttr.getMode().getValue(), vpux::VPU::PPEMode::LRELU);
+    EXPECT_EQ(intPpeAttr.getClampLow().getValue().getSExtValue(), std::numeric_limits<int32_t>::min());
+    EXPECT_EQ(intPpeAttr.getClampHigh().getValue().getSExtValue(), std::numeric_limits<int32_t>::max());
+    EXPECT_EQ(intPpeAttr.getLreluMult().getValue().getSExtValue(), 1);
+    EXPECT_EQ(intPpeAttr.getLreluShift().getValue().getSExtValue(), 0);
+    EXPECT_FP_ATTR_ARRAY_NEAR(intPpeAttr.getQuantScale(), {0.5});
+    EXPECT_EQ(intPpeAttr.getQuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getQuantShift(), nullptr);
+    EXPECT_EQ(intPpeAttr.getIn1QuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getIn2QuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getQuantPostShift(), nullptr);
+    EXPECT_FP_ATTR_NEAR(intPpeAttr.getFpPreluAlpha(), 1.0);
+}
+
+TEST_F(NPU37xxPpeIfcUnitTest, IntPPE_Conv_U8_U8_U8_RELU) {
+    auto op = createConvolution(getU8Type(), getU8Type(), getU8Type(), 0.5, createRelu(), nullptr);
+    ASSERT_NE(op, nullptr);
+    auto ppeAttr = _ppeIfc->retrievePPEAttribute(op);
+    ASSERT_NE(ppeAttr, nullptr);
+    auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(ppeAttr);
+    ASSERT_NE(intPpeAttr, nullptr) << "Failed to specialize PPE attribute";
+
+    EXPECT_EQ(intPpeAttr.getMode().getValue(), vpux::VPU::PPEMode::NOOP);
+    EXPECT_EQ(intPpeAttr.getClampLow().getValue().getSExtValue(), 128);
+    EXPECT_EQ(intPpeAttr.getClampHigh().getValue().getSExtValue(), 255);
+    EXPECT_EQ(intPpeAttr.getLreluMult().getValue().getSExtValue(), 1);
+    EXPECT_EQ(intPpeAttr.getLreluShift().getValue().getSExtValue(), 0);
+    EXPECT_FP_ATTR_ARRAY_NEAR(intPpeAttr.getQuantScale(), {0.5});
+    EXPECT_EQ(intPpeAttr.getQuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getQuantShift(), nullptr);
+    EXPECT_EQ(intPpeAttr.getIn1QuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getIn2QuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getQuantPostShift(), nullptr);
+    EXPECT_FP_ATTR_NEAR(intPpeAttr.getFpPreluAlpha(), 1.0);
+}
+
+TEST_F(NPU37xxPpeIfcUnitTest, IntPPE_Conv_F16_F16_F16_LEAKY_RELU) {
+    auto op = createConvolution(getF16Type(), getF16Type(), getF16Type(), 0.5, createLeakyRelu(0.1), nullptr);
+    ASSERT_NE(op, nullptr);
+    auto ppeAttr = _ppeIfc->retrievePPEAttribute(op);
+    ASSERT_NE(ppeAttr, nullptr);
+    auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(ppeAttr);
+    ASSERT_NE(intPpeAttr, nullptr) << "Failed to specialize PPE attribute";
+
+    EXPECT_EQ(intPpeAttr.getMode().getValue(), vpux::VPU::PPEMode::LPRELU);
+    EXPECT_EQ(intPpeAttr.getClampLow().getValue().getSExtValue(), std::numeric_limits<int32_t>::min());
+    EXPECT_EQ(intPpeAttr.getClampHigh().getValue().getSExtValue(), std::numeric_limits<int32_t>::max());
+    EXPECT_EQ(intPpeAttr.getLreluMult().getValue().getSExtValue(), 1638);
+    EXPECT_EQ(intPpeAttr.getLreluShift().getValue().getSExtValue(), 14);
+    EXPECT_FP_ATTR_ARRAY_NEAR(intPpeAttr.getQuantScale(), {0.5});
+    EXPECT_EQ(intPpeAttr.getQuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getQuantShift(), nullptr);
+    EXPECT_EQ(intPpeAttr.getIn1QuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getIn2QuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getQuantPostShift(), nullptr);
+    EXPECT_FP_ATTR_NEAR(intPpeAttr.getFpPreluAlpha(), 0.1);
+}
+
+TEST_F(NPU37xxPpeIfcUnitTest, IntPPE_Conv_F16_F16_U8_LEAKY_RELU) {
+    auto op = createConvolution(getF16Type(), getF16Type(), getU8Type(), 0.5, createLeakyRelu(0.1), nullptr);
+    ASSERT_NE(op, nullptr);
+    auto ppeAttr = _ppeIfc->retrievePPEAttribute(op);
+    ASSERT_NE(ppeAttr, nullptr);
+    auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(ppeAttr);
+    ASSERT_NE(intPpeAttr, nullptr) << "Failed to specialize PPE attribute";
+
+    EXPECT_EQ(intPpeAttr.getMode().getValue(), vpux::VPU::PPEMode::LPRELU);
+    EXPECT_EQ(intPpeAttr.getClampLow().getValue().getSExtValue(), 0);
+    EXPECT_EQ(intPpeAttr.getClampHigh().getValue().getSExtValue(), 255);
+    EXPECT_EQ(intPpeAttr.getLreluMult().getValue().getSExtValue(), 1638);
+    EXPECT_EQ(intPpeAttr.getLreluShift().getValue().getSExtValue(), 14);
+    EXPECT_FP_ATTR_ARRAY_NEAR(intPpeAttr.getQuantScale(), {0.5});
+    EXPECT_EQ(intPpeAttr.getQuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getQuantShift(), nullptr);
+    EXPECT_EQ(intPpeAttr.getIn1QuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getIn2QuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getQuantPostShift(), nullptr);
+    EXPECT_FP_ATTR_NEAR(intPpeAttr.getFpPreluAlpha(), 50.0);
+}
+
+TEST_F(NPU37xxPpeIfcUnitTest, IntPPE_Conv_U8_U8_F16_LEAKY_RELU) {
+    auto op = createConvolution(getU8Type(), getU8Type(), getF16Type(), 0.5, createLeakyRelu(0.1), nullptr);
+    ASSERT_NE(op, nullptr);
+    auto ppeAttr = _ppeIfc->retrievePPEAttribute(op);
+    ASSERT_NE(ppeAttr, nullptr);
+    auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(ppeAttr);
+    ASSERT_NE(intPpeAttr, nullptr) << "Failed to specialize PPE attribute";
+
+    EXPECT_EQ(intPpeAttr.getMode().getValue(), vpux::VPU::PPEMode::LPRELU);
+    EXPECT_EQ(intPpeAttr.getClampLow().getValue().getSExtValue(), std::numeric_limits<int32_t>::min());
+    EXPECT_EQ(intPpeAttr.getClampHigh().getValue().getSExtValue(), std::numeric_limits<int32_t>::max());
+    EXPECT_EQ(intPpeAttr.getLreluMult().getValue().getSExtValue(), 1638);
+    EXPECT_EQ(intPpeAttr.getLreluShift().getValue().getSExtValue(), 14);
+    EXPECT_FP_ATTR_ARRAY_NEAR(intPpeAttr.getQuantScale(), {0.5});
+    EXPECT_EQ(intPpeAttr.getQuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getQuantShift(), nullptr);
+    EXPECT_EQ(intPpeAttr.getIn1QuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getIn2QuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getQuantPostShift(), nullptr);
+    EXPECT_FP_ATTR_NEAR(intPpeAttr.getFpPreluAlpha(), 0.1);
+}
+
+TEST_F(NPU37xxPpeIfcUnitTest, IntPPE_Conv_U8_U8_U8_LEAKY_RELU) {
+    auto op = createConvolution(getU8Type(), getU8Type(), getU8Type(), 0.5, createLeakyRelu(0.1), nullptr);
+    ASSERT_NE(op, nullptr);
+    auto ppeAttr = _ppeIfc->retrievePPEAttribute(op);
+    ASSERT_NE(ppeAttr, nullptr);
+    auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(ppeAttr);
+    ASSERT_NE(intPpeAttr, nullptr) << "Failed to specialize PPE attribute";
+
+    EXPECT_EQ(intPpeAttr.getMode().getValue(), vpux::VPU::PPEMode::LPRELU);
+    EXPECT_EQ(intPpeAttr.getClampLow().getValue().getSExtValue(), 0);
+    EXPECT_EQ(intPpeAttr.getClampHigh().getValue().getSExtValue(), 255);
+    EXPECT_EQ(intPpeAttr.getLreluMult().getValue().getSExtValue(), 1638);
+    EXPECT_EQ(intPpeAttr.getLreluShift().getValue().getSExtValue(), 14);
+    EXPECT_FP_ATTR_ARRAY_NEAR(intPpeAttr.getQuantScale(), {0.5});
+    EXPECT_EQ(intPpeAttr.getQuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getQuantShift(), nullptr);
+    EXPECT_EQ(intPpeAttr.getIn1QuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getIn2QuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getQuantPostShift(), nullptr);
+    EXPECT_FP_ATTR_NEAR(intPpeAttr.getFpPreluAlpha(), 0.1);
+}
+
+TEST_F(NPU37xxPpeIfcUnitTest, IntPPE_Conv_F16_F16_F16_CLAMP) {
+    auto op = createConvolution(getF16Type(), getF16Type(), getF16Type(), 0.5, createClamp(20.0, 300.0), nullptr);
+    ASSERT_NE(op, nullptr);
+    auto ppeAttr = _ppeIfc->retrievePPEAttribute(op);
+    ASSERT_NE(ppeAttr, nullptr);
+    auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(ppeAttr);
+    ASSERT_NE(intPpeAttr, nullptr) << "Failed to specialize PPE attribute";
+
+    EXPECT_EQ(intPpeAttr.getMode().getValue(), vpux::VPU::PPEMode::LRELUX);
+    EXPECT_EQ(intPpeAttr.getClampLow().getValue().getSExtValue(), std::numeric_limits<int32_t>::min());
+    EXPECT_PACKED_CLAMP_EQ(intPpeAttr.getClampHigh(), 20.0, 300.0f);
+    EXPECT_EQ(intPpeAttr.getLreluMult().getValue().getSExtValue(), 1);
+    EXPECT_EQ(intPpeAttr.getLreluShift().getValue().getSExtValue(), 0);
+    EXPECT_FP_ATTR_ARRAY_NEAR(intPpeAttr.getQuantScale(), {0.5});
+    EXPECT_EQ(intPpeAttr.getQuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getQuantShift(), nullptr);
+    EXPECT_EQ(intPpeAttr.getIn1QuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getIn2QuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getQuantPostShift(), nullptr);
+    EXPECT_FP_ATTR_NEAR(intPpeAttr.getFpPreluAlpha(), 1.0);
+}
+
+TEST_F(NPU37xxPpeIfcUnitTest, IntPPE_Conv_F16_F16_U8_CLAMP) {
+    auto op = createConvolution(getF16Type(), getF16Type(), getU8Type(), 0.5, createClamp(20.0, 300.0), nullptr);
+    ASSERT_NE(op, nullptr);
+    auto ppeAttr = _ppeIfc->retrievePPEAttribute(op);
+    ASSERT_NE(ppeAttr, nullptr);
+    auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(ppeAttr);
+    ASSERT_NE(intPpeAttr, nullptr) << "Failed to specialize PPE attribute";
+
+    EXPECT_EQ(intPpeAttr.getMode().getValue(), vpux::VPU::PPEMode::NOOP);
+    EXPECT_EQ(intPpeAttr.getClampLow().getValue().getSExtValue(), 10128);
+    EXPECT_EQ(intPpeAttr.getClampHigh().getValue().getSExtValue(), 255);
+    EXPECT_EQ(intPpeAttr.getLreluMult().getValue().getSExtValue(), 1);
+    EXPECT_EQ(intPpeAttr.getLreluShift().getValue().getSExtValue(), 0);
+    EXPECT_FP_ATTR_ARRAY_NEAR(intPpeAttr.getQuantScale(), {0.5});
+    EXPECT_EQ(intPpeAttr.getQuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getQuantShift(), nullptr);
+    EXPECT_EQ(intPpeAttr.getIn1QuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getIn2QuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getQuantPostShift(), nullptr);
+    EXPECT_FP_ATTR_NEAR(intPpeAttr.getFpPreluAlpha(), 499.99996948242188);
+}
+
+TEST_F(NPU37xxPpeIfcUnitTest, IntPPE_Conv_U8_U8_F16_CLAMP) {
+    auto op = createConvolution(getU8Type(), getU8Type(), getF16Type(), 0.5, createClamp(20.0, 300.0), nullptr);
+    ASSERT_NE(op, nullptr);
+    auto ppeAttr = _ppeIfc->retrievePPEAttribute(op);
+    ASSERT_NE(ppeAttr, nullptr);
+    auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(ppeAttr);
+    ASSERT_NE(intPpeAttr, nullptr) << "Failed to specialize PPE attribute";
+
+    EXPECT_EQ(intPpeAttr.getMode().getValue(), vpux::VPU::PPEMode::LRELUX);
+    EXPECT_EQ(intPpeAttr.getClampLow().getValue().getSExtValue(), std::numeric_limits<int32_t>::min());
+    EXPECT_PACKED_CLAMP_EQ(intPpeAttr.getClampHigh(), 20.0, 300.0);
+    EXPECT_EQ(intPpeAttr.getLreluMult().getValue().getSExtValue(), 1);
+    EXPECT_EQ(intPpeAttr.getLreluShift().getValue().getSExtValue(), 0);
+    EXPECT_FP_ATTR_ARRAY_NEAR(intPpeAttr.getQuantScale(), {0.5});
+    EXPECT_EQ(intPpeAttr.getQuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getQuantShift(), nullptr);
+    EXPECT_EQ(intPpeAttr.getIn1QuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getIn2QuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getQuantPostShift(), nullptr);
+    EXPECT_FP_ATTR_NEAR(intPpeAttr.getFpPreluAlpha(), 1.0);
+}
+
+TEST_F(NPU37xxPpeIfcUnitTest, IntPPE_Conv_U8_U8_U8_CLAMP) {
+    auto op = createConvolution(getU8Type(), getU8Type(), getU8Type(), 0.5, createClamp(20.0, 300.0), nullptr);
+    ASSERT_NE(op, nullptr);
+    auto ppeAttr = _ppeIfc->retrievePPEAttribute(op);
+    ASSERT_NE(ppeAttr, nullptr);
+    auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(ppeAttr);
+    ASSERT_NE(intPpeAttr, nullptr) << "Failed to specialize PPE attribute";
+
+    EXPECT_EQ(intPpeAttr.getMode().getValue(), vpux::VPU::PPEMode::NOOP);
+    EXPECT_EQ(intPpeAttr.getClampLow().getValue().getSExtValue(), 10128);
+    EXPECT_EQ(intPpeAttr.getClampHigh().getValue().getSExtValue(), 255);
+    EXPECT_EQ(intPpeAttr.getLreluMult().getValue().getSExtValue(), 1);
+    EXPECT_EQ(intPpeAttr.getLreluShift().getValue().getSExtValue(), 0);
+    EXPECT_FP_ATTR_ARRAY_NEAR(intPpeAttr.getQuantScale(), {0.5});
+    EXPECT_EQ(intPpeAttr.getQuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getQuantShift(), nullptr);
+    EXPECT_EQ(intPpeAttr.getIn1QuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getIn2QuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getQuantPostShift(), nullptr);
+    EXPECT_FP_ATTR_NEAR(intPpeAttr.getFpPreluAlpha(), 1.0);
+}
+
+TEST_F(NPU37xxPpeIfcUnitTest, IntPPE_MatMul_U8_U8_U8_NOOP) {
+    auto op = createMatMul(getU8Type(), getU8Type(), getU8Type());
+    ASSERT_NE(op, nullptr);
+    auto ppeAttr = _ppeIfc->retrievePPEAttribute(op);
+    ASSERT_NE(ppeAttr, nullptr);
+    auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(ppeAttr);
+    ASSERT_NE(intPpeAttr, nullptr) << "Failed to specialize PPE attribute";
+
+    EXPECT_EQ(intPpeAttr.getMode().getValue(), vpux::VPU::PPEMode::NOOP);
+    EXPECT_EQ(intPpeAttr.getClampLow().getValue().getSExtValue(), 0);
+    EXPECT_EQ(intPpeAttr.getClampHigh().getValue().getSExtValue(), 255);
+    EXPECT_EQ(intPpeAttr.getLreluMult().getValue().getSExtValue(), 1);
+    EXPECT_EQ(intPpeAttr.getLreluShift().getValue().getSExtValue(), 0);
+    EXPECT_EQ(intPpeAttr.getQuantScale(), nullptr);
+    EXPECT_EQ(intPpeAttr.getQuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getQuantShift(), nullptr);
+    EXPECT_EQ(intPpeAttr.getIn1QuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getIn2QuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getQuantPostShift(), nullptr);
+    EXPECT_FP_ATTR_NEAR(intPpeAttr.getFpPreluAlpha(), 1.0);
+}
+
+TEST_F(NPU37xxPpeIfcUnitTest, IntPPE_AvgPool_F16_U8_RELU) {
+    auto op = createAvgPool(getF16Type(), getU8Type(), {2, 2}, 0.5, createLeakyRelu(0.1));
+    ASSERT_NE(op, nullptr);
+    auto ppeAttr = _ppeIfc->retrievePPEAttribute(op);
+    ASSERT_NE(ppeAttr, nullptr);
+    auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(ppeAttr);
+    ASSERT_NE(intPpeAttr, nullptr) << "Failed to specialize PPE attribute";
+
+    EXPECT_EQ(intPpeAttr.getMode().getValue(), vpux::VPU::PPEMode::LPRELU);
+    EXPECT_EQ(intPpeAttr.getClampLow().getValue().getSExtValue(), 0);
+    EXPECT_EQ(intPpeAttr.getClampHigh().getValue().getSExtValue(), 255);
+    EXPECT_EQ(intPpeAttr.getLreluMult().getValue().getSExtValue(), 1638);
+    EXPECT_EQ(intPpeAttr.getLreluShift().getValue().getSExtValue(), 14);
+    EXPECT_FP_ATTR_ARRAY_NEAR(intPpeAttr.getQuantScale(), {62.5});
+    EXPECT_EQ(intPpeAttr.getQuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getQuantShift(), nullptr);
+    EXPECT_EQ(intPpeAttr.getIn1QuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getIn2QuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getQuantPostShift(), nullptr);
+    EXPECT_FP_ATTR_NEAR(intPpeAttr.getFpPreluAlpha(), 50.0);
+}
+
+TEST_F(NPU37xxPpeIfcUnitTest, IntPPE_MaxPool_F16_U8_CLAMP) {
+    auto op = createMaxPool(getF16Type(), getU8Type(), createClamp(20.0, 300.0));
+    ASSERT_NE(op, nullptr);
+    auto ppeAttr = _ppeIfc->retrievePPEAttribute(op);
+    ASSERT_NE(ppeAttr, nullptr);
+    auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(ppeAttr);
+    ASSERT_NE(intPpeAttr, nullptr) << "Failed to specialize PPE attribute";
+
+    EXPECT_EQ(intPpeAttr.getMode().getValue(), vpux::VPU::PPEMode::NOOP);
+    EXPECT_EQ(intPpeAttr.getClampLow().getValue().getSExtValue(), 10128);
+    EXPECT_EQ(intPpeAttr.getClampHigh().getValue().getSExtValue(), 255);
+    EXPECT_EQ(intPpeAttr.getLreluMult().getValue().getSExtValue(), 1);
+    EXPECT_EQ(intPpeAttr.getLreluShift().getValue().getSExtValue(), 0);
+    EXPECT_EQ(intPpeAttr.getQuantScale(), nullptr);
+    EXPECT_EQ(intPpeAttr.getQuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getQuantShift(), nullptr);
+    EXPECT_EQ(intPpeAttr.getIn1QuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getIn2QuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getQuantPostShift(), nullptr);
+    EXPECT_FP_ATTR_NEAR(intPpeAttr.getFpPreluAlpha(), 499.99996948242188);
+}
+
+TEST_F(NPU37xxPpeIfcUnitTest, IntPPE_ReduceMean_U8_U8_NOOP) {
+    auto op = createReduceMean(getU8Type(), getU8Type());
+    ASSERT_NE(op, nullptr);
+    auto ppeAttr = _ppeIfc->retrievePPEAttribute(op);
+    ASSERT_NE(ppeAttr, nullptr);
+    auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(ppeAttr);
+    ASSERT_NE(intPpeAttr, nullptr) << "Failed to specialize PPE attribute";
+
+    EXPECT_EQ(intPpeAttr.getMode().getValue(), vpux::VPU::PPEMode::NOOP);
+    EXPECT_EQ(intPpeAttr.getClampLow().getValue().getSExtValue(), 0);
+    EXPECT_EQ(intPpeAttr.getClampHigh().getValue().getSExtValue(), 255);
+    EXPECT_EQ(intPpeAttr.getLreluMult().getValue().getSExtValue(), 1);
+    EXPECT_EQ(intPpeAttr.getLreluShift().getValue().getSExtValue(), 0);
+    EXPECT_EQ(intPpeAttr.getQuantScale(), nullptr);
+    EXPECT_EQ(intPpeAttr.getQuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getQuantShift(), nullptr);
+    EXPECT_EQ(intPpeAttr.getIn1QuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getIn2QuantMult(), nullptr);
+    EXPECT_EQ(intPpeAttr.getQuantPostShift(), nullptr);
+    EXPECT_FP_ATTR_NEAR(intPpeAttr.getFpPreluAlpha(), 1.0);
 }

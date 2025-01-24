@@ -20,8 +20,6 @@ bool isNceTile(mlir::SymbolRefAttr executor);
 // MemoryResourceOp
 //
 
-static constexpr StringLiteral usedMemModuleName = "UsedMemory";
-
 template <typename Enum, typename OutT = MemoryResourceOp>
 using memory_resource_if = enable_t<OutT, std::is_enum<Enum>, vpux::details::HasStringifyEnum<Enum>>;
 
@@ -49,33 +47,6 @@ template <typename Enum>
 memory_resource_if<Enum> getAvailableMemory(mlir::ModuleOp mainModule, Enum kind) {
     return getAvailableMemory(mainModule, mlir::SymbolRefAttr::get(mainModule->getContext(), stringifyEnum(kind)));
 }
-
-MemoryResourceOp setUsedMemory(mlir::ModuleOp mainModule, mlir::SymbolRefAttr memSpace, Byte size);
-
-template <typename Enum>
-memory_resource_if<Enum> setUsedMemory(mlir::ModuleOp mainModule, Enum kind, Byte size) {
-    return setUsedMemory(mainModule, mlir::SymbolRefAttr::get(mainModule->getContext(), stringifyEnum(kind)), size);
-}
-
-// TODO E#105253: consider not using temporary modules to store data in functions
-MemoryResourceOp setUsedMemory(mlir::func::FuncOp func, mlir::SymbolRefAttr memSpace, Byte size);
-
-template <typename Enum>
-memory_resource_if<Enum> setUsedMemory(mlir::func::FuncOp func, Enum kind, Byte size) {
-    return setUsedMemory(func, mlir::SymbolRefAttr::get(func->getContext(), stringifyEnum(kind)), size);
-}
-
-MemoryResourceOp getUsedMemory(mlir::ModuleOp mainModule, mlir::SymbolRefAttr memSpace);
-
-template <typename Enum>
-memory_resource_if<Enum> getUsedMemory(mlir::ModuleOp mainModule, Enum kind) {
-    return getUsedMemory(mainModule, mlir::SymbolRefAttr::get(mainModule->getContext(), stringifyEnum(kind)));
-}
-
-SmallVector<MemoryResourceOp> getUsedMemory(mlir::ModuleOp mainModule);
-SmallVector<MemoryResourceOp> getUsedMemory(mlir::func::FuncOp func);
-
-void eraseUsedMemory(mlir::func::FuncOp func);
 
 //
 // Reserved memory resource

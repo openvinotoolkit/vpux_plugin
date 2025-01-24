@@ -9,20 +9,20 @@
 namespace vpux {
 namespace vpumi37xx2vpuasm {
 
-mlir::LogicalResult BarrierRewriter::symbolize(VPUMI37XX::ConfigureBarrierOp op, SymbolMapper&,
-                                               mlir::ConversionPatternRewriter& rewriter) const {
+mlir::FailureOr<SymbolizationResult> BarrierRewriter::symbolize(VPUMI37XX::ConfigureBarrierOp op, SymbolMapper&,
+                                                                mlir::ConversionPatternRewriter& rewriter) const {
     auto result = op.getResult();
     auto symName = findSym(result).getRootReference();
     auto taskIdx = mlir::TypeAttr::get(op.getType());
 
     // VPUASM::ConfigureBarrierOp has an optional attribute work_item_idx which is not using
     // in 37XX generation. For avoid code duplication across operation lets set it as nullptr here
-    rewriter.create<VPUASM::ConfigureBarrierOp>(op.getLoc(), symName, taskIdx, nullptr, op.getIdAttr(),
-                                                op.getNextSameIdAttr(), op.getProducerCountAttr(),
-                                                op.getConsumerCountAttr());
+    auto newOp = rewriter.create<VPUASM::ConfigureBarrierOp>(op.getLoc(), symName, taskIdx, nullptr, op.getIdAttr(),
+                                                             op.getNextSameIdAttr(), op.getProducerCountAttr(),
+                                                             op.getConsumerCountAttr());
     rewriter.eraseOp(op);
 
-    return mlir::success();
+    return SymbolizationResult(newOp);
 }
 
 }  // namespace vpumi37xx2vpuasm

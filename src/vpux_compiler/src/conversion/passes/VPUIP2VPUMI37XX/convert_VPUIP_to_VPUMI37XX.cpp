@@ -17,6 +17,7 @@
 #include "vpux/compiler/dialect/VPUMI37XX/ops.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
 
+#include "vpux/compiler/utils/llvm_to_binary.hpp"
 #include "vpux/utils/profiling/metadata.hpp"
 
 #include <mlir/IR/IRMapping.h>
@@ -359,8 +360,9 @@ private:
 
     void createComputeOpSwKernel(
             mlir::MLIRContext* ctx, VPUIP::SwKernelOp op, mlir::OpBuilder builderBlk,
-            mlir::func::FuncOp kernel_info_funcOp, mlir::Operation::operand_range wait_bars,
-            mlir::Operation::operand_range update_bars, VPURegMapped::IndexType indexType,
+            mlir::func::FuncOp kernel_info_funcOp, std::string& kernel_elf2, bool isCompiled,
+            mlir::Operation::operand_range wait_bars, mlir::Operation::operand_range update_bars,
+            VPURegMapped::IndexType indexType,
             llvm::DenseMap<mlir::StringAttr,
                            std::pair<VPUMI37XX::DeclareKernelTextOp, VPUMI37XX::DeclareKernelEntryOp>>&
                     kernelTextEntryMap) {
@@ -378,8 +380,15 @@ private:
             return kernelTextEntryMap[kernelElf];
         };
 
-        auto kernel_elf =
-                std::string(kernel_info_funcOp->getAttrOfType<mlir::StringAttr>("VPU.kernel_entry").getValue());
+        std::string kernel_elf;
+        if (kernel_info_funcOp == nullptr) {
+            kernel_elf = std::move(kernel_elf2);
+            isCompiled = true;
+        } else {
+            kernel_elf =
+                    std::string(kernel_info_funcOp->getAttrOfType<mlir::StringAttr>("VPU.kernel_entry").getValue());
+            isCompiled = false;
+        }
 
         SmallVector<uint8_t> paramsVector = vpux::VPUMI37XX::KernelParamsSerializer::createKernelParams(op);
 
@@ -431,7 +440,8 @@ private:
         auto kernelParams = builderBlk.create<VPUMI37XX::KernelParamsOp>(
                 op->getLoc(), indexType, op.getInputs(), op.getOutputBuffs(), dynInputShapesRange, dynOutputShapesRange,
                 mlir::StringAttr::get(ctx, kernel_elf),
-                mlir::DenseIntElementsAttr::get(mlir::VectorType::get({paramsSize}, uint8Type), paramsVector));
+                mlir::DenseIntElementsAttr::get(mlir::VectorType::get({paramsSize}, uint8Type), paramsVector),
+                mlir::BoolAttr::get(ctx, isCompiled));
 
         builderBlk.create<VPUMI37XX::ActKernelInvocationOp>(op->getLoc(), indexType, /*taskLocation*/ nullptr,
                                                             mlir::ValueRange(wait_bars), mlir::ValueRange(update_bars),
@@ -442,8 +452,9 @@ private:
     }
 
     void createCacheOpSwKernel(mlir::MLIRContext* ctx, VPUIP::SwKernelOp op, mlir::OpBuilder builderBlk,
-                               mlir::SymbolRefAttr kernelTaskType, mlir::Operation::operand_range wait_bars,
-                               mlir::Operation::operand_range update_bars, VPURegMapped::IndexType indexType) {
+                               mlir::SymbolRefAttr kernelTaskType, bool isCompiled,
+                               mlir::Operation::operand_range wait_bars, mlir::Operation::operand_range update_bars,
+                               VPURegMapped::IndexType indexType) {
         auto taskTypeVal = VPU::symbolizeActShaveTaskType(kernelTaskType.getLeafReference().strref());
         VPUX_THROW_UNLESS(taskTypeVal.has_value(), "Operation '{0}' has invalid VPU.task_type attribute '{1}'",
                           op.getKernelFunction(), kernelTaskType.getLeafReference());
@@ -478,7 +489,8 @@ private:
         auto kernelParams = builderBlk.create<VPUMI37XX::KernelParamsOp>(
                 op->getLoc(), indexType, mlir::ValueRange(), mlir::ValueRange(), dynInputShapes, dynOutputShapes,
                 mlir::StringAttr::get(ctx, kernel_type),
-                mlir::DenseIntElementsAttr::get(mlir::VectorType::get({paramsSize}, uint8Type), paramsVectorDummy));
+                mlir::DenseIntElementsAttr::get(mlir::VectorType::get({paramsSize}, uint8Type), paramsVectorDummy),
+                mlir::BoolAttr::get(ctx, isCompiled));
 
         builderBlk.create<VPUMI37XX::ActKernelInvocationOp>(
                 op->getLoc(), indexType, /*taskLocation*/ nullptr, mlir::ValueRange(wait_bars),
@@ -524,14 +536,33 @@ private:
 
                 auto kernel_info_funcOp = moduleOp.lookupSymbol<mlir::func::FuncOp>(sw_kernel_symbol);
 
-                // Check if the task is a Cache handling op
-                const auto kernelTaskType = kernel_info_funcOp->getAttrOfType<mlir::SymbolRefAttr>("VPU.task_type");
-                bool isCacheOp = VPUIP::isCacheOpTaskType(kernelTaskType);
-                if (!isCacheOp) {
-                    createComputeOpSwKernel(ctx, op, builderBlk, kernel_info_funcOp, wait_bars, update_bars, indexType,
-                                            kernelTextEntryMap);
+                if (kernel_info_funcOp) {
+                    const auto kernelTaskType = kernel_info_funcOp->getAttrOfType<mlir::SymbolRefAttr>("VPU.task_type");
+
+                    // Check if the task is a Cache handling op
+                    bool isCacheOp = VPUIP::isCacheOpTaskType(kernelTaskType);
+                    if (!isCacheOp) {
+                        std::string emptyString = std::string("");
+                        createComputeOpSwKernel(ctx, op, builderBlk, kernel_info_funcOp, emptyString, false, wait_bars,
+                                                update_bars, indexType, kernelTextEntryMap);
+                    } else {
+                        createCacheOpSwKernel(ctx, op, builderBlk, kernelTaskType, false, wait_bars, update_bars,
+                                              indexType);
+                    }
                 } else {
-                    createCacheOpSwKernel(ctx, op, builderBlk, kernelTaskType, wait_bars, update_bars, indexType);
+                    // This is the compiled kernel case
+                    auto kernel_info_llvmFuncOp = moduleOp.lookupSymbol<mlir::LLVM::LLVMFuncOp>(sw_kernel_symbol);
+
+                    VPUX_THROW_UNLESS(kernel_info_llvmFuncOp != nullptr, "kernel_info_llvmFuncOp should be valid");
+
+                    auto llvmFuncOpNameStr = kernel_info_llvmFuncOp.getName().str();
+
+                    vpux::translateToLLVMIR(moduleOp, sw_kernel_symbol, _log);
+
+                    createComputeOpSwKernel(ctx, op, builderBlk, nullptr, llvmFuncOpNameStr, true, wait_bars,
+                                            update_bars, indexType, kernelTextEntryMap);
+
+                    vpux::lowerLLVMToBinary(moduleOp, sw_kernel_symbol);
                 }
 
                 shave_task_count++;
@@ -599,10 +630,10 @@ private:
                         dpuResults, op.getOutputSparsityMapBuff(), op.getProfilingData(), op.getTaskTypeAttr(),
                         op.getEltwiseTypeAttr(), mpe_freq_mode, op.getKernelSizeAttr(), op.getKernelStridesAttr(),
                         op.getKernelPaddingAttr(), op.getIsContinuedAttr(), op.getCmSpPatternAttr(),
-                        op.getIsSegmentedAttr(), op.getInputChannelsCompressionAttr(), op.getOutChannelOffsetAttr(),
-                        op.getIsSuperdenseAttr(), op.getIsInplaceAttr(), op.getInputSeSizeAttr(),
-                        op.getOutputSeSizeAttr(), op.getIsPermuteQuantizeAttr(), wait_barriers, update_barriers,
-                        startAfterAttr, cleanAfterAttr);
+                        op.getIsSegmentedAttr(), op.getInputChannelsCompressionAttr(),
+                        op.getIsZeroOffsetWeightsTableAttr(), op.getOutChannelOffsetAttr(), op.getIsSuperdenseAttr(),
+                        op.getIsInplaceAttr(), op.getInputSeSizeAttr(), op.getOutputSeSizeAttr(),
+                        op.getIsPermuteQuantizeAttr(), wait_barriers, update_barriers, startAfterAttr, cleanAfterAttr);
 
                 invariant_task_count++;
 
@@ -814,6 +845,7 @@ public:
                 trivialIndexType,                                   // setup all barriers with the trivial index (0)
                 checked_cast<uint8_t>(origOp.getId()),              // real_id
                 -1,                                                 // int64_t next_same_id()
+                nullptr,                                            // mlir::Value previousSameId
                 mlir::IntegerAttr::get(uint8Type, producer_count),  // origOp.producer_countAttr(),
                 mlir::IntegerAttr::get(uint8Type, consumer_count)   // origOp.consumer_countAttr(),
         );

@@ -41,7 +41,7 @@ func.func @SparseConvSETable(%arg0: memref<1x48x10x10xf16, #NHWC, [@CMX_NN, 0]>,
   }
 
   VPURT.Task waits(%barrier : !VPURT.Barrier) attributes {isTrailingSWLayer = false} {
-    %out = VPUIP.NCEClusterTask {input_se_size = 16 : i64, kernel_padding = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, kernel_size = [1, 1], kernel_strides = [1, 1], task_type = #VPUIP.nce_task_type<CONV>, opaque_ppe = #VPU.PPEStub<>}
+    %out = VPUIP.NCEClusterTask {input_se_size = 16 : i64, kernel_padding = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, kernel_size = [1, 1], kernel_strides = [1, 1], task_type = #VPUIP.nce_task_type<CONV>, ppe = #VPU.PPEStub<>}
             input(%input : memref<1x48x6x10xf16, #NHWC, [@CMX_NN, 0]>)
             input_sparsity_map(%input_sm : memref<1x48x12x21xi1, #NHWC, [@CMX_NN, 0]>)
             input_storage_element_table(%input_se : memref<1x3x12x21xi32, #NHWC, [@CMX_NN, 0]>)
@@ -55,7 +55,7 @@ func.func @SparseConvSETable(%arg0: memref<1x48x10x10xf16, #NHWC, [@CMX_NN, 0]>,
     -> memref<1x48x3x3xf16, #NHWC, [@CMX_NN, 0]> variants : {
       DPUTask {cluster_id = 0 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [15, 2, 63], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     } PPE : {
-      PPETask {opaque_ppe = #VPU.PPEStub<>}
+      PPETask {ppe = #VPU.PPEStub<>}
     }
   }
 
@@ -143,9 +143,9 @@ func.func @SparseConvSETableWithExplictDistributed() -> memref<1x16x80x288xf16, 
               parent_output(%parent_output : !ParentOutput)
               outputs(%output : memref<1x16x80x288xf16, #NHWC, [@CMX_NN, 0]>)
       -> memref<1x16x80x288xf16, #NHWC, [@CMX_NN, 0]> variants : {
-        DPUTask {cluster_id = 1 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [287, 159, 15], outStart = [0, 80, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, opaque_ppe = #VPU.PPEStub<>}
+        DPUTask {cluster_id = 1 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, outEnd = [287, 159, 15], outStart = [0, 80, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, ppe = #VPU.PPEStub<>}
       } PPE : {
-        PPETask {opaque_ppe = #VPU.PPEStub<>}
+        PPETask {ppe = #VPU.PPEStub<>}
       }
     }
 

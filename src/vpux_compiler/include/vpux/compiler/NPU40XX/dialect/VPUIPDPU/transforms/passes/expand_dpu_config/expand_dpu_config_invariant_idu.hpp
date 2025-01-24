@@ -3,6 +3,8 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+#pragma once
+
 #include "vpux/compiler/NPU40XX/dialect/VPUIPDPU/ops.hpp"
 #include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
 
@@ -16,6 +18,8 @@ struct IDUConfig {
         mlir::Type wMode;
         std::optional<int64_t> poolWtData;
         bool wtSparse = false;
+        IDUWeightPalletMode pltMode = IDUWeightPalletMode::NO_PLT;
+        std::optional<SmallVector<double>> quantileLUT;
     } weights;
     struct InputLayerCfg {
         int64_t sparsityPattern = 0;
@@ -37,7 +41,7 @@ struct IDUConfig {
         IDUWorkloadType workloadType = IDUWorkloadType::CONV;
     } workloadCfg;
     struct DepthWiseCfg {
-        bool dw3x3s2OptDisable = false;
+        bool dw3x3s1OptDisable = false;
         std::optional<int64_t> dwOptOffset;
     } depthWiseCfg;
     struct EltWiseCfg {

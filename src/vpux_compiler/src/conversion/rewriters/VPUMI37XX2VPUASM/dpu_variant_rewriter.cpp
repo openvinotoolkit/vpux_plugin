@@ -9,20 +9,20 @@
 namespace vpux {
 namespace vpumi37xx2vpuasm {
 
-mlir::LogicalResult DPUVariantRewriter::symbolize(VPUMI37XX::DPUVariantOp op, SymbolMapper&,
-                                                  mlir::ConversionPatternRewriter& rewriter) const {
+mlir::FailureOr<SymbolizationResult> DPUVariantRewriter::symbolize(VPUMI37XX::DPUVariantOp op, SymbolMapper&,
+                                                                   mlir::ConversionPatternRewriter& rewriter) const {
     auto symName = findSym(op).getRootReference();
     auto taskLocation = findSym(op.getTaskLocation());
 
     auto invariant = findSym(op.getInvariant());
     auto taskIdx = mlir::TypeAttr::get(op.getType());
 
-    rewriter.create<VPUASM::DPUVariantOp_37XX>(op.getLoc(), symName, taskIdx, taskLocation, invariant,
-                                               op.getStartAttr(), op.getEndAttr(), op.getPadAttr(), op.getMpeModeAttr(),
-                                               op.getClusterIdAttr());
+    auto newOp = rewriter.create<VPUASM::DPUVariantOp_37XX>(op.getLoc(), symName, taskIdx, taskLocation, invariant,
+                                                            op.getStartAttr(), op.getEndAttr(), op.getPadAttr(),
+                                                            op.getMpeModeAttr(), op.getClusterIdAttr());
     rewriter.eraseOp(op);
 
-    return mlir::success();
+    return SymbolizationResult(newOp);
 }
 
 }  // namespace vpumi37xx2vpuasm

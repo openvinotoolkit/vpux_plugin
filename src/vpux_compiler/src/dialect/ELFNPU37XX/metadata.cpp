@@ -4,9 +4,10 @@
 //
 
 #include "vpux/compiler/dialect/ELFNPU37XX/metadata.hpp"
+#include "vpux/compiler/core/types/quantile_float/types.hpp"
 #include "vpux/compiler/dialect/VPUASM/ops.hpp"
 
-#include "vpux/utils/IE/prefix.hpp"
+#include <intel_npu/prefix.hpp>
 
 #include <llvm/Support/Format.h>
 
@@ -57,8 +58,10 @@ elf::DType ELFNPU37XX::createDType(mlir::Type type) {
         return elf::DType::DType_I2;
     } else if (type.isInteger(1)) {
         return elf::DType::DType_BIN;
-    } else if (type.isa<mlir::quant::QuantizedType>()) {
+    } else if (mlir::isa<mlir::quant::QuantizedType>(type)) {
         return createDType(type.cast<mlir::quant::QuantizedType>().getStorageType());
+    } else if (mlir::isa<vpux::type::QuantileFloatType>(type)) {
+        return elf::DType::DType_I4X;
     } else {
         VPUX_THROW("Unsupported element type {0}", type);
     }
@@ -163,6 +166,9 @@ elf::OVNodeType ELFNPU37XX::createOVNodeType(mlir::Type type) {
     } else if (type.isInteger(1)) {
         // Both signed and unsigned 1-bit integers are converted to U1
         return elf::OVNodeType::OVNodeType_U1;
+    } else if (mlir::isa<vpux::type::QuantileFloatType>(type)) {
+        // 4 bit quantile float dtype
+        return elf::OVNodeType::OVNodeType_NF4;
     } else {
         VPUX_THROW("Unsupported type : '{0}'", type);
     }
@@ -173,23 +179,28 @@ void setOVNodeType(elf::OVNode& node, IE::DataInfoOp dataInfo) {
     node.type = ELFNPU37XX::createOVNodeType(userType.getElementType());
 }
 
-void setOVNodeNames(elf::OVNode& node, IE::DataInfoOp dataInfo) {
+void setOVNodeNames(elf::OVNode& node, IE::DataInfoOp dataInfo, vpux::Logger log) {
+    auto primaryName = dataInfo.getName().str();
+
     // If the friendlyName is not set in DataInfoOp, friendlyName is equal to primary name.
-    auto friendlyName = dataInfo.getFriendlyName().has_value() ? dataInfo.getFriendlyName().value().str()
-                                                               : dataInfo.getName().str();
+    auto friendlyName = dataInfo.getFriendlyName().has_value() ? dataInfo.getFriendlyName().value().str() : primaryName;
     copy_str(node.friendly_name, friendlyName);
 
     // If the inputName is not set in DataInfoOp, inputName is equal to primary name.
-    auto inputName =
-            dataInfo.getInputName().has_value() ? dataInfo.getInputName().value().str() : dataInfo.getName().str();
+    auto inputName = dataInfo.getInputName().has_value() ? dataInfo.getInputName().value().str() : primaryName;
     copy_str(node.input_name, inputName);
 
     node.tensor_names_count = 0;
     if (dataInfo.getTensorNames().has_value()) {
         const auto tmpTensorNames = dataInfo.getTensorNames().value();
         node.tensor_names_count = checked_cast<uint32_t>(tmpTensorNames.size());
-        for (auto tensor_name : tmpTensorNames | indexed) {
-            copy_str(node.tensor_names[tensor_name.index()], mlir::cast<mlir::StringAttr>(tensor_name.value()).str());
+        if (tmpTensorNames.size() > elf::MAX_METADATA_IO) {
+            log.warning("OV Node \"{0}\" has {1} tensor names. Trimming to the maximum limit of {2}", primaryName,
+                        node.tensor_names_count, elf::MAX_METADATA_IO);
+            node.tensor_names_count = elf::MAX_METADATA_IO;
+        }
+        for (auto i : irange(node.tensor_names_count)) {
+            copy_str(node.tensor_names[i], mlir::cast<mlir::StringAttr>(tmpTensorNames[i]).str());
         }
     }
 }
@@ -215,18 +226,19 @@ void setOVNodeShape(elf::OVNode& node, IE::DataInfoOp dataInfo) {
     }
 }
 
-void createOVNodes(std::vector<elf::OVNode>& nodes, ArrayRef<IE::DataInfoOp> dataInfoVector) {
+void createOVNodes(std::vector<elf::OVNode>& nodes, ArrayRef<IE::DataInfoOp> dataInfoVector, vpux::Logger log) {
     for (auto dataInfo : dataInfoVector) {
         // Serialize metadata only for model primary parameters and results, skip state and shape nodes
         const auto name = dataInfo.getName().str();
-        if (isStateInputName(name) || isStateOutputName(name) || isShapeTensorName(name)) {
+        if (intel_npu::isStateInputName(name) || intel_npu::isStateOutputName(name) ||
+            intel_npu::isShapeTensorName(name)) {
             continue;
         }
 
         elf::OVNode tmpNode{};
 
         setOVNodeType(tmpNode, dataInfo);
-        setOVNodeNames(tmpNode, dataInfo);
+        setOVNodeNames(tmpNode, dataInfo, log);
         setOVNodeShape(tmpNode, dataInfo);
 
         nodes.push_back(tmpNode);
@@ -271,6 +283,8 @@ std::string stringifyOVNodeType(elf::OVNodeType val) {
         return "U1";
     case elf::OVNodeType::OVNodeType_BOOLEAN:
         return "BOOLEAN";
+    case elf::OVNodeType::OVNodeType_NF4:
+        return "NF4";
     default:
         return "";
     }
@@ -442,10 +456,10 @@ std::unique_ptr<elf::NetworkMetadata> ELFNPU37XX::constructMetadata(mlir::Module
     }
 
     // ov parameters
-    createOVNodes(metadata.mOVParameters, inputsInfo);
+    createOVNodes(metadata.mOVParameters, inputsInfo, log);
 
     // ov results
-    createOVNodes(metadata.mOVResults, outputsInfo);
+    createOVNodes(metadata.mOVResults, outputsInfo, log);
 
     printMetadata(&metadata, log);
 

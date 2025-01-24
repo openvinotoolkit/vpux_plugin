@@ -13,8 +13,8 @@ namespace vpumi37xx2vpuasm {
 class KernelRangeRewriter : public VPUASMSymbolizationPattern<VPUMI37XX::ActKernelRangeOp> {
 public:
     using Base::Base;
-    mlir::LogicalResult symbolize(VPUMI37XX::ActKernelRangeOp op, SymbolMapper& mapper,
-                                  mlir::ConversionPatternRewriter& rewriter) const override;
+    mlir::FailureOr<SymbolizationResult> symbolize(VPUMI37XX::ActKernelRangeOp op, SymbolMapper& mapper,
+                                                   mlir::ConversionPatternRewriter& rewriter) const override;
 };
 
 }  // namespace vpumi37xx2vpuasm

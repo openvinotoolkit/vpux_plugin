@@ -68,66 +68,101 @@ def Const_SymbolRefAttrArrayAttr : ArrayOfAttr<Const_Dialect,
 // ContentAttr
 //
 
-def Const_ContentAttr : Property<"::vpux::Const::ContentAttr"> {
+def Const_ContentAttr : Const_Attr<"Content"> {
     let summary = "Lazy folded constant content";
 
     let description = [{
-        This property holds base constant and transformation applied to it. It
-        provides and API to get transformed values on the fly.
-    }];
-
-    let hashProperty = "hash_value($_storage)";
-}
-
-def Const_EphemeralContentAttr : Const_Attr<"EphemeralContent"> {
-    let summary = "Utility wrapper attribute around real content property.";
-
-    let description = [{
-        This attribute holds the bare minimum of fields necessary to reconstruct
-        a content property from. This is used *primarily* for folding and other
-        scoped-lifetime, sensitive places where certain invariants are
-        guaranteed. General usage is prohibited.
+        This object holds base constant and transformations applied to it. It
+        provides an API to get transformed values on the fly.
     }];
 
     let parameters = (ins
         "mlir::ElementsAttr":$baseContent,
-        "vpux::Const::TransformAttrInterfaceArrayAttr":$transformations
+        "vpux::Const::TransformAttrInterfaceArrayAttr":$transformations,
+        "vpux::NDTypeInterface":$finalType,
+        "mlir::UnitAttr":$isSplat
     );
 
+    let builders = [
+        AttrBuilderWithInferredContext<
+            (ins "::mlir::ElementsAttr":$baseContent), [{
+                auto transformationsAttr = vpux::Const::TransformAttrInterfaceArrayAttr::get(
+                    baseContent.getContext(), {});
+                const auto [finalType, isSplat] = vpux::Const::inferFinalTypeAndSplat(
+                    baseContent, {});
+                const auto splatAttr = isSplat ? mlir::UnitAttr::get(baseContent.getContext()) : nullptr;
+                return $_get(baseContent.getContext(), baseContent, transformationsAttr, finalType, splatAttr);
+            }]
+        >,
+
+        AttrBuilderWithInferredContext<
+            (ins "mlir::ElementsAttr":$baseContent,
+                 "mlir::ArrayRef<vpux::Const::TransformAttrInterface>":$transformations), [{
+                auto transformationsAttr = vpux::Const::TransformAttrInterfaceArrayAttr::get(
+                    baseContent.getContext(), transformations);
+                const auto [finalType, isSplat] = vpux::Const::inferFinalTypeAndSplat(
+                    baseContent, transformations);
+                const auto splatAttr = isSplat ? mlir::UnitAttr::get(baseContent.getContext()) : nullptr;
+                return $_get(baseContent.getContext(), baseContent, transformationsAttr, finalType, splatAttr);
+            }]
+        >,
+
+        // Used for cases when splatness can't be inferred from data such as parsing IR with dense resources
+        AttrBuilderWithInferredContext<
+            (ins "mlir::ElementsAttr":$baseContent,
+                 "mlir::UnitAttr":$splatAttr,
+                 "mlir::ArrayRef<vpux::Const::TransformAttrInterface>":$transformations), [{
+                auto transformationsAttr = vpux::Const::TransformAttrInterfaceArrayAttr::get(
+                    baseContent.getContext(), transformations);
+                const auto finalType = vpux::Const::inferFinalType(
+                    mlir::cast<vpux::NDTypeInterface>(baseContent.getType()), transformations);
+                return $_get(baseContent.getContext(), baseContent, transformationsAttr, finalType, splatAttr);
+            }]
+        >,
+    ];
+
+    let storageNamespace = "details";
+    let genVerifyDecl = 1;
+    let skipDefaultBuilders = 1;
+    let genAccessors = 0;
     let hasCustomAssemblyFormat = 1;
 
-    // helper compatibility APIs
     let extraClassDeclaration = [{
-        operator vpux::Const::ContentAttr() const;
-        bool isSplat() const;
+        using ValueType = ::vpux::Const::Content;
+
+        ValueType fold(bool bypassCache = false) const;
+
+        const mlir::ElementsAttr& getBaseContent() const;
+        mlir::ArrayRef<vpux::Const::TransformAttrInterface> getTransformations() const;
         vpux::NDTypeInterface getType() const;
+        bool isSplat() const;
+        vpux::Const::TransformAttrInterfaceArrayAttr getTransformationsAttr() const;
+
+        // ContentSetup interface
+        struct SpecialSetupCallable {  // lambda that could be assigned
+            ::mlir::ElementsAttr baseContent;
+            using return_type = ContentAttr;
+            return_type operator()(const detail::ContentSetupBase& setup) const {
+                return ContentAttr::get(baseContent, setup);
+            }
+        };
+
+        auto transform() const {
+            return vpux::Const::SpecializedContentSetup(getBaseContent().getType(), getTransformations(),
+                SpecialSetupCallable{getBaseContent()});
+        }
+
+        // special version of get() that is used when we create Content
+        // property from the setup object
+        static ContentAttr get(mlir::ElementsAttr base, const detail::ContentSetupBase& setup);
+
+        static mlir::LogicalResult verifyDenseResource(FuncRef<mlir::InFlightDiagnostic()> emitError, mlir::DenseResourceElementsAttr denseResource,
+                                                bool isSplat);
     }];
 
-    let extraClassDefinition = [{
-        mlir::Attribute vpux::Const::EphemeralContentAttr::parse(mlir::AsmParser&, mlir::Type) {
-            VPUX_THROW("This attribute could not be parsed");
-            return nullptr;
-        }
-
-        vpux::Const::EphemeralContentAttr::operator vpux::Const::ContentAttr() const {
-            return vpux::Const::ContentAttr::get(getBaseContent(), getTransformations().getValue());
-        }
-
-        bool vpux::Const::EphemeralContentAttr::isSplat() const {
-            mlir::ArrayRef<vpux::Const::TransformAttrInterface> transforms{};
-            if (getTransformations()) {
-                transforms = getTransformations().getValue();
-            }
-            return vpux::Const::inferFinalTypeAndSplat(getBaseContent(), transforms).second;
-        }
-        vpux::NDTypeInterface vpux::Const::EphemeralContentAttr::getType() const {
-            mlir::ArrayRef<vpux::Const::TransformAttrInterface> transforms{};
-            if (getTransformations()) {
-                transforms = getTransformations().getValue();
-            }
-            return vpux::Const::inferFinalTypeAndSplat(getBaseContent(), transforms).first;
-        }
-    }];
+    let storageType = "vpux::Const::ContentAttr";
+    let returnType = "vpux::Const::Content";
+    let convertFromStorage = "$_self.fold()";
 }
 
 //
@@ -280,32 +315,6 @@ def Const_ConvertElemTypeAttr : Const_Attr<"ConvertElemType",
         This transformation does actual data type conversion.
         Right now only support the sub byte type conversion.
     }];
-
-    let parameters = (ins
-        "mlir::Type":$elemType
-    );
-
-    let builders = [
-        AttrBuilderWithInferredContext<
-            (ins "mlir::Type":$elemType), [{
-                return $_get(elemType.getContext(), elemType);
-            }]
-        >
-    ];
-
-    let storageNamespace = "details";
-    let genVerifyDecl = 1;
-    let skipDefaultBuilders = 1;
-    let assemblyFormat = "`<` $elemType `>`";
-}
-
-//
-// QuantCastAttr
-//
-
-def Const_QuantCastAttr : Const_Attr<"QuantCast",
-        [DeclareAttrInterfaceMethods<Const_TransformAttrInterface>]> {
-    let summary = "Cast element type from raw integer to quantized type";
 
     let parameters = (ins
         "mlir::Type":$elemType

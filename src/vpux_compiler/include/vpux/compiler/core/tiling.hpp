@@ -60,6 +60,11 @@ static constexpr double NCEELTWISE_DPU_COST_RATIO = 2.5;
 // Experimental number to get accurate NCEDWCONV VPUNN cost
 // Track [E#117314]
 static constexpr double NCEDWCONV_DPU_COST_RATIO = 2;
+// Track [E#144661]
+static constexpr double NCEDWCONV_HK_DPU_COST_RATIO = 1.6;
+
+// Track [E#148159]
+static constexpr double SOK_NO_BROADCAST_DPU_COST_RATIO = 1.2;
 
 // Experimental number to get accurate ACT-SPARSITY VPUNN cost
 // Track [E#117195]
@@ -244,6 +249,8 @@ InputTiling backInferReduceTile(const vpux::TileInfo& outputTile, ShapeRef inSha
 InputTiling backInferInterpolateTile(const vpux::TileInfo& outputTile, ArrayRef<int64_t> initialInputDims,
                                      ArrayRef<int64_t> initialOutputDims, ArrayRef<int64_t> initialInputOffsets,
                                      ArrayRef<int64_t> initialOutputOffsets, ArrayRef<int64_t> currentInputDims,
+                                     std::optional<ArrayRef<int64_t>> coordinatesDims,
+                                     std::optional<ArrayRef<int64_t>> lambdasDims,
                                      vpux::IE::InterpolateMode interpolateMode,
                                      vpux::IE::InterpolateCoordMode coordMode,
                                      vpux::IE::InterpolateNearestMode nearestMode, vpux::Logger log);
@@ -263,6 +270,12 @@ InputTiling backInferGatherTile(const vpux::TileInfo& outputTile, const ShapeRef
 InputTiling backInferGatherDMATile(const vpux::TileInfo& outputTile, ShapeRef origInputShape, ShapeRef origIndicesShape,
                                    int64_t axisValue, bool hasAxisTensor, vpux::Logger log);
 
+//
+// GatherElements tiling
+//
+InputTiling backInferGatherElementsTile(const vpux::TileInfo& outputTile, const ShapeRef& origInputShape,
+                                        const ShapeRef& origIndicesShape, int64_t axisValue, const int64_t indicesRank,
+                                        vpux::Logger log);
 //
 // Pad tiling
 //

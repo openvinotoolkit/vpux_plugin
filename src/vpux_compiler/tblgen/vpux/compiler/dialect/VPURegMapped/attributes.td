@@ -107,6 +107,12 @@ def VPURegMapped_RegisterMappedAttr : VPURegMapped_Attr<"RegisterMapped"> {
     let assemblyFormat = "`<` $regMapped `>`";
 }
 
+def VPURegMapped_IndexTypeAttr : VPURegMapped_Attr<"IndexType"> {
+    let cppNamespace = "vpux::VPURegMapped";
+    let parameters = (ins "vpux::VPURegMapped::IndexType":$index);
+    let assemblyFormat = "`<` $index `>`";
+}
+
 //
 // TaskType
 //

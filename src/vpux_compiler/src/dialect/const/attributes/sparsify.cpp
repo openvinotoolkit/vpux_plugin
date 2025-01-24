@@ -209,8 +209,3 @@ Const::Content Const::SparsifyAttr::transform(Const::Content& input) const {
 Const::details::PositionRequirement Const::SparsifyAttr::getPositionRequirement() const {
     return Const::details::PositionRequirement::PREFERRED_LAST;
 }
-
-Const::ContentSetup vpux::Const::ContentSetup::sparsify(bool compressOutputType, mlir::ElementsAttr numActualElements) {
-    return addTransformation(
-            Const::SparsifyAttr::get(mlir::BoolAttr::get(getContext(), compressOutputType), numActualElements));
-}

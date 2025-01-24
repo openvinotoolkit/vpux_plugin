@@ -43,11 +43,6 @@ mlir::LogicalResult canConvertGroupTransposedConvToGroupConv(IE::GroupTransposed
         return mlir::failure();
     }
 
-    // Const::DeclareOp - IE::FakeQuantizeOp filter is not handled
-    if (!mlir::isa<Const::DeclareOp>(groupTransposedConv.getFilter().getDefiningOp())) {
-        return mlir::failure();
-    }
-
     return mlir::success();
 }
 

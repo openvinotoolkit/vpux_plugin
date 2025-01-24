@@ -194,7 +194,12 @@ bool VPU::isOperationSplitOverKernelCompatible(mlir::Operation* op, ShapeRef out
             auto newShape = Shape(origType.getShape().raw());
             newShape[Dims4D::Filter::OC] = OC;
             auto elemType = origType.getElementType();
-            if (auto qElemType = elemType.dyn_cast<mlir::quant::UniformQuantizedPerAxisType>()) {
+            if (auto qElemType = elemType.dyn_cast<mlir::quant::QuantileQuantizedPerAxisType>()) {
+                elemType = mlir::quant::QuantileQuantizedType::get(
+                        qElemType.getFlags(), qElemType.getStorageType(), qElemType.getQuantileType(),
+                        qElemType.getExpressedType(), qElemType.getQuantiles(), /*scale=*/1.0,
+                        /*zeroPoint=*/0, qElemType.getStorageTypeMin(), qElemType.getStorageTypeMax());
+            } else if (auto qElemType = elemType.dyn_cast<mlir::quant::UniformQuantizedPerAxisType>()) {
                 elemType = mlir::quant::UniformQuantizedType::get(
                         qElemType.getFlags(), qElemType.getStorageType(), qElemType.getExpressedType(), /*scale=*/1.0,
                         /*zeroPoint=*/0, qElemType.getStorageTypeMin(), qElemType.getStorageTypeMax());

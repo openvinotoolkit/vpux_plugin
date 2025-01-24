@@ -31,9 +31,10 @@
  * compatibility is not affected if this changes.
  */
 #define VPU_NNRT_40XX_API_VER_MAJOR 11
-#define VPU_NNRT_40XX_API_VER_MINOR 4
-#define VPU_NNRT_40XX_API_VER_PATCH 10
+#define VPU_NNRT_40XX_API_VER_MINOR 5
+#define VPU_NNRT_40XX_API_VER_PATCH 0
 #define VPU_NNRT_40XX_API_VER ((VPU_NNRT_40XX_API_VER_MAJOR << 16) | VPU_NNRT_40XX_API_VER_MINOR)
+#define VPU_CONCAT_NNRT_API_VER(MAJOR, MINOR) (((MAJOR) << 16) | (MINOR))
 
 /* Index in the API version table, same for all HW generations */
 #define VPU_NNRT_40XX_API_VER_INDEX 7

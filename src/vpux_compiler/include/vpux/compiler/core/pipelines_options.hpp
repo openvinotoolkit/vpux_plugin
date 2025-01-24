@@ -8,6 +8,7 @@
 #include "vpux/compiler/core/developer_build_utils.hpp"
 #include "vpux/compiler/utils/options.hpp"
 #include "vpux/compiler/utils/passes.hpp"
+#include "vpux/utils/core/mem_size.hpp"
 
 #include <mlir/Pass/PassManager.h>
 #include <mlir/Transforms/Passes.h>
@@ -28,6 +29,10 @@ struct ReferenceSWOptions : mlir::PassPipelineOptions<T> {
     BoolOption enableMemoryUsageCollector{*this, "enable-memory-usage-collector",
                                           llvm::cl::desc("Enable peak memory usage instrumentation after each pass"),
                                           llvm::cl::init(isDeveloperBuild())};
+
+    BoolOption enableFunctionStatisticsInstrumentation{
+            *this, "enable-function-statistics-instrumentation",
+            llvm::cl::desc("Enable printing statistics for functions after each pass"), llvm::cl::init(false)};
 
     // InitCompiler
     IntOption revisionID{*this, "revision-id", ::llvm::cl::desc("[Optional] Revision ID of the platform")};
@@ -73,7 +78,7 @@ struct ReferenceSWOptions : mlir::PassPipelineOptions<T> {
             llvm::cl::init(true)};
 
     IntOption optimizationLevel{*this, "optimization-level",
-                                llvm::cl::desc("Set compilation optimization level, enabled starting from NPU40XX."
+                                llvm::cl::desc("Set compilation optimization level, enabled starting from NPU4."
                                                "Possible values: 0 - optimization for compilation time,"
                                                "1 - optimization for execution time (default),"
                                                "2 - high optimization for execution time"),
@@ -156,9 +161,9 @@ struct ReferenceSWOptions : mlir::PassPipelineOptions<T> {
             llvm::cl::desc("Enable WeightsDequantizeToFakeQuantizePass on structures with BlockArgument input"),
             llvm::cl::init(false)};
 
-    BoolOption enableHandleU16FakeQuantize{*this, "enable-handle-u16-fake-quantize",
-                                           llvm::cl::desc("Enable handle u16 fake quantize pass"),
-                                           llvm::cl::init(false)};
+    BoolOption enableU16FQToScaleShiftConversion{*this, "enable-u16-fake-quantize-to-scale-shift-conversion",
+                                                 llvm::cl::desc("Enable u16 fake quantize to scale shift conversion"),
+                                                 llvm::cl::init(false)};
 
     BoolOption enableGroupedMatMul{*this, "enable-grouped-matmul",
                                    llvm::cl::desc("Enable execution of grouped MatMul as a single operation."),
@@ -176,15 +181,27 @@ struct ReferenceSWOptions : mlir::PassPipelineOptions<T> {
     BoolOption enableFP16CompressedConvolution{*this, "enable-fp16-compressed-convolution",
                                                llvm::cl::desc("Enable FP16 Compressed convolution op"),
                                                llvm::cl::init(false)};
-    BoolOption moveMultiplyPostFCForDynamicQuant{*this, "move-multiply-post-fc-for-dynamic-quant",
-                                                 llvm::cl::desc("Move multiply post fc for dynamic quant"),
-                                                 llvm::cl::init(false)};
 
     BoolOption enableWeightsDynamicDequantization{*this, "enable-weights-dynamic-dequantization",
                                                   llvm::cl::desc("Enable weights dequantization for weights as input"),
                                                   llvm::cl::init(false)};
 
     StrOption modelHash{*this, "model-hash", llvm::cl::desc("Hash of model XML architecture"), llvm::cl::init("")};
+
+    BoolOption enableRuntimeDequant{*this, "enable-runtime-dequant",
+                                    llvm::cl::desc("Enable runtime dequantization of asymmetricly quantized weight"),
+                                    llvm::cl::init(false)};
+    Int64Option runtimeDequantizationLimit{
+            *this, "runtime-dequantization-limit",
+            llvm::cl::desc("Lower limit on weight size for runtime dequantization"
+                           "Weights smaller than the limit will be statically dequantized"),
+            llvm::cl::init(524'288)};  // 512kb
+
+    BoolOption enableInPlaceBufferization{
+            *this, "enable-in-place-bufferization",
+            llvm::cl::desc("Enable in-place bufferization. Might eliminate some redundant buffer allocations at the "
+                           "cost of longer compile time"),
+            llvm::cl::init(false)};
 
     bool enableForceZMajorConcat = false;
     bool enableSwapTransposeWithFQ = false;
@@ -195,6 +212,7 @@ struct ReferenceSWOptions : mlir::PassPipelineOptions<T> {
     bool enableConvertFCToConv = false;
     bool enableAdjustNonZeroFakeQuant = false;
     bool enableAdaptiveStripping = false;
+    bool enableExtraShapeBoundOps = false;
 };
 
 //
@@ -211,6 +229,10 @@ struct ReferenceHWOptions : mlir::PassPipelineOptions<T> {
     BoolOption enableMemoryUsageCollector{*this, "enable-memory-usage-collector",
                                           llvm::cl::desc("Enable peak memory usage instrumentation after each pass"),
                                           llvm::cl::init(isDeveloperBuild())};
+
+    BoolOption enableFunctionStatisticsInstrumentation{
+            *this, "enable-function-statistics-instrumentation",
+            llvm::cl::desc("Enable printing statistics for functions after each pass"), llvm::cl::init(false)};
 
     // InitCompiler
     IntOption revisionID{*this, "revision-id", ::llvm::cl::desc("[Optional] Revision ID of the platform")};
@@ -242,9 +264,9 @@ struct ReferenceHWOptions : mlir::PassPipelineOptions<T> {
                                              llvm::cl::desc("Enable split-conv-with-multiple-fq pass"),
                                              llvm::cl::init(true)};
 
-    BoolOption enableHandleU16FakeQuantize{*this, "enable-handle-u16-fake-quantize",
-                                           llvm::cl::desc("Enable handle u16 fake quantize pass"),
-                                           llvm::cl::init(false)};
+    BoolOption enableU16FQToScaleShiftConversion{*this, "enable-u16-fake-quantize-to-scale-shift-conversion",
+                                                 llvm::cl::desc("Enable u16 fake quantize to scale shift conversion"),
+                                                 llvm::cl::init(false)};
 
     BoolOption enableHandleLargeStrides{*this, "handle-large-strides",
                                         llvm::cl::desc("Enable handle-large-strides pass"), llvm::cl::init(true)};
@@ -286,6 +308,11 @@ struct ReferenceHWOptions : mlir::PassPipelineOptions<T> {
     DoubleOption weightsSparsityThreshold{*this, "weights-sparsity-threshold",
                                           llvm::cl::desc("Threshold for ratio of sparse weights values"),
                                           llvm::cl::init(-1.0)};
+    Int64Option weightsSparsityLargeConstThreshold{
+            *this, "weights-sparsity-large-const-threshold",
+            llvm::cl::desc(
+                    "Sparsify weights using a single thread if the constant's size is larger than this threshold."),
+            llvm::cl::init((200_MB).to<vpux::Byte>().count())};
 
     BoolOption enablePrefetching{*this, "prefetching",
                                  llvm::cl::desc("Enable prefetch tiling pass and prefetch scheduling"),
@@ -294,6 +321,32 @@ struct ReferenceHWOptions : mlir::PassPipelineOptions<T> {
     BoolOption enablePipelining{*this, "pipelining",
                                 llvm::cl::desc("Enable vertical fusion pipelining pass and schedule pipelining"),
                                 llvm::cl::init(false)};
+
+    IntOption concatRepeatingBlockOutliningSeqLength{
+            *this, "concat-repeating-block-outlining-min-seq-length",
+            llvm::cl::desc("Threshold for length of concat input sequence for repeating blocks outlining"),
+            llvm::cl::init(5)};
+
+    BoolOption enableConcatRepeatingBlockOutlining{*this, "concat-repeating-block-outlining",
+                                                   llvm::cl::desc("Enable concat input as repeating blocks outlining"),
+                                                   llvm::cl::init(true)};
+    IntOption opTilingCacheThreshold{
+            *this, "op-tiling-cache-threshold",
+            llvm::cl::desc("threshold for number of clustered ops for tiling cache optimization"),
+            llvm::cl::init(CLUSTERED_OP_THRESHOLD_FOR_TILING_CACHE)};
+
+    IntOption vfOutliningInstanceThreshold{
+            *this, "vf-outlining-instance-threshold",
+            llvm::cl::desc("Threshold for number of instances (slices of the graph) to perform outlining"),
+            llvm::cl::init(5)};
+
+    IntOption vfOutliningTileThreshold{
+            *this, "vf-outlining-tile-threshold",
+            llvm::cl::desc("Threshold for outlining vertical fusion regions with accumulated number of tiles"),
+            llvm::cl::init(10)};
+
+    BoolOption enableVerticalFusionOutlining{*this, "vf-outlining", llvm::cl::desc("Enable vertical fusion outlining"),
+                                             llvm::cl::init(false)};
 
     BoolOption enableVerticalFusion{*this, "vertical-fusion", llvm::cl::desc("Enable vertical fusion feature"),
                                     llvm::cl::init(false)};
@@ -367,7 +420,7 @@ struct ReferenceHWOptions : mlir::PassPipelineOptions<T> {
             llvm::cl::init(true)};
 
     IntOption optimizationLevel{*this, "optimization-level",
-                                llvm::cl::desc("Set compilation optimization level, enabled starting from NPU40XX."
+                                llvm::cl::desc("Set compilation optimization level, enabled starting from NPU4."
                                                "Possible values: 0 - optimization for compilation time,"
                                                "1 - optimization for execution time (default),"
                                                "2 - high optimization for execution time"),
@@ -566,13 +619,21 @@ struct ReferenceHWOptions : mlir::PassPipelineOptions<T> {
 
     BoolOption fuseMvn6ScaleBias{*this, "fuse-mvn6-scale-bias", llvm::cl::desc("Enable fuse-mvn6-scale-bias pass"),
                                  llvm::cl::init(false)};
-    BoolOption moveMultiplyPostFCForDynamicQuant{*this, "move-multiply-post-fc-for-dynamic-quant",
-                                                 llvm::cl::desc("Move multiply post fc for dynamic quant"),
-                                                 llvm::cl::init(false)};
 
     BoolOption enableWeightsDynamicDequantization{*this, "enable-weights-dynamic-dequantization",
                                                   llvm::cl::desc("Enable weights dequantization for weights as input"),
                                                   llvm::cl::init(false)};
+    BoolOption enableInPlaceBufferization{
+            *this, "enable-in-place-bufferization",
+            llvm::cl::desc("Enable in-place bufferization. Might eliminate some redundant buffer allocations at the "
+                           "cost of longer compile time"),
+            llvm::cl::init(false)};
+
+    BoolOption enableDPUF16ToF32Convert{*this, "enable-dpu-f16-to-f32-convert",
+                                        llvm::cl::desc("Enable running F16 -> F32 converts on DPU."),
+                                        llvm::cl::init(false)};
+
+    bool enableExtraShapeBoundOps = false;
 };
 
 //
@@ -585,12 +646,20 @@ struct DefaultHWOptionsBase : mlir::PassPipelineOptions<DefaultHWOptionsBase> {
     BoolOption enableAdaptiveStripping{*this, "enable-adaptive-stripping", llvm::cl::desc("Enable adaptive stripping"),
                                        llvm::cl::init(false)};
 
+    BoolOption enableDPUF16ToF32Convert{*this, "enable-dpu-f16-to-f32-convert",
+                                        llvm::cl::desc("Enable running F16 -> F32 converts on DPU."),
+                                        llvm::cl::init(false)};
+
     BoolOption enableVerifiers{*this, "enable-verifiers", llvm::cl::desc("Enable verifiers execution after each pass"),
                                llvm::cl::init(isDeveloperBuild())};
 
     BoolOption enableMemoryUsageCollector{*this, "enable-memory-usage-collector",
                                           llvm::cl::desc("Enable peak memory usage instrumentation after each pass"),
                                           llvm::cl::init(isDeveloperBuild())};
+
+    BoolOption enableFunctionStatisticsInstrumentation{
+            *this, "enable-function-statistics-instrumentation",
+            llvm::cl::desc("Enable printing statistics for functions after each pass"), llvm::cl::init(false)};
 
     StrOption functionOutlining{*this, "function-outlining",
                                 llvm::cl::desc("Define a list of outlining modes and their parameters where the next "
@@ -605,6 +674,14 @@ struct DefaultHWOptionsBase : mlir::PassPipelineOptions<DefaultHWOptionsBase> {
 
     StrOption debatcherExtraArgs{*this, "debatching-extra-args", llvm::cl::desc("Extra arguments for debatching "),
                                  llvm::cl::init("")};
+
+    StrOption debatcherInliningMethod{*this, "debatching-inlining-method",
+                                      llvm::cl::desc("Method for inlinging of debatching-function. Supported methods: "
+                                                     "\"naive\", \"reordering\". Default is \"reordering\""),
+                                      llvm::cl::init("reordering")};
+
+    BoolOption enableLoopOutliner{*this, "loop-outlining", llvm::cl::desc("Apply outlining for body of Loop op"),
+                                  llvm::cl::init(false)};
 
     BoolOption enableDummyOpReplacement{*this, "dummy-op-replacement",
                                         llvm::cl::desc("Replace unsupported SW Kernel ops with Dummy ones"),
@@ -641,7 +718,7 @@ struct DefaultHWOptionsBase : mlir::PassPipelineOptions<DefaultHWOptionsBase> {
             llvm::cl::init(true)};
 
     IntOption optimizationLevel{*this, "optimization-level",
-                                llvm::cl::desc("Set compilation optimization level, enabled starting from NPU40XX."
+                                llvm::cl::desc("Set compilation optimization level, enabled starting from NPU4."
                                                "Possible values: 0 - optimization for compilation time,"
                                                "1 - optimization for execution time (default),"
                                                "2 - high optimization for execution time"),
@@ -651,6 +728,8 @@ struct DefaultHWOptionsBase : mlir::PassPipelineOptions<DefaultHWOptionsBase> {
                                       llvm::cl::desc("Set performance hint for compiler to set up number of tiles."
                                                      "Possible values: latency, efficiency (default)"),
                                       llvm::cl::init("efficiency")};
+
+    BoolOption enableProfiling{*this, "profiling", llvm::cl::desc("Enable profiling"), llvm::cl::init(false)};
 
     BoolOption enableScheduleTrace{*this, "enable-schedule-trace",
                                    llvm::cl::desc("Enable compile time schedule analysis and trace"),
@@ -676,6 +755,32 @@ struct DefaultHWOptionsBase : mlir::PassPipelineOptions<DefaultHWOptionsBase> {
     BoolOption enablePipelining{*this, "pipelining",
                                 llvm::cl::desc("Enable vertical fusion pipelining pass and schedule pipelining"),
                                 llvm::cl::init(true)};
+
+    IntOption concatRepeatingBlockOutliningSeqLength{
+            *this, "concat-repeating-block-outlining-min-seq-length",
+            llvm::cl::desc("Threshold for length of concat input sequence for repeating blocks outlining"),
+            llvm::cl::init(5)};
+
+    BoolOption enableConcatRepeatingBlockOutlining{*this, "concat-repeating-block-outlining",
+                                                   llvm::cl::desc("Enable concat input as repeating blocks outlining"),
+                                                   llvm::cl::init(true)};
+    IntOption opTilingCacheThreshold{
+            *this, "op-tiling-cache-threshold",
+            llvm::cl::desc("threshold for number of clustered ops for tiling cache optimization"),
+            llvm::cl::init(CLUSTERED_OP_THRESHOLD_FOR_TILING_CACHE)};
+
+    IntOption vfOutliningInstanceThreshold{
+            *this, "vf-outlining-instance-threshold",
+            llvm::cl::desc("Threshold for number of instances (slices of the graph) to perform outlining"),
+            llvm::cl::init(5)};
+
+    IntOption vfOutliningTileThreshold{
+            *this, "vf-outlining-tile-threshold",
+            llvm::cl::desc("Threshold for outlining vertical fusion regions with accumulated number of tiles"),
+            llvm::cl::init(10)};
+
+    BoolOption enableVerticalFusionOutlining{*this, "vf-outlining", llvm::cl::desc("Enable vertical fusion outlining"),
+                                             llvm::cl::init(true)};
 
     // SetupChannelsAutoPadding pass options
     BoolOption enableAutoPaddingODU{*this, "enable-auto-padding-odu",
@@ -728,6 +833,12 @@ struct DefaultHWOptionsBase : mlir::PassPipelineOptions<DefaultHWOptionsBase> {
     BoolOption reduceParallelControlFlows{*this, "reduce-parallel-control-flows",
                                           llvm::cl::desc("Reduce parallel overlapping control flows where possible"),
                                           llvm::cl::init(true)};
+
+    Int64Option constantFoldingSizeThreshold{
+            *this, "constant-folding-threshold",
+            llvm::cl::desc("Fold constants in single threading if the size is larger than the threshold."),
+            llvm::cl::init(300 * 1024 * 1024)};  // 300MB
+
     // Option to control locations verification. Possible options are:
     // off - no verification
     // fast - verifies locations only after last* pass by thorough algorithm
@@ -761,13 +872,20 @@ struct DefaultHWOptionsBase : mlir::PassPipelineOptions<DefaultHWOptionsBase> {
     BoolOption enableMCSideLoadDump{*this, "enable-mc-side-loading-dump",
                                     llvm::cl::desc("Dump multi-cluster strategies in side-loading format"),
                                     llvm::cl::init(false)};
-    BoolOption moveMultiplyPostFCForDynamicQuant{*this, "move-multiply-post-fc-for-dynamic-quant",
-                                                 llvm::cl::desc("Move multiply post fc for dynamic quant"),
-                                                 llvm::cl::init(false)};
 
     BoolOption enableWeightsDynamicDequantization{*this, "enable-weights-dynamic-dequantization",
                                                   llvm::cl::desc("Enable weights dequantization for weights as input"),
                                                   llvm::cl::init(false)};
+    BoolOption enableInPlaceBufferization{
+            *this, "enable-in-place-bufferization",
+            llvm::cl::desc("Enable in-place bufferization. Might eliminate some redundant buffer allocations at the "
+                           "cost of longer compile time"),
+            llvm::cl::init(false)};
+
+    BoolOption enableExtraShapeBoundOps{
+            *this, "enable-extra-shape-bound-ops",
+            llvm::cl::desc("Attach ShapeBoundOp trait to operations that perform faster when their shapes are static."),
+            llvm::cl::init(false)};
 };
 
 //
@@ -783,6 +901,26 @@ struct MCAndTilingOptionsBase : mlir::PassPipelineOptions<MCAndTilingOptionsBase
     BoolOption enablePipelining{*this, "pipelining", llvm::cl::desc("Enable vertical fusion pipelining"),
                                 llvm::cl::init(false)};
 
+    IntOption opTilingCacheThreshold{
+            *this, "op-tiling-cache-threshold",
+            llvm::cl::desc("threshold for number of clustered ops for tiling cache optimization"),
+            llvm::cl::init(CLUSTERED_OP_THRESHOLD_FOR_TILING_CACHE)};
+
+    IntOption vfOutliningInstanceThreshold{
+            *this, "vf-outlining-instance-threshold",
+            llvm::cl::desc("Threshold for number of instances (slices of the graph) to perform outlining"),
+            llvm::cl::init(5)};
+
+    IntOption vfOutliningTileThreshold{
+            *this, "vf-outlining-tile-threshold",
+            llvm::cl::desc("Threshold for outlining vertical fusion regions with accumulated number of tiles"),
+            llvm::cl::init(10)};
+
+    BoolOption enableVerticalFusionOutlining{*this, "vf-outlining", llvm::cl::desc("Enable vertical fusion outlining"),
+                                             llvm::cl::init(false)};
+
+    BoolOption enableProfiling{*this, "profiling", llvm::cl::desc("Enable profiling"), llvm::cl::init(false)};
+
     // Extended Tiling options - Incremental Pipeline
     BoolOption readStrategyFromJson{*this, "read-strategy-from-json",
                                     llvm::cl::desc("Read the multiclustering and tiling strategy from a JSON file"),
@@ -792,9 +930,9 @@ struct MCAndTilingOptionsBase : mlir::PassPipelineOptions<MCAndTilingOptionsBase
                                    llvm::cl::desc("Write the multiclustering and tiling strategy to a JSON file"),
                                    llvm::cl::init(false)};
 
-    BoolOption enableVPUNNCost{*this, "vpunn-cost",
-                               llvm::cl::desc("Use VPUNN cost model to get the best tiling strategy"),
-                               llvm::cl::init(false)};
+    BoolOption enableVPUNNCostForTiling{*this, "enable-vpunn-cost-for-tiling",
+                                        llvm::cl::desc("Use VPUNN cost model to get the best tiling strategy"),
+                                        llvm::cl::init(false)};
 
     BoolOption enableOutputPipelining{*this, "output-pipelining", llvm::cl::desc("Enable output pipelining"),
                                       llvm::cl::init(false)};
@@ -821,7 +959,12 @@ struct MCAndTilingOptionsBase : mlir::PassPipelineOptions<MCAndTilingOptionsBase
         enablePrefetching = options.enablePrefetching;
         enableVerticalFusion = options.enableVerticalFusion;
         enablePipelining = options.enablePipelining;
-        enableVPUNNCost = options.enableVPUNNCost;
+        enableVPUNNCostForTiling = options.enableVPUNNCostForTiling;
+        opTilingCacheThreshold = options.opTilingCacheThreshold;
+        vfOutliningInstanceThreshold = options.vfOutliningInstanceThreshold;
+        vfOutliningTileThreshold = options.vfOutliningTileThreshold;
+        enableVerticalFusionOutlining = options.enableVerticalFusionOutlining;
+        enableProfiling = options.enableProfiling;
         enableOutputPipelining = options.enableOutputPipelining;
         enableShaveDDRAccessOptimization = options.enableShaveDDRAccessOptimization;
         readStrategyFromJson = options.readStrategyFromJson;
@@ -847,9 +990,36 @@ struct BackendCompilationOptionsBase : mlir::PassPipelineOptions<T> {
                                        llvm::cl::desc("Threshold for WLM optimization"),
                                        llvm::cl::init(VIRTUAL_BARRIER_THRESHOLD_WLM)};
 
+    mlir::detail::PassOptions::Option<WlmVpurtEnqueueMode> wlmVpurtEnqueue{
+            *this, "wlm-vpurt-enqueue",
+            ::llvm::cl::desc("Option for enabling WLM enqueue barriers search algorithm at VPURT. To be used only for "
+                             "experiments."),
+            ::llvm::cl::init(WlmVpurtEnqueueMode::DISABLED),
+            ::llvm::cl::values(clEnumValN(WlmVpurtEnqueueMode::ENABLED, "ENABLED",
+                                          "WLM enqueue barriers search algorithm at VPURT ENABLED"),
+                               clEnumValN(WlmVpurtEnqueueMode::DISABLED, "DISABLED",
+                                          "WLM enqueue barriers search algorithm at VPURT DISABLED. Use LCA based "
+                                          "enqueue algorithm at VPUMI"))};
+
     StrOption enableShaveDDRAccessOptimization{
             *this, "enable-shave-ddr-access-optimization",
             llvm::cl::desc("SHAVE DDR access optimization option (true, false or auto)"), llvm::cl::init("true")};
+
+    BoolOption enableDumpStatisticsOfWlmOps{*this, "enable-dump-wlm-ops-stats",
+                                            llvm::cl::desc("Enable dump of WLM ops statistics"), llvm::cl::init(false)};
+
+    mlir::detail::PassOptions::Option<AllocateShaveStackFrames> allocateShaveStackFrames{
+            *this, "allocate-shave-stack-frames",
+            ::llvm::cl::desc("Enable the computation and allocation of a new section which "
+                             "will be used as stack frame form shaves."),
+            ::llvm::cl::init(AllocateShaveStackFrames::DISABLED),
+            ::llvm::cl::values(
+                    clEnumValN(AllocateShaveStackFrames::ENABLED, "ENABLED",
+                               "Allocate DDR buffer to be used as shave stack frames."),
+                    clEnumValN(AllocateShaveStackFrames::DISABLED, "DISABLED", "Stack frames allocated by FW."))};
 };
+
+template <typename T>
+struct ShaveCodeGenOptionsBase : mlir::PassPipelineOptions<T> {};
 
 }  // namespace vpux

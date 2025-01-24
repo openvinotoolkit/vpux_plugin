@@ -4,6 +4,7 @@
 //
 
 #include "vpux/compiler/dialect/IE/utils/permute_infer.hpp"
+#include "vpux/compiler/dialect/const/utils/utils.hpp"
 #include "vpux/compiler/init.hpp"
 
 #include <gtest/gtest.h>
@@ -18,7 +19,7 @@ Const::DeclareOp buildConstant(mlir::MLIRContext& ctx, const ShapeRef shape, con
                                const DimsOrder inputOrder) {
     std::vector<uint8_t> content(shape.totalSize(), 1);
     const auto dataType = mlir::RankedTensorType::get(shape.raw(), getUInt8Type(&ctx));
-    const auto dataAttr = mlir::DenseElementsAttr::get(dataType, mlir::ArrayRef<uint8_t>(content));
+    const auto dataAttr = Const::createConstContent(dataType, mlir::ArrayRef<uint8_t>(content));
     const auto baseContentAttr = Const::ContentAttr::get(dataAttr);
     const int64_t storageTypeMin = std::numeric_limits<uint8_t>::min();
     const int64_t storageTypeMax = std::numeric_limits<uint8_t>::max();
@@ -28,7 +29,7 @@ Const::DeclareOp buildConstant(mlir::MLIRContext& ctx, const ShapeRef shape, con
     const auto quantType =
             mlir::quant::UniformQuantizedPerAxisType::get(0, getUInt8Type(&ctx), mlir::Float32Type::get(&ctx), scales,
                                                           zeroPoints, axis, storageTypeMin, storageTypeMax);
-    auto contentAttr = baseContentAttr.transform().reorder(inputOrder).quantCast(quantType).get();
+    auto contentAttr = baseContentAttr.transform().reorder(inputOrder).castElemType(quantType).get();
     const auto quantDataType = contentAttr.getType();
     mlir::OpBuilder builder(&ctx);
     return builder.create<Const::DeclareOp>(mlir::UnknownLoc::get(&ctx), quantDataType, std::move(contentAttr));

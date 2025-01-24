@@ -1,4 +1,4 @@
-// Copyright (C) Intel Corporation
+// Copyright (C) 2022 - 2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -8,35 +8,28 @@
 #include "vpu_ov2_layer_test.hpp"
 
 namespace ov {
-
 namespace test {
 
 class ScatterUpdateLayerTestCommon : public ScatterUpdateLayerTest, virtual public VpuOv2LayerTest {};
 
-class ScatterUpdateLayerTest_NPU3720 : public ScatterUpdateLayerTestCommon {};
-class ScatterUpdateLayerTest_NPU4000 : public ScatterUpdateLayerTestCommon {};
-
-TEST_P(ScatterUpdateLayerTest_NPU3720, SW) {
+TEST_P(ScatterUpdateLayerTestCommon, NPU3720_SW) {
     setReferenceSoftwareMode();
     run(Platform::NPU3720);
 }
 
-TEST_P(ScatterUpdateLayerTest_NPU3720, HW) {
+TEST_P(ScatterUpdateLayerTestCommon, NPU3720_HW) {
     setDefaultHardwareMode();
     run(Platform::NPU3720);
 }
 
-TEST_P(ScatterUpdateLayerTest_NPU4000, SW) {
+TEST_P(ScatterUpdateLayerTestCommon, NPU4000_SW) {
     setReferenceSoftwareMode();
     run(Platform::NPU4000);
 }
-
 }  // namespace test
-
 }  // namespace ov
 
-using ov::test::ScatterUpdateLayerTest_NPU3720;
-using ov::test::ScatterUpdateLayerTest_NPU4000;
+using ov::test::ScatterUpdateLayerTestCommon;
 
 namespace {
 // map<inputShape, map<indicesShape, axis>>
@@ -78,10 +71,7 @@ const auto params = testing::Combine(testing::ValuesIn(combineShapes(axesShapeIn
                                      testing::ValuesIn(scatterIndices), testing::Values(ov::element::f16),
                                      testing::Values(ov::element::i32), testing::Values(ov::test::utils::DEVICE_NPU));
 
-INSTANTIATE_TEST_SUITE_P(smoke_ScatterUpdate, ScatterUpdateLayerTest_NPU3720, params,
-                         ScatterUpdateLayerTest_NPU3720::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_ScatterUpdate, ScatterUpdateLayerTest_NPU4000, params,
-                         ScatterUpdateLayerTest_NPU4000::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_ScatterUpdate, ScatterUpdateLayerTestCommon, params,
+                         ScatterUpdateLayerTestCommon::getTestCaseName);
 
 }  // namespace

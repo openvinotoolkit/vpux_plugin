@@ -6,22 +6,13 @@
 #include "vpux/compiler/dialect/IE/transforms/passes.hpp"
 
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
+#include "vpux/compiler/dialect/const/utils/utils.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 
 using namespace vpux;
 
 namespace {
-
-static inline Const::DeclareOp createConstOpFromValue(mlir::PatternRewriter& rewriter, mlir::Location loc, float val,
-                                                      mlir::RankedTensorType argType) {
-    const auto denseElementVal = wrapData(argType, val);
-    VPUX_THROW_UNLESS(denseElementVal != nullptr,
-                      "Subtract pool has incompatible data type {0}, only float16 or float32 are supported",
-                      argType.getElementType());
-
-    return rewriter.create<Const::DeclareOp>(loc, argType, Const::ContentAttr::get(denseElementVal));
-}
 
 Const::DeclareOp getInputConstantOp(mlir::Value input) {
     if (input == nullptr) {
@@ -44,7 +35,7 @@ mlir::Value createNegativeFqVal(mlir::PatternRewriter& rewriter, mlir::Location 
     auto valConstContent = valConst.getContent();
     auto inValue = valConstContent.getSplatValue<float>();
     auto negativeValue = (inValue == 0) ? 0 : -1 * inValue;
-    return createConstOpFromValue(rewriter, loc, negativeValue, storageType);
+    return Const::createFloatConst(rewriter, loc, storageType, negativeValue);
 }
 
 IE::FakeQuantizeOp createNewFq(mlir::PatternRewriter& rewriter, mlir::Location loc, mlir::Value fqInput,
@@ -150,7 +141,7 @@ mlir::LogicalResult ConvertSubtractToDWConvAdd::matchAndRewrite(IE::SubtractOp s
 
     if (auto mulOp = input2.getDefiningOp<IE::MultiplyOp>()) {
         auto handleConstantInput = [&](auto constInputOp, mlir::Value otherInput, mlir::Value maybeFqInput) {
-            auto constInputContent = constInputOp.getContentAttr();
+            const auto& constInputContent = constInputOp.getContentAttr();
             auto negativeContent = constInputContent.transform().rescale(-1.0).get();
             mlir::Value negativeInput = rewriter.create<Const::DeclareOp>(constInputOp.getLoc(), constInputOp.getType(),
                                                                           std::move(negativeContent));
@@ -201,7 +192,7 @@ mlir::LogicalResult ConvertSubtractToDWConvAdd::matchAndRewrite(IE::SubtractOp s
 
     mlir::Value negativeInput = input2;
     if (auto constInput2 = getInputConstantOp(input2)) {
-        auto constInput2Content = constInput2.getContentAttr();
+        const auto& constInput2Content = constInput2.getContentAttr();
         auto negativeContent = constInput2Content.transform().rescale(-1.0).get();
         negativeInput = rewriter.create<Const::DeclareOp>(appendLoc(subOpLoc, "neg_cst"), constInput2.getType(),
                                                           std::move(negativeContent));
@@ -209,14 +200,14 @@ mlir::LogicalResult ConvertSubtractToDWConvAdd::matchAndRewrite(IE::SubtractOp s
         const auto elemType = outputType.getElementType();
         const auto inputC = input2Shape[Dims4D::Act::C];
         const auto filterStorageType = mlir::RankedTensorType::get(SmallVector<int64_t>{inputC, 1, 1, 1}, elemType);
-        auto dwConvFilter =
-                createConstOpFromValue(rewriter, appendLoc(subOpLoc, "conv_filter"), -1.0f, filterStorageType);
-        auto filter = dwConvFilter.getOutput();
+        auto filter = Const::createFloatConst(rewriter, appendLoc(subOpLoc, "conv_filter"), filterStorageType, -1.0f);
 
         if (fqInput2 != nullptr) {
             const auto fqArgType = mlir::RankedTensorType::get({1, 1, 1, 1}, elemType);
-            auto fqVal = createConstOpFromValue(rewriter, subOpLoc, -1.0f, fqArgType);
-            auto filterFQ = rewriter.create<IE::FakeQuantizeOp>(subOpLoc, filter, fqVal, fqVal, fqVal, fqVal,
+            // TODO(E#145633): FQ(-1,-1) will cause GroupConv output 3x larger than reference for unknown reason.
+            auto low = Const::createFloatConst(rewriter, subOpLoc, fqArgType, -1.0f);
+            auto high = Const::createFloatConst(rewriter, subOpLoc, fqArgType, 0.0f);
+            auto filterFQ = rewriter.create<IE::FakeQuantizeOp>(subOpLoc, filter, low, high, low, high,
                                                                 fqInput2.getLevelsAttr(), fqInput2.getLowFpTypeAttr(),
                                                                 fqInput2.getAutoBroadcastAttr());
             filter = filterFQ.getOutput();
@@ -284,6 +275,12 @@ void ConvertSubtractToAddPass::safeRunOnFunc() {
         const auto hasIntInput = input1Type.getElementType().isa<mlir::IntegerType>() ||
                                  input2Type.getElementType().isa<mlir::IntegerType>();
 
+        // SubTract with FLOAT32 input/ouput can not be executed as NCE op, and should be kept like Subtract and be
+        // executed on shave.
+        const auto hasFP32Input = input1Type.getElementType().isa<mlir::Float32Type>() ||
+                                  input2Type.getElementType().isa<mlir::Float32Type>();
+        const auto convertGroupConv = getInputConstantOp(op.getInput2()) == nullptr;
+
         // Check if a broadcast operation is needed. If the input and output types do not match, and it cannot be
         // optimized through constant folding, then broadcasting is required
         const auto needsBroadcast = (input1Type != input2Type) &&
@@ -302,7 +299,7 @@ void ConvertSubtractToAddPass::safeRunOnFunc() {
             }
         }
 
-        return hasIntInput || needsBroadcast || needsExpansion;
+        return hasIntInput || needsBroadcast || needsExpansion || (hasFP32Input && convertGroupConv);
     };
 
     mlir::ConversionTarget target(ctx);

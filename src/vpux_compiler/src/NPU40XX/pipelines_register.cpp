@@ -23,13 +23,14 @@ using namespace vpux;
 //
 
 void PipelineRegistry40XX::registerPipelines() {
-    mlir::PassPipelineRegistration<>("ShaveCodeGen", "Compile both from IE to VPUIP and from IERT to LLVM for VPU40XX",
-                                     [](mlir::OpPassManager& pm) {
-                                         buildShaveCodeGenPipeline40XX(pm);
-                                     });
+    mlir::PassPipelineRegistration<ShaveCodeGenOptions40XX>(
+            "ShaveCodeGen", "Compile both from IE to VPUIP and from IERT to LLVM for NPU40XX",
+            [](mlir::OpPassManager& pm, const ShaveCodeGenOptions40XX& options) {
+                buildShaveCodeGenPipeline(pm, options);
+            });
 
     mlir::PassPipelineRegistration<ReferenceSWOptions40XX>(
-            "reference-sw-mode", "Compile IE Network in Reference Software mode (SW only execution) for VPU40XX",
+            "reference-sw-mode", "Compile IE Network in Reference Software mode (SW only execution) for NPU40XX",
             [](mlir::OpPassManager& pm, const ReferenceSWOptions40XX& options) {
                 VPU::buildInitCompilerPipeline(pm,
                                                {VPU::ArchKind::NPU40XX, VPU::CompilationMode::ReferenceSW, options});
@@ -38,7 +39,7 @@ void PipelineRegistry40XX::registerPipelines() {
             });
 
     mlir::PassPipelineRegistration<ReferenceHWOptions40XX>(
-            "reference-hw-mode", "Compile IE Network in Reference Hardware mode (HW and SW execution) for VPU40XX",
+            "reference-hw-mode", "Compile IE Network in Reference Hardware mode (HW and SW execution) for NPU40XX",
             [](mlir::OpPassManager& pm, const ReferenceHWOptions40XX& options) {
                 VPU::buildInitCompilerPipeline(pm,
                                                {VPU::ArchKind::NPU40XX, VPU::CompilationMode::ReferenceHW, options});
@@ -47,7 +48,7 @@ void PipelineRegistry40XX::registerPipelines() {
             });
 
     mlir::PassPipelineRegistration<DefaultHWOptions40XX>(
-            "default-hw-mode", "Compile IE Network in Default Hardware mode (HW and SW execution) for VPU40XX",
+            "default-hw-mode", "Compile IE Network in Default Hardware mode (HW and SW execution) for NPU40XX",
             [](mlir::OpPassManager& pm, const DefaultHWOptions40XX& options) {
                 VPU::buildInitCompilerPipeline(pm, {VPU::ArchKind::NPU40XX, VPU::CompilationMode::DefaultHW, options});
 

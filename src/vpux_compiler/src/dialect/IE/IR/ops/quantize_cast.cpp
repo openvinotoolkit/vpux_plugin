@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+#include "vpux/compiler/core/types/quantile_float/types.hpp"
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/utils/cast_utils.hpp"
 
@@ -29,37 +30,88 @@ mlir::LogicalResult vpux::IE::QuantizeCastOp::inferReturnTypeComponents(
     const auto inType = quantizeCast.getInput().getType().cast<mlir::RankedTensorType>();
     const auto dstElemType = quantizeCast.getDstElemType();
     const auto outDesc = vpux::getTensorAttr(inType);
-    unsigned int outputWidth;
-    if (auto quantizedOutput = dstElemType.dyn_cast<mlir::quant::QuantizedType>()) {
-        outputWidth = quantizedOutput.getStorageTypeIntegralWidth();
-    } else if (auto quantizedOutput = dstElemType.dyn_cast<mlir::IntegerType>()) {
-        outputWidth = quantizedOutput.getWidth();
-    } else {
-        return errorAt(loc, "Unsupported output type: {0}", dstElemType);
-    }
 
-    if (auto integerInput = inType.getElementType().dyn_cast<mlir::IntegerType>()) {
-        const auto inputWidth = integerInput.getWidth();
-        if (inputWidth != outputWidth) {
-            return errorAt(loc, "Integer input width ({0}) differs from output width ({1})", inputWidth, outputWidth);
+    // Supported cast cases:
+    //      quant_quantile  <--->   quant_quantile
+    //      quant_quantile  <--->   quantile_float
+    //      quant_uniform   <--->   quant_uniform
+    //      quant_uniform   <--->   integer
+    unsigned int inputWidth;
+    unsigned int outputWidth;
+    const auto inElemType = inType.getElementType();
+    if (mlir::isa<mlir::quant::QuantileQuantizedType, mlir::quant::QuantileQuantizedPerAxisType>(inElemType)) {
+        if (mlir::isa<mlir::quant::QuantileQuantizedType, mlir::quant::QuantileQuantizedPerAxisType>(dstElemType)) {
+            auto quantizedOutput = dstElemType.dyn_cast<mlir::quant::QuantizedType>();
+            outputWidth = quantizedOutput.getStorageTypeIntegralWidth();
+        } else if (auto quantileFloatOutput = dstElemType.dyn_cast<vpux::type::QuantileFloatType>()) {
+            outputWidth = quantileFloatOutput.getWidth();
+        } else {
+            return errorAt(loc, "Unsupported quantize cast: '{0}'->'{1}'", inElemType, dstElemType);
         }
-    } else if (auto quantizedInput = inType.getElementType().dyn_cast<mlir::quant::QuantizedType>()) {
-        const auto inputWidth = quantizedInput.getStorageTypeIntegralWidth();
+
+        auto quantizedInput = inElemType.dyn_cast<mlir::quant::QuantizedType>();
+        inputWidth = quantizedInput.getStorageTypeIntegralWidth();
+        if (inputWidth != outputWidth) {
+            return errorAt(loc, "Quantile quantized input width ({0}) differs from output width ({1})", inputWidth,
+                           outputWidth);
+        }
+    } else if (auto quantileFloatInput = inElemType.dyn_cast<vpux::type::QuantileFloatType>()) {
+        if (mlir::isa<mlir::quant::QuantileQuantizedType, mlir::quant::QuantileQuantizedPerAxisType>(dstElemType)) {
+            auto quantizedOutput = dstElemType.dyn_cast<mlir::quant::QuantizedType>();
+            outputWidth = quantizedOutput.getStorageTypeIntegralWidth();
+        } else {
+            return errorAt(loc, "Unsupported quantize cast: '{0}'->'{1}'", inElemType, dstElemType);
+        }
+
+        inputWidth = quantileFloatInput.getWidth();
+        if (inputWidth != outputWidth) {
+            return errorAt(loc, "Quantile float input width ({0}) differs from output width ({1})", inputWidth,
+                           outputWidth);
+        }
+    } else if (mlir::isa<mlir::quant::UniformQuantizedType, mlir::quant::UniformQuantizedPerAxisType>(inElemType)) {
+        if (mlir::isa<mlir::quant::UniformQuantizedType, mlir::quant::UniformQuantizedPerAxisType>(dstElemType)) {
+            auto quantizedOutput = dstElemType.dyn_cast<mlir::quant::QuantizedType>();
+            outputWidth = quantizedOutput.getStorageTypeIntegralWidth();
+        } else if (auto integerOutput = dstElemType.dyn_cast<mlir::IntegerType>()) {
+            outputWidth = integerOutput.getWidth();
+        } else {
+            return errorAt(loc, "Unsupported quantize cast: '{0}'->'{1}'", inElemType, dstElemType);
+        }
+
+        auto quantizedInput = inElemType.dyn_cast<mlir::quant::QuantizedType>();
+        inputWidth = quantizedInput.getStorageTypeIntegralWidth();
         if (inputWidth != outputWidth) {
             return errorAt(loc, "Quantized input width ({0}) differs from output width ({1})", inputWidth, outputWidth);
         }
+    } else if (auto integerInput = inElemType.dyn_cast<mlir::IntegerType>()) {
+        if (auto quantizedOutput = dstElemType.dyn_cast<mlir::quant::QuantizedType>()) {
+            outputWidth = quantizedOutput.getStorageTypeIntegralWidth();
+        } else {
+            return errorAt(loc, "Unsupported quantize cast: '{0}'->'{1}'", inElemType, dstElemType);
+        }
+
+        inputWidth = integerInput.getWidth();
+        if (inputWidth != outputWidth) {
+            return errorAt(loc, "Integer input width ({0}) differs from output width ({1})", inputWidth, outputWidth);
+        }
     } else {
-        return errorAt(loc, "Unsupported combination of input and output element types: {0} -> {1}",
-                       inType.getElementType(), dstElemType);
+        return errorAt(loc, "Unsupported combination of input and output element types: {0} -> {1}", inElemType,
+                       dstElemType);
     }
 
     inferredReturnShapes.emplace_back(inType.getShape(), dstElemType, outDesc);
     return mlir::success();
 }
 
-mlir::OpFoldResult vpux::IE::QuantizeCastOp::fold(FoldAdaptor) {
-    return getInput().getType() == getOutput().getType() ? getInput()
-                                                         : mlir::TypedValue<mlir::RankedTensorType>(nullptr);
+mlir::OpFoldResult vpux::IE::QuantizeCastOp::fold(FoldAdaptor adaptor) {
+    if (getInput().getType() == getOutput().getType()) {
+        return getInput();
+    } else if (const auto attr = mlir::dyn_cast_or_null<Const::ContentAttr>(adaptor.getInput())) {
+        auto elemType = getDstElemTypeAttr().getValue();
+        return attr.transform().castElemType(elemType).get();
+    }
+
+    return nullptr;
 }
 
 //

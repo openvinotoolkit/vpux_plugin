@@ -1934,3 +1934,352 @@ TEST_F(MLIR_BarrierInfoTests, createLegalVariantBatchesByExecutorType) {
     };
     EXPECT_EQ(barrierInfoTest.toTaskVec(legalVariantBatches), expectedVariantBatches);
 }
+
+/**
+ * Correct out-of-block dependencies according to graph-split constraints
+ *
+ * Test should remove out-of-block connection to consumer
+ *         /------------------------------------------------------------------------------\
+ *   0 - b0 - 1 - b1 - 2 (sync) - b2 - 3 - b3 - 4 - b4 - 5 (sync) - b5 - 6 - b6 - 7 - b7 - 8
+ *
+ * since task 8 already waits for b7
+ */
+std::pair<BarrierInfoTest::BarrierMaps, BarrierInfoTest::BarrierMaps> outOfBlockWaitDependencyConfig() {
+    BarrierInfoTest::BarrierMaps inputBarrierMaps;
+    BarrierInfoTest::BarrierMaps expectedBarrierMaps;
+    inputBarrierMaps.taskUpdateBarriers = {
+            {0},  // task 0
+            {1},  // task 1
+            {2},  // task 2 - sync task
+            {3},  // task 3
+            {4},  // task 4
+            {5},  // task 5 - sync task
+            {6},  // task 6
+            {7},  // task 7
+            {},   // task 8
+    };
+
+    inputBarrierMaps.taskWaitBarriers = {
+            {},      // task 0
+            {0},     // task 1
+            {1},     // task 2 - sync task
+            {2},     // task 3
+            {3},     // task 4
+            {4},     // task 5 - sync task
+            {5},     // task 6
+            {6},     // task 7
+            {0, 7},  // task 8
+    };
+
+    fillProducersAndConsumers(inputBarrierMaps);
+    inputBarrierMaps.nTasks = inputBarrierMaps.taskUpdateBarriers.size();
+    inputBarrierMaps.nBarriers = inputBarrierMaps.barrierProducerMap.size();
+    inputBarrierMaps.syncTasksIds = {2, 5};
+
+    expectedBarrierMaps.taskUpdateBarriers = {
+            {0},  // task 0
+            {1},  // task 1
+            {2},  // task 2 - sync task
+            {3},  // task 3
+            {4},  // task 4
+            {5},  // task 5 - sync task
+            {6},  // task 6
+            {7},  // task 7
+            {},   // task 8
+    };
+
+    expectedBarrierMaps.taskWaitBarriers = {
+            {},   // task 0
+            {0},  // task 1
+            {1},  // task 2 - sync task
+            {2},  // task 3
+            {3},  // task 4
+            {4},  // task 5 - sync task
+            {5},  // task 6
+            {6},  // task 7
+            {7},  // task 8
+    };
+
+    fillProducersAndConsumers(expectedBarrierMaps);
+
+    return std::make_pair(inputBarrierMaps, expectedBarrierMaps);
+}
+
+TEST_F(BarrierInfoTests, fixOutOfBlockWaitDependency) {
+    auto [barrierConfig, expectedResult] = outOfBlockWaitDependencyConfig();
+    BarrierInfoTest barrierInfoTest(barrierConfig);
+
+    EXPECT_FALSE(barrierInfoTest.verifyControlGraphSplit());
+
+    BarrierInfo::TaskSet tasks;
+    tasks.insert(8);
+    barrierInfoTest.adjustTasksDependenciesToGraphSplitConstraints(tasks);
+    auto testResult = barrierInfoTest.getBarrierMaps();
+    checkBarrierMaps(expectedResult, testResult);
+
+    EXPECT_TRUE(barrierInfoTest.verifyControlGraphSplit());
+}
+
+/**
+ * Correct out-of-block dependencies according to graph-split constraints
+ *
+ * Test should remove out-of-block connection to consumer sync-point
+ *         /--------------------------------------------\
+ *   0 - b0 - 1 - b1 - 2 (sync) - b2 - 3 - b3 - 4 - b4 - 5 (sync) - b5 - 6 - b6 - 7 - b7 - 8
+ *
+ * because sync points were connected when graph was split
+ */
+std::pair<BarrierInfoTest::BarrierMaps, BarrierInfoTest::BarrierMaps> outOfBlockWaitDependencyToSyncTaskConfig() {
+    BarrierInfoTest::BarrierMaps inputBarrierMaps;
+    BarrierInfoTest::BarrierMaps expectedBarrierMaps;
+    inputBarrierMaps.taskUpdateBarriers = {
+            {0},  // task 0
+            {1},  // task 1
+            {2},  // task 2 - sync task
+            {3},  // task 3
+            {4},  // task 4
+            {5},  // task 5 - sync task
+            {6},  // task 6
+            {7},  // task 7
+            {},   // task 8
+    };
+
+    inputBarrierMaps.taskWaitBarriers = {
+            {},      // task 0
+            {0},     // task 1
+            {1},     // task 2 - sync task
+            {2},     // task 3
+            {3},     // task 4
+            {0, 4},  // task 5 - sync task
+            {5},     // task 6
+            {6},     // task 7
+            {7},     // task 8
+    };
+
+    fillProducersAndConsumers(inputBarrierMaps);
+    inputBarrierMaps.nTasks = inputBarrierMaps.taskUpdateBarriers.size();
+    inputBarrierMaps.nBarriers = inputBarrierMaps.barrierProducerMap.size();
+    inputBarrierMaps.syncTasksIds = {2, 5};
+
+    expectedBarrierMaps.taskUpdateBarriers = {
+            {0},  // task 0
+            {1},  // task 1
+            {2},  // task 2 - sync task
+            {3},  // task 3
+            {4},  // task 4
+            {5},  // task 5 - sync task
+            {6},  // task 6
+            {7},  // task 7
+            {},   // task 8
+    };
+
+    expectedBarrierMaps.taskWaitBarriers = {
+            {},   // task 0
+            {0},  // task 1
+            {1},  // task 2 - sync task
+            {2},  // task 3
+            {3},  // task 4
+            {4},  // task 5 - sync task
+            {5},  // task 6
+            {6},  // task 7
+            {7},  // task 8
+    };
+
+    fillProducersAndConsumers(expectedBarrierMaps);
+
+    return std::make_pair(inputBarrierMaps, expectedBarrierMaps);
+}
+
+TEST_F(BarrierInfoTests, fixOutOfBlockWaitDependencyToSyncTask) {
+    auto [barrierConfig, expectedResult] = outOfBlockWaitDependencyToSyncTaskConfig();
+    BarrierInfoTest barrierInfoTest(barrierConfig);
+
+    EXPECT_FALSE(barrierInfoTest.verifyControlGraphSplit());
+
+    BarrierInfo::TaskSet tasks;
+    tasks.insert(5);
+    barrierInfoTest.adjustTasksDependenciesToGraphSplitConstraints(tasks);
+    auto testResult = barrierInfoTest.getBarrierMaps();
+    checkBarrierMaps(expectedResult, testResult);
+
+    EXPECT_TRUE(barrierInfoTest.verifyControlGraphSplit());
+}
+
+/**
+ * Correct out-of-block dependencies according to graph-split constraints
+ *
+ * Test should remove out-of-block connection to consumers
+ *          /--------------------------------------------------------------------\
+ *         /---------------------------------------------------------------------------\
+ *   0 - b0 - 1 - b1 - 2 (sync) - b2 - 3 - b3 - 4 - b4 - 5 (sync) - b5 - 6 - b6 - 7     8
+ *
+ * and insert a connection to previous sync-point update barrier if the connection doesn't exist
+ *
+ *   0 - b0 - 1 - b1 - 2 (sync) - b2 - 3 - b3 - 4 - b4 - 5 (sync) - b5 - 6 - b6 - 7     8
+ *                                                                   \-----------------/
+ *
+ */
+std::pair<BarrierInfoTest::BarrierMaps, BarrierInfoTest::BarrierMaps> multipleOutOfBlockWaitDependenciesConfig() {
+    BarrierInfoTest::BarrierMaps inputBarrierMaps;
+    BarrierInfoTest::BarrierMaps expectedBarrierMaps;
+    inputBarrierMaps.taskUpdateBarriers = {
+            {0},  // task 0
+            {1},  // task 1
+            {2},  // task 2 - sync task
+            {3},  // task 3
+            {4},  // task 4
+            {5},  // task 5 - sync task
+            {6},  // task 6
+            {7},  // task 7
+            {},   // task 8
+    };
+
+    inputBarrierMaps.taskWaitBarriers = {
+            {},      // task 0
+            {0},     // task 1
+            {1},     // task 2 - sync task
+            {2},     // task 3
+            {3},     // task 4
+            {4},     // task 5 - sync task
+            {5},     // task 6
+            {0, 6},  // task 7
+            {0},     // task 8
+    };
+
+    fillProducersAndConsumers(inputBarrierMaps);
+    inputBarrierMaps.nTasks = inputBarrierMaps.taskUpdateBarriers.size();
+    inputBarrierMaps.nBarriers = inputBarrierMaps.barrierProducerMap.size();
+    inputBarrierMaps.syncTasksIds = {2, 5};
+
+    expectedBarrierMaps.taskUpdateBarriers = {
+            {0},  // task 0
+            {1},  // task 1
+            {2},  // task 2 - sync task
+            {3},  // task 3
+            {4},  // task 4
+            {5},  // task 5 - sync task
+            {6},  // task 6
+            {7},  // task 7
+            {},   // task 8
+    };
+
+    expectedBarrierMaps.taskWaitBarriers = {
+            {},   // task 0
+            {0},  // task 1
+            {1},  // task 2 - sync task
+            {2},  // task 3
+            {3},  // task 4
+            {4},  // task 5 - sync task
+            {5},  // task 6
+            {6},  // task 7
+            {5},  // task 8
+    };
+
+    fillProducersAndConsumers(expectedBarrierMaps);
+
+    return std::make_pair(inputBarrierMaps, expectedBarrierMaps);
+}
+
+TEST_F(BarrierInfoTests, fixMultipleOutOfBlockWaitDependencies) {
+    auto [barrierConfig, expectedResult] = multipleOutOfBlockWaitDependenciesConfig();
+    BarrierInfoTest barrierInfoTest(barrierConfig);
+
+    EXPECT_FALSE(barrierInfoTest.verifyControlGraphSplit());
+
+    BarrierInfo::TaskSet tasks;
+    tasks.insert(7);
+    tasks.insert(8);
+    barrierInfoTest.adjustTasksDependenciesToGraphSplitConstraints(tasks);
+    auto testResult = barrierInfoTest.getBarrierMaps();
+    checkBarrierMaps(expectedResult, testResult);
+
+    EXPECT_TRUE(barrierInfoTest.verifyControlGraphSplit());
+}
+
+/**
+ * Correct out-of-block dependencies according to graph-split constraints
+ *
+ * Test should remove redundant out-of-block connections from producers
+ *                                      /-----------------------------------\
+ *      /---------------------------------\
+ *     /--------------------------------------------------------------------\
+ *    /------------------------------------------------------------------------------\
+ *   0 - b0 - 1 - b1 - 2 (sync) - b2 - 3 - b3 - 4 - b4 - 5 (sync) - b5 - 6 - b6 - 7 - b7 - 8
+ *
+ */
+std::pair<BarrierInfoTest::BarrierMaps, BarrierInfoTest::BarrierMaps> outOfBlockUpdateDependencyConfig() {
+    BarrierInfoTest::BarrierMaps inputBarrierMaps;
+    BarrierInfoTest::BarrierMaps expectedBarrierMaps;
+    inputBarrierMaps.taskUpdateBarriers = {
+            {0, 3, 6, 7},  // task 0
+            {1},           // task 1
+            {2},           // task 2 - sync task
+            {3, 6},        // task 3
+            {4},           // task 4
+            {5},           // task 5 - sync task
+            {6},           // task 6
+            {7},           // task 7
+            {},            // task 8
+    };
+
+    inputBarrierMaps.taskWaitBarriers = {
+            {},   // task 0
+            {0},  // task 1
+            {1},  // task 2 - sync task
+            {2},  // task 3
+            {3},  // task 4
+            {4},  // task 5 - sync task
+            {5},  // task 6
+            {6},  // task 7
+            {7},  // task 8
+    };
+
+    fillProducersAndConsumers(inputBarrierMaps);
+    inputBarrierMaps.nTasks = inputBarrierMaps.taskUpdateBarriers.size();
+    inputBarrierMaps.nBarriers = inputBarrierMaps.barrierProducerMap.size();
+    inputBarrierMaps.syncTasksIds = {2, 5};
+
+    expectedBarrierMaps.taskUpdateBarriers = {
+            {0},  // task 0
+            {1},  // task 1
+            {2},  // task 2 - sync task
+            {3},  // task 3
+            {4},  // task 4
+            {5},  // task 5 - sync task
+            {6},  // task 6
+            {7},  // task 7
+            {},   // task 8
+    };
+
+    expectedBarrierMaps.taskWaitBarriers = {
+            {},   // task 0
+            {0},  // task 1
+            {1},  // task 2 - sync task
+            {2},  // task 3
+            {3},  // task 4
+            {4},  // task 5 - sync task
+            {5},  // task 6
+            {6},  // task 7
+            {7},  // task 8
+    };
+
+    fillProducersAndConsumers(expectedBarrierMaps);
+
+    return std::make_pair(inputBarrierMaps, expectedBarrierMaps);
+}
+
+TEST_F(BarrierInfoTests, fixOutOfBlockUpdateDependencies) {
+    auto [barrierConfig, expectedResult] = outOfBlockUpdateDependencyConfig();
+    BarrierInfoTest barrierInfoTest(barrierConfig);
+
+    EXPECT_FALSE(barrierInfoTest.verifyControlGraphSplit());
+
+    BarrierInfo::TaskSet tasks;
+    tasks.insert(0);
+    tasks.insert(3);
+    barrierInfoTest.adjustTasksDependenciesToGraphSplitConstraints(tasks);
+    auto testResult = barrierInfoTest.getBarrierMaps();
+    checkBarrierMaps(expectedResult, testResult);
+
+    EXPECT_TRUE(barrierInfoTest.verifyControlGraphSplit());
+}

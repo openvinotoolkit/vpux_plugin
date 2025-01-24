@@ -17,10 +17,6 @@ add_subdirectory(profiling_parser)
 
 add_subdirectory(vpux-binutils)
 
-if(ENABLE_NPU_PROTOPIPE)
-    add_subdirectory(protopipe)
-endif()
-
 add_subdirectory(npureg-tblgen)
 
 #

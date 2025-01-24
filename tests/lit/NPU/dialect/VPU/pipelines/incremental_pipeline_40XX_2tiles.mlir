@@ -17,7 +17,7 @@ func.func @SubgraphIncrementalPipelineCheck(%arg0: tensor<1x16x227x227xf16, {ord
 
     %0 = VPU.NCE.DepthConvolution(%arg0, %weights1, %weightsTable1) {
         pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-        opaque_ppe = #VPU.PPEStub<>,
+        ppe = #VPU.PPEStub<>,
 rawFilterShape = [16, 1, 1, 1],
         strides = [1, 1]
         } -> tensor<1x16x227x227xf16, {order = #NHWC}>
@@ -27,7 +27,7 @@ rawFilterShape = [16, 1, 1, 1],
 
     %1 = VPU.NCE.Convolution(%0, %weights2, %weightsTable2) {
         pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-        opaque_ppe = #VPU.PPEStub<>,
+        ppe = #VPU.PPEStub<>,
 rawFilterShape = [96, 16, 7, 7],
         strides = [2, 2]
         } -> tensor<1x96x111x111xf16, {order = #NHWC}>
@@ -343,7 +343,7 @@ func.func @PerAxisQuantizedDWConvIncrementalPipelineCheck(%arg0: tensor<1x32x256
 
     %0 = VPU.NCE.DepthConvolution(%arg0, %cst_522, %cst_521) {
         pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-        opaque_ppe = #VPU.PPEStub<>,
+        ppe = #VPU.PPEStub<>,
 rawFilterShape = [32, 1, 1, 1], strides = [1, 1]
         } -> tensor<1x32x256x256x!qElemType, {order = #NHWC}>
 

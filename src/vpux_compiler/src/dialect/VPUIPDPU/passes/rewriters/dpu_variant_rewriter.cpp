@@ -18,8 +18,9 @@ mlir::LogicalResult DPUVariantRewriter::matchAndRewrite(VPUASM::DPUVariantOp op,
                                                         mlir::PatternRewriter& rewriter) const {
     auto variant = rewriter.create<VPUIPDPU::DPUVariantOp>(
             op.getLoc(), op.getSymNameAttr(), op.getTaskIndexAttr(), op.getTaskLocationAttr(), op.getNextLinkAttr(),
-            op.getInvariantTaskLocationAttr(), op.getWeightsAttr(), op.getWeightTableAttr(), op.getNceTaskTypeAttr(),
-            op.getWorkloadIdAttr());
+            op.getInvariantTaskLocationAttr(), op.getWeightsAttr(), op.getWeightTableAttr(),
+            op.getWeightTableDataPtrAttr(), op.getWeightTableSpPtrAttr(), op.getWeightTableScaleAttr(),
+            op.getWeightTableBiasAttr(), op.getWeightZeroPointsAttr(), op.getNceTaskTypeAttr(), op.getWorkloadIdAttr());
 
     auto& variantRegion = variant.getRegion();
     auto varBlock = rewriter.createBlock(&variantRegion);
@@ -33,6 +34,10 @@ mlir::LogicalResult DPUVariantRewriter::matchAndRewrite(VPUASM::DPUVariantOp op,
 
     {
         mlir::OpBuilder::InsertionGuard guard(rewriter);
+
+        if (dpuVariantExpandIface.expandGeneralConfig(rewriter, _log).failed()) {
+            return mlir::failure();
+        }
 
         if (dpuVariantExpandIface.expandIDUConfig(rewriter, _log, _symRefMap).failed()) {
             return mlir::failure();

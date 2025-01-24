@@ -14,14 +14,15 @@ namespace vpux::VPU {
 struct VPUNNCostParameters {
     VPUNNCostParameters(VPU::MultiClusterStrategy strategy, const OutputTiling& tiling = {},
                         TilingMode mode = TilingMode::ISOLATED,
-                        const SmallVector<SmallVector<TileInfo>>& operandTiling = {})
-            : _strategy(strategy), _tiling(tiling), _mode(mode), _operandsTiling(operandTiling) {
+                        const SmallVector<SmallVector<TileInfo>>& operandTiling = {}, const bool withDMAs = true)
+            : _strategy(strategy), _tiling(tiling), _mode(mode), _operandsTiling(operandTiling), _withDMAs(withDMAs) {
     }
 
     VPU::MultiClusterStrategy _strategy;
     OutputTiling _tiling;
     TilingMode _mode;
     SmallVector<SmallVector<TileInfo>> _operandsTiling;
+    bool _withDMAs = true;
 };
 
 class MultiClusterStrategySetter {
@@ -82,14 +83,23 @@ public:
     /*
      *  Get the cost of DMA writes in DDR
      */
-    StrategyCost getSpillingWriteCost(mlir::Operation* operation, const VPUNNCostParameters& parameters) const;
+    StrategyCost getSpillingWriteCost(
+            mlir::Operation* operation, const VPUNNCostParameters& parameters,
+            std::function<vpux::NDTypeInterface(const TileInfo&)> getOutputType = nullptr) const;
 
     /*
      *  Get the cost of DMA reads from DDR
      */
-    StrategyCost getSpillingReadCost(mlir::Operation* operation, const VPUNNCostParameters& parameters,
-                                     mlir::Operation* parentOp = nullptr,
-                                     std::function<bool(mlir::Value value)> findOperand = nullptr) const;
+    StrategyCost getSpillingReadCost(
+            mlir::Operation* operation, const VPUNNCostParameters& parameters, mlir::Operation* parentOp = nullptr,
+            std::function<bool(mlir::Value value)> findOperand = nullptr,
+            std::function<vpux::NDTypeInterface(const TileInfo&)> getOperandType = nullptr) const;
+    StrategyCost getSpillingReadCost(
+            mlir::Operation* operation, const VPUNNCostParameters& parameters, mlir::Value operand,
+            std::function<vpux::NDTypeInterface(const TileInfo&)> getOperandType = nullptr) const;
+
+    StrategyCost getSpillingTypeCost(vpux::NDTypeInterface type,
+                                     const std::optional<ShapeRef>& tileAxis = std::nullopt) const;
 
 private:
     /*

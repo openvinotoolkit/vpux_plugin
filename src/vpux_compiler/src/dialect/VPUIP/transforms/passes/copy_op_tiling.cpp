@@ -115,12 +115,8 @@ private:
 // Splits large CopyOps into a bunch of smaller ones to fit DMA capabilities
 class CopyOpTiling final : public mlir::OpRewritePattern<VPUIP::CopyOp> {
 public:
-    CopyOpTiling(mlir::MLIRContext* ctx, Logger log, VPU::ArchKind arch, int64_t dmaPortNum, bool allowRecursiveSplit)
-            : mlir::OpRewritePattern<VPUIP::CopyOp>(ctx),
-              _log(log),
-              _arch(arch),
-              _dmaPortNum(dmaPortNum),
-              _allowRecursiveSplit(allowRecursiveSplit) {
+    CopyOpTiling(mlir::MLIRContext* ctx, Logger log, VPU::ArchKind arch, int64_t dmaPortNum)
+            : mlir::OpRewritePattern<VPUIP::CopyOp>(ctx), _log(log), _arch(arch), _dmaPortNum(dmaPortNum) {
     }
 
 public:
@@ -132,7 +128,6 @@ private:
     Logger _log;
     VPU::ArchKind _arch;
     int64_t _dmaPortNum;
-    const bool _allowRecursiveSplit;
 };
 
 SmallVector<mlir::Value> CopyOpTiling::createTiles(VPUIP::CopyOp origOp, mlir::PatternRewriter& rewriter) const {
@@ -155,15 +150,8 @@ SmallVector<mlir::Value> CopyOpTiling::createTiles(VPUIP::CopyOp origOp, mlir::P
     //  The number of planes DMA could process within one tile. In case of small spatial dimensions of tensor (e.g.
     // 1x2048x8x8) it can exceed CMX_DMA_MAX_NUM_PLANES, so it's necessary to limit this value
     const auto maxNumPlanes = VPUIP::getMaxNumberPlanes(_arch);
-    int64_t desiredPlanesPerTileAmount = (VPUIP::DMA_LIMIT.count() / singlePlaneSize.count());
-    if (desiredPlanesPerTileAmount == 0 && _allowRecursiveSplit) {
-        desiredPlanesPerTileAmount = 1;
-    }
-    VPUX_THROW_UNLESS(desiredPlanesPerTileAmount != 0,
-                      "Couldn't split a CopyOp at '{0}' with single plane size greater than DMA_LIMIT",
-                      origOp->getLoc());
-
-    const auto numPlanesPerTile = std::min(desiredPlanesPerTileAmount, maxNumPlanes);
+    const int64_t numPlanesPerTile =
+            std::clamp(VPUIP::DMA_LIMIT.count() / singlePlaneSize.count(), int64_t(1), maxNumPlanes);
 
     SmallVector<mlir::Value> concatInputs;
     auto currentOffset = SmallVector<int64_t>(origInputShape.size(), 0);
@@ -234,21 +222,14 @@ SmallVector<mlir::Value> CopyOpTiling::createTiles(VPUIP::CopyOp origOp, mlir::P
 
 mlir::LogicalResult CopyOpTiling::matchAndRewrite(VPUIP::CopyOp origOp, mlir::PatternRewriter& rewriter) const {
     _log.trace("Found Copy Operation '{0}'", origOp->getLoc());
-    // In case of recursive legalization we want to split only illegal operations with striding level less than max
-    // available and leave max level DMAs to be handled by main rewriter
-    if (_allowRecursiveSplit) {
-        const int64_t maxStridingLevel = VPUIP::getMaxStridingLevel(VPU::getArch(origOp));
-        const bool hasValidStridingLevel = VPUIP::getStridingLevel(origOp->getOperand(0)) < maxStridingLevel &&
-                                           VPUIP::getStridingLevel(origOp->getResult(0)) < maxStridingLevel;
-        if (isLegalCopyOp(origOp) || !hasValidStridingLevel) {
-            return mlir::failure();
-        }
+
+    if (isLegalCopyOp(origOp)) {
+        return mlir::failure();
     }
 
     const auto concatInputs = createTiles(origOp, rewriter);
 
     rewriter.replaceOpWithNewOp<VPUIP::ConcatViewOp>(origOp, concatInputs, origOp.getOutputBuff());
-
     return mlir::success();
 }
 
@@ -350,34 +331,20 @@ void CopyOpTilingPass::safeRunOnFunc() {
     auto dmaOp = IE::getAvailableExecutor(module, VPU::ExecutorKind::DMA_NN);
     const auto dmaPortNum = dmaOp.getCount();
 
-    // First try to legalize recursively. Some operations may have shapes, which can't be resolved by single axis split,
-    // so try to legalize them recursively, for example: 3x1x4000x4000 to 3 DMAs with shape 1x1x4000x4000 and then split
-    // each of them separatly to satisfy numPlanes and DMA_LIMIT requirements
+    // This rewriter will not handle Copy Op with a distributed type
+    // For Copy Op that require tiling:
+    // 1. Handle cases where the tensor size exceeds DMA_LIMIT;
+    // 2. Handle cases with stride level is MAX_STRIDING_LEVEL and planes exceeding MAX_NUM_PLANES;
     {
         mlir::RewritePatternSet patterns(&ctx);
-        patterns.add<CopyOpTiling>(&ctx, _log, arch, dmaPortNum, /*allowRecursiveSplit=*/true);
+        patterns.add<CopyOpTiling>(&ctx, _log, arch, dmaPortNum);
+
         if (mlir::failed(
                     mlir::applyPatternsAndFoldGreedily(func, std::move(patterns), getDefaultGreedyRewriteConfig()))) {
             signalPassFailure();
-            return;
         }
     }
-    // After all, some DMAs may be illegal. This conversion confirms that this isn't possible and stops compilation.
-    {
-        mlir::ConversionTarget target(ctx);
-        target.addDynamicallyLegalOp<VPUIP::CopyOp>(isLegalCopyOp);
 
-        mlir::RewritePatternSet patterns(&ctx);
-        patterns.add<CopyOpTiling>(&ctx, _log, arch, dmaPortNum, /*allowRecursiveSplit=*/false);
-
-        // The new operations added by CopyOpTiling pattern:
-        target.addLegalOp<VPUIP::SubViewOp>();
-        target.addLegalOp<VPUIP::ConcatViewOp>();
-
-        if (mlir::failed(mlir::applyPartialConversion(getOperation(), target, std::move(patterns)))) {
-            signalPassFailure();
-        }
-    }
     // For case "CopyOp + TilingCopyOp -> ConcatOp" with strided copy, tiling the copyOp into 2 could benefit
     // performance as copy in parallel.
     // Generic solution tracked by: #E122243

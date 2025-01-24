@@ -70,7 +70,7 @@ mlir::OpFoldResult vpux::IE::BroadcastOp::fold(FoldAdaptor adaptor) {
     }
 
     // move broadcast to const attribute.
-    if (auto ephemeral = operands[0].dyn_cast_or_null<Const::EphemeralContentAttr>()) {
+    if (auto ephemeral = operands[0].dyn_cast_or_null<Const::ContentAttr>()) {
         const auto contentAttr = static_cast<Const::ContentAttr>(ephemeral);
         const auto inputShape = to_small_vector(getShape(getInput()));
         const auto outputShape = to_small_vector(getShape(getOutput()));

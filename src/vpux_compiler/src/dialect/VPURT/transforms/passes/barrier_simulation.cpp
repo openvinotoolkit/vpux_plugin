@@ -38,6 +38,7 @@ void BarrierSimulationPass::safeRunOnFunc() {
         return;
     }
     if (mlir::failed(barrierSim.simulateBarriers(_log.nest()))) {
+        _log.error("Barrier simulation failed");
         signalPassFailure();
         return;
     }

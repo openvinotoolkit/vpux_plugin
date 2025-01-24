@@ -11,11 +11,12 @@
 
 #include "vpux/compiler/dialect/VPU/transforms/factories/nce_sparsity_converters.hpp"
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
+#include "vpux/compiler/dialect/VPU/utils/nce_sparsity.hpp"
+#include "vpux/compiler/dialect/VPU/utils/ppe_utils.hpp"
 #include "vpux/compiler/dialect/VPUIP/IR/attributes.hpp"
 #include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPURT/IR/task.hpp"
-#include "vpux/compiler/utils/VPU/ppe_utils.hpp"
 #include "vpux/compiler/utils/platform_resources.hpp"
 #include "vpux/hwtest/hwtest_utils.hpp"
 #include "vpux/utils/core/custom_float.hpp"
@@ -144,7 +145,8 @@ void buildEltwise(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp mod
         auto wtTblDataVals = mlir::DenseElementsAttr::get(wtTblDataDdrValueType, wtTblDataValues);
         auto wtTblDataDdr = funcbuilder.create<Const::DeclareOp>(
                 builder.getUnknownLoc(), wtTblDataDdrType,
-                Const::ContentAttr::transform(wtTblDataVals).reorder(DimsOrder::NHWC).get());
+                Const::ContentAttr::get(wtTblDataVals,
+                                        Const::ContentSetup(wtTblDataDdrValueType).reorder(DimsOrder::NHWC)));
 
         // weights table cmx tensor
         auto wtTblCmxType = getMemRefType(VPURT::BufferSection::CMX_NN, 0, wtTblDataShape,
@@ -164,18 +166,21 @@ void buildEltwise(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp mod
             funcbuilder, mlir::ValueRange(barrier0.getBarrier()), mlir::ValueRange(barrier1.getBarrier()),
             builder.getUnknownLoc(), outputCmxType, inputCmx.getOperation()->getResult(0),
             weightsCmx.getOperation()->getResult(0), wtTblValue,
-            /*instruction_table_list=*/nullptr, /*spr_lookup_table*/ nullptr,
-            parentInputCmx.getOperation()->getResult(0), parentOutputCmx.getOperation()->getResult(0),
-            outputCmx.getOperation()->getResult(0), VPUIP::NCETaskType::ELTWISE, mlir::ArrayAttr(), mlir::ArrayAttr(),
-            VPU::PaddingAttr(),
+            /*spr_lookup_table*/ nullptr, parentInputCmx.getOperation()->getResult(0),
+            parentOutputCmx.getOperation()->getResult(0), outputCmx.getOperation()->getResult(0),
+            VPUIP::NCETaskType::ELTWISE, mlir::ArrayAttr(), mlir::ArrayAttr(), VPU::PaddingAttr(),
             /*is_continued*/ nullptr, /*sp_pattern*/ nullptr, /*is_segment*/ nullptr, /*out_channels_offset*/ nullptr,
-            /*input_channels_compression*/ nullptr, /*is superdense*/ nullptr, /*is inplace*/ nullptr,
+            /*input_channels_compression*/ nullptr, /*is_zero_offset_weights_table=*/nullptr, /*is superdense*/ nullptr,
+            /*is inplace*/ nullptr,
             /*input se size*/ nullptr, /*output se size*/ nullptr, /*is permute quantize*/ nullptr,
-            /*is small kernel optimized*/ nullptr, vpux::VPU::EltwiseTypeAttr::get(ctx, eltwiseMode));
+            /*is small kernel optimized*/ nullptr, /*mpe_engine*/ nullptr,
+            vpux::VPU::EltwiseTypeAttr::get(ctx, eltwiseMode));
 
-    auto eltwiseQuantScale = qPerChType ? 0
-                                        : VPU::calculateQuantScaleVectorForEltwise(inputCmxType, weightsCmxType,
-                                                                                   outputCmxType, arch, false);
+    // Since Eltwise operation doesn't have weights table it requires final quantization scaling
+    // to be part of output tensor description. Scale vector will be placed in PPE block and
+    // later used during NCE task serialization
+    const auto eltwiseQuantScale =
+            qPerChType ? 0 : VPU::computeQuantScale(inputCmxType.getElementType(), outputCmxType.getElementType());
 
     int64_t clampLow = std::numeric_limits<int32_t>::min();
     int64_t clampHigh = std::numeric_limits<int32_t>::max();

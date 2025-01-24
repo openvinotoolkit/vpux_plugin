@@ -14,6 +14,6 @@ Bit VPU::arch40xx::ShaveKernelInfo::getShaveVectorSize() const {
     if (mlir::isa<IE::MVNOp, VPU::MVNOp>(_swOp)) {
         return Bit(256);
     }
-    // Default to use 37XX kernels
+    // Default to use NPU37XX kernels
     return VPU::arch37xx::ShaveKernelInfo::getShaveVectorSize();
 }

@@ -17,6 +17,7 @@ void FuseOutstandingQuantStrategy::addPatterns(mlir::RewritePatternSet& patterns
     auto ctx = patterns.getContext();
 
     patterns.add<vpux::IE::QuantizeWithTwoInputsNCEEltwiseOpGeneric<IE::AddOp>>(ctx, isMixPrecisionSupported, log);
+    patterns.add<vpux::IE::QuantizeWithAvgPool>(ctx, isMixPrecisionSupported, log);
 }
 
 }  // namespace vpux::IE::arch37xx

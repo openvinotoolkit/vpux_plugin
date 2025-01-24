@@ -5,6 +5,8 @@
 
 #pragma once
 
+#include "vpux/compiler/NPU40XX/dialect/ELF/ops.hpp"
+#include "vpux/compiler/NPU40XX/dialect/ELF/ops_interfaces.hpp"
 #include "vpux/compiler/conversion/passes/VPUMI40XX2VPUASM/symbolization_type_converter.hpp"
 #include "vpux/compiler/dialect/VPUMI40XX/dialect.hpp"
 #include "vpux/compiler/dialect/VPUMI40XX/ops.hpp"
@@ -19,10 +21,12 @@ class VPUASMSymbolizationPattern : public SymbolizationPattern<OperationType> {
 public:
     using Base = VPUASMSymbolizationPattern<OperationType>;
     using SymbolMapper = typename SymbolizationPattern<OperationType>::SymbolMapper;
+    using SectionMapper = typename SymbolizationPattern<OperationType>::SectionMapper;
+    using OpAdaptor = typename SymbolizationPattern<OperationType>::OpAdaptor;
 
     VPUASMSymbolizationPattern(mlir::func::FuncOp netFunc, SymbolizationTypeConverter& typeConverter,
-                               SymbolMapper& mapper, mlir::MLIRContext* ctx, Logger log)
-            : SymbolizationPattern<OperationType>(netFunc, typeConverter, mapper, ctx), _log(log) {
+                               SymbolMapper& mapper, SectionMapper& sectionMap, mlir::MLIRContext* ctx, Logger log)
+            : SymbolizationPattern<OperationType>(netFunc, typeConverter, mapper, sectionMap, ctx), _log(log) {
     }
 
     // E#69730: would be cleaner to type-check at template level if Op itself declares the OneResult interface

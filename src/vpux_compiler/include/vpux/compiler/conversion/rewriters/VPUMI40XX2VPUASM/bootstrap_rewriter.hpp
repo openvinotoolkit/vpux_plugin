@@ -13,8 +13,8 @@ namespace vpumi40xx2vpuasm {
 class BootstrapRewriter : public VPUASMSymbolizationPattern<VPUMI40XX::BootstrapOp> {
 public:
     using Base::Base;
-    mlir::LogicalResult symbolize(VPUMI40XX::BootstrapOp op, SymbolMapper& mapper,
-                                  mlir::ConversionPatternRewriter& rewriter) const override;
+    mlir::FailureOr<SymbolizationResult> symbolize(VPUMI40XX::BootstrapOp op, SymbolMapper& mapper,
+                                                   mlir::ConversionPatternRewriter& rewriter) const override;
 };
 
 }  // namespace vpumi40xx2vpuasm

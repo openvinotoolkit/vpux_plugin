@@ -70,8 +70,9 @@ Const::DeclareOp ReshapeGroupConvInput::broadcastConst(mlir::Value activation, i
 
     Const::ContentAttr newContentAttr;
     if (cst.getContentAttr().isSplat()) {
-        auto contentAttr = cst.getContentAttr();
-        auto setup = Const::ContentAttr::transform(contentAttr.getBaseContent());  // content-only copy
+        const auto& contentAttr = cst.getContentAttr();
+        const auto& baseContent = contentAttr.getBaseContent();
+        Const::ContentSetup setup(baseContent.getType());  // content-only copy
         setup = setup.reshape(Shape(origInShape.size(), int64_t(1)));
 
         for (auto attr : contentAttr.getTransformations()) {
@@ -83,7 +84,7 @@ Const::DeclareOp ReshapeGroupConvInput::broadcastConst(mlir::Value activation, i
             setup = setup.addTransformation(attr);
         }
 
-        newContentAttr = setup.broadcast(onDim, weightShape[onDim]).get();
+        newContentAttr = Const::ContentAttr::get(baseContent, setup.broadcast(onDim, weightShape[onDim]));
     } else {
         auto broadcastDim = (OC > 1 ? Dims4D::Filter::OC : Dims4D::Filter::IC);
         newContentAttr = cst.getContentAttr()
@@ -295,7 +296,7 @@ mlir::LogicalResult SliceGroupConvInput::matchAndRewrite(IE::GroupConvolutionOp 
             return false;
         }
 
-        auto postReorder = mlir::cast<IE::ReorderOp>(*layerOp->getUsers().begin());
+        auto postReorder = mlir::dyn_cast<IE::ReorderOp>(*layerOp->getUsers().begin());
         if (postReorder == nullptr || !layerOp->hasOneUse() ||
             DimsOrder::fromValue(postReorder.getOutput()) != DimsOrder::NCHW) {
             return false;

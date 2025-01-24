@@ -305,6 +305,17 @@ static_assert(sizeof(VpuNNRTConfig) == 112, "VpuNNRTConfig size != 112");
 static_assert(offsetof(VpuNNRTConfig, logaddr_dma_hwp) % 8 == 0, "Alignment error");
 
 /**
+ * VpuBarrierConfiguration contains the information needed to program a barrier.
+ */
+struct VPU_ALIGNED_STRUCT(4) VpuBarrierConfiguration {
+    uint8_t producerCount;
+    uint8_t producerInterruptEnabled;
+    uint8_t consumerCount;
+    uint8_t consumerInterruptEnabled;
+};
+static_assert(sizeof(VpuBarrierConfiguration) == 4, "VpuBarrierConfiguration size != 4");
+
+/**
  * VpuManagedMappedInference
  */
 struct VPU_ALIGNED_STRUCT(32) VpuManagedMappedInference {
@@ -327,14 +338,28 @@ struct VPU_ALIGNED_STRUCT(32) VpuManagedMappedInference {
     /**
      * VpuTaskReferences reserved for future use.
      */
-    VpuTaskReference<uint32_t> reserved0[6];
+    VpuTaskReference<uint32_t> reserved0[4];
+    /**
+     * barriers_configuration contains the information for barrier programming that can
+     * be DMAed directly to the barrier FIFO registers.
+     * Layout in memory is: All VpuBarrierConfigurations for physical barrier 0, then all
+     * VpuBarrierConfigurations for physical barrier 1 and so on.
+     * Needed for initial barrier FIFO setup and for the barrier callback to top up
+     * barrier FIFOs during the inference.
+     */
+    VpuTaskReference<VpuBarrierConfiguration> barriers_configuration;
+    /**
+     * num_of_barrier_reprogrammings is an array with an entry for each physical barrier
+     * that contains the number of reprogrammings for that barrier.
+     */
+    VpuTaskReference<uint32_t> num_of_barrier_reprogrammings;
     /**
      * initial_barriers are virtual barrier ids that index into
      * VpuManagedMappedInference::task_configs. These barriers must be programmed
      * before starting the bootstrap workitems (see bootstrap_workitems_count).
      */
     VpuTaskReference<uint32_t> initial_barriers;
-    /*
+    /**
      * nnrt_config contains information needed to configure the NNRuntime to run the
      * inference.
      */
@@ -352,13 +377,42 @@ struct VPU_ALIGNED_STRUCT(32) VpuManagedMappedInference {
     uint8_t media_used;
     uint8_t dma_from_ddr_used;
     uint8_t dma_from_cmx_used;
-    uint8_t pad0_[3];
+    uint8_t pad0_[2];
+    /*
+     * VpuBarrierProgrammingMode indicates how barriers should be programmed:
+     * LEGACY
+     *   Runtime is responsible for all barrier programming, barriers_configuration is not populated.
+     * NO_BARRIER_DMAS_SCHEDULED
+     *   Compiler has not scheduled any DMAs to program barriers but has populated barriers_configuration.
+     *   The runtime can create DMAs to write to the barrier FIFOs (initial and top-up).
+     * INITIAL_BARRIER_DMAS_SCHEDULED
+     *   Compiler has inserted one or more DMAs into the schedule to perform the initial barrier programming and
+     *   has populated barriers_configuration. Runtime is responsible for topping up the barrier FIFOs as the
+     *   inference progresses.
+     * ALL_BARRIER_DMAS_SCHEDULED
+     *   Compiler has inserted DMAs into the schedule for all barrier programming, the runtime should not
+     *   program any barriers.
+     */
+    enum VpuBarrierProgrammingMode : uint8_t {
+        LEGACY = 0,
+        NO_BARRIER_DMAS_SCHEDULED,
+        INITIAL_BARRIER_DMAS_SCHEDULED,
+        ALL_BARRIER_DMAS_SCHEDULED,
+        UNKNOWN = 255
+    };
+    VpuBarrierProgrammingMode barrier_programming_mode;
     /**
      * The descriptor required to make the the VpuManagedMappedInference parsable.
      * This is not used by the firmware during normal execution.
      */
     VpuTaskReference<VpuManagedMappedInferenceInfo> inference_info;
-    uint8_t pad1_[240];
+    /**
+     * Stride in barrier configuration array between consecutive physical barriers.
+     */
+    uint32_t barrier_configuration_stride;
+
+    uint8_t pad1_[236];
+
     /*
      * bootstrap_workitems_count contains the number of work items at the beginning
      * of the VpuManagedMappedInference::work_items list that should be enqueued
@@ -377,6 +431,9 @@ static_assert(offsetof(VpuManagedMappedInference, task_configs) % 8 == 0, "Align
 static_assert(offsetof(VpuManagedMappedInference, initial_barriers) % 8 == 0, "Alignment error");
 static_assert(offsetof(VpuManagedMappedInference, nnrt_config) % 8 == 0, "Alignment error");
 static_assert(offsetof(VpuManagedMappedInference, inference_info) % 8 == 0, "Alignment error");
+static_assert(offsetof(VpuManagedMappedInference, barriers_configuration) % 8 == 0, "Alignment error");
+static_assert(offsetof(VpuManagedMappedInference, num_of_barrier_reprogrammings) % 8 == 0, "Alignment error");
+static_assert(offsetof(VpuManagedMappedInference, barrier_configuration_stride) % 4 == 0, "Alignment error");
 static_assert(offsetof(VpuManagedMappedInference, bootstrap_workitems_count) % 4 == 0, "Alignment error");
 
 #pragma pack(pop)

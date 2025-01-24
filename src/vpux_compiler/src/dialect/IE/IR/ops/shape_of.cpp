@@ -3,8 +3,13 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+#include <mlir/IR/Builders.h>
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
+#include "vpux/compiler/dialect/const/utils/utils.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
+#include "vpux/compiler/utils/types.hpp"
+#include "vpux/utils/core/array_ref.hpp"
+#include "vpux/utils/core/checked_cast.hpp"
 
 using namespace vpux;
 
@@ -31,4 +36,31 @@ mlir::LogicalResult vpux::IE::ShapeOfOp::inferReturnTypeComponents(
     inferredReturnShapes.emplace_back(ArrayRef(outShape), outElemType);
 
     return mlir::success();
+}
+
+//
+// fold
+//
+
+mlir::OpFoldResult vpux::IE::ShapeOfOp::fold(FoldAdaptor) {
+    auto shape = getShape(getInput());
+    if (shape.isDynamic()) {
+        return nullptr;
+    }
+
+    mlir::OpBuilder builder(getOperation());
+
+    auto elemType = getDstElemType();
+    auto constantShape = SmallVector<int64_t>{checked_cast<int64_t>(shape.size())};
+    auto type = mlir::RankedTensorType::get(constantShape, elemType);
+
+    if (elemType.isSignedInteger(32)) {
+        auto values = SmallVector<int32_t>(shape.begin(), shape.end());
+        return Const::createConst(builder, appendLoc(getLoc(), "shape_of"), type, ArrayRef(values));
+    } else if (elemType.isSignedInteger(64)) {
+        auto values = SmallVector<int64_t>(shape.begin(), shape.end());
+        return Const::createConst(builder, appendLoc(getLoc(), "shape_of"), type, ArrayRef(values));
+    }
+
+    VPUX_THROW("Unsupported data type: {0}", elemType);
 }

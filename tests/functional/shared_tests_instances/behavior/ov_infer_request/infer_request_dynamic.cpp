@@ -10,7 +10,7 @@
 #include "behavior/ov_infer_request/infer_request_dynamic.hpp"
 #include "common/npu_test_env_cfg.hpp"
 #include "common/utils.hpp"
-#include "intel_npu/al/config/common.hpp"
+#include "intel_npu/config/common.hpp"
 
 using namespace ov::test::behavior;
 

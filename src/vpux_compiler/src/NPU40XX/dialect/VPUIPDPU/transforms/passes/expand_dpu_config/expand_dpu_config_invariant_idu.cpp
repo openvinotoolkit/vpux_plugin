@@ -9,9 +9,6 @@
 #include "vpux/compiler/dialect/VPUASM/ops.hpp"
 #include "vpux/compiler/dialect/VPUIPDPU/rewriters/utils.hpp"
 
-using namespace VPUIPDPU;
-using namespace vpux::VPUIPDPU::arch40xx::IDU;
-
 namespace vpux::VPUIPDPU::arch40xx::IDU {
 
 mlir::LogicalResult verifyInQuantConfig(const Logger& log, mlir::Type inType) {
@@ -75,17 +72,59 @@ mlir::LogicalResult configureInActivations(const Logger&, IDUConfig::InActivatio
 
 mlir::LogicalResult configureWeights(const Logger& log, IDUConfig::Weights& config, VPUIP::NCETaskType taskType,
                                      mlir::Type inActType, mlir::Type weightsType, bool wtSparse) {
-    if (taskType == VPUIP::NCETaskType::MAXPOOL || taskType == VPUIP::NCETaskType::AVEPOOL) {
+    const bool isPalletModeEnabled = llvm::isa_and_nonnull<mlir::quant::QuantileQuantizedType>(weightsType) ||
+                                     llvm::isa_and_nonnull<mlir::quant::QuantileQuantizedPerAxisType>(weightsType);
+
+    if (isPalletModeEnabled) {
+        if (!weightsType) {
+            log.error("Missing weights data for DPU task {0}", VPUIP::stringifyNCETaskType(taskType));
+            return mlir::failure();
+        }
+
+        auto storageType = llvm::dyn_cast<mlir::quant::QuantizedType>(weightsType).getStorageType();
+        if (storageType.isInteger(4)) {
+            config.pltMode = IDUWeightPalletMode::FOUR_BIT_PLT;
+        } else if (storageType.isInteger(2)) {
+            config.pltMode = IDUWeightPalletMode::TWO_BIT_PLT;
+        } else if (storageType.isInteger(1)) {
+            config.pltMode = IDUWeightPalletMode::ONE_BIT_PLT;
+        } else {
+            log.error("Unsupported storage type for palletization mode: {0}", storageType);
+            return mlir::failure();
+        }
+
+        if (!config.quantileLUT) {
+            config.quantileLUT.emplace();
+        }
+
+        if (auto quantileQuantizedType = llvm::dyn_cast<mlir::quant::QuantileQuantizedType>(weightsType)) {
+            auto quantiles = quantileQuantizedType.getQuantiles();
+            config.quantileLUT->assign(quantiles.begin(), quantiles.end());
+        } else if (auto quantileQuantizedPerAxisType =
+                           llvm::dyn_cast<mlir::quant::QuantileQuantizedPerAxisType>(weightsType)) {
+            auto quantiles = quantileQuantizedPerAxisType.getQuantiles();
+            config.quantileLUT->assign(quantiles.begin(), quantiles.end());
+        } else {
+            log.error("Palletization mode is enabled but weight type doesn't contain quantile LUT");
+            return mlir::failure();
+        }
+    } else {
+        config.pltMode = IDUWeightPalletMode::NO_PLT;
+    }
+
+    if (taskType == VPUIP::NCETaskType::MAXPOOL || taskType == VPUIP::NCETaskType::AVEPOOL ||
+        taskType == VPUIP::NCETaskType::REDUCEMEAN || taskType == VPUIP::NCETaskType::REDUCESUMSQUARE) {
         config.wMode = getBaseType(inActType);
     } else {
         if (!weightsType) {
             log.error("Missing weights data for DPU task {0}", VPUIP::stringifyNCETaskType(taskType));
             return mlir::failure();
         }
-        config.wMode = getBaseType(weightsType);
+        config.wMode = getBaseType(weightsType, isPalletModeEnabled);
     }
 
-    if (taskType == VPUIP::NCETaskType::AVEPOOL) {
+    if (taskType == VPUIP::NCETaskType::AVEPOOL || taskType == VPUIP::NCETaskType::REDUCEMEAN ||
+        taskType == VPUIP::NCETaskType::REDUCESUMSQUARE) {
         if (config.wMode.isInteger(CHAR_BIT * sizeof(uint8_t))) {
             config.poolWtData = 0x0101;  // Two I8/U8 values => 0x0101;
         } else if (config.wMode.isF16()) {
@@ -123,7 +162,8 @@ mlir::LogicalResult configureSparsityPattern(const Logger&, IDUConfig::InputLaye
 mlir::LogicalResult configureStorageElement(const Logger& log, IDUConfig::StorageElement& config,
                                             VPUIP::NCETaskType taskType, const NDTypeInterface& inActType,
                                             bool inSparsityEnabled, std::optional<int64_t> seSize) {
-    if (taskType == VPUIP::NCETaskType::CONV || taskType == VPUIP::NCETaskType::ELTWISE) {
+    if (taskType == VPUIP::NCETaskType::CONV || taskType == VPUIP::NCETaskType::ELTWISE ||
+        taskType == VPUIP::NCETaskType::REDUCEMEAN || taskType == VPUIP::NCETaskType::REDUCESUMSQUARE) {
         auto seSizeVal = seSize.value_or(0);
         if (inSparsityEnabled && seSizeVal) {
             auto inputZ = inActType.getShape()[Dims4D::Act::C];
@@ -169,6 +209,12 @@ mlir::LogicalResult configureStride(const Logger&, IDUConfig::Stride& config,
 mlir::LogicalResult configureWorkload(const Logger& log, IDUConfig::WorkloadCfg& config, VPUIP::NCETaskType taskType,
                                       int64_t kernelX, int64_t kernelY) {
     switch (taskType) {
+    case VPUIP::NCETaskType::REDUCEMEAN:
+        config.workloadType = IDUWorkloadType::REDUCEMEAN;
+        break;
+    case VPUIP::NCETaskType::REDUCESUMSQUARE:
+        config.workloadType = IDUWorkloadType::REDUCESUMSQUARE;
+        break;
     case VPUIP::NCETaskType::CONV:
         config.workloadType = IDUWorkloadType::CONV;
         break;
@@ -199,12 +245,12 @@ mlir::LogicalResult configureWorkload(const Logger& log, IDUConfig::WorkloadCfg&
 
 mlir::LogicalResult configureDepthWiseCfg(const Logger&, IDUConfig::DepthWiseCfg& config, VPUIP::NCETaskType taskType,
                                           std::optional<bool> smallKernelOptimization) {
-    if (smallKernelOptimization.value_or(false)) {
-        config.dw3x3s2OptDisable = false;
-    } else if (taskType == VPUIP::NCETaskType::DWCONV || taskType == VPUIP::NCETaskType::MAXPOOL) {
-        config.dw3x3s2OptDisable = true;
+    if (taskType == VPUIP::NCETaskType::DWCONV && smallKernelOptimization.value_or(true) == false) {
+        config.dw3x3s1OptDisable = true;
+    } else if (taskType == VPUIP::NCETaskType::MAXPOOL) {
+        // Must be set = 1 (true) for MAXPOOL ops
+        config.dw3x3s1OptDisable = true;
     }
-
     return mlir::success();
 }
 
@@ -251,7 +297,7 @@ mlir::LogicalResult configureEltwiseCfg(const Logger& log, IDUConfig::EltWiseCfg
         auto inType = getBaseType(inActType);
         auto wtType = getBaseType(weightsType);
         if (inType.isa<mlir::Float8E4M3FNType, mlir::Float8E5M2Type>() ||
-            wtType.isa<mlir::Float8E5M2Type, mlir::Float8E5M2Type>()) {
+            wtType.isa<mlir::Float8E4M3FNType, mlir::Float8E5M2Type>()) {
             config.elopScapeFp = true;
         }
 
@@ -268,11 +314,10 @@ PPETask evalPPETasks(mlir::Region& ppeRegion, std::optional<VPUIP::NCETaskType> 
     PPETask ppeTask;
 
     for (auto ppeTaskOp : ppeRegion.getOps<VPUASM::PPETaskOp>()) {
-        auto opaquePpeAttr = ppeTaskOp.getOpaquePpeAttr();
-        auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(opaquePpeAttr);
+        auto ppeAttr = ppeTaskOp.getPpeAttr();
+        auto intPpeAttr = mlir::dyn_cast<vpux::VPU::PPEIntAttr>(ppeAttr);
         VPUX_THROW_WHEN(intPpeAttr == nullptr,
-                        "Expected PPEIntAttr type but got {0}, make sure to use the right factory version",
-                        opaquePpeAttr);
+                        "Expected PPEIntAttr type but got {0}, make sure to use the right factory version", ppeAttr);
 
         if (const auto in1QuantMultAttr = intPpeAttr.getIn1QuantMult()) {
             if (mlir::isa_and_nonnull<mlir::FloatAttr>(in1QuantMultAttr.getValue()[0])) {
@@ -376,7 +421,9 @@ mlir::LogicalResult buildIDUConfig(mlir::OpBuilder& builder, const mlir::Locatio
 
     // IDUWeights
     auto poolWtDataAttr = getI64IntegerAttrOrNull(builder, config.weights.poolWtData);
-    builder.create<IDUWeightsOp>(loc, config.weights.wMode, poolWtDataAttr, config.weights.wtSparse);
+    auto quantileLUTAttr = getF64ArrayAttrOrNull(builder, config.weights.quantileLUT);
+    builder.create<IDUWeightsOp>(loc, config.weights.wMode, poolWtDataAttr, config.weights.wtSparse,
+                                 config.weights.pltMode, quantileLUTAttr);
 
     // IDUInputLayerCfg
     if (config.inputLayerCfg.sparsityPattern) {
@@ -400,9 +447,9 @@ mlir::LogicalResult buildIDUConfig(mlir::OpBuilder& builder, const mlir::Locatio
     builder.create<IDUWorkloadCfgOp>(loc, config.workloadCfg.workloadType);
 
     // IDUDepthWiseCfg
-    if (config.depthWiseCfg.dw3x3s2OptDisable || config.depthWiseCfg.dwOptOffset.has_value()) {
+    if (config.depthWiseCfg.dw3x3s1OptDisable || config.depthWiseCfg.dwOptOffset.has_value()) {
         auto dwOptOffsetAttr = getI64IntegerAttrOrNull(builder, config.depthWiseCfg.dwOptOffset);
-        builder.create<IDUDepthWiseCfgOp>(loc, config.depthWiseCfg.dw3x3s2OptDisable, dwOptOffsetAttr);
+        builder.create<IDUDepthWiseCfgOp>(loc, config.depthWiseCfg.dw3x3s1OptDisable, dwOptOffsetAttr);
     }
 
     // IDUEltWiseCfg
@@ -426,24 +473,25 @@ mlir::LogicalResult buildIDUConfig(mlir::OpBuilder& builder, const mlir::Locatio
 mlir::LogicalResult vpux::VPUIPDPU::arch40xx::buildDPUInvariantIDU(
         VPUASM::DPUInvariantOp origInvOp, mlir::OpBuilder& builder, const Logger& log, mlir::Block* invBlock,
         const std::unordered_map<BlockArg, size_t>& invBlockArgsPos) {
-    IDUConfig config;
+    IDU::IDUConfig config;
     auto inAct = getInvBlockArg(BlockArg::ACT_IN, invBlock, invBlockArgsPos);
     mlir::Type weightsType;
     if (auto weights = getInvBlockArg(BlockArg::WEIGHTS, invBlock, invBlockArgsPos)) {
         weightsType = weights.getType().cast<mlir::MemRefType>().getElementType();
     }
 
-    auto ppeTask = evalPPETasks(origInvOp.getPpe(), /*taskType*/ {});
-    if (configureIDU(log, config, inAct.getType(), weightsType, origInvOp.getNceTaskType(), origInvOp.getCmSpPattern(),
-                     origInvOp.getInputChannelsCompression(), origInvOp.getIsSmallKernelOptimized(),
-                     getInvBlockArg(BlockArg::ACT_SPARSE_MAP_IN, invBlock, invBlockArgsPos) != nullptr,
-                     getInvBlockArg(BlockArg::WEIGHTS_SPARSE_MAP, invBlock, invBlockArgsPos) != nullptr,
-                     origInvOp.getKernelSize(), origInvOp.getKernelStrides(), origInvOp.getInputSeSize(), ppeTask)
+    auto ppeTask = IDU::evalPPETasks(origInvOp.getPpe(), /*taskType*/ {});
+    if (IDU::configureIDU(log, config, inAct.getType(), weightsType, origInvOp.getNceTaskType(),
+                          origInvOp.getCmSpPattern(), origInvOp.getInputChannelsCompression(),
+                          origInvOp.getIsSmallKernelOptimized(),
+                          getInvBlockArg(BlockArg::ACT_SPARSE_MAP_IN, invBlock, invBlockArgsPos) != nullptr,
+                          getInvBlockArg(BlockArg::WEIGHTS_SPARSE_MAP, invBlock, invBlockArgsPos) != nullptr,
+                          origInvOp.getKernelSize(), origInvOp.getKernelStrides(), origInvOp.getInputSeSize(), ppeTask)
                 .failed()) {
         return mlir::failure();
     }
 
-    if (buildIDUConfig(builder, origInvOp.getLoc(), config, inAct).failed()) {
+    if (IDU::buildIDUConfig(builder, origInvOp.getLoc(), config, inAct).failed()) {
         return mlir::failure();
     }
 

@@ -5,11 +5,9 @@
 
 #include <mlir/IR/BuiltinTypes.h>
 #include "vpux/compiler/NPU40XX/dialect/NPUReg40XX/ops.hpp"
-#include "vpux/compiler/NPU40XX/dialect/NPUReg40XX/types.hpp"
 #include "vpux/compiler/dialect/VPUASM/utils.hpp"
 #include "vpux/compiler/utils/ELF/utils.hpp"
-
-#include "vpux/utils/core/mem_size.hpp"
+#include "vpux/utils/core/error.hpp"
 
 #include <npu_40xx_nnrt.hpp>
 
@@ -32,20 +30,23 @@ void NPUReg40XX::NNDMAOp::serialize(elf::writer::BinaryDataSection<uint8_t>& bin
     binDataSection.appendData(serializedDmaDesc.data(), serializedDmaDesc.size());
 }
 
-size_t NPUReg40XX::NNDMAOp::getBinarySize() {
+size_t NPUReg40XX::NNDMAOp::getBinarySize(VPU::ArchKind) {
     return sizeof(nn_public::VpuDMATask);
 }
 
-size_t NPUReg40XX::NNDMAOp::getAlignmentRequirements() {
-    return alignof(nn_public::VpuDMATask);
+size_t NPUReg40XX::NNDMAOp::getAlignmentRequirements(VPU::ArchKind) {
+    // TODO: E#80148
+    VPUX_THROW("WrappableInterface method should not be called at this point! E#80148");
 }
 
 std::optional<ELF::SectionSignature> NPUReg40XX::NNDMAOp::getSectionSignature() {
-    return {};
+    // TODO: E#80148
+    VPUX_THROW("WrappableInterface method should not be called at this point! E#80148");
 }
 
 bool NPUReg40XX::NNDMAOp::hasMemoryFootprint() {
-    return true;
+    // TODO: E#80148
+    VPUX_THROW("WrappableInterface method should not be called at this point! E#80148");
 }
 
 namespace {
@@ -87,9 +88,8 @@ std::vector<ELF::RelocationInfo> NPUReg40XX::NNDMAOp::getRelocationInfo(ELF::Sym
                                   ? ELF::RelocationType::R_VPU_64_BIT_OR_B21_B26_UNSET
                                   : ELF::RelocationType::R_VPU_64;
 
-    relocs.push_back(ELF::RelocationInfo(getInput(), targetSection, getSymRefOffsetForReloc(thisDma, getInput()),
-                                         inputRelocType, ELF::getOffsetOfSymRef(symRefMap, getInput()),
-                                         "Input in NNDMA reloc"));
+    relocs.emplace_back(getInput(), targetSection, getSymRefOffsetForReloc(thisDma, getInput()), inputRelocType,
+                        ELF::getOffsetOfSymRef(symRefMap, getInput()), "Input in NNDMA reloc");
 
     // Output reloc
     auto firstOutputBuff = getOutputBuffs()[0].cast<mlir::SymbolRefAttr>();
@@ -97,9 +97,9 @@ std::vector<ELF::RelocationInfo> NPUReg40XX::NNDMAOp::getRelocationInfo(ELF::Sym
                                    ? ELF::RelocationType::R_VPU_64_BIT_OR_B21_B26_UNSET
                                    : ELF::RelocationType::R_VPU_64;
 
-    relocs.push_back(ELF::RelocationInfo(
-            firstOutputBuff, targetSection, getSymRefOffsetForReloc(thisDma, firstOutputBuff), outputRelocType,
-            ELF::getOffsetOfSymRef(symRefMap, firstOutputBuff), "Output (firstOutputBuff) in NNDMA reloc"));
+    relocs.emplace_back(firstOutputBuff, targetSection, getSymRefOffsetForReloc(thisDma, firstOutputBuff),
+                        outputRelocType, ELF::getOffsetOfSymRef(symRefMap, firstOutputBuff),
+                        "Output (firstOutputBuff) in NNDMA reloc");
 
     // Link Address reloc
     if (auto nextLink = getNextLink().value_or(nullptr)) {
@@ -107,24 +107,23 @@ std::vector<ELF::RelocationInfo> NPUReg40XX::NNDMAOp::getRelocationInfo(ELF::Sym
         auto relocType = getOperation()->hasAttr("directLink") ? ELF::RelocationType::R_VPU_64
                                                                : ELF::RelocationType::R_VPU_32_BIT_OR_B21_B26_UNSET;
 
-        relocs.push_back(ELF::RelocationInfo(nextLink, targetSection, getSymRefOffsetForReloc(thisDma, nextLink),
-                                             relocType, ELF::getOffsetOfSymRef(symRefMap, nextLink),
-                                             "Link address (nextLink) in NNDMA reloc"));
+        relocs.emplace_back(nextLink, targetSection, getSymRefOffsetForReloc(thisDma, nextLink), relocType,
+                            ELF::getOffsetOfSymRef(symRefMap, nextLink), "Link address (nextLink) in NNDMA reloc");
     }
 
     // ActCompressionSizeEntry reloc
     if (auto actCompressionSizeEntry = getActCompressionSizeEntry().value_or(nullptr)) {
-        relocs.push_back(ELF::RelocationInfo(
+        relocs.emplace_back(
                 actCompressionSizeEntry, targetSection, getSymRefOffsetForReloc(thisDma, actCompressionSizeEntry),
                 ELF::RelocationType::R_VPU_32_BIT_OR_B21_B26_UNSET,
-                ELF::getOffsetOfSymRef(symRefMap, actCompressionSizeEntry), "actCompressionSizeEntry in NNDMA reloc"));
+                ELF::getOffsetOfSymRef(symRefMap, actCompressionSizeEntry), "actCompressionSizeEntry in NNDMA reloc");
     }
 
     // Indices reloc
     if (auto indices = getIndices().value_or(nullptr)) {
-        relocs.push_back(ELF::RelocationInfo(indices, targetSection, getSymRefOffsetForReloc(thisDma, indices),
-                                             ELF::RelocationType::R_VPU_32, ELF::getOffsetOfSymRef(symRefMap, indices),
-                                             "indices in NNDMA reloc"));
+        relocs.emplace_back(indices, targetSection, getSymRefOffsetForReloc(thisDma, indices),
+                            ELF::RelocationType::R_VPU_32, ELF::getOffsetOfSymRef(symRefMap, indices),
+                            "indices in NNDMA reloc");
     }
 
     return relocs;

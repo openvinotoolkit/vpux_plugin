@@ -61,6 +61,16 @@ bool isUpstreamPossible(IE::LayerOpInterface sliceOp, mlir::Value tensor, Logger
         return false;
     }
 
+    // Consider a strided slice with begins, ends or strides unknown at compile time:
+    // %GELU = IE.Gelu(%arg0) -> 1x2x3x4xf16
+    // %SLICE = IE.StridedSlice(%GELU, %arg1) -> ?x?x?x?xf16
+    // The upstreaming may be unsafe because the producer does not guarantee dynamic shapes support:
+    // %SLICE = IE.StridedSlice(%arg0, %arg1) -> ?x?x?x?xf16    // OK
+    // %GELU = IE.Gelu(%arg0) -> ?x?x?x?xf16                    // Not OK, GeLU kernel expected static input
+    if (getShape(sliceOp->getResult(0)).isDynamic()) {
+        return false;
+    }
+
     // Strided slice does not support datatypes generically
     // so we can't afford changing datatype of this operation.
     if (mlir::isa<IE::StridedSliceOp>(sliceOp)) {

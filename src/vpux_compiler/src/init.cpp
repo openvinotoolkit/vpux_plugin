@@ -27,10 +27,15 @@
 #include "vpux/compiler/dialect/const/ops.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 
+#include "vpux/compiler/core/types/quantile_float/dialect.hpp"
+#include "vpux/compiler/core/types/quantile_float/types.hpp"
+
 #include <llvm/ADT/TypeSwitch.h>
 #include <mlir/Dialect/Affine/IR/AffineOps.h>
 #include <mlir/Dialect/Async/IR/Async.h>
 #include <mlir/Dialect/ControlFlow/IR/ControlFlow.h>
+#include <mlir/Dialect/Index/IR/IndexDialect.h>
+#include <mlir/Dialect/Index/IR/IndexOps.h>
 #include <mlir/Dialect/LLVMIR/LLVMDialect.h>
 #include <mlir/Dialect/Math/IR/Math.h>
 #include <mlir/Dialect/MemRef/IR/MemRef.h>
@@ -40,6 +45,9 @@
 #include <mlir/IR/BuiltinDialect.h>
 #include <mlir/IR/BuiltinTypes.h>
 #include <mlir/Transforms/BufferizationUtils.h>
+
+#include <mlir/Target/LLVMIR/Dialect/Builtin/BuiltinToLLVMIRTranslation.h>
+#include <mlir/Target/LLVMIR/Dialect/LLVMIR/LLVMToLLVMIRTranslation.h>
 
 using namespace vpux;
 
@@ -75,7 +83,8 @@ void registerDialects(mlir::DialectRegistry& registry) {
                     vpux::ELF::ELFDialect,                    //
                     vpux::NPUReg37XX::NPUReg37XXDialect,      //
                     vpux::NPUReg40XX::NPUReg40XXDialect,      //
-                    vpux::ELFNPU37XX::ELFNPU37XXDialect>();
+                    vpux::ELFNPU37XX::ELFNPU37XXDialect,      //
+                    vpux::type::QuantileFloatDialect>();
 
     registry.insert<mlir::func::FuncDialect,           //
                     mlir::async::AsyncDialect,         //
@@ -92,7 +101,7 @@ void registerDialects(mlir::DialectRegistry& registry) {
 
 }  // namespace
 
-mlir::DialectRegistry vpux::createDialectRegistry(DummyOpMode dummyOpMode) {
+mlir::DialectRegistry vpux::createDialectRegistry(DummyOpMode dummyOpMode, const bool enableExtraShapeBoundOps) {
     mlir::DialectRegistry registry;
     registerDialects(registry);
 
@@ -100,15 +109,30 @@ mlir::DialectRegistry vpux::createDialectRegistry(DummyOpMode dummyOpMode) {
         mlir::quant::AnyQuantizedType::attachInterface<MemRefElementTypeModel>(*ctx);
         mlir::quant::UniformQuantizedType::attachInterface<MemRefElementTypeModel>(*ctx);
         mlir::quant::UniformQuantizedPerAxisType::attachInterface<MemRefElementTypeModel>(*ctx);
+        mlir::quant::QuantileQuantizedType::attachInterface<MemRefElementTypeModel>(*ctx);
+        mlir::quant::QuantileQuantizedPerAxisType::attachInterface<MemRefElementTypeModel>(*ctx);
         mlir::quant::CalibratedQuantizedType::attachInterface<MemRefElementTypeModel>(*ctx);
     });
+
+    registry.addExtension(+[](mlir::MLIRContext* ctx, vpux::type::QuantileFloatDialect*) {
+        vpux::type::NF4Type::attachInterface<MemRefElementTypeModel>(*ctx);
+    });
+
     Const::ConstDialect::setupExtraInterfaces(registry);
     IERT::IERTDialect::setupExtraInterfaces(registry);
     VPUIP::VPUIPDialect::setupExtraInterfaces(registry);
     VPU::registerAlignedChannelsOpInterfacesVPU(registry);
 
+    // Register the translation to LLVM IR with MLIR
+    mlir::registerBuiltinDialectTranslation(registry);
+    mlir::registerLLVMDialectTranslation(registry);
+
     if (dummyOpMode == DummyOpMode::ENABLED) {
         VPUIP::VPUIPDialect::setupExtraInterfacesAdditional(registry);
+    }
+
+    if (enableExtraShapeBoundOps) {
+        IE::IEDialect::setupExtraInterfaces(registry);
     }
 
     registry.addExtension(+[](mlir::MLIRContext*, mlir::BuiltinDialect* dialect) {

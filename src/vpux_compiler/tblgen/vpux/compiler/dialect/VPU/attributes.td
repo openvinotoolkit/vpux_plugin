@@ -7,8 +7,8 @@
 #define VPUX_COMPILER_DIALECT_VPU_ATTRIBUTES
 
 include "vpux/compiler/core/attributes.td"
-include "vpux/compiler/dialect/VPU/dialect.td"
 include "vpux/compiler/dialect/VPU/attr_interfaces.td"
+include "vpux/compiler/dialect/VPU/dialect.td"
 
 //
 // Base classes
@@ -156,6 +156,26 @@ def VPU_RevisionID  :
 }
 
 def VPU_RevisionIDAttr : VPU_EnumAttr<VPU_RevisionID, "revision_id">;
+
+//
+// VFScenario
+//
+
+def VPU_VFScenario :
+        VPU_I64EnumAttr<
+            "VFScenario",
+            "Scenarios for VF scheduling",
+            [
+                I64EnumAttrCase<"MINIMAL", 0>,
+                I64EnumAttrCase<"LASTOP_PREFETCHING", 1>,
+                I64EnumAttrCase<"WEIGHTS_PREFETCHING", 3>,
+                I64EnumAttrCase<"FULL_PREFETCHING", 4>,
+                I64EnumAttrCase<"VF_PIPELINING", 5>
+            ]
+        > {
+}
+
+def VPU_VFScenarioAttr : VPU_EnumAttr<VPU_VFScenario, "vf_scenario">;
 
 //
 // SparsitySupport
@@ -341,7 +361,9 @@ def VPU_PPEMode :
                 I64EnumAttrCase<"FLEXARB", 24>,
                 I64EnumAttrCase<"NOT",     25>,
                 I64EnumAttrCase<"ABS",     26>,
-                I64EnumAttrCase<"NEG",     27>
+                I64EnumAttrCase<"NEG",     27>,
+                I64EnumAttrCase<"SIN",     28>,
+                I64EnumAttrCase<"COS",     29>
             ]
         > {
 }
@@ -411,35 +433,53 @@ def VPU_PPEFpAttr : VPU_Attr<"PPEFp", [
         DeclareAttrInterfaceMethods<VPU_PPEAttrInterface>
     ] > {
     let description = [{
-        Non-compatible mode for VPU PPE attribute, storing parameters only for float PPE operations.
-        FloatArray attributes were chosen in order to support per-axis PPE operations in the future. Currently only scalars are used.
+        Stores parameters for the float/non-backwards-compatible PPE (Post Processing Engine) pipeline.
 
-        Since the PPE attribute maps directly to the HW config table, some missing fields are later replaced by mathematically neutral values.
-
-        Neutral values:
-        - `mode`: NOOP
-        - (`clamp_low`, `clamp_high`): (std::numeric_limits<float>::min(), std::numeric_limits<float>::max())
-        - `scale`: {1.0}
-        - `prelu_alpha`: {1.0}
-        - `bias`: {0.0}
-        - `adder`: {0.0}
+        Parameters:
+        - `mode`: Specifies the post-op type which may influence how the other fields are used. Default: `NOOP`
+        - `clamp_low`: Specifies the low clamp applied on the output. Default: `std::numeric_limits<float>::lowest()`
+        - `clamp_high`: Specifies the high clamp applied on the output. Default: `std::numeric_limits<float>::max()`
+        - `scale`: Specifies the per-tensor scale applied on the PPE input, in case of per-channel scale (stored in the WT) this field is set to null.
+        - `prelu_alpha`: Specifies the leaky-relu alpha applied to negative values, may also be used as a per-tensor multiplier in certain modes. Default: `{1.0}`
+        - `bias`: Specifies the per-tensor bias applied on the PPE input, in case of per-channel bias (stored in the WT) this field is set to null.
+        - `adder`: Specifies the per-tensor zero-point applied on the PPE output. Default: `0.0`
+        - `in1_mult`/`in2_mult`: Specifies the scales applied to the inputs of eltwise ops by the IDU. Default: `1.0`
+        - `sprlut`: Enables and stores the SprLUT configuration table for SprLUT supported post-ops. Default: `null`
 
         The exact usage of the parameters inside PPE HW can be found in the PPE section of the compiler docs.
     }];
     let parameters = (ins
         "vpux::VPU::PPEModeAttr":$mode,
-        OptionalParameter<"mlir::FloatAttr">:$clamp_low,
-        OptionalParameter<"mlir::FloatAttr">:$clamp_high,
-        OptionalParameter<"mlir::ArrayAttr">:$scale,
-        OptionalParameter<"mlir::ArrayAttr">:$prelu_alpha,
-        OptionalParameter<"mlir::ArrayAttr">:$bias,
-        OptionalParameter<"mlir::ArrayAttr">:$adder,
+        "mlir::FloatAttr":$clamp_low,
+        "mlir::FloatAttr":$clamp_high,
+        OptionalParameter<"mlir::FloatAttr">:$scale,
+        "mlir::ArrayAttr":$prelu_alpha,
+        OptionalParameter<"mlir::FloatAttr">:$bias,
+        "mlir::FloatAttr":$adder,
         OptionalParameter<"mlir::ArrayAttr">:$in1_mult,
-        OptionalParameter<"mlir::ArrayAttr">:$in2_mult
+        OptionalParameter<"mlir::ArrayAttr">:$in2_mult,
+        OptionalParameter<"mlir::ElementsAttr">:$sprlut
     );
 
     let assemblyFormat = "`<` struct(params) `>`";
 }
+
+//
+// MPEEngineAttr
+//
+
+class VPU_MPEEngineAttrBase<Pred condition, string summary> : Attr<condition, summary> {
+    let storageType = [{ vpux::VPU::MPEEngineAttr }];
+    let returnType = [{ vpux::VPU::MPEEngineAttr }];
+    let convertFromStorage = "$_self";
+}
+
+def VPU_MPEEngineAttr : VPU_MPEEngineAttrBase<CPred<"$_self.isa<vpux::VPU::MPEEngineAttr>()">,
+                                      "MPE Engine attribute"> {
+        string cppType = "vpux::VPU::MPEEngineAttr";
+    }
+
+include "vpux/compiler/NPU37XX/dialect/VPU/attributes.td"
 
 //
 // MultiClusterStrategy
@@ -512,12 +552,12 @@ def VPU_DistributionModeAttr : VPU_EnumAttr<VPU_DistributionMode, "tensor_distri
 // mode - hint for how data and compute are distributed across clusters
 //      * SEGMENTED - data and compute is split in a simple manner across clusters
 //      not taking into account the overlap lines. This is possible for
-//      input tensors in VPUX3XXX since HW can read the overlap lines from
+//      input tensors in NPU3XXX since HW can read the overlap lines from
 //      neighboring clusters.
 //          * for NPU40XX we continue to use SEGMENTED yet we take into account the overlap
 //          lines, this is intended to be improve in the future, for easier understanding
 //      * OVERLAPPED - data is split taking into account the overlap lines in
-//      memory, compute does not differ from SEGMENTED. This is done for VPUX3XXX for the
+//      memory, compute does not differ from SEGMENTED. This is done for NPU3XXX for the
 //      layers which can't perform intercluster read accesses, and for all case in NPU40XX
 //      and following.
 //      * DUPLICATED - both data and compute are duplicated on the specified clusters.
@@ -953,6 +993,104 @@ def VPU_SEPaddingAttr : VPU_Attr<"SEPadding", [
     let genVerifyDecl = 1;
 }
 
+//
+// SEDilatedConvAttr
+//
+
+def VPU_SEDilatedConvAttr : VPU_Attr<"SEDilatedConv", [
+        DeclareAttrInterfaceMethods<VPU_SEAttrInterface>
+    ] > {
+    let description = [{
+        Describes how input data can be modified to emulate dilated convolution behavior
+        with normal convolution. Using this attribute implies that original dilated
+        convolution is decomposed into a graph of normal convolutions with sparse input.
+        Number of convolutions in the graph is D^2. Each convolution should process only
+        a part of input tensor and this part is defined by Storage Element Table.
+        Output of all convolution then should be interleaved using strided concat.
+
+        The attribute contains the following parameters:
+
+        - `dilation`: [H, W] - describes how many elements should be skipped on each
+          spatial dimension, it is dilation of ofiginal kernel
+
+        - `kernelStride`: [H, W] - original convolution kernel stride
+
+        - `kernelSize`: [H, W] - original convolution kernel size
+
+        - `dataOffset`: [N, C, H, W] - starting point of input tensor used for every
+          sub-convolution
+
+        - `dataSizes`: [N, C, H, W] - size of original input sub-tensor used for
+          every sub-convolution
+
+        - `offsets` / `sizes`: [N, C, H, W] - describes what slice of the effective
+          output data represents the final output. The parameters above define how
+          the input data will be expanded. Attribute methods may provide more data
+          than necessary and these parameters can help to further slice it.
+
+        Example:
+        ```
+        Original convoltion has:
+            - input     = 1x16x6x6
+            - kernel    = 3x3
+            - dilations = 2x2
+            - stride    = 1x1
+
+        Original input data [1, 16, 6, 6]:
+            1  2  3  4  5  6
+            7  8  9 10  11 12
+            13 14 15 16 17 18
+            19 20 21 22 23 24
+            25 26 27 28 29 30
+            31 32 33 34 35 36
+
+        It can be decomposed into a subgraph of 4 sub-convolutions.
+        The first one has the following configuration for SET attribute:
+
+            - dilation:     [2, 2]
+            - kernelStride: [1, 1]
+            - kernelSize:   [3, 3]
+            - dataOffset:   [0, 0, 0, 0]
+            - dataSizes:    [1, 16, 5, 5]
+
+        The data is fetched using the Storage Element pointers:
+            1  3  5
+            13 15 17
+            25 27 29
+
+        The second one has the following configuration for SET attribute:
+
+            - dilation:     [2, 2]
+            - kernelStride: [1, 1]
+            - kernelSize:   [3, 3]
+            - dataOffset:   [0, 0, 0, 1]
+            - dataSizes:    [1, 16, 5, 5]
+
+        The data is fetched using the Storage Element pointers:
+            2  4  6
+            14 16 18
+            26 28 30
+
+        The other 2 convolutions have similar parameters, but with different dataOffset.
+        All 4 outputs have to be interleaved to get the final output.
+        ```
+    }];
+    let parameters = (ins
+        "mlir::ArrayAttr":$dilation,
+
+        "mlir::ArrayAttr":$kernelStride,
+        "mlir::ArrayAttr":$kernelSize,
+
+        "mlir::ArrayAttr":$dataOffset,
+        "mlir::ArrayAttr":$dataSizes,
+
+        OptionalParameter<"mlir::ArrayAttr">:$offsets,
+        OptionalParameter<"mlir::ArrayAttr">:$sizes
+    );
+
+    let assemblyFormat = "`<` struct(params) `>`";
+    let genVerifyDecl = 1;
+}
 
 //
 // M2I Color Formats

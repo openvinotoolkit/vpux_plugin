@@ -83,7 +83,7 @@ func.func @OptimizeSubviewCopyConvPattern(
         DPUTask {cluster_id = 0 : i64, inEnd = [0, 0, 1535], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 127], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
         DPUTask {cluster_id = 1 : i64, inEnd = [0, 0, 1535], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 127], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     } PPE : {
-        PPETask {opaque_ppe = #VPU.PPEStub<>}
+        PPETask {ppe = #VPU.PPEStub<>}
     }
 
     return %conv: !OutputDistributed
@@ -201,7 +201,7 @@ func.func @OptimizeSubviewCopy2ConvPattern(
         DPUTask {cluster_id = 0 : i64, inEnd = [0, 0, 1535], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 127], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
         DPUTask {cluster_id = 1 : i64, inEnd = [0, 0, 1535], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 127], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     } PPE : {
-        PPETask {opaque_ppe = #VPU.PPEStub<>}
+        PPETask {ppe = #VPU.PPEStub<>}
     }
 
     %allocConv1 = VPURT.AllocDistributed -> !OutputDistributed1
@@ -219,7 +219,7 @@ func.func @OptimizeSubviewCopy2ConvPattern(
         DPUTask {cluster_id = 0 : i64, inEnd = [0, 0, 1535], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 127], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
         DPUTask {cluster_id = 1 : i64, inEnd = [0, 0, 1535], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 256], outStart = [0, 0, 128], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     } PPE : {
-        PPETask {opaque_ppe = #VPU.PPEStub<>}
+        PPETask {ppe = #VPU.PPEStub<>}
     }
 
     return %conv0, %conv1: !OutputDistributed0, !OutputDistributed1
@@ -353,7 +353,7 @@ func.func @Optimize2SubviewCopyConvPattern(
         DPUTask {cluster_id = 0 : i64, inEnd = [0, 0, 1535], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 127], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
         DPUTask {cluster_id = 1 : i64, inEnd = [0, 0, 1535], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 127], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     } PPE : {
-        PPETask {opaque_ppe = #VPU.PPEStub<>}
+        PPETask {ppe = #VPU.PPEStub<>}
     }
 
     %allocConv1 = VPURT.AllocDistributed -> !OutputDistributed1
@@ -371,7 +371,7 @@ func.func @Optimize2SubviewCopyConvPattern(
         DPUTask {cluster_id = 0 : i64, inEnd = [0, 0, 1535], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 127], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
         DPUTask {cluster_id = 1 : i64, inEnd = [0, 0, 1535], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 256], outStart = [0, 0, 128], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     } PPE : {
-        PPETask {opaque_ppe = #VPU.PPEStub<>}
+        PPETask {ppe = #VPU.PPEStub<>}
     }
 
     return %conv0, %conv1: !OutputDistributed0, !OutputDistributed1
@@ -531,7 +531,7 @@ func.func @Optimize2SubviewCopyConvPatternWithOptimizableCopyIn(
         DPUTask {cluster_id = 0 : i64, inEnd = [0, 0, 1535], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 127], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
         DPUTask {cluster_id = 1 : i64, inEnd = [0, 0, 1535], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 127], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     } PPE : {
-        PPETask {opaque_ppe = #VPU.PPEStub<>}
+        PPETask {ppe = #VPU.PPEStub<>}
     }
 
     %allocConv1 = VPURT.AllocDistributed -> !OutputDistributed1
@@ -549,7 +549,7 @@ func.func @Optimize2SubviewCopyConvPatternWithOptimizableCopyIn(
         DPUTask {cluster_id = 0 : i64, inEnd = [0, 0, 1535], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 127], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
         DPUTask {cluster_id = 1 : i64, inEnd = [0, 0, 1535], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 256], outStart = [0, 0, 128], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     } PPE : {
-        PPETask {opaque_ppe = #VPU.PPEStub<>}
+        PPETask {ppe = #VPU.PPEStub<>}
     }
 
     return %conv0, %conv1: !OutputDistributed0, !OutputDistributed1
@@ -705,7 +705,7 @@ func.func @Optimize2SubviewCopyConvPatternKeepCopyInWithOtherUsers(
         DPUTask {cluster_id = 0 : i64, inEnd = [0, 0, 1535], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 127], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
         DPUTask {cluster_id = 1 : i64, inEnd = [0, 0, 1535], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 127], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     } PPE : {
-        PPETask {opaque_ppe = #VPU.PPEStub<>}
+        PPETask {ppe = #VPU.PPEStub<>}
     }
 
     %allocConv1 = VPURT.AllocDistributed -> !OutputDistributed1
@@ -723,7 +723,7 @@ func.func @Optimize2SubviewCopyConvPatternKeepCopyInWithOtherUsers(
         DPUTask {cluster_id = 0 : i64, inEnd = [0, 0, 1535], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 127], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
         DPUTask {cluster_id = 1 : i64, inEnd = [0, 0, 1535], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 256], outStart = [0, 0, 128], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     } PPE : {
-        PPETask {opaque_ppe = #VPU.PPEStub<>}
+        PPETask {ppe = #VPU.PPEStub<>}
     }
 
     return %conv0, %conv1, %spillCopy: !OutputDistributed0, !OutputDistributed1, memref<1x3072x1x1xf16, #NHWC, @DDR>
@@ -873,7 +873,7 @@ func.func @Optimize2SubviewCopyConvPatternKeepCopyInNotCMX2DDR(
         DPUTask {cluster_id = 0 : i64, inEnd = [0, 0, 1535], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 127], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
         DPUTask {cluster_id = 1 : i64, inEnd = [0, 0, 1535], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 127], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     } PPE : {
-        PPETask {opaque_ppe = #VPU.PPEStub<>}
+        PPETask {ppe = #VPU.PPEStub<>}
     }
 
     %allocConv1 = VPURT.AllocDistributed -> !OutputDistributed1
@@ -891,7 +891,7 @@ func.func @Optimize2SubviewCopyConvPatternKeepCopyInNotCMX2DDR(
         DPUTask {cluster_id = 0 : i64, inEnd = [0, 0, 1535], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 127], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
         DPUTask {cluster_id = 1 : i64, inEnd = [0, 0, 1535], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 256], outStart = [0, 0, 128], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     } PPE : {
-        PPETask {opaque_ppe = #VPU.PPEStub<>}
+        PPETask {ppe = #VPU.PPEStub<>}
     }
 
     return %conv0, %conv1: !OutputDistributed0, !OutputDistributed1
@@ -1039,7 +1039,7 @@ func.func @Optimize2SubviewCopyConvPatternKeepCopyInNotDuplicatedLike(
         DPUTask {cluster_id = 0 : i64, inEnd = [0, 0, 1535], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 127], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
         DPUTask {cluster_id = 1 : i64, inEnd = [0, 0, 1535], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 127], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     } PPE : {
-        PPETask {opaque_ppe = #VPU.PPEStub<>}
+        PPETask {ppe = #VPU.PPEStub<>}
     }
 
     %allocConv1 = VPURT.AllocDistributed -> !OutputDistributed1
@@ -1057,7 +1057,7 @@ func.func @Optimize2SubviewCopyConvPatternKeepCopyInNotDuplicatedLike(
         DPUTask {cluster_id = 0 : i64, inEnd = [0, 0, 1535], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 127], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
         DPUTask {cluster_id = 1 : i64, inEnd = [0, 0, 1535], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 256], outStart = [0, 0, 128], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     } PPE : {
-        PPETask {opaque_ppe = #VPU.PPEStub<>}
+        PPETask {ppe = #VPU.PPEStub<>}
     }
 
     return %conv0, %conv1: !OutputDistributed0, !OutputDistributed1
@@ -1199,7 +1199,7 @@ func.func @Optimize2SubviewCopyConvPatternWithKeepCopyInNotFitInCMX(
         DPUTask {cluster_id = 0 : i64, inEnd = [0, 0, 1535], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 127], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
         DPUTask {cluster_id = 1 : i64, inEnd = [0, 0, 1535], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 127], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     } PPE : {
-        PPETask {opaque_ppe = #VPU.PPEStub<>}
+        PPETask {ppe = #VPU.PPEStub<>}
     }
 
     %allocConv1 = VPURT.AllocDistributed -> !OutputDistributed1
@@ -1217,7 +1217,7 @@ func.func @Optimize2SubviewCopyConvPatternWithKeepCopyInNotFitInCMX(
         DPUTask {cluster_id = 0 : i64, inEnd = [0, 0, 1535], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 127], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
         DPUTask {cluster_id = 1 : i64, inEnd = [0, 0, 1535], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 256], outStart = [0, 0, 128], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     } PPE : {
-        PPETask {opaque_ppe = #VPU.PPEStub<>}
+        PPETask {ppe = #VPU.PPEStub<>}
     }
 
     return %conv0, %conv1: !OutputDistributed0, !OutputDistributed1
@@ -1361,7 +1361,7 @@ func.func @Optimize2SubviewCopyConvPatternWithOptimizeCopyInWithStrides(
         DPUTask {cluster_id = 0 : i64, inEnd = [0, 0, 1535], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 127], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
         DPUTask {cluster_id = 1 : i64, inEnd = [0, 0, 1535], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 127], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     } PPE : {
-        PPETask {opaque_ppe = #VPU.PPEStub<>}
+        PPETask {ppe = #VPU.PPEStub<>}
     }
 
     %allocConv1 = VPURT.AllocDistributed -> !OutputDistributed1
@@ -1379,7 +1379,7 @@ func.func @Optimize2SubviewCopyConvPatternWithOptimizeCopyInWithStrides(
         DPUTask {cluster_id = 0 : i64, inEnd = [0, 0, 1535], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 127], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
         DPUTask {cluster_id = 1 : i64, inEnd = [0, 0, 1535], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 256], outStart = [0, 0, 128], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     } PPE : {
-        PPETask {opaque_ppe = #VPU.PPEStub<>}
+        PPETask {ppe = #VPU.PPEStub<>}
     }
 
     return %conv0, %conv1: !OutputDistributed0, !OutputDistributed1
@@ -1475,7 +1475,7 @@ func.func @OptimizeSubview2CopyConvPattern(
         DPUTask {cluster_id = 0 : i64, inEnd = [0, 0, 1535], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 127], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
         DPUTask {cluster_id = 1 : i64, inEnd = [0, 0, 1535], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 127], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     } PPE : {
-        PPETask {opaque_ppe = #VPU.PPEStub<>}
+        PPETask {ppe = #VPU.PPEStub<>}
     }
 
     %alloc1 = VPURT.AllocDistributed -> !InputDistributed
@@ -1498,7 +1498,7 @@ func.func @OptimizeSubview2CopyConvPattern(
         DPUTask {cluster_id = 0 : i64, inEnd = [0, 0, 1535], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 127], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
         DPUTask {cluster_id = 1 : i64, inEnd = [0, 0, 1535], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 256], outStart = [0, 0, 128], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     } PPE : {
-        PPETask {opaque_ppe = #VPU.PPEStub<>}
+        PPETask {ppe = #VPU.PPEStub<>}
     }
 
     return %conv0, %conv1: !OutputDistributed0, !OutputDistributed1
@@ -1580,7 +1580,7 @@ func.func @NonDistributedOptimizeSubviewCopyConvPattern(
         DPUTask {cluster_id = 0 : i64, inEnd = [0, 0, 1535], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 127], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
         DPUTask {cluster_id = 0 : i64, inEnd = [0, 0, 1535], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 256], outStart = [0, 0, 128], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     } PPE : {
-        PPETask {opaque_ppe = #VPU.PPEStub<>}
+        PPETask {ppe = #VPU.PPEStub<>}
     }
 
     %allocConv1 =  memref.alloc(): !OutputCMXType
@@ -1598,7 +1598,7 @@ func.func @NonDistributedOptimizeSubviewCopyConvPattern(
         DPUTask {cluster_id = 0 : i64, inEnd = [0, 0, 1535], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 127], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
         DPUTask {cluster_id = 0 : i64, inEnd = [0, 0, 1535], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 256], outStart = [0, 0, 128], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     } PPE : {
-        PPETask {opaque_ppe = #VPU.PPEStub<>}
+        PPETask {ppe = #VPU.PPEStub<>}
     }
 
     return %conv0, %conv1: !OutputCMXType, !OutputCMXType
@@ -1681,7 +1681,7 @@ func.func @NonDistributedOptimizeSubviewCopyConvPatternWithOptimizedCopyIn(
         DPUTask {cluster_id = 0 : i64, inEnd = [0, 0, 1535], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 127], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
         DPUTask {cluster_id = 0 : i64, inEnd = [0, 0, 1535], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 256], outStart = [0, 0, 128], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     } PPE : {
-        PPETask {opaque_ppe = #VPU.PPEStub<>}
+        PPETask {ppe = #VPU.PPEStub<>}
     }
 
     %allocConv1 =  memref.alloc(): !OutputCMXType
@@ -1699,7 +1699,7 @@ func.func @NonDistributedOptimizeSubviewCopyConvPatternWithOptimizedCopyIn(
         DPUTask {cluster_id = 0 : i64, inEnd = [0, 0, 1535], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 127], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
         DPUTask {cluster_id = 0 : i64, inEnd = [0, 0, 1535], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 256], outStart = [0, 0, 128], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     } PPE : {
-        PPETask {opaque_ppe = #VPU.PPEStub<>}
+        PPETask {ppe = #VPU.PPEStub<>}
     }
 
     return %conv0, %conv1: !OutputCMXType, !OutputCMXType
@@ -1787,7 +1787,7 @@ func.func @NotOptimizeSubviewCopyCDimTooBig(
         DPUTask {cluster_id = 0 : i64, inEnd = [0, 0, 1535], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 127], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
         DPUTask {cluster_id = 1 : i64, inEnd = [0, 0, 1535], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 127], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     } PPE : {
-        PPETask {opaque_ppe = #VPU.PPEStub<>}
+        PPETask {ppe = #VPU.PPEStub<>}
     }
     return %conv: !OutputDistributed
 
@@ -1872,7 +1872,7 @@ func.func @NotOptimizeSubviewWithNonCopyConsumer(
         DPUTask {cluster_id = 0 : i64, inEnd = [0, 0, 1535], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 127], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
         DPUTask {cluster_id = 1 : i64, inEnd = [0, 0, 1535], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 127], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     } PPE : {
-        PPETask {opaque_ppe = #VPU.PPEStub<>}
+        PPETask {ppe = #VPU.PPEStub<>}
     }
     return %conv, %subview1: !OutputDistributed, memref<1x1530x1x1xf16, {order = #NHWC, strides = [3072, 1, 3072, 3072]}, @DDR>
 
@@ -1958,7 +1958,7 @@ func.func @NotOptimizeSubviewWithCopyConsumerNotToCMX(
         DPUTask {cluster_id = 0 : i64, inEnd = [0, 0, 1535], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 127], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
         DPUTask {cluster_id = 1 : i64, inEnd = [0, 0, 1535], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 127], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     } PPE : {
-        PPETask {opaque_ppe = #VPU.PPEStub<>}
+        PPETask {ppe = #VPU.PPEStub<>}
     }
     return %conv, %copy: !OutputDistributed, memref<1x1536x1x1xf16, #NHWC, @DDR>
 
@@ -2048,7 +2048,7 @@ func.func @NotOptimizeSubviewWithDistributedAndNonDistributedCopies(
         DPUTask {cluster_id = 0 : i64, inEnd = [0, 0, 1535], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 127], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
         DPUTask {cluster_id = 1 : i64, inEnd = [0, 0, 1535], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 127], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     } PPE : {
-        PPETask {opaque_ppe = #VPU.PPEStub<>}
+        PPETask {ppe = #VPU.PPEStub<>}
     }
     return %conv, %copy: !OutputDistributed, memref<1x1536x1x1xf16, #NHWC, [@CMX_NN, 0]>
 
@@ -2133,7 +2133,7 @@ func.func @NotOptimizeSubviewWithNon1x1SpatialSize(
         DPUTask {cluster_id = 0 : i64, inEnd = [0, 1, 1535], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 1, 127], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
         DPUTask {cluster_id = 1 : i64, inEnd = [0, 1, 1535], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 1, 127], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     } PPE : {
-        PPETask {opaque_ppe = #VPU.PPEStub<>}
+        PPETask {ppe = #VPU.PPEStub<>}
     }
 
     return %conv: !OutputDistributed
@@ -2232,7 +2232,7 @@ func.func @NotOptimizeSubviewWithNonConvEndConsumer(
         DPUTask {cluster_id = 0 : i64, inEnd = [0, 0, 1535], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 127], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
         DPUTask {cluster_id = 1 : i64, inEnd = [0, 0, 1535], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 127], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     } PPE : {
-        PPETask {opaque_ppe = #VPU.PPEStub<>}
+        PPETask {ppe = #VPU.PPEStub<>}
     }
 
     %allocPool = VPURT.AllocDistributed -> !PoolOutputDistributed
@@ -2249,7 +2249,7 @@ func.func @NotOptimizeSubviewWithNonConvEndConsumer(
         DPUTask {cluster_id = 0 : i64, inEnd = [0, 0, 1535], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 127], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
         DPUTask {cluster_id = 1 : i64, inEnd = [0, 0, 1535], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 127], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
     } PPE : {
-        PPETask {opaque_ppe = #VPU.PPEStub<>}
+        PPETask {ppe = #VPU.PPEStub<>}
     }
 
     return %conv, %maxpool: !OutputDistributed, !PoolOutputDistributed
@@ -2263,4 +2263,104 @@ func.func @NotOptimizeSubviewWithNonConvEndConsumer(
     // CHECK:        VPUIP.Copy
     // CHECK-SAME:      inputs([[SUBVIEW]] : memref<1x1536x1x1xf16, {order = #NHWC, strides = [3072, 1, 3072, 3072]}, @DDR>)
     // CHECK-SAME:  -> !VPUIP.DistributedBuffer<1x1536x1x1xf16, #NHWC, @CMX_NN, {mode = "DUPLICATED", num_clusters = 2 : i64
+}
+
+// -----
+
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+#NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
+
+!InputDistributed = !VPUIP.DistributedBuffer<
+    1x1536x1x1xf16, #NHWC, @CMX_NN, {
+    mode = "DUPLICATED",
+    num_clusters = 2
+}>
+
+!WeightsDistributed = !VPUIP.DistributedBuffer<
+    256x1536x1x1xf16, #NHWC, @CMX_NN, {
+    mode = "SEGMENTED",
+    num_tiles = [2, 1, 1, 1],
+    num_clusters = 2,
+    alignment = [16, 1, 1, 1]
+}>
+
+!WTableDistributed = !VPUIP.DistributedBuffer<
+    256x1x1x4xsi32, #NCHW, @CMX_NN, {
+    mode = "SEGMENTED",
+    num_tiles = [2, 1, 1, 1],
+    num_clusters = 2,
+    alignment = [16, 1, 1, 1]
+}>
+
+!OutputDistributed = !VPUIP.DistributedBuffer<
+    1x256x1x1xf16, #NHWC, @CMX_NN, {
+    mode = "SEGMENTED",
+    num_tiles = [1, 2, 1, 1],
+    num_clusters = 2,
+    alignment = [1, 16, 1, 1]
+}>
+
+// CHECK: @NotOptimizeSubviewWithRMS
+// CHECK-SAME: ([[ARG0:%.+]]: memref<1x1x3072xf16, @DDR>
+// CHECK-SAME: [[ARG1:%.+]]: memref<3072xf16, @DDR>
+func.func @NotOptimizeSubviewWithRMS(
+        %input1: memref<1x1x3072xf16, @DDR>,
+        %input2: memref<3072xf16, @DDR>,
+        %weights: !WeightsDistributed,
+        %wtable: !WTableDistributed)
+         -> (!OutputDistributed){
+
+    %allocRMSInput1 = memref.alloc() : memref<1x1x3072xf16, [@CMX_NN, 0]>
+    %RMSInput1 = VPUIP.Copy inputs(%input1 : memref<1x1x3072xf16, @DDR>) outputs(%allocRMSInput1 : memref<1x1x3072xf16, [@CMX_NN, 0]>) -> memref<1x1x3072xf16, [@CMX_NN, 0]>
+    %allocRMSInput2 = memref.alloc() : memref<3072xf16, [@CMX_NN, 0]>
+    %RMSInput2 = VPUIP.Copy inputs(%input2 : memref<3072xf16, @DDR>) outputs(%allocRMSInput2 : memref<3072xf16, [@CMX_NN, 0]>) -> memref<3072xf16, [@CMX_NN, 0]>
+    %allocRMSOutput = memref.alloc() : memref<1x1x3072xf16, [@CMX_NN, 0]>
+    %RMSResult = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_RMS inputs(%RMSInput1 as %arg2: memref<1x1x3072xf16, [@CMX_NN, 0]>, %RMSInput2 as %arg3: memref<3072xf16, [@CMX_NN, 0]>) outputs(%allocRMSOutput as %arg4: memref<1x1x3072xf16, [@CMX_NN, 0]>) on tile 0 -> memref<1x1x3072xf16, [@CMX_NN, 0]>{
+      VPUIP.SW.Kernel.run {attrs = [9.9999999747524271E-7]}(%arg2, %arg3, %arg4) : memref<1x1x3072xf16, [@CMX_NN, 0]>, memref<3072xf16, [@CMX_NN, 0]>, memref<1x1x3072xf16, [@CMX_NN, 0]>
+    }
+    %GenericReshape = VPUIP.GenericReshape inputs(%RMSResult : memref<1x1x3072xf16, [@CMX_NN, 0]>) -> memref<1x3072x1x1xf16, [@CMX_NN, 0]>
+    %PermuteCast = VPUIP.PermuteCast {dst_order = #NHWC, mem_perm = #NHWC} inputs(%GenericReshape : memref<1x3072x1x1xf16, [@CMX_NN, 0]>) -> memref<1x3072x1x1xf16, #NHWC, [@CMX_NN, 0]>
+    %allocRMSOutputDDR = memref.alloc() : memref<1x3072x1x1xf16, #NHWC, @DDR>
+    %RMSResultInDDR = VPUIP.Copy inputs(%PermuteCast : memref<1x3072x1x1xf16, #NHWC, [@CMX_NN, 0]>) outputs(%allocRMSOutputDDR : memref<1x3072x1x1xf16, #NHWC, @DDR>) -> memref<1x3072x1x1xf16, #NHWC, @DDR>
+
+    %subview = VPUIP.SubView %RMSResultInDDR [0, 0, 0, 0] [1, 1536, 1, 1]
+        : memref<1x3072x1x1xf16, #NHWC, @DDR> to memref<1x1536x1x1xf16, {order = #NHWC, strides = [3072, 1, 3072, 3072]}, @DDR>
+
+    %alloc = VPURT.AllocDistributed -> !InputDistributed
+    %nceTilingCopy = VPUIP.Copy inputs(%subview : memref<1x1536x1x1xf16, {order = #NHWC, strides = [3072, 1, 3072, 3072]}, @DDR>)
+                    outputs(%alloc : !InputDistributed)
+        -> !InputDistributed
+
+    %allocConv = VPURT.AllocDistributed -> !OutputDistributed
+    %conv = VPUIP.NCEClusterTask {
+            kernel_padding = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
+            kernel_size = [1, 1], kernel_strides = [1, 1],
+            task_type = #VPUIP.nce_task_type<CONV>}
+        input(%nceTilingCopy : !InputDistributed)
+        weights(%weights : !WeightsDistributed)
+        weight_table(%wtable : !WTableDistributed)
+        parent_input(%nceTilingCopy : !InputDistributed)
+        parent_output(%allocConv : !OutputDistributed)
+        outputs(%allocConv : !OutputDistributed)
+        -> !OutputDistributed variants : {
+        DPUTask {cluster_id = 0 : i64, inEnd = [0, 0, 1535], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 127], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
+        DPUTask {cluster_id = 1 : i64, inEnd = [0, 0, 1535], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_4x16>, outEnd = [0, 0, 127], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
+    } PPE : {
+        PPETask {ppe = #VPU.PPEStub<>}
+    }
+    return %conv: !OutputDistributed
+
+    // CHECK:        [[RMS_INPUT1:%.+]] = VPUIP.Copy inputs([[ARG0]] : memref<1x1x3072xf16, @DDR>
+    // CHECK:        [[RMS_INPUT2:%.+]] = VPUIP.Copy inputs([[ARG1]] : memref<3072xf16, @DDR>
+
+    // CHECK:        [[RMS_RESULT:%.+]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_RMS
+    // CHECK-SAME:   inputs([[RMS_INPUT1]] as %{{.+}}: memref<1x1x3072xf16, [@CMX_NN, 0]>, 
+    // CHECK-SAME:   [[RMS_INPUT2]] as %{{.+}}: memref<3072xf16, [@CMX_NN, 0]>)
+
+    // CHECK:        [[GENERIC_RESHAPE:%.+]] = VPUIP.GenericReshape inputs([[RMS_RESULT]] : memref<1x1x3072xf16, [@CMX_NN, 0]>)
+    // CHECK:        [[PERMUTE_CAST:%.+]] = VPUIP.PermuteCast {dst_order = #NHWC, mem_perm = #NHWC} inputs([[GENERIC_RESHAPE]] : memref<1x3072x1x1xf16, [@CMX_NN, 0]>)
+    // CHECK:        [[COPY1:%.+]] = VPUIP.Copy inputs([[PERMUTE_CAST]] : memref<1x3072x1x1xf16, #NHWC, [@CMX_NN, 0]>)
+    // CHECK:        [[SUBVIEW:%.+]] = VPUIP.SubView [[COPY1]] [0, 0, 0, 0] [1, 1536, 1, 1] : memref<1x3072x1x1xf16, #NHWC, @DDR> to memref<1x1536x1x1xf16, {order = #NHWC, strides = [3072, 1, 3072, 3072]}, @DDR>
+    // CHECK:        [[COPY2:%.+]] = VPUIP.Copy inputs([[SUBVIEW]] : memref<1x1536x1x1xf16, {order = #NHWC, strides = [3072, 1, 3072, 3072]}, @DDR>)
+
 }

@@ -115,7 +115,3 @@ Const::Content vpux::Const::ReverseAttr::transform(vpux::Const::Content& input) 
     }
     VPUX_THROW("Unexpected data type: {0}", inputElementType);
 }
-
-Const::ContentSetup vpux::Const::ContentSetup::reverse(Dim axis) {
-    return addTransformation(Const::ReverseAttr::get(getIntAttr(getContext(), axis.ind())));
-}

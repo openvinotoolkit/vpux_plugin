@@ -164,5 +164,7 @@ uint32_t checked_cast_reg(float src) {
 
 std::optional<TaskBufferLayoutOp> getTaskBufferLayoutOp(mlir::Operation* op);
 
+uint32_t getDefaultTaskListCount(VPURegMapped::TaskType taskType, VPU::ArchKind archKind);
+
 }  // namespace VPURegMapped
 }  // namespace vpux

@@ -6,12 +6,13 @@
 #include "vpux/compiler/conversion/rewriters/VPUMI40XX2VPUASM/kernel_invocation_rewriter.hpp"
 #include "vpux/compiler/dialect/VPUASM/ops.hpp"
 #include "vpux/compiler/dialect/VPUIP/utils/sw_utils.hpp"
+#include "vpux/compiler/dialect/VPUMI40XX/utils.hpp"
 
 namespace vpux {
 namespace vpumi40xx2vpuasm {
 
-mlir::LogicalResult KernelInvocationRewriter::symbolize(VPUMI40XX::ActKernelInvocationOp op, SymbolMapper&,
-                                                        mlir::ConversionPatternRewriter& rewriter) const {
+mlir::FailureOr<SymbolizationResult> KernelInvocationRewriter::symbolize(
+        VPUMI40XX::ActKernelInvocationOp op, SymbolMapper&, mlir::ConversionPatternRewriter& rewriter) const {
     auto symName = findSym(op).getRootReference();
     auto taskLocation = findSym(op.getTaskLocation());
     auto kernelParams = findSym(op.getKernelParams());
@@ -31,18 +32,30 @@ mlir::LogicalResult KernelInvocationRewriter::symbolize(VPUMI40XX::ActKernelInvo
     auto kernelData = isCacheOp ? nullptr : findSym(oldKernelRange.getKernelArgsIndex());
     auto kernelRange = findSym(oldKernelRange.getTaskLocation());
 
-    mlir::FlatSymbolRefAttr profilingData = nullptr;
+    mlir::SymbolRefAttr profilingData = nullptr;
     if (auto profBuffer = op.getProfilingData()) {
         profilingData = findSym(profBuffer);
     }
 
-    rewriter.create<VPUASM::ActKernelInvocationOp>(op.getLoc(), symName, taskIdx, taskLocation, kernelRange, kernelData,
-                                                   kernelParams, waitAttr, updateAttr, profilingData, op.getTileAttr(),
-                                                   op.getStartAfterAttr(), op.getCleanAfterAttr(), kernelIndexAttr);
+    mlir::SymbolRefAttr nextLink = nullptr;
+    auto nextInvocation = VPUMI40XX::getNextOp(op);
+    while (nextInvocation) {
+        if (auto nextInvocationTaskLink = nextInvocation.getTaskLink();
+            nextInvocationTaskLink.has_value() && nextInvocationTaskLink.value() == op.getType()) {
+            nextLink = findSym(nextInvocation.getTaskLocation());
+            break;
+        }
+        nextInvocation = VPUMI40XX::getNextOp(nextInvocation);
+    }
+
+    auto newOp = rewriter.create<VPUASM::ActKernelInvocationOp>(
+            op.getLoc(), symName, taskIdx, taskLocation, nextLink, kernelRange, kernelData, kernelParams, waitAttr,
+            updateAttr, profilingData, op.getTileAttr(), op.getStartAfterAttr(), op.getCleanAfterAttr(),
+            kernelIndexAttr);
 
     rewriter.eraseOp(op);
 
-    return mlir::success();
+    return SymbolizationResult(newOp);
 }
 
 }  // namespace vpumi40xx2vpuasm

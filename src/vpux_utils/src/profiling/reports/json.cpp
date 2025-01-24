@@ -312,13 +312,22 @@ void TraceEventExporter::processTraceEvents(const TaskList& tasks, const std::st
         ted.timestamp = task.start_time_ns / 1000.;
         ted.duration = task.duration_ns / 1000.;
 
-        if (task.active_cycles != 0) {
-            ted.customArgs.push_back({"Active cycles:", std::to_string(task.active_cycles)});
+        if (task.total_cycles != 0) {
+            ted.customArgs.push_back({"Total cycles:", std::to_string(task.total_cycles)});
         }
         if (task.stall_cycles != 0) {
             ted.customArgs.push_back({"Stall cycles:", std::to_string(task.stall_cycles)});
         }
-
+        if (task.stall_counters.lsu0_stalls != 0) {
+            ted.customArgs.push_back({"LSU0 stall cycles:", std::to_string(task.stall_counters.lsu0_stalls)});
+        }
+        if (task.stall_counters.lsu1_stalls != 0) {
+            ted.customArgs.push_back({"LSU1 stall cycles:", std::to_string(task.stall_counters.lsu1_stalls)});
+        }
+        if (task.stall_counters.instruction_stalls != 0) {
+            ted.customArgs.push_back(
+                    {"Instruction stall cycles:", std::to_string(task.stall_counters.instruction_stalls)});
+        }
         _events.push_back(ted);
     }
 

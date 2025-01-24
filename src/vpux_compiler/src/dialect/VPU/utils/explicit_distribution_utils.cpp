@@ -4,7 +4,12 @@
 //
 
 #include "vpux/compiler/dialect/VPU/utils/explicit_distribution_utils.hpp"
+#include <optional>
+#include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
 #include "vpux/compiler/dialect/VPU/utils/distributed_tensor_utils.hpp"
+#include "vpux/compiler/dialect/VPU/utils/sw_utils.hpp"
+#include "vpux/utils/core/error.hpp"
+#include "vpux/utils/core/range.hpp"
 
 using namespace vpux;
 
@@ -14,6 +19,22 @@ VPU::OverlapDistributionParams VPU::getExplicitOverlapParamsForSWOpInput(VPU::SW
     VPUX_THROW_WHEN(swOp == nullptr, "Cannot get SW DistributionInfoAttr, is not a SW op");
     VPUX_THROW_WHEN(swOp->getNumResults() != 1, "More than one result for Sw op: {0}", swOp);
 
+    std::optional<size_t> overlappedInputIdx = std::nullopt;
+    const auto strategy = VPU::MultiClusterStrategy::SplitOverHeightOverlapped;
+    const auto operands = swOp->getOperands();
+
+    auto clusteredOp = mlir::dyn_cast<VPU::ClusteredOpInterface>(swOp.getOperation());
+    VPUX_THROW_WHEN(clusteredOp == nullptr, "Sw op {0} is not a ClusteredOp", swOp->getLoc());
+    for (const auto& [index, operand] : operands | indexed) {
+        const auto ndTypeInterface = mlir::dyn_cast<vpux::NDTypeInterface>(operand.getType());
+        if (getSWInputTensorDistributionMode(clusteredOp, strategy, ndTypeInterface) ==
+            VPU::DistributionMode::OVERLAPPED) {
+            VPUX_THROW_WHEN(overlappedInputIdx.has_value(), "More than one OVERLAPPED input for Sw op: {0}", swOp);
+            overlappedInputIdx = index;
+        }
+    }
+    VPUX_THROW_UNLESS(overlappedInputIdx.has_value(), "Sw op {0} has no OVERLAPPED inputs", swOp);
+
     std::optional<ArrayRef<int64_t>> alignmentValue = std::nullopt;
     if (!alignment.empty()) {
         alignmentValue = alignment;
@@ -21,22 +42,23 @@ VPU::OverlapDistributionParams VPU::getExplicitOverlapParamsForSWOpInput(VPU::SW
 
     const auto tiles = fillDividedTiles(Shape(numTiles), outShape, alignmentValue);
     VPUX_THROW_WHEN(mlir::failed(tiles), "Incorrect tiles at {0}", swOp.getLoc());
-    const auto outTiles = tiles.value();
+    const auto& outTiles = tiles.value();
 
     auto tilingBuilder = mlir::dyn_cast<VPU::TilingBuilderOpInterface>(swOp.getOperation());
     VPUX_THROW_WHEN(tilingBuilder == nullptr, "Cannot cast op to TilingBuilderOpInterface at {0}", swOp.getLoc());
     SmallVector<InputTiling> inputTiles;
     for (const auto& outTile : outTiles) {
         inputTiles.push_back(tilingBuilder.backInferTileInfo(outTile, Logger::global()));
-        VPUX_THROW_UNLESS(inputTiles.back().tiles.size() == 1, "Unexpected input operands size {0}",
+        VPUX_THROW_UNLESS(inputTiles.back().tiles.size() == operands.size(),
+                          "Unexpected input operands size: expected {0}, but got {1}", operands.size(),
                           inputTiles.back().tiles.size());
     }
 
     SmallVector<SmallVector<int64_t>> inputPerClusterShape;
     SmallVector<SmallVector<int64_t>> inputPerClusterOffset;
     for (auto i : irange(outTiles.size())) {
-        inputPerClusterShape.push_back(to_small_vector(inputTiles[i].tiles.front().shape));
-        inputPerClusterOffset.push_back(to_small_vector(inputTiles[i].tiles.front().offsets));
+        inputPerClusterShape.push_back(to_small_vector(inputTiles[i].tiles[overlappedInputIdx.value()].shape));
+        inputPerClusterOffset.push_back(to_small_vector(inputTiles[i].tiles[overlappedInputIdx.value()].offsets));
     }
 
     return OverlapDistributionParams(inputPerClusterShape, inputPerClusterOffset, inputPerClusterShape,

@@ -43,6 +43,6 @@ size_t getDPUTaskOpCost(VPUIP::DPUTaskOp dpuTaskOp, const std::shared_ptr<VPUNN:
                         VPU::ArchKind arch, vpux::Logger log);
 
 VPUNN::MemoryLocation getMemoryLocation(mlir::Type type);
-VPUNN::ActivationFunction getVPUNNActivationFunction(VPU::PPEAttr ppeOpaqueAttr);
+VPUNN::ActivationFunction getVPUNNActivationFunction(VPU::PPEAttr ppeAttr);
 
 }  // namespace vpux

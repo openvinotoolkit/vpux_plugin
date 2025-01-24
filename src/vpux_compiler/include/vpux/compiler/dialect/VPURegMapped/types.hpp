@@ -32,7 +32,6 @@ struct RegFieldValue {
     elf::Version version{};
 };
 
-enum class PPEBackwardsCompatibilityMode : bool { DISABLED = false, ENABLED = true };
 }  // namespace vpux::VPURegMapped
 
 //

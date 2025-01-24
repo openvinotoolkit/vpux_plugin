@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2023 Intel Corporation
+// Copyright (C) 2023-2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -7,30 +7,23 @@
 #include "vpu_ov2_layer_test.hpp"
 
 namespace ov {
-
 namespace test {
 
 class SliceLayerTestCommon : public Slice8LayerTest, virtual public VpuOv2LayerTest {};
 
-class SliceLayerTest_NPU3720 : public SliceLayerTestCommon {};
-
-class SliceLayerTest_NPU4000 : public SliceLayerTestCommon {};
-
-TEST_P(SliceLayerTest_NPU3720, SW) {
+TEST_P(SliceLayerTestCommon, NPU3720_SW) {
     setReferenceSoftwareMode();
     run(Platform::NPU3720);
 }
 
-TEST_P(SliceLayerTest_NPU4000, SW) {
+TEST_P(SliceLayerTestCommon, NPU4000_SW) {
     setReferenceSoftwareMode();
     run(Platform::NPU4000);
 }
 }  // namespace test
-
 }  // namespace ov
 
-using ov::test::SliceLayerTest_NPU3720;
-using ov::test::SliceLayerTest_NPU4000;
+using ov::test::SliceLayerTestCommon;
 
 namespace {
 
@@ -49,8 +42,6 @@ const auto sliceParams = testing::Combine(testing::ValuesIn(staticParams),  // p
                                           testing::ValuesIn(modelTypes),    // Model type
                                           testing::Values(ov::test::utils::DEVICE_NPU));
 
-INSTANTIATE_TEST_SUITE_P(smoke_Slice, SliceLayerTest_NPU3720, sliceParams, SliceLayerTest_NPU3720::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_Slice, SliceLayerTest_NPU4000, sliceParams, SliceLayerTest_NPU4000::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_Slice, SliceLayerTestCommon, sliceParams, SliceLayerTestCommon::getTestCaseName);
 
 }  // namespace

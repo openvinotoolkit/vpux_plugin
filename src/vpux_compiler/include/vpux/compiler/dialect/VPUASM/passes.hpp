@@ -29,7 +29,6 @@ namespace VPUASM {
 
 std::unique_ptr<mlir::Pass> createHoistInputOutputsPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createAddProfilingSectionPass(Logger log = Logger::global());
-std::unique_ptr<mlir::Pass> createBarriersToManagedBarriersPass(Logger log = Logger::global());
 //
 // Generated
 //

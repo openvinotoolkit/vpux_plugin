@@ -3,71 +3,36 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+#include <mlir/IR/BuiltinAttributes.h>
 #include <mlir/IR/BuiltinTypes.h>
 #include "vpux/compiler/NPU40XX/dialect/NPUReg40XX/ops.hpp"
-#include "vpux/compiler/NPU40XX/dialect/NPUReg40XX/types.hpp"
+#include "vpux/compiler/NPU40XX/dialect/NPUReg40XX/utils.hpp"
 #include "vpux/compiler/act_kernels/shave_binary_resources.h"
 #include "vpux/compiler/core/profiling.hpp"
-#include "vpux/compiler/dialect/VPUASM/ops.hpp"
 #include "vpux/compiler/dialect/VPUMI40XX/utils.hpp"
-#include "vpux/utils/core/mem_size.hpp"
+#include "vpux/compiler/dialect/VPURegMapped/utils.hpp"
 
 #include <npu_40xx_nnrt.hpp>
 
 using namespace vpux;
 using namespace npu40xx;
 
-namespace vpux {
-namespace NPUReg40XX {
-
-constexpr uint32_t defaultActRtCodeSectionSize = static_cast<uint32_t>((1_MB).to<vpux::Byte>().count());
-constexpr uint64_t defaultActRtEntry = 0x1C000000;
-
-// ActShave profiling metric mask
-//  [0]  BIT_STALL_CYCLE_CNT_EN
-//  [1]  BIT_EXEC_INST_CNT_EN
-//  [2]  BIT_CLK_CYCLE_CNT_EN
-//  [3]  BIT_BRANCH_TAKEN_CNT_EN
-//  [4]  BIT_INST_BRKP0_CNT_EN
-//  [5]  BIT_INST_BRKP1_CNT_EN
-//  [6]  BIT_DATA_BRKP0_CNT_EN
-//  [7]  BIT_DATA_BRKP1_CNT_EN
-//  [8]  BIT_GO_COUNT_EN
-//  [9]  BIT_LSU0_RBYTE_CNT_EN
-//  [10] BIT_LSU0_WBYTE_CNT_EN
-//  [11] BIT_LSU1_RBYTE_CNT_EN
-//  [12] BIT_LSU1_WBYTE_CNT_EN
-//  Stall count instructions:
-//  [16] SWIH
-//  [17] Other interrupts
-//  [18] LSU0 Stall (waiting for data)
-//  [19] LSU1 Stall (waiting for data)
-//  [20] LSU0 Access Stall
-//  [21] LSU1 Access Stall
-//  [22] Instruction buffer Low Stall
-//  [23] Discontinuity Fetch Stall
-//  [24] Discontinuity Decode Stall (too much data in instruction buffer at end of delay slots)
-//  [25] Discontinuity Starve Stall
-//  [26] Instruction buffer Low during discontinuity
-//
-//  [27] FRC_DURATION_EN
-//  [28] FRC_TIMESTAMP_EN
-constexpr uint32_t defaultPerfMetricsMask = 0x183C000F;
-}  // namespace NPUReg40XX
-}  // namespace vpux
-
 //
 // MappedInferenceOp
 //
 
-void vpux::NPUReg40XX::MappedInferenceOp::serialize(elf::writer::BinaryDataSection<uint8_t>& binDataSection) {
+void vpux::NPUReg40XX::MappedInferenceOp::serializeCached(elf::writer::BinaryDataSection<uint8_t>& binDataSection,
+                                                          ELF::SymbolReferenceMap& symRefMap) {
     auto moduleOp = getOperation()->getParentOfType<mlir::ModuleOp>();
     bool isActShaveProfilingEnabled =
             vpux::getProfilingSection(moduleOp, profiling::ExecutorType::ACTSHAVE).has_value();
 
-    nn_public::VpuMappedInference mi{};
+    nn_public::VpuMappedInference mi = {};
 
-    mi.vpu_nnrt_api_ver = VPU_NNRT_40XX_API_VER;
+    auto mpiVersionRef = symRefMap.lookupSymbol(getMappedInferenceVersion());
+    auto mpiVersionOp = mlir::cast<NPUReg40XX::MappedInferenceVersionOp>(mpiVersionRef);
+
+    mi.vpu_nnrt_api_ver = VPU_CONCAT_NNRT_API_VER(mpiVersionOp.getMajor(), mpiVersionOp.getMinor());
 
     mi.barrier_configs.count = getBarrierCount();
     mi.media_tasks.count = getMediaCount();
@@ -112,26 +77,19 @@ void vpux::NPUReg40XX::MappedInferenceOp::serialize(elf::writer::BinaryDataSecti
         mi.act_kernel_invocations[listIdx].count = actKernelInvocationsCountVec[listIdx];
     }
 
-    mi.shv_rt_configs.dpu_perf_mode = nn_public::VpuHWPStatMode::MODE3;
-    if (getActKernelInvocationsCount()) {
-        mi.shv_rt_configs.use_schedule_embedded_rt = false;
-        mi.shv_rt_configs.code_window_buffer_size = NPUReg40XX::defaultActRtCodeSectionSize;
-        // TODO: E#74314 nnActEntry.40xx.elf has a .versiondata section that contains a single uint32_t
-        // This should be read and set in mi.shvRtConfigs_.runtimeVersion_
-        mi.shv_rt_configs.runtime_version = 0;
-        mi.shv_rt_configs.runtime_entry = NPUReg40XX::defaultActRtEntry;
-        mi.shv_rt_configs.perf_metrics_mask = isActShaveProfilingEnabled ? NPUReg40XX::defaultPerfMetricsMask : 0;
-
-        if (getActShaveRt().has_value()) {
-            auto actShaveRtRef = mlir::SymbolTable::lookupNearestSymbolFrom(getOperation(), getActShaveRt().value());
-            auto actShaveRtOp = mlir::cast<NPUReg40XX::ActShaveRtOp>(actShaveRtRef);
-
-            mi.shv_rt_configs.use_schedule_embedded_rt = true;
-            mi.shv_rt_configs.code_window_buffer_size = checked_cast<uint32_t>(actShaveRtOp.getBinarySize());
-            mi.shv_rt_configs.runtime_entry = actShaveRtOp.getKernelEntry();
-            mi.shv_rt_configs.runtime_version = actShaveRtOp.getVersion();
-        }
+    std::optional<uint64_t> stackSize;
+    if (getActShaveStacks().has_value()) {
+        auto stackRef = symRefMap.lookupSymbol(getActShaveStacks()->begin()->dyn_cast<mlir::SymbolRefAttr>());
+        auto stackOp = mlir::cast<VPUASM::ShaveStackFrameOp>(stackRef);
+        stackSize = stackOp.getBinarySizeCached(symRefMap, VPU::ArchKind::NPU40XX);
     }
+    // NPU40XX does not have stack frames provided by compiler
+    // they are resolved by shave driver when initialized.
+
+    auto isActKernelInvocations = getActKernelInvocationsCount().size() > 0;
+    NPUReg40XX::fillNNrtConfig<NPUReg40XX::ActShaveRtOp>(mi.shv_rt_configs, getOperation(), getActShaveRt(), stackSize,
+                                                         isActShaveProfilingEnabled, isActKernelInvocations,
+                                                         std::nullopt);
 
     if (getManagedMappedInference().has_value()) {
         mi.managed_inference.count = 1;
@@ -140,16 +98,315 @@ void vpux::NPUReg40XX::MappedInferenceOp::serialize(elf::writer::BinaryDataSecti
     // Look only at the DMA tasks belonging to the first (and only) DMA engine
     std::tie(mi.task_storage_counts_.dma_ddr_count, mi.task_storage_counts_.dma_cmx_count) =
             VPUMI40XX::compute_dma_split(totalDDRDmaCount, totalCMXDmaCount);
-    mi.task_storage_counts_.dpu_invariant_count = nn_public::VPU_INVARIANT_COUNT;
-    mi.task_storage_counts_.dpu_variant_count = nn_public::VPU_VARIANT_COUNT;
-    mi.task_storage_counts_.act_range_count = nn_public::VPU_KERNEL_RANGE_COUNT;
-    mi.task_storage_counts_.act_invo_count = nn_public::VPU_KERNEL_INVO_COUNT;
-    mi.task_storage_counts_.media_count = nn_public::VPU_MEDIA_COUNT;
+    auto archKind = VPU::ArchKind::NPU40XX;
+    mi.task_storage_counts_.dpu_invariant_count =
+            VPURegMapped::getDefaultTaskListCount(VPURegMapped::TaskType::DPUInvariant, archKind);
+    mi.task_storage_counts_.dpu_variant_count =
+            VPURegMapped::getDefaultTaskListCount(VPURegMapped::TaskType::DPUVariant, archKind);
+    mi.task_storage_counts_.act_range_count =
+            VPURegMapped::getDefaultTaskListCount(VPURegMapped::TaskType::ActKernelRange, archKind);
+    mi.task_storage_counts_.act_invo_count =
+            VPURegMapped::getDefaultTaskListCount(VPURegMapped::TaskType::ActKernelInvocation, archKind);
+    mi.task_storage_counts_.media_count = VPURegMapped::getDefaultTaskListCount(VPURegMapped::TaskType::M2I, archKind);
 
-    uint8_t* ptrCharTmp = reinterpret_cast<uint8_t*>(&mi);
-    binDataSection.appendData(ptrCharTmp, getBinarySize());
+    auto ptrCharTmp = reinterpret_cast<uint8_t*>(&mi);
+    binDataSection.appendData(ptrCharTmp, getBinarySize(archKind));
 }
 
-size_t vpux::NPUReg40XX::MappedInferenceOp::getBinarySize() {
+size_t vpux::NPUReg40XX::MappedInferenceOp::getBinarySize(VPU::ArchKind) {
     return sizeof(nn_public::VpuMappedInference);
+}
+
+size_t vpux::NPUReg40XX::MappedInferenceOp::getAlignmentRequirements(VPU::ArchKind) {
+    // TODO: E#80148
+    VPUX_THROW("WrappableInterface method should not be called at this point! E#80148");
+}
+
+std::optional<ELF::SectionSignature> vpux::NPUReg40XX::MappedInferenceOp::getSectionSignature() {
+    // TODO: E#80148
+    VPUX_THROW("WrappableInterface method should not be called at this point! E#80148");
+}
+
+bool vpux::NPUReg40XX::MappedInferenceOp::hasMemoryFootprint() {
+    // TODO: E#80148
+    VPUX_THROW("WrappableInterface method should not be called at this point! E#80148");
+}
+
+namespace {
+size_t getSymRefOffsetForReloc(NPUReg40XX::MappedInferenceOp op, mlir::SymbolRefAttr ref) {
+    auto dmaTaskReferenceOffset = offsetof(nn_public::VpuTaskReference<nn_public::VpuDMATask>, address);
+    for (size_t dmaEngine = 0; dmaEngine < op.getDmaTasksAttr().size(); dmaEngine++) {
+        auto dmaGroup = op.getDmaTasksAttr()[dmaEngine].cast<mlir::ArrayAttr>();
+        auto dmaCounts = op.getDmaCount();
+        auto dmaCountList = parseIntArrayAttr<int64_t>(dmaCounts[dmaEngine].cast<mlir::ArrayAttr>());
+        auto dmaTaskIdxOffset = (dmaEngine * sizeof(nn_public::VpuTaskReference<nn_public::VpuDMATask>));
+
+        // by default we expect that getDmaTasksAttr
+        // will return a list that looks like
+        // index 0 -> DDR dmas
+        // index 1 -> CMX dmas
+        auto cmxIdx = 1;
+        if (dmaCountList[0] != 0) {
+            auto dmaDDR = dmaGroup[0].cast<mlir::SymbolRefAttr>();
+            if (ref == dmaDDR) {
+                return offsetof(nn_public::VpuMappedInference, dma_tasks_ddr_[0]) + dmaTaskIdxOffset +
+                       dmaTaskReferenceOffset;
+            }
+        } else {
+            cmxIdx = 0;
+        }
+
+        // could be cmx dma
+        // if there are no DDR dmas for the current task it means that cmx index would be 0
+        if (dmaCountList[1] != 0) {
+            auto dmaCMX = dmaGroup[cmxIdx].cast<mlir::SymbolRefAttr>();
+            if (ref == dmaCMX) {
+                return offsetof(nn_public::VpuMappedInference, dma_tasks_cmx_[0]) + dmaTaskIdxOffset +
+                       dmaTaskReferenceOffset;
+            }
+        }
+    }
+    if (ref == op.getBarrierTasks()) {
+        return offsetof(nn_public::VpuMappedInference, barrier_configs) +
+               offsetof(nn_public::VpuTaskReference<nn_public::VpuBarrierCountConfig>, address);
+    }
+
+    if (ref == op.getMediaTasks()) {
+        return offsetof(nn_public::VpuMappedInference, media_tasks) +
+               offsetof(nn_public::VpuTaskReference<nn_public::VpuMediaTask>, address);
+    }
+
+    if (ref == op.getActShaveRt()) {
+        return offsetof(nn_public::VpuMappedInference, shv_rt_configs) +
+               offsetof(nn_public::VpuNNShaveRuntimeConfigs, act_rt_window_base);
+    }
+
+    if (ref == op.getDmaHwpBase()) {
+        return offsetof(nn_public::VpuMappedInference, logaddr_dma_hwp_);
+    }
+
+    if (ref == op.getHwpWorkpointCfg()) {
+        return offsetof(nn_public::VpuMappedInference, hwp_workpoint_cfg_addr);
+    }
+
+    if (op.getActShaveStacksAttr()) {
+        auto shaveStacksRef = llvm::find(op.getActShaveStacksAttr(), ref);
+        if (shaveStacksRef != op.getActShaveStacksAttr().end()) {
+            auto index = shaveStacksRef - op.getActShaveStacksAttr().begin();
+            auto shaveRtConfigOffset = offsetof(nn_public::VpuMappedInference, shv_rt_configs);
+            auto stackFramesOffset = offsetof(nn_public::VpuNNShaveRuntimeConfigs, stack_frames);
+            auto arrayIdxOffset = index * sizeof(nn_public::VpuNNShaveRuntimeConfigs::stack_frames[0]);
+            return shaveRtConfigOffset + stackFramesOffset + arrayIdxOffset;
+        }
+    }
+
+    auto getTileIdx = [](auto arrayIdx, mlir::ArrayAttr countAttr) -> size_t {
+        auto count = parseIntArrayAttr<int64_t>(countAttr);
+
+        auto usedTilesNum = arrayIdx + 1;
+        for (size_t countIdx = 0; countIdx < count.size() && usedTilesNum; ++countIdx) {
+            if (count[countIdx]) {
+                --usedTilesNum;
+            }
+            if (!usedTilesNum) {
+                return countIdx;
+            }
+        }
+
+        VPUX_THROW_WHEN(usedTilesNum, "Cannot identify the tile corresponding for task of index {0}", arrayIdx);
+
+        return 0;
+    };
+
+    if (op.getActKernelInvocationsAttr()) {
+        auto shaveInvoRef = llvm::find(op.getActKernelInvocationsAttr(), ref);
+        if (shaveInvoRef != op.getActKernelInvocationsAttr().end()) {
+            auto index = getTileIdx(shaveInvoRef - op.getActKernelInvocationsAttr().begin(),
+                                    op.getActKernelInvocationsCount());
+            auto invosOffset = offsetof(nn_public::VpuMappedInference, act_kernel_invocations);
+            auto arrayIdxOffset = (index * sizeof(nn_public::VpuTaskReference<nn_public::VpuActKernelInvocation>));
+            auto vpuPtrOffset = offsetof(nn_public::VpuTaskReference<nn_public::VpuActKernelInvocation>, address);
+            return invosOffset + arrayIdxOffset + vpuPtrOffset;
+        }
+    }
+
+    if (op.getActKernelRangesAttr()) {
+        auto shaveRangeRef = llvm::find(op.getActKernelRangesAttr(), ref);
+        if (shaveRangeRef != op.getActKernelRangesAttr().end()) {
+            auto index = getTileIdx(shaveRangeRef - op.getActKernelRangesAttr().begin(), op.getActKernelRangesCount());
+            auto rangesOffset = offsetof(nn_public::VpuMappedInference, act_kernel_ranges);
+            auto arrayIdxOffset = (index * sizeof(nn_public::VpuTaskReference<nn_public::VpuActKernelRange>));
+            auto vpuPtrOffset = offsetof(nn_public::VpuTaskReference<nn_public::VpuActKernelRange>, address);
+            return rangesOffset + arrayIdxOffset + vpuPtrOffset;
+        }
+    }
+
+    if (op.getVariantTasks()) {
+        auto variantsRef = llvm::find(op.getVariantTasksAttr(), ref);
+        if (variantsRef != op.getVariantTasksAttr().end()) {
+            auto index = getTileIdx(variantsRef - op.getVariantTasksAttr().begin(), op.getVariantCount());
+            auto variantsOffset = offsetof(nn_public::VpuMappedInference, variants);
+            auto arrayIdxOffset = (index * sizeof(nn_public::VpuTaskReference<nn_public::VpuDPUVariant>));
+            auto vpuPtrOffset = offsetof(nn_public::VpuTaskReference<nn_public::VpuDPUVariant>, address);
+            return variantsOffset + arrayIdxOffset + vpuPtrOffset;
+        }
+    }
+
+    if (op.getInvariantTasks()) {
+        auto invariantsRef = llvm::find(op.getInvariantTasksAttr(), ref);
+        if (invariantsRef != op.getInvariantTasksAttr().end()) {
+            auto index = getTileIdx(invariantsRef - op.getInvariantTasksAttr().begin(), op.getInvariantCount());
+            auto invariantsOffset = offsetof(nn_public::VpuMappedInference, invariants);
+            auto arrayIdxOffset = (index * sizeof(nn_public::VpuTaskReference<nn_public::VpuDPUInvariant>));
+            auto vpuPtrOffset = offsetof(nn_public::VpuTaskReference<nn_public::VpuDPUInvariant>, address);
+            return invariantsOffset + arrayIdxOffset + vpuPtrOffset;
+        }
+    }
+
+    if (op.getManagedMappedInferenceAttr()) {
+        if (ref == op.getManagedMappedInferenceAttr()) {
+            return offsetof(nn_public::VpuMappedInference, managed_inference) +
+                   offsetof(nn_public::VpuTaskReference<uint8_t>, address);
+        }
+    }
+
+    VPUX_THROW("Provided SymbolRefAttr is not linked to the MappedInference Op or getSymRefOffsetForReloc does not "
+               "support it");
+}
+}  // namespace
+
+std::vector<ELF::RelocationInfo> vpux::NPUReg40XX::MappedInferenceOp::getRelocationInfo(
+        ELF::SymbolReferenceMap& symRefMap) {
+    std::vector<ELF::RelocationInfo> relocs;
+
+    auto thisMI = *(this);
+    ELF::ElfSectionInterface targetSection = mlir::dyn_cast<ELF::ElfSectionInterface>(getOperation()->getParentOp());
+    VPUX_THROW_UNLESS(targetSection, "The relocation info can be retrieved only if the op is included into a section");
+
+    if (auto dmaTasks = getDmaTasks().value_or(nullptr)) {
+        for (auto dmaList : dmaTasks) {
+            auto dmaListArrayAttr = dmaList;
+            dmaListArrayAttr.walkImmediateSubElements(
+                    [&](mlir::Attribute attr) {
+                        if (auto symRef = attr.dyn_cast<mlir::SymbolRefAttr>()) {
+                            relocs.emplace_back(symRef, targetSection, getSymRefOffsetForReloc(thisMI, symRef),
+                                                ELF::RelocationType::R_VPU_64,
+                                                ELF::getOffsetOfSymRef(symRefMap, symRef),
+                                                "Dma list in mapped inference reloc");
+                        }
+                    },
+                    [](mlir::Type) {});
+        }
+    }
+
+    if (auto invariantTasks = getInvariantTasks().value_or(nullptr)) {
+        auto invTasksSubElemIf = invariantTasks;
+        invTasksSubElemIf.walkImmediateSubElements(
+                [&](mlir::Attribute attr) {
+                    if (auto symRef = attr.dyn_cast<mlir::SymbolRefAttr>()) {
+                        relocs.emplace_back(symRef, targetSection, getSymRefOffsetForReloc(thisMI, symRef),
+                                            ELF::RelocationType::R_VPU_64, ELF::getOffsetOfSymRef(symRefMap, symRef),
+                                            "Invariant task in mapped inference reloc");
+                    }
+                },
+                [](mlir::Type) {});
+    }
+
+    if (auto variantTasks = getVariantTasks().value_or(nullptr)) {
+        auto varTasksSubElemIf = variantTasks;
+        varTasksSubElemIf.walkImmediateSubElements(
+                [&](mlir::Attribute attr) {
+                    if (auto symRef = attr.dyn_cast<mlir::SymbolRefAttr>()) {
+                        relocs.emplace_back(symRef, targetSection, getSymRefOffsetForReloc(thisMI, symRef),
+                                            ELF::RelocationType::R_VPU_64, ELF::getOffsetOfSymRef(symRefMap, symRef),
+                                            "Variant task in mapped inference reloc");
+                    }
+                },
+                [](mlir::Type) {});
+    }
+
+    if (auto actKernelRanges = getActKernelRanges().value_or(nullptr)) {
+        auto akrTasksSubElemIf = actKernelRanges;
+        akrTasksSubElemIf.walkImmediateSubElements(
+                [&](mlir::Attribute attr) {
+                    if (auto symRef = attr.dyn_cast<mlir::SymbolRefAttr>()) {
+                        relocs.emplace_back(symRef, targetSection, getSymRefOffsetForReloc(thisMI, symRef),
+                                            ELF::RelocationType::R_VPU_64, ELF::getOffsetOfSymRef(symRefMap, symRef),
+                                            "Act kernel range in mapped inference reloc");
+                    }
+                },
+                [](mlir::Type) {});
+    }
+
+    if (auto actKernelInvos = getActKernelInvocations().value_or(nullptr)) {
+        auto akiTasksSubElemIf = actKernelInvos;
+        akiTasksSubElemIf.walkImmediateSubElements(
+                [&](mlir::Attribute attr) {
+                    if (auto symRef = attr.dyn_cast<mlir::SymbolRefAttr>()) {
+                        relocs.emplace_back(symRef, targetSection, getSymRefOffsetForReloc(thisMI, symRef),
+                                            ELF::RelocationType::R_VPU_64, ELF::getOffsetOfSymRef(symRefMap, symRef),
+                                            "Act kernel invocation in mapped inference reloc");
+                    }
+                },
+                [](mlir::Type) {});
+    }
+
+    if (auto mediaTasks = getMediaTasks().value_or(nullptr)) {
+        relocs.emplace_back(mediaTasks, targetSection, getSymRefOffsetForReloc(thisMI, mediaTasks),
+                            ELF::RelocationType::R_VPU_64, ELF::getOffsetOfSymRef(symRefMap, mediaTasks),
+                            "mediaTasks in mapped inference reloc");
+    }
+
+    if (auto barrierTasks = getBarrierTasks().value_or(nullptr)) {
+        relocs.emplace_back(barrierTasks, targetSection, getSymRefOffsetForReloc(thisMI, barrierTasks),
+                            ELF::RelocationType::R_VPU_64, ELF::getOffsetOfSymRef(symRefMap, barrierTasks),
+                            "barrierTasks in mapped inference reloc");
+    }
+
+    if (auto actShaveRt = getActShaveRt().value_or(nullptr)) {
+        relocs.emplace_back(actShaveRt, targetSection, getSymRefOffsetForReloc(thisMI, actShaveRt),
+                            ELF::RelocationType::R_VPU_64, ELF::getOffsetOfSymRef(symRefMap, actShaveRt),
+                            "actShaveRt in mapped inference reloc");
+    }
+
+    if (auto actShaveStacks = getActShaveStacks().value_or(nullptr)) {
+        auto shvStacksTasksSubElemIf = actShaveStacks;
+        shvStacksTasksSubElemIf.walkImmediateSubElements(
+                [&](mlir::Attribute attr) {
+                    if (auto symRef = attr.dyn_cast<mlir::SymbolRefAttr>()) {
+                        auto stacks = symRefMap.lookupSymbol(symRef);
+                        auto stackOp = mlir::cast<VPUASM::ShaveStackFrameOp>(stacks);
+                        auto stackSize = stackOp.getBinarySizeCached(symRefMap, VPU::ArchKind::NPU40XX);
+                        // SHAVE stack grows backwards!
+                        // set the addend to the top of the allocated section so it does not override
+                        // outside of its buffer
+                        auto addend = ELF::getOffsetOfSymRef(symRefMap, symRef) + stackSize;
+
+                        relocs.emplace_back(symRef, targetSection, getSymRefOffsetForReloc(thisMI, symRef),
+                                            ELF::RelocationType::R_VPU_32, addend,
+                                            "Act shave stack in mapped inference reloc");
+                    }
+                },
+                [](mlir::Type) {});
+    }
+
+    if (auto dmaHwpBase = getDmaHwpBase().value_or(nullptr)) {
+        relocs.emplace_back(dmaHwpBase, targetSection, getSymRefOffsetForReloc(thisMI, dmaHwpBase),
+                            ELF::RelocationType::R_VPU_64, ELF::getOffsetOfSymRef(symRefMap, dmaHwpBase),
+                            "dmaHwpBase in mapped inference reloc");
+    }
+
+    if (auto hwpWorkpointCfg = getHwpWorkpointCfg().value_or(nullptr)) {
+        relocs.emplace_back(hwpWorkpointCfg, targetSection, getSymRefOffsetForReloc(thisMI, hwpWorkpointCfg),
+                            ELF::RelocationType::R_VPU_64, ELF::getOffsetOfSymRef(symRefMap, hwpWorkpointCfg),
+                            "hwpWorkpointCfg in mapped inference reloc");
+    }
+
+    if (auto managedMPI = getManagedMappedInference().value_or(nullptr)) {
+        relocs.emplace_back(managedMPI, targetSection, getSymRefOffsetForReloc(thisMI, managedMPI),
+                            ELF::RelocationType::R_VPU_64, ELF::getOffsetOfSymRef(symRefMap, managedMPI),
+                            "managedMPI in mapped inference reloc");
+    }
+
+    return relocs;
 }

@@ -74,5 +74,4 @@ INSTANTIATE_TEST_SUITE_P(smoke_ConvertLikeTest, ConvertLikeLayerTest_NPU4000,
                          ::testing::Combine(::testing::ValuesIn(data_Shapes), ::testing::ValuesIn(like_Shapes),
                                             ::testing::ValuesIn(inType), ::testing::ValuesIn(inType)),
                          ConvertLikeLayerTestCommon::getTestCaseName);
-
 }  // namespace ov::test

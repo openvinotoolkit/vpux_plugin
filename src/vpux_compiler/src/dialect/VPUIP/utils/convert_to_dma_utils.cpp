@@ -6,6 +6,7 @@
 
 #include "vpux/compiler/core/attributes/shape.hpp"
 #include "vpux/compiler/core/layers.hpp"
+#include "vpux/compiler/dialect/IE/utils/dynamic_shape_utils.hpp"
 #include "vpux/compiler/dialect/IE/utils/resources.hpp"
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
@@ -34,7 +35,7 @@ SmallVector<unsigned> correctPermutation(ArrayRef<unsigned> revPerm) {
 // 2) DPU: It is not feasible for the hardware to handle block sizes > 2, see E#83455.
 
 // Optimized DepthToSpace SW kernel has below restrictions:
-// 1. SW optimizations limited to NPU37XX, as VPU40XX SW-kernels performance is currently severely degraded (see
+// 1. SW optimizations limited to NPU37XX, as NPU40XX SW-kernels performance is currently severely degraded (see
 // E#71378)
 // 2. Layout must be NHWC
 // 3. Data type must be 16-bits
@@ -507,6 +508,10 @@ bool vpux::VPUIP::isLegalConvertToDMA(mlir::Operation* op, vpux::Logger log, boo
             .Case<VPU::MemPermuteOp>([&](mlir::Operation* op) {
                 log.trace("Got Permute Op at {0}.", op->getLoc());
 
+                if (IE::hasDynamicTensors(op)) {
+                    // TODO(E#105847): MemPermute with the dynamic shape ops cannot be converted to DMA
+                    return false;
+                }
                 const auto inputType = op->getOperand(0).getType().cast<vpux::NDTypeInterface>();
                 const auto outputType = op->getResult(0).getType().cast<vpux::NDTypeInterface>();
 
@@ -569,7 +574,8 @@ bool vpux::VPUIP::isLegalConvertToDMA(mlir::Operation* op, vpux::Logger log, boo
             })
             .Case<VPUIP::SwKernelOp>([&](VPUIP::SwKernelOp swKernelOp) {
                 // TODO(E#105847): dynamic shape ops cannot be converted to DMA
-                if (!swKernelOp.getDynamicInputShapes().empty() || !swKernelOp.getDynamicOutputShapes().empty()) {
+                if (!swKernelOp.getDynamicInputShapes().empty() || !swKernelOp.getDynamicOutputShapes().empty() ||
+                    VPUIP::hasDynamicShape(swKernelOp)) {
                     return false;
                 }
                 if (auto memPerm = getMemPermFromSwKernel(swKernelOp)) {

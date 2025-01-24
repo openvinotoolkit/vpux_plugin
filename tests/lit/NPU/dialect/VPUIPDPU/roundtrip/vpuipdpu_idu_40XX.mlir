@@ -38,7 +38,7 @@ module @Test_1 {
                 VPUIPDPU.IDUInputLayerCfg sparsity_pattern(7) {input_compressed}
                 VPUIPDPU.IDUInActivations in_activations(%act_in: memref<1x16x16x16xf16, #NHWC, [@CMX_NN, 0]>)
                 VPUIPDPU.IDUWorkloadCfg workload_type(CONV)
-                VPUIPDPU.IDUWeights  wmode(f16)
+                VPUIPDPU.IDUWeights  wmode(f16) wt_plt_cfg(FOUR_BIT_PLT) quantiles_lut([-1.000000e+00, -8.000000e-01, -0.69999999999999996, -6.000000e-01, -5.000000e-01, -4.000000e-01, -3.000000e-01, 0.000000e+00, 1.000000e-01, 2.000000e-01, 3.000000e-01, 4.000000e-01, 5.000000e-01, 6.000000e-01, 0.69999999999999996, 1.000000e+00])
             }
             VPUIPDPU.PPECfg {
                 VPUIPDPU.PPEFpAddMultBypass bypass_mode(ON)
@@ -71,7 +71,7 @@ module @Test_1 {
 // CHECK:        VPUIPDPU.IDUInputLayerCfg sparsity_pattern(7) {input_compressed}
 // CHECK:        VPUIPDPU.IDUInActivations in_activations(%arg0 : memref<1x16x16x16xf16, #NHWC, [@CMX_NN, 0]>)
 // CHECK:        VPUIPDPU.IDUWorkloadCfg workload_type(CONV)
-// CHECK:        VPUIPDPU.IDUWeights wmode(f16)
+// CHECK:        VPUIPDPU.IDUWeights wmode(f16) wt_plt_cfg(FOUR_BIT_PLT) quantiles_lut([-1.000000e+00, -8.000000e-01, -0.69999999999999996, -6.000000e-01, -5.000000e-01, -4.000000e-01, -3.000000e-01, 0.000000e+00, 1.000000e-01, 2.000000e-01, 3.000000e-01, 4.000000e-01, 5.000000e-01, 6.000000e-01, 0.69999999999999996, 1.000000e+00])
 // CHECK:      }
 // CHECK:    }
 // CHECK:    VPUIPDPU.DPUVariant @DPUVariant_0 invariant(@DeclareTaskBuffer_DPUInvariant_0) {nce_task_type = #VPUIP.nce_task_type<MAXPOOL>, taskLocation = @DeclareTaskBuffer_DPUVariant_0, task_index = !VPURegMapped.Index<0:0:0>} DPUCfg : {

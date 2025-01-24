@@ -5,7 +5,7 @@
 
 #pragma once
 
-#include "intel_npu/al/icompiler.hpp"
+#include "intel_npu/network_metadata.hpp"
 #include "vpux/compiler/dialect/ELFNPU37XX/metadata.hpp"
 
 namespace vpux::VPUMI37XX {

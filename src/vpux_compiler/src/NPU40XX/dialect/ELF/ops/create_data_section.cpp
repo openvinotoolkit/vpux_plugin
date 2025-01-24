@@ -74,7 +74,9 @@ void vpux::ELF::DataSectionOp::preserialize(elf::Writer& writer, vpux::ELF::Sect
     for (auto& op : block->getOperations()) {
         if (op.hasTrait<ELF::BinaryOpInterface::Trait>()) {
             auto binaryOp = mlir::cast<ELF::BinaryOpInterface>(op);
-            sectionSize += binaryOp.getBinarySizeCached(symRefMap);
+            // getting the BinarySize using VPU::ArchKind::UNKNOWN is OK at this point because the binaryOps should
+            // already all be in their arch-specific form or are arch-independent
+            sectionSize += binaryOp.getBinarySizeCached(symRefMap, VPU::ArchKind::UNKNOWN);
         }
     }
     section->setSize(sectionSize);

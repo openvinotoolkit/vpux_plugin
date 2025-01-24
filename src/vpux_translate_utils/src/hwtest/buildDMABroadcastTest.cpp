@@ -7,6 +7,7 @@
 
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
 #include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
 #include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPURT/IR/task.hpp"
 #include "vpux/compiler/dialect/VPURT/transforms/passes.hpp"
@@ -16,7 +17,7 @@ namespace vpux {
 namespace hwtest {
 
 /*DMA broadcast builder supports the test configurations described below.
-CMX can be configured on any valid tile (NPU40XX: 0->5).
+CMX can be configured on any valid tile (NPU4: 0->5).
 
 
 [Use case 1] DMA source - DDR, DMA destination - multiple CMX:
@@ -212,9 +213,14 @@ void buildDMABroadcast(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleO
 
     funcbuilder.create<mlir::func::ReturnOp>(builder.getUnknownLoc(), funcOutputs);
 
+    // Set WLM status attribute based on the test descriptor
+    auto wlmStatus =
+            testDesc.getWLMParams().isWLMPartialEnabled ? VPUIP::WlmStatus::ENABLED : VPUIP::WlmStatus::DISABLED;
+    VPUIP::setWlmStatus(module, wlmStatus);
+
     mlir::PassManager pmBuilderEnd(module->getName(), mlir::OpPassManager::Nesting::Implicit);
     // Assign physical barriers instead of virtual barriers
-    pmBuilderEnd.addPass(VPURT::createAssignPhysicalBarriersPass(false, false, std::nullopt, log));
+    pmBuilderEnd.addPass(VPURT::createAssignPhysicalBarriersPass(false, std::nullopt, log));
     pmBuilderEnd.addPass(VPURT::createBarrierSimulationPass(log));
 
     VPUX_THROW_UNLESS(mlir::succeeded(pmBuilderEnd.run(module)), "Compilation failed");

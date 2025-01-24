@@ -34,7 +34,6 @@ mlir::Operation* getParentComputeOp(mlir::Operation* op);
 bool prefetchTilingConditionSatisfied(mlir::Operation* op, Logger log);
 bool largeConstPipelineConditionSatisfied(mlir::Operation* op, Logger log);
 bool hasMultiBranches(mlir::Operation* op);
-Dim getHighestDimFromType(vpux::NDTypeInterface type);
 
 bool archSupportsSwLayerTiling(VPU::ArchKind arch);
 bool opNeedsTiling(mlir::Operation* op, bool enablePrefetchTiling, Logger log);

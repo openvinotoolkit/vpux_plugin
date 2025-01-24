@@ -263,9 +263,13 @@ mlir::LogicalResult vpux::VPU::NCEDepthConvolutionOp::inferReturnTypes(
 
     const auto& outputShapeNG = conv.get_output_partial_shape(0);
 
-    const auto outputShape = to_small_vector(outputShapeNG.get_shape() | transformed([](size_t val) {
-                                                 return checked_cast<int64_t>(val);
-                                             }));
+    auto outputShape = to_small_vector(outputShapeNG.get_shape() | transformed([](size_t val) {
+                                           return checked_cast<int64_t>(val);
+                                       }));
+
+    if (op.getOutputChannels().has_value()) {
+        outputShape[Dims4D::Act::C.ind()] = op.getOutputChannels().value();
+    }
 
     auto inputType = mlir::cast<vpux::NDTypeInterface>(op.getInput().getType());
     auto outputType =
@@ -479,13 +483,6 @@ vpux::NDTypeInterface vpux::VPU::NCEDepthConvolutionOp::getDistributedTypeForOpO
         return getDistributedTypeFromInput(clusteredOp, origOp.getWeightsTable(), weightsTableTensorDistributionMode,
                                            weightsTableTensorNumTiles, weightAlignmentAttr, strategy,
                                            hasExplicitDistributedAttr, siblingsAnalysis);
-    } else if (operand.get() == origOp.getInstructionListTable()) {
-        auto instructionListTableDistributionMode = getInstructionListTableTensorDistributionMode(strategy);
-        auto instructionListTableNumTiles =
-                getIntArrayAttr(origOp.getContext(), getInstructionListTableTensorNumTiles(strategy));
-        return getDistributedTypeFromInput(clusteredOp, origOp.getInstructionListTable(),
-                                           instructionListTableDistributionMode, instructionListTableNumTiles, nullptr,
-                                           strategy, hasExplicitDistributedAttr, siblingsAnalysis);
     }
     VPUX_THROW("Failed to compute distributed type for op {0}", clusteredOp);
     return nullptr;

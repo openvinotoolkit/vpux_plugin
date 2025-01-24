@@ -9,10 +9,12 @@ namespace vpux::profiling {
 
 enum TargetDevice {
     TargetDevice_NONE = 0,
-    TargetDevice_VPUX37XX = 1,
-    TargetDevice_VPUX311X = 2,
-    TargetDevice_VPUX40XX = 3,
-    TargetDevice_MIN = TargetDevice_NONE
+    TargetDevice_VPUX30XX = 1,
+    TargetDevice_VPUX37XX = 2,
+    TargetDevice_VPUX311X = 3,
+    TargetDevice_VPUX40XX = 4,
+    TargetDevice_MIN = TargetDevice_NONE,
+    TargetDevice_MAX = TargetDevice_VPUX40XX
 };
 
 enum TargetDeviceRevision {
@@ -29,7 +31,7 @@ inline bool IsOutRange(const T& v, const T& low, const T& high) {
 }
 
 inline const char* const* EnumNamesTargetDevice() {
-    static const char* const names[5] = {"NONE", "NPU37XX", "NPU311X", nullptr};
+    static const char* const names[5] = {"NONE", "VPUX30XX", "VPUX37XX", "VPUX311X", nullptr};
     return names;
 }
 

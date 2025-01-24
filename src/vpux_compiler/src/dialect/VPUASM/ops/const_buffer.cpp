@@ -15,18 +15,18 @@ using namespace vpux;
 void VPUASM::ConstBufferOp::serialize(elf::writer::BinaryDataSection<uint8_t>& binDataSection) {
     auto cnt = getProperties().getContent().fold();
     auto ptr = binDataSection.getCurrentWriteAddr() + getMemoryOffset();
-    const auto size = getBinarySize();
+    const auto size = getBinarySize(VPU::ArchKind::UNKNOWN);
     MutableArrayRef<char> inBlobView(reinterpret_cast<char*>(ptr), reinterpret_cast<char*>(ptr) + size);
     cnt.copyTo(inBlobView);
 }
 
-size_t VPUASM::ConstBufferOp::getBinarySize() {
+size_t VPUASM::ConstBufferOp::getBinarySize(VPU::ArchKind) {
     auto content = getProperties().getContent();
     VPUX_THROW_WHEN(content == nullptr, "This content is already deleted!");
     return content.getType().getTotalAllocSize().count();
 }
 
-size_t VPUASM::ConstBufferOp::getAlignmentRequirements() {
+size_t VPUASM::ConstBufferOp::getAlignmentRequirements(VPU::ArchKind) {
     // TODO: E#59169 measure if weights alignment has any impact on performance.
     return ELF::VPUX_DEFAULT_ALIGNMENT;
 }
@@ -41,7 +41,7 @@ bool vpux::VPUASM::ConstBufferOp::hasMemoryFootprint() {
 }
 
 void vpux::VPUASM::ConstBufferOp::build(mlir::OpBuilder&, mlir::OperationState& state, mlir::StringAttr symName,
-                                        ::vpux::VPUASM::BufferType bufferType, vpux::Const::ContentAttr&& content) {
+                                        ::vpux::VPUASM::BufferType bufferType, vpux::Const::ContentAttr content) {
     auto& props = state.getOrAddProperties<Properties>();
     props.sym_name = symName;
     props.buffer_type = mlir::TypeAttr::get(bufferType);

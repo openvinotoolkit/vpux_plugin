@@ -18,8 +18,8 @@ using namespace VPUMI40XX;
 void ConfigureBarrierOp::build(mlir::OpBuilder& odsBuilder, mlir::OperationState& odsState,
                                VPURegMapped::IndexType index, int64_t id, int64_t next_same_id,
                                mlir::IntegerAttr producer_count, mlir::IntegerAttr consumer_count) {
-    build(odsBuilder, odsState, index, mlir::ValueRange{}, checked_cast<uint8_t>(id), next_same_id, producer_count,
-          consumer_count);
+    build(odsBuilder, odsState, index, mlir::ValueRange{}, checked_cast<uint8_t>(id), next_same_id,
+          /*previousSameId*/ nullptr, producer_count, consumer_count);
     return;
 }
 
@@ -27,8 +27,8 @@ void ConfigureBarrierOp::build(mlir::OpBuilder& odsBuilder, mlir::OperationState
                                VPURegMapped::IndexType index, int64_t id, int64_t next_same_id,
                                mlir::IntegerAttr producer_count, mlir::IntegerAttr consumer_count,
                                bool isFinalBarrier) {
-    build(odsBuilder, odsState, index, mlir::ValueRange{}, checked_cast<uint8_t>(id), next_same_id, producer_count,
-          consumer_count, isFinalBarrier);
+    build(odsBuilder, odsState, index, mlir::ValueRange{}, checked_cast<uint8_t>(id), next_same_id,
+          /*previousSameId*/ nullptr, producer_count, consumer_count, isFinalBarrier);
     return;
 }
 

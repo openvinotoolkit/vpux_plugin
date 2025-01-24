@@ -9,7 +9,6 @@
 #include <npu_40xx_nnrt.hpp>
 
 using namespace vpux;
-using namespace npu40xx;
 
 //
 // ActShaveRtOp
@@ -23,12 +22,14 @@ void vpux::VPUASM::ActShaveRtOp::serialize(elf::writer::BinaryDataSection<uint8_
 #endif
 }
 
-size_t vpux::VPUASM::ActShaveRtOp::getBinarySize() {
-    return sizeof(nn_public::VpuNNShaveRuntimeConfigs);
+size_t vpux::VPUASM::ActShaveRtOp::getBinarySize(VPU::ArchKind) {
+    const auto kernelText = vpux::ELF::getKernelELF(getOperation(), getKernelPath(), {".text"});
+
+    return kernelText.size();
 }
 
 // The management kernel code must be 1kB aligned as an ActShave requirement
-size_t vpux::VPUASM::ActShaveRtOp::getAlignmentRequirements() {
+size_t vpux::VPUASM::ActShaveRtOp::getAlignmentRequirements(VPU::ArchKind) {
     return ELF::VPUX_SHAVE_ALIGNMENT;
 }
 

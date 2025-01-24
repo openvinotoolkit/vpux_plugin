@@ -1,4 +1,4 @@
-// Copyright (C) Intel Corporation
+// Copyright (C) 2020 - 2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -56,7 +56,6 @@ TEST_P(Gather8LayerTest_NPU4000, HW) {
     setDefaultHardwareMode();
     run(Platform::NPU4000);
 }
-
 }  // namespace test
 }  // namespace ov
 
@@ -91,7 +90,6 @@ const auto params =
 
 INSTANTIATE_TEST_CASE_P(smoke_Gather1, GatherLayerTest_NPU3720, params, GatherLayerTest_NPU3720::getTestCaseName);
 INSTANTIATE_TEST_SUITE_P(smoke_Gather1, GatherLayerTest_NPU4000, params, GatherLayerTest_NPU4000::getTestCaseName);
-
 }  // namespace
 
 namespace {  // conformance scenarios
@@ -182,7 +180,7 @@ GEN7_PRECOMMIT_NPU3720_TEST(1, (ov::Shape{3, 2, 4, 1}), ({3, 3}), 2, 1);
 
 namespace {  // opset8::Gather tests
 
-const std::vector<ov::element::Type> modelType = {ov::element::f16, ov::element::u8};
+const std::vector<ov::element::Type> modelType = {ov::element::f16, ov::element::u8, ov::element::i8};
 #define GEN8_TEST(no, inputShape, indicesShape, axis, batch_dims)                                                 \
     INSTANTIATE_TEST_CASE_P(smoke_Gather8_##no, Gather8LayerTest_NPU3720,                                         \
                             testing::Combine(testing::Values(static_shapes_to_test_representation({inputShape})), \
@@ -196,7 +194,7 @@ const std::vector<ov::element::Type> modelType = {ov::element::f16, ov::element:
                              testing::Combine(testing::Values(static_shapes_to_test_representation({inputShape})), \
                                               testing::Values(std::vector<size_t> indicesShape),                   \
                                               testing::Values(std::tuple<int, int>{axis, batch_dims}),             \
-                                              testing::Values(ov::element::f16), testing::Values(DEVICE_NPU)),     \
+                                              testing::ValuesIn(modelType), testing::Values(DEVICE_NPU)),          \
                              Gather8LayerTest_NPU3720::getTestCaseName)
 
 #define GEN8_TILING_NPU3720_TEST(no, inputShape, indicesShape, axis, batch_dims)                                   \
@@ -204,7 +202,7 @@ const std::vector<ov::element::Type> modelType = {ov::element::f16, ov::element:
                              testing::Combine(testing::Values(static_shapes_to_test_representation({inputShape})), \
                                               testing::Values(std::vector<size_t> indicesShape),                   \
                                               testing::Values(std::tuple<int, int>{axis, batch_dims}),             \
-                                              testing::Values(ov::element::f16), testing::Values(DEVICE_NPU)),     \
+                                              testing::ValuesIn(modelType), testing::Values(DEVICE_NPU)),          \
                              Gather8LayerTest_NPU3720::getTestCaseName)
 
 #define GEN8_PRECOMMIT_NPU4000_TEST(no, inputShape, indicesShape, axis, batch_dims)                                \
@@ -212,7 +210,7 @@ const std::vector<ov::element::Type> modelType = {ov::element::f16, ov::element:
                              testing::Combine(testing::Values(static_shapes_to_test_representation({inputShape})), \
                                               testing::Values(std::vector<size_t> indicesShape),                   \
                                               testing::Values(std::tuple<int, int>{axis, batch_dims}),             \
-                                              testing::Values(ov::element::f16), testing::Values(DEVICE_NPU)),     \
+                                              testing::ValuesIn(modelType), testing::Values(DEVICE_NPU)),          \
                              Gather8LayerTest_NPU4000::getTestCaseName)
 
 #define GEN8_NPU4000_TEST(no, inputShape, indicesShape, axis, batch_dims)                                          \
@@ -220,7 +218,7 @@ const std::vector<ov::element::Type> modelType = {ov::element::f16, ov::element:
                              testing::Combine(testing::Values(static_shapes_to_test_representation({inputShape})), \
                                               testing::Values(std::vector<size_t> indicesShape),                   \
                                               testing::Values(std::tuple<int, int>{axis, batch_dims}),             \
-                                              testing::Values(ov::element::f16), testing::Values(DEVICE_NPU)),     \
+                                              testing::ValuesIn(modelType), testing::Values(DEVICE_NPU)),          \
                              Gather8LayerTest_NPU4000::getTestCaseName)
 
 GEN8_TEST(0, (ov::Shape{3, 5, 1, 1}), ({3, 2}), 1, 1);
@@ -237,5 +235,5 @@ GEN8_PRECOMMIT_NPU3720_TEST(0, (ov::Shape{2, 3, 1, 1}), ({2, 1}), 1, 1);
 GEN8_PRECOMMIT_NPU3720_TEST(1, (ov::Shape{3, 2, 4, 1}), ({3, 3}), 2, 1);
 GEN8_PRECOMMIT_NPU4000_TEST(0, (ov::Shape{2, 3, 1, 1}), ({2, 1}), 1, 1);
 GEN8_PRECOMMIT_NPU4000_TEST(1, (ov::Shape{3, 2, 4, 1}), ({3, 3}), 2, 1);
-
+GEN8_PRECOMMIT_NPU4000_TEST(2, (ov::Shape{1, 3, 64, 512}), ({3}), 1, 0);
 }  // namespace

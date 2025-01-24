@@ -8,46 +8,46 @@
 
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 
-// CHECK: func.func @ExpandICMatMul([[ARG0:%.+]]: tensor<48x4x50x49xf16>) ->  tensor<48x4x50x32xf16> {
-func.func @ExpandICMatMul(%arg0: tensor<48x4x50x49xf16>) -> tensor<48x4x50x32xf16> {
-    %0 = const.Declare tensor<48x4x49x32xf16> =
+// CHECK: func.func @ExpandICMatMul([[INPUT:%.+]]: tensor<48x4x50x49xf16>) ->  tensor<48x4x50x32xf16> {
+func.func @ExpandICMatMul(%input: tensor<48x4x50x49xf16>) -> tensor<48x4x50x32xf16> {
+    %cst = const.Declare tensor<48x4x49x32xf16> =
         dense<1.0> : tensor<48x4x49x32xf16>
-    %1 = IE.MatMul(%arg0, %0) : tensor<48x4x50x49xf16>, tensor<48x4x49x32xf16> -> tensor<48x4x50x32xf16>
+    %matmul = IE.MatMul(%input, %cst) : tensor<48x4x50x49xf16>, tensor<48x4x49x32xf16> -> tensor<48x4x50x32xf16>
 
-    return %1 : tensor<48x4x50x32xf16>
-    // CHECK:       [[VAL0:%.+]] = IE.Expand([[ARG0]]) {pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 15]}
+    return %matmul : tensor<48x4x50x32xf16>
+    // CHECK:       [[EXPAND:%.+]] = IE.Expand([[INPUT]]) {pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 15]}
     // CHECK-SAME:  : tensor<48x4x50x49xf16> -> tensor<48x4x50x64xf16>
     // CHECK:       [[CST:%.+]] = const.Declare tensor<48x4x64x32xf16> = dense<1.000000e+00> :
     // CHECK-SAME:  tensor<48x4x49x32xf16>, [#const.PadWithZero<[0, 0, 0, 0], [0, 0, 15, 0]>]
-    // CHECK:       [[VAL1:%.+]] = IE.MatMul([[VAL0]], [[CST]])
+    // CHECK:       [[MATMUL:%.+]] = IE.MatMul([[EXPAND]], [[CST]])
     // CHECK-SAME:  : tensor<48x4x50x64xf16>, tensor<48x4x64x32xf16> -> tensor<48x4x50x32xf16>
-    // CHECK:       [[VAL2:%.+]] = IE.Slice [[VAL1]] [0, 0, 0, 0] [48, 4, 50, 32]
+    // CHECK:       [[SLICE:%.+]] = IE.Slice [[MATMUL]] [0, 0, 0, 0] [48, 4, 50, 32]
     // CHECK-SAME:  : tensor<48x4x50x32xf16> to tensor<48x4x50x32xf16>
-    // CHECK:       return [[VAL2]] : tensor<48x4x50x32xf16>
+    // CHECK:       return [[SLICE]] : tensor<48x4x50x32xf16>
 }
 
 // -----
 
 #NCWH = affine_map<(d0, d1, d2, d3) -> (d0, d1, d3, d2)>
 
-// CHECK:       func.func @ExpandICMatMulWithTranspose([[ARG0:%.+]]: tensor<48x4x50x49xf16>,
-// CHECK-SAME:  [[ARG1:%.+]]: tensor<48x4x49x32xf16>) ->  tensor<48x4x50x32xf16> {
-func.func @ExpandICMatMulWithTranspose(%arg0: tensor<48x4x50x49xf16>, %arg1: tensor<48x4x49x32xf16>) -> tensor<48x4x50x32xf16> {
-    %0 = IE.Transpose(%arg1) {order_value = #NCWH} : tensor<48x4x49x32xf16> -> tensor<48x4x32x49xf16>
-    %1 = IE.MatMul(%arg0, %0) {transpose_b} : tensor<48x4x50x49xf16>, tensor<48x4x32x49xf16> -> tensor<48x4x50x32xf16>
+// CHECK:       func.func @ExpandICMatMulWithTranspose([[INPUT1:%.+]]: tensor<48x4x50x49xf16>,
+// CHECK-SAME:  [[INPUT2:%.+]]: tensor<48x4x49x32xf16>) ->  tensor<48x4x50x32xf16> {
+func.func @ExpandICMatMulWithTranspose(%input1: tensor<48x4x50x49xf16>, %input2: tensor<48x4x49x32xf16>) -> tensor<48x4x50x32xf16> {
+    %transpose = IE.Transpose(%input2) {order_value = #NCWH} : tensor<48x4x49x32xf16> -> tensor<48x4x32x49xf16>
+    %matmul = IE.MatMul(%input1, %transpose) {transpose_b} : tensor<48x4x50x49xf16>, tensor<48x4x32x49xf16> -> tensor<48x4x50x32xf16>
 
-    return %1 : tensor<48x4x50x32xf16>
-    // CHECK:       [[VAL0:%.+]] = IE.Transpose([[ARG1]]) {order_value = #NCWH}
+    return %matmul : tensor<48x4x50x32xf16>
+    // CHECK:       [[TRANSPOSE:%.+]] = IE.Transpose([[INPUT2]]) {order_value = #NCWH}
     // CHECK-SAME:  : tensor<48x4x49x32xf16> -> tensor<48x4x32x49xf16>
-    // CHECK:       [[VAL1:%.+]] = IE.Expand([[ARG0]]) {pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 15]}
+    // CHECK:       [[EXPAND_IN1:%.+]] = IE.Expand([[INPUT1]]) {pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 15]}
     // CHECK-SAME:  : tensor<48x4x50x49xf16> -> tensor<48x4x50x64xf16>
-    // CHECK:       [[VAL2:%.+]] = IE.Expand([[VAL0]]) {pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 15]}
+    // CHECK:       [[EXPAND_IN2:%.+]] = IE.Expand([[TRANSPOSE]]) {pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 15]}
     // CHECK-SAME:  : tensor<48x4x32x49xf16> -> tensor<48x4x32x64xf16>
-    // CHECK:       [[VAL3:%.+]] = IE.MatMul([[VAL1]], [[VAL2]]) {transpose_b}
+    // CHECK:       [[MATMUL:%.+]] = IE.MatMul([[EXPAND_IN1]], [[EXPAND_IN2]]) {transpose_b}
     // CHECK-SAME:  : tensor<48x4x50x64xf16>, tensor<48x4x32x64xf16> -> tensor<48x4x50x32xf16>
-    // CHECK:       [[VAL4:%.+]] = IE.Slice [[VAL3]] [0, 0, 0, 0] [48, 4, 50, 32]
+    // CHECK:       [[SLICE:%.+]] = IE.Slice [[MATMUL]] [0, 0, 0, 0] [48, 4, 50, 32]
     // CHECK-SAME:  : tensor<48x4x50x32xf16> to tensor<48x4x50x32xf16>
-    // CHECK:       return [[VAL4]] : tensor<48x4x50x32xf16>
+    // CHECK:       return [[SLICE]] : tensor<48x4x50x32xf16>
 }
 
 // -----
@@ -55,22 +55,22 @@ func.func @ExpandICMatMulWithTranspose(%arg0: tensor<48x4x50x49xf16>, %arg1: ten
 #NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
 #NCWH = affine_map<(d0, d1, d2, d3) -> (d0, d1, d3, d2)>
 
-// CHECK:       func.func @ExpandOCMatMulWithTranspose([[ARG0:%.+]]: tensor<16x8x49x32xf16>,
-// CHECK-SAME:  [[ARG1:%.+]]: tensor<16x8x32x50xf16>) ->  tensor<16x8x49x50xf16> {
-func.func @ExpandOCMatMulWithTranspose(%arg0: tensor<16x8x49x32xf16>, %arg1: tensor<16x8x32x50xf16>) -> tensor<16x8x49x50xf16>  {
-    %0 = IE.Transpose(%arg1) {order_value = #NCWH} : tensor<16x8x32x50xf16> -> tensor<16x8x50x32xf16>
-    %1 = IE.MatMul(%arg0, %0) {transpose_b} : tensor<16x8x49x32xf16>, tensor<16x8x50x32xf16> -> tensor<16x8x49x50xf16>
+// CHECK:       func.func @ExpandOCMatMulWithTranspose([[INPUT1:%.+]]: tensor<16x8x49x32xf16>,
+// CHECK-SAME:  [[INPUT2:%.+]]: tensor<16x8x32x50xf16>) ->  tensor<16x8x49x50xf16> {
+func.func @ExpandOCMatMulWithTranspose(%input1: tensor<16x8x49x32xf16>, %input2: tensor<16x8x32x50xf16>) -> tensor<16x8x49x50xf16>  {
+    %transpose = IE.Transpose(%input2) {order_value = #NCWH} : tensor<16x8x32x50xf16> -> tensor<16x8x50x32xf16>
+    %matmul = IE.MatMul(%input1, %transpose) {transpose_b} : tensor<16x8x49x32xf16>, tensor<16x8x50x32xf16> -> tensor<16x8x49x50xf16>
 
-    return %1 : tensor<16x8x49x50xf16>
-    // CHECK:       [[VAL0:%.+]] = IE.Transpose([[ARG1]]) {order_value = #NCWH}
+    return %matmul : tensor<16x8x49x50xf16>
+    // CHECK:       [[TRANSPOSE:%.+]] = IE.Transpose([[INPUT2]]) {order_value = #NCWH}
     // CHECK-SAME:  : tensor<16x8x32x50xf16> -> tensor<16x8x50x32xf16>
-    // CHECK:       [[VAL1:%.+]] = IE.Expand([[VAL0]]) {pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 14, 0]}
+    // CHECK:       [[EXPAND:%.+]] = IE.Expand([[TRANSPOSE]]) {pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 14, 0]}
     // CHECK-SAME:  : tensor<16x8x50x32xf16> -> tensor<16x8x64x32xf16>
-    // CHECK:       [[VAL2:%.+]] = IE.MatMul([[ARG0]], [[VAL1]]) {transpose_b}
+    // CHECK:       [[MATMUL:%.+]] = IE.MatMul([[INPUT1]], [[EXPAND]]) {transpose_b}
     // CHECK-SAME:  : tensor<16x8x49x32xf16>, tensor<16x8x64x32xf16> -> tensor<16x8x49x64xf16>
-    // CHECK:       [[VAL3:%.+]] = IE.Slice [[VAL2]] [0, 0, 0, 0] [16, 8, 49, 50]
+    // CHECK:       [[SLICE:%.+]] = IE.Slice [[MATMUL]] [0, 0, 0, 0] [16, 8, 49, 50]
     // CHECK-SAME:  : tensor<16x8x49x64xf16> to tensor<16x8x49x50xf16>
-    // CHECK:       return [[VAL3]] : tensor<16x8x49x50xf16>
+    // CHECK:       return [[SLICE]] : tensor<16x8x49x50xf16>
 }
 
 // -----
@@ -78,47 +78,71 @@ func.func @ExpandOCMatMulWithTranspose(%arg0: tensor<16x8x49x32xf16>, %arg1: ten
 #NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
 #NCWH = affine_map<(d0, d1, d2, d3) -> (d0, d1, d3, d2)>
 
-// CHECK:       func.func @ExpandICOCMatMulWithTranspose([[ARG0:%.+]]:  tensor<16x8x49x25xf16>,
-// CHECK-SAME:  [[ARG1:%.+]]: tensor<16x8x25x49xf16>) ->  tensor<16x8x49x49xf16> {
-func.func @ExpandICOCMatMulWithTranspose(%arg0: tensor<16x8x49x25xf16>, %arg1: tensor<16x8x25x49xf16>) -> tensor<16x8x49x49xf16>  {
-    %0 = IE.Transpose(%arg1) {order_value = #NCWH} : tensor<16x8x25x49xf16> -> tensor<16x8x49x25xf16>
-    %1 = IE.MatMul(%arg0, %0) {transpose_b} : tensor<16x8x49x25xf16>, tensor<16x8x49x25xf16> -> tensor<16x8x49x49xf16>
+// CHECK:       func.func @ExpandICOCMatMulWithTranspose([[INPUT1:%.+]]:  tensor<16x8x49x25xf16>,
+// CHECK-SAME:  [[INPUT2:%.+]]: tensor<16x8x25x49xf16>) ->  tensor<16x8x49x49xf16> {
+func.func @ExpandICOCMatMulWithTranspose(%input1: tensor<16x8x49x25xf16>, %input2: tensor<16x8x25x49xf16>) -> tensor<16x8x49x49xf16>  {
+    %transpose = IE.Transpose(%input2) {order_value = #NCWH} : tensor<16x8x25x49xf16> -> tensor<16x8x49x25xf16>
+    %matmul = IE.MatMul(%input1, %transpose) {transpose_b} : tensor<16x8x49x25xf16>, tensor<16x8x49x25xf16> -> tensor<16x8x49x49xf16>
 
-    return %1 : tensor<16x8x49x49xf16>
-    // CHECK:       [[VAL0:%.+]] = IE.Transpose([[ARG1]]) {order_value = #NCWH}
+    return %matmul : tensor<16x8x49x49xf16>
+    // CHECK:       [[TRANSPOSE:%.+]] = IE.Transpose([[INPUT2]]) {order_value = #NCWH}
     // CHECK-SAME:  : tensor<16x8x25x49xf16> -> tensor<16x8x49x25xf16>
-    // CHECK:       [[VAL1:%.+]] = IE.Expand([[ARG0]]) {pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 7]}
+    // CHECK:       [[EXPAND_IC_IN1:%.+]] = IE.Expand([[INPUT1]]) {pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 7]}
     // CHECK-SAME:  : tensor<16x8x49x25xf16> -> tensor<16x8x49x32xf16>
-    // CHECK:       [[VAL2:%.+]] = IE.Expand([[VAL0]]) {pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 7]}
+    // CHECK:       [[EXPAND_IC_IN2:%.+]] = IE.Expand([[TRANSPOSE]]) {pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 7]}
     // CHECK-SAME:  : tensor<16x8x49x25xf16> -> tensor<16x8x49x32xf16>
-    // CHECK:       [[VAL3:%.+]] = IE.Expand([[VAL2]]) {pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 15, 0]}
+    // CHECK:       [[EXPAND_OC_IN2:%.+]] = IE.Expand([[EXPAND_IC_IN2]]) {pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 15, 0]}
     // CHECK-SAME:  : tensor<16x8x49x32xf16> -> tensor<16x8x64x32xf16>
-    // CHECK:       [[VAL4:%.+]] = IE.MatMul([[VAL1]], [[VAL3]]) {transpose_b}
+    // CHECK:       [[MATMUL:%.+]] = IE.MatMul([[EXPAND_IC_IN1]], [[EXPAND_OC_IN2]]) {transpose_b}
     // CHECK-SAME:  : tensor<16x8x49x32xf16>, tensor<16x8x64x32xf16> -> tensor<16x8x49x64xf16>
-    // CHECK:       [[VAL5:%.+]] = IE.Slice [[VAL4]] [0, 0, 0, 0] [16, 8, 49, 49]
+    // CHECK:       [[SLICE:%.+]] = IE.Slice [[MATMUL]] [0, 0, 0, 0] [16, 8, 49, 49]
     // CHECK-SAME:  : tensor<16x8x49x64xf16> to tensor<16x8x49x49xf16>
-    // CHECK:       return [[VAL5]] : tensor<16x8x49x49xf16>
+    // CHECK:       return [[SLICE]] : tensor<16x8x49x49xf16>
 }
 
 // -----
 
 #NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
 
-// CHECK:       func.func @ExpandICOCMatMul([[ARG0:%.+]]:  tensor<16x8x49x25xf16>
+// CHECK:       func.func @ExpandICOCMatMul([[INPUT:%.+]]:  tensor<16x8x49x25xf16>
 // CHECK-SAME:  ->  tensor<16x8x49x49xf16> {
-func.func @ExpandICOCMatMul(%arg0: tensor<16x8x49x25xf16>) -> tensor<16x8x49x49xf16>  {
-    %0 = const.Declare tensor<16x8x49x25xf16> =
+func.func @ExpandICOCMatMul(%input: tensor<16x8x49x25xf16>) -> tensor<16x8x49x49xf16>  {
+    %cst = const.Declare tensor<16x8x49x25xf16> =
         dense<1.0> : tensor<16x8x49x25xf16>
-    %1 = IE.MatMul(%arg0, %0) {transpose_b} : tensor<16x8x49x25xf16>, tensor<16x8x49x25xf16> -> tensor<16x8x49x49xf16>
+    %matmul = IE.MatMul(%input, %cst) {transpose_b} : tensor<16x8x49x25xf16>, tensor<16x8x49x25xf16> -> tensor<16x8x49x49xf16>
 
-    return %1 : tensor<16x8x49x49xf16>
-    // CHECK:           [[VAL0:%.+]] = IE.Expand([[ARG0]]) {pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 7]}
+    return %matmul : tensor<16x8x49x49xf16>
+    // CHECK:           [[EXPAND:%.+]] = IE.Expand([[INPUT]]) {pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 0, 7]}
     // CHECK-SAME: :    tensor<16x8x49x25xf16> -> tensor<16x8x49x32xf16>
-    // CHECK:           [[CST1:%.+]] = const.Declare tensor<16x8x64x32xf16> = dense<1.000000e+00> : tensor<16x8x49x25xf16>,
+    // CHECK:           [[CST:%.+]] = const.Declare tensor<16x8x64x32xf16> = dense<1.000000e+00> : tensor<16x8x49x25xf16>,
     // CHECK-SAME:      [#const.PadWithZero<[0, 0, 0, 0], [0, 0, 0, 7]>, #const.PadWithZero<[0, 0, 0, 0], [0, 0, 15, 0]>]
-    // CHECK:           [[VAL1:%.+]] = IE.MatMul([[VAL0]], [[CST1]]) {transpose_b}
+    // CHECK:           [[MATMUL:%.+]] = IE.MatMul([[EXPAND]], [[CST]]) {transpose_b}
     // CHECK-SAME:      : tensor<16x8x49x32xf16>, tensor<16x8x64x32xf16> -> tensor<16x8x49x64xf16>
-    // CHECK:           [[VAL2:%.+]] = IE.Slice [[VAL1]] [0, 0, 0, 0] [16, 8, 49, 49]
+    // CHECK:           [[SLICE:%.+]] = IE.Slice [[MATMUL]] [0, 0, 0, 0] [16, 8, 49, 49]
     // CHECK-SAME:      : tensor<16x8x49x64xf16> to tensor<16x8x49x49xf16>
-    // CHECK:           return [[VAL2]] : tensor<16x8x49x49xf16>
+    // CHECK:           return [[SLICE]] : tensor<16x8x49x49xf16>
+}
+
+// -----
+
+!input1ElemType = !quant.uniform<u8:f16, 0.1:1>
+!input2ElemType = !quant.uniform<u8:f16, 0.2:2>
+!outputElemType = !quant.uniform<u8:f16, 0.3:3>
+// CHECK: [[INPUT1_ELEM_TYPE:!.+]] = !quant.uniform<u8:f16, 1.000000e-01:1>
+// CHECK: [[INPUT2_ELEM_TYPE:!.+]] = !quant.uniform<u8:f16, 2.000000e-01:2>
+// CHECK: [[OUTPUT_ELEM_TYPE:!.+]] = !quant.uniform<u8:f16, 3.000000e-01:3>
+
+// CHECK:       func.func @ExpandOCMatMulQuant([[INPUT1:%.+]]: tensor<1x32x75x16x[[INPUT1_ELEM_TYPE]]>,
+// CHECK-SAME:  [[INPUT2:%.+]]: tensor<1x32x75x16x[[INPUT2_ELEM_TYPE]]>) ->  tensor<1x32x75x75x[[OUTPUT_ELEM_TYPE]]> {
+func.func @ExpandOCMatMulQuant(%input1: tensor<1x32x75x16x!input1ElemType>, %input2: tensor<1x32x75x16x!input2ElemType>) -> tensor<1x32x75x75x!outputElemType> {
+    %matmul = IE.MatMul(%input1, %input2) {transpose_b} : tensor<1x32x75x16x!input1ElemType>, tensor<1x32x75x16x!input2ElemType> -> tensor<1x32x75x75x!outputElemType>
+
+    return %matmul : tensor<1x32x75x75x!outputElemType>
+    // CHECK:           [[EXPAND:%.+]] = IE.Expand([[INPUT2]]) {pads_begin = [0, 0, 0, 0], pads_end = [0, 0, 5, 0]}
+    // CHECK-SAME:      : tensor<1x32x75x16x[[INPUT2_ELEM_TYPE]]> -> tensor<1x32x80x16x[[INPUT2_ELEM_TYPE]]>
+    // CHECK:           [[MATMUL:%.+]] = IE.MatMul([[INPUT1]], [[EXPAND]]) {transpose_b}
+    // CHECK-SAME:      : tensor<1x32x75x16x[[INPUT1_ELEM_TYPE]]>, tensor<1x32x80x16x[[INPUT2_ELEM_TYPE]]> -> tensor<1x32x75x80x[[OUTPUT_ELEM_TYPE]]>
+    // CHECK:           [[SLICE:%.+]] = IE.Slice [[MATMUL]] [0, 0, 0, 0] [1, 32, 75, 75]
+    // CHECK-SAME:      : tensor<1x32x75x80x[[OUTPUT_ELEM_TYPE]]> to tensor<1x32x75x75x[[OUTPUT_ELEM_TYPE]]>
+    // CHECK:           return [[SLICE]] : tensor<1x32x75x75x[[OUTPUT_ELEM_TYPE]]>
 }

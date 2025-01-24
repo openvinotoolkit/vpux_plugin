@@ -32,7 +32,17 @@ mlir::Type typeTo4D(const mlir::Type type) {
 
     // Update axis in per-axis quantization
     auto elemType = origType.getElementType();
-    if (auto perAxisType = elemType.dyn_cast<mlir::quant::UniformQuantizedPerAxisType>()) {
+    if (auto perAxisType = elemType.dyn_cast<mlir::quant::QuantileQuantizedPerAxisType>()) {
+        const auto origQuantAxis = perAxisType.getQuantizedDimension();
+        VPUX_THROW_WHEN(origQuantAxis <= 0, "Quantization over batch is not supported.");
+        const auto newQuantAxis = origQuantAxis - 1;
+
+        elemType = mlir::quant::QuantileQuantizedPerAxisType::get(
+                perAxisType.getFlags(), perAxisType.getStorageType(), perAxisType.getQuantileType(),
+                perAxisType.getExpressedType(), perAxisType.getQuantiles(), perAxisType.getScales(),
+                perAxisType.getZeroPoints(), newQuantAxis, perAxisType.getStorageTypeMin(),
+                perAxisType.getStorageTypeMax());
+    } else if (auto perAxisType = elemType.dyn_cast<mlir::quant::UniformQuantizedPerAxisType>()) {
         const auto origQuantAxis = perAxisType.getQuantizedDimension();
         VPUX_THROW_WHEN(origQuantAxis <= 0, "Quantization over batch is not supported.");
         const auto newQuantAxis = origQuantAxis - 1;
@@ -144,21 +154,33 @@ mlir::LogicalResult MatMulRewriter::matchAndRewrite(VPURT::TaskOp vpurtTask, mli
     const auto sameInput = parentInputProducer == inputProducer;
     const auto sameOutput = parentOutputProducer == outputProducer;
 
-    rewriter.eraseOp(nceOp);
-    rewriter.eraseOp(inputProducer);
-    rewriter.eraseOp(weightProducer);
-    rewriter.eraseOp(weightTableProducer);
+    if (nceOp->use_empty()) {
+        rewriter.eraseOp(nceOp);
+    }
+    if (inputProducer->use_empty()) {
+        rewriter.eraseOp(inputProducer);
+    }
+    if (weightProducer->use_empty()) {
+        rewriter.eraseOp(weightProducer);
+    }
+    if (weightTableProducer->use_empty()) {
+        rewriter.eraseOp(weightTableProducer);
+    }
 
-    if (!sameInput) {
+    if (!sameInput && parentInputProducer->use_empty()) {
         rewriter.eraseOp(parentInputProducer);
     }
 
-    if (!sameOutput) {
+    if (!sameOutput && parentOutputProducer->use_empty()) {
         rewriter.eraseOp(parentOutputProducer);
     }
 
-    rewriter.eraseOp(outputProducer);
-    rewriter.eraseOp(vpurtTask);
+    if (outputProducer->use_empty()) {
+        rewriter.eraseOp(outputProducer);
+    }
+    if (vpurtTask->use_empty()) {
+        rewriter.eraseOp(vpurtTask);
+    }
     return mlir::success();
 }
 
@@ -175,6 +197,17 @@ private:
 void BatchMatMulToMatMul::safeRunOnFunc() {
     auto& ctx = getContext();
     auto func = getOperation();
+    auto vpurtTasks = func.getOps<VPURT::TaskOp>();
+    const auto is5D = [](VPURT::TaskOp vpurtTask) -> bool {
+        auto nceOp = vpurtTask.getInnerTaskOpOfType<VPUIP::NCEClusterTaskOp>();
+        if (nceOp == nullptr) {
+            return false;
+        }
+        return getShape(nceOp.getOutput()).size() == DimsGroups5D::Act::numDims;
+    };
+    if (std::none_of(vpurtTasks.begin(), vpurtTasks.end(), is5D)) {
+        return;
+    }
 
     mlir::RewritePatternSet patterns(&ctx);
     patterns.add<MatMulRewriter>(&ctx, _log);

@@ -8,7 +8,6 @@
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPU/utils/ppe_version_config.hpp"
-#include "vpux/compiler/utils/VPU/ppe_utils.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 
 namespace vpux {
@@ -37,13 +36,13 @@ mlir::LogicalResult EltwiseToNCE<ConcreteOp>::matchAndRewrite(ConcreteOp origOp,
                                                               mlir::PatternRewriter& rewriter) const {
     _log.trace("[{0}] Got '{1}' at '{2}'", this->getDebugName(), origOp->getName(), origOp->getLoc());
 
-    auto ppeOpaqueAttr = VPU::PpeVersionConfig::retrievePPEAttribute(origOp);
+    auto ppeAttr = VPU::PpeVersionConfig::retrievePPEAttribute(origOp);
 
-    auto nceOp = rewriter.create<VPU::NCEEltwiseOp>(
-            origOp->getLoc(), origOp.getType(), origOp.getInput1(), origOp.getInput2(),
-            VPU::EltwiseTypeAttr::get(this->getContext(), _opType), ppeOpaqueAttr,
-            /*multi_cluster_strategyAttr=*/nullptr,
-            /*is_inplace=*/nullptr);
+    auto nceOp = rewriter.create<VPU::NCEEltwiseOp>(origOp->getLoc(), origOp.getType(), origOp.getInput1(),
+                                                    origOp.getInput2(),
+                                                    VPU::EltwiseTypeAttr::get(this->getContext(), _opType), ppeAttr,
+                                                    /*multi_cluster_strategyAttr=*/nullptr,
+                                                    /*is_inplace=*/nullptr, origOp.getOutputChannelsAttr());
     rewriter.replaceOp(origOp, nceOp.getOutput());
     return mlir::success();
 }

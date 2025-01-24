@@ -30,6 +30,7 @@ void computeBasePtrs(VPUIP::StorageElementTableOp seTableOp, vpux::NDTypeInterfa
 
     SmallVector<Shape> perClusterOffsets{};
     SmallVector<Shape> perClusterShapes{};
+
     if (auto inputDistType = inputType.dyn_cast<VPUIP::DistributedBufferType>()) {
         perClusterOffsets = inputDistType.getPerClusterMemoryShapeOffsets();
         perClusterShapes = inputDistType.getPerClusterMemoryShapes();
@@ -42,15 +43,19 @@ void computeBasePtrs(VPUIP::StorageElementTableOp seTableOp, vpux::NDTypeInterfa
         if (perClusterOffsets.empty() || perClusterShapes.empty()) {
             return static_cast<int32_t>(0);
         }
+
         for (auto p : zip(perClusterOffsets, perClusterShapes) | indexed) {
             const auto offsets = std::get<0>(p.value());
             const auto shape = std::get<1>(p.value());
+
             auto containsH = offsets[Dims4D::Act::H] <= h && h < (offsets[Dims4D::Act::H] + shape[Dims4D::Act::H]);
             auto containsW = offsets[Dims4D::Act::W] <= w && w < (offsets[Dims4D::Act::W] + shape[Dims4D::Act::W]);
+
             if (containsH && containsW) {
                 return checked_cast<int32_t>(p.index());
             }
         }
+
         return static_cast<int32_t>(-1);
     };
 
@@ -67,9 +72,12 @@ void computeBasePtrs(VPUIP::StorageElementTableOp seTableOp, vpux::NDTypeInterfa
     std::vector<int32_t> basePtrs(numElements, 0);
 
     SmallVector<int64_t> outputOffsets{0, 0, 0, 0};
+
     if (seAttr != nullptr) {
-        if (auto tileInfo = seAttr.getTileInfo(); tileInfo.has_value() && tileInfo->offsets != nullptr) {
-            outputOffsets = parseIntArrayAttr<int64_t>(tileInfo->offsets);
+        auto tileInfo = seAttr.getTileInfo();
+
+        if (tileInfo.has_value() && tileInfo.value().offsets != nullptr && !tileInfo.value().offsets.empty()) {
+            outputOffsets = parseIntArrayAttr<int64_t>(tileInfo.value().offsets);
         }
     }
 
@@ -78,15 +86,20 @@ void computeBasePtrs(VPUIP::StorageElementTableOp seTableOp, vpux::NDTypeInterfa
                 const Shape outputCoord{
                         outputOffsets[Dims4D::Act::N.ind()] + 0, outputOffsets[Dims4D::Act::C.ind()] + se * seSize,
                         outputOffsets[Dims4D::Act::H.ind()] + h, outputOffsets[Dims4D::Act::W.ind()] + w};
+
                 auto inputCoord =
                         (seAttr != nullptr) ? seAttr.backInferInputCoord(outputCoord, Shape(inputShape)) : outputCoord;
+
                 const auto seSpatialOffset = (h * outputW + w) * seDepth;
+
                 basePtrs[seSpatialOffset + se] = findCluster(inputCoord[Dims4D::Act::H], inputCoord[Dims4D::Act::W]);
             });
 
     const auto basePtrType =
             mlir::RankedTensorType::get({static_cast<int64_t>(basePtrs.size())}, getInt32Type(seTableOp.getContext()));
+
     const auto basePtrsElems = mlir::DenseIntElementsAttr::get(basePtrType, basePtrs);
+
     seTableOp.setBasePtrsAttr(basePtrsElems);
 }
 

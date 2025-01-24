@@ -16,11 +16,9 @@ namespace {
 class ReduceExceedingActiveCountBarriersPass final :
         public VPURT::ReduceExceedingActiveCountBarriersBase<ReduceExceedingActiveCountBarriersPass> {
 public:
-    explicit ReduceExceedingActiveCountBarriersPass(const bool wlmFlag,
-                                                    std::optional<int> virtualBarrierThresholdforWlm,
+    explicit ReduceExceedingActiveCountBarriersPass(std::optional<int> virtualBarrierThresholdforWlm,
                                                     const bool unevenVariantSplit, Logger log)
-            : _wlmFlag(wlmFlag),
-              _virtualBarrierThresholdforWlm(virtualBarrierThresholdforWlm),
+            : _virtualBarrierThresholdforWlm(virtualBarrierThresholdforWlm),
               _unevenVariantSplitFlag(unevenVariantSplit) {
         Base::initLogger(log, Base::getArgumentName());
     }
@@ -39,8 +37,8 @@ private:
     const bool _considerTaskFifoDependency = false;
     bool _mergeWaitBarriersIteratively = false;
     bool _considerTaskExecutorType = false;
+    bool _shareWaitAndUpdateBarriers = true;
 
-    bool _wlmFlag = false;
     std::optional<int> _virtualBarrierThresholdforWlm = std::nullopt;
     bool _unevenVariantSplitFlag = false;
     SmallVector<llvm::BitVector> _taskControlMap;
@@ -219,6 +217,7 @@ void ReduceExceedingActiveCountBarriersPass::linearizeBarriers(
 
 void ReduceExceedingActiveCountBarriersPass::safeRunOnFunc() {
     auto func = getOperation();
+    auto module = func->getParentOfType<mlir::ModuleOp>();
 
     const auto numBarriersToUse = numBarriers.hasValue() ? checked_cast<size_t>(numBarriers.getValue())
                                                          : checked_cast<size_t>(VPUIP::getNumAvailableBarriers(func));
@@ -234,7 +233,11 @@ void ReduceExceedingActiveCountBarriersPass::safeRunOnFunc() {
     VPUX_THROW_UNLESS(numBarriersToUse > 1, "Not possible to satisfy barrier requirement numBarriersToUse '{0}'",
                       numBarriersToUse);
 
-    auto wlmFlag = wlmEnableOpt.hasValue() ? static_cast<bool>(wlmEnableOpt.getValue()) : _wlmFlag;
+    auto wlmFlag = vpux::VPUIP::getWlmStatus(module) == vpux::VPUIP::WlmStatus::ENABLED;
+
+    auto shareWaitAndUpdateBarriers = shareWaitAndUpdateBarriersOpt.hasValue()
+                                              ? static_cast<bool>(shareWaitAndUpdateBarriersOpt.getValue())
+                                              : _shareWaitAndUpdateBarriers;
 
     auto& barrierInfo = getAnalysis<BarrierInfo>();
     if (barrierInfo.getNumOfBarrierOps() <= numBarriersToUse) {
@@ -252,6 +255,7 @@ void ReduceExceedingActiveCountBarriersPass::safeRunOnFunc() {
         _log.trace("WLM flag turned off because number of barrier is above threshold {0} > {1}",
                    barrierInfo.getNumOfBarrierOps(), _virtualBarrierThresholdforWlm.value());
         wlmFlag = false;
+        vpux::VPUIP::setWlmStatus(module, vpux::VPUIP::WlmStatus::FAILED);
     }
 
     if (wlmFlag) {
@@ -261,7 +265,7 @@ void ReduceExceedingActiveCountBarriersPass::safeRunOnFunc() {
         // For some models, strictly enforcing 1-wait barrier per task can lead to performance regression when tasks
         // executor type is not taken into account when batches of tasks must be linearized. Taking into account tasks
         // executor type can help avoid placing tasks from same engine under different barriers, thus not preventing
-        // them to run in parallel.
+        // them from running in parallel.
         _considerTaskExecutorType = true;
     }
 
@@ -277,18 +281,22 @@ void ReduceExceedingActiveCountBarriersPass::safeRunOnFunc() {
     auto barSimLog = _log.nest();
     barSimLog.setName("barrier-schedule-sim");
     if (mlir::succeeded(barrierSim.simulateBarriers(barSimLog, numBarriersToUse))) {
-        _log.trace("Barrier simulation passed with '{0}', no isses with exceeding barriers", numBarriersToUse);
+        _log.trace("Barrier simulation passed with '{0}' barriers, no isses with exceeding barriers count",
+                   numBarriersToUse);
         barrierInfo.clearAttributes();
         return;
     }
 
     SmallVector<mlir::DenseSet<VPURT::DeclareVirtualBarrierOp>> barrierBatchesToLegalize;
+    auto barrierBatchesFromPrevIteration = barrierBatchesToLegalize;
 
     const auto updateAnalysis = [&]() {
         barrierInfo.optimizeBarriers(_checkSlotCountWhenOptimizing, /* considerTaskFifoDependency */ true);
-        // Assert tasks are driven by barriers. Will not be required once #E130177 is implemented.
-        // Currently, the correct linearization of some models depend on this condition.
-        barrierInfo.shareWaitAndUpdateBarriers(_availableSlots);
+        if (shareWaitAndUpdateBarriers) {
+            // Assert tasks are driven by barriers. This will not be required for WLM runs once #E130177 is implemented.
+            // Currently, enabling this for WLM can trigger rollback and performance regressions.
+            barrierInfo.shareWaitAndUpdateBarriers(_availableSlots);
+        }
         VPURT::orderExecutionTasksAndBarriers(func, barrierInfo);
 
         barrierSim = VPURT::BarrierSimulator{func, wlmFlag, barrierInfo};
@@ -308,17 +316,29 @@ void ReduceExceedingActiveCountBarriersPass::safeRunOnFunc() {
 
         barrierSim = VPURT::BarrierSimulator{func, wlmFlag, barrierInfo};
         if (mlir::succeeded(barrierSim.simulateBarriers(barSimLog, numBarriersToUse, true))) {
-            _log.trace("Barrier simulation passed with '{0}', no isses with exceeding barriers", numBarriersToUse);
+            _log.trace("Barrier simulation passed with '{0}' barriers, no isses with exceeding barriers count",
+                       numBarriersToUse);
             VPUX_THROW_UNLESS(barrierSim.getBarrierBatchesToLegalize().empty(),
                               "Simulation passed, but '{0}' batches to legalize exist",
                               barrierSim.getBarrierBatchesToLegalize().size());
         }
         barrierBatchesToLegalize = barrierSim.getBarrierBatchesToLegalize();
+
+        if (!barrierBatchesToLegalize.empty() && barrierBatchesToLegalize == barrierBatchesFromPrevIteration) {
+            // If the simulation cannot proceed even after linearizing all tasks associated with active barriers it will
+            // return a set of barriers encountered in the previous iteration. This indicates that more tasks need to be
+            // linearized in order to reduce the number of active barriers. Here we calculate barriers associated with
+            // tasks that can run in parallel to those indicated by the simulator and add them to the batch for
+            // linearization.
+            _log.trace("Encountered identical barrier batches as in previous iteration. Linearization will try to "
+                       "include barriers associated with parallel tasks.");
+            barrierSim.calculateBarrierBatchesForParallelTasks();
+            barrierBatchesToLegalize = barrierSim.getBarrierBatchesToLegalize();
+        }
     };
 
     // optimize current barrier state and perform simulation
     updateAnalysis();
-    auto barrierBatchesFromPrevIteration = barrierBatchesToLegalize;
 
     // iterate through barrier batches to legalize and reduce active barrier count in each batch
     for (size_t it = 0; it < barrierInfo.getNumOfBarrierOps() && !barrierBatchesToLegalize.empty(); ++it) {
@@ -345,7 +365,7 @@ void ReduceExceedingActiveCountBarriersPass::safeRunOnFunc() {
 
         updateAnalysis();
         VPUX_THROW_UNLESS(
-                barrierBatchesToLegalize != barrierBatchesFromPrevIteration,
+                barrierBatchesToLegalize.empty() || barrierBatchesToLegalize != barrierBatchesFromPrevIteration,
                 "Encountered identical barrier batches as in previous iteration. Cannot reduce active barriers count.");
         barrierBatchesFromPrevIteration = barrierBatchesToLegalize;
     }
@@ -371,8 +391,7 @@ void ReduceExceedingActiveCountBarriersPass::safeRunOnFunc() {
 //
 
 std::unique_ptr<mlir::Pass> vpux::VPURT::createReduceExceedingActiveCountBarriersPass(
-        const bool wlmFlag, std::optional<int> virtualBarrierThresholdforWlm, const bool unevenVariantSplitFlag,
-        Logger log) {
-    return std::make_unique<ReduceExceedingActiveCountBarriersPass>(wlmFlag, virtualBarrierThresholdforWlm,
+        std::optional<int> virtualBarrierThresholdforWlm, const bool unevenVariantSplitFlag, Logger log) {
+    return std::make_unique<ReduceExceedingActiveCountBarriersPass>(virtualBarrierThresholdforWlm,
                                                                     unevenVariantSplitFlag, log);
 }

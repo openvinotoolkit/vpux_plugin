@@ -7,7 +7,6 @@
 #include "vpux/compiler/dialect/IE/utils/resources.hpp"
 #include "vpux/compiler/dialect/VPUASM/ops.hpp"
 #include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
-#include "vpux/compiler/utils/ELF/utils.hpp"
 #include "vpux_headers/serial_metadata.hpp"
 
 #include "vpux/compiler/dialect/ELFNPU37XX/metadata.hpp"
@@ -40,7 +39,7 @@ void vpux::VPUASM::NetworkMetadataOp::serialize(elf::writer::BinaryDataSection<u
 #endif
 }
 
-size_t vpux::VPUASM::NetworkMetadataOp::getBinarySize() {
+size_t vpux::VPUASM::NetworkMetadataOp::getBinarySize(VPU::ArchKind) {
     // calculate size based on serialized form, instead of just sizeof(NetworkMetadata)
     // serialization uses metadata that also gets stored in the blob and must be accounted for
     // also for non-POD types (e.g. have vector as member) account for all data to be serialized
@@ -51,7 +50,7 @@ size_t vpux::VPUASM::NetworkMetadataOp::getBinarySize() {
     return elf::MetadataSerialization::serialize(metadata).size();
 }
 
-size_t vpux::VPUASM::NetworkMetadataOp::getAlignmentRequirements() {
+size_t vpux::VPUASM::NetworkMetadataOp::getAlignmentRequirements(VPU::ArchKind) {
     return alignof(elf::NetworkMetadata);
 }
 

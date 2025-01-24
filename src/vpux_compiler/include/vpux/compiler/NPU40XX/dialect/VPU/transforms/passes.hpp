@@ -35,9 +35,9 @@ struct DefaultHWOptions : public VPU::DefaultHWOptionsDialectBase, virtual vpux:
     StrOption actSparsityProfile{*this, "act-sparsity-profile", llvm::cl::desc("Activation sparsity profile"),
                                  llvm::cl::init("S0")};
 
-    BoolOption enableVPUNNCost{*this, "vpunn-cost",
-                               llvm::cl::desc("Use VPUNN cost model to get the best tiling strategy"),
-                               llvm::cl::init(true)};
+    BoolOption enableVPUNNCostForTiling{*this, "enable-vpunn-cost-for-tiling",
+                                        llvm::cl::desc("Use VPUNN cost model to get the best tiling strategy"),
+                                        llvm::cl::init(true)};
 
     BoolOption enableOutputPipelining{*this, "output-pipelining", llvm::cl::desc("Enable output pipelining"),
                                       llvm::cl::init(true)};

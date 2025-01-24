@@ -12,8 +12,6 @@
 module @Convolution {
     // CHECK-DAG:  {{  }}IE.ExecutorResource 2 of @DMA_NN
     // CHECK-DAG:  {{  }}IE.TileResource {activity_factor = {{[0-9]+.[0-9]+}} : f64} 2 of @NCE at 1.300000e+03 MHz
-    // CHECK-DAG:  {{    }}builtin.module @UsedMemory
-    // CHECK-DAG:  {{      }}IE.MemoryResource {{[0-9]+}} bytes of @CMX_NN
     // CHECK-DAG:  {{    }}IE.ExecutorResource 1 of @DPU
     // CHECK-DAG:  {{    }}IE.ExecutorResource 2 of @SHAVE_ACT
     // CHECK-DAG:  {{    }}IE.ExecutorResource 1 of @SHAVE_NN
@@ -80,8 +78,6 @@ module @Convolution {
 module @ScaleShiftSubgraph {
     // CHECK-DAG:  {{  }}IE.ExecutorResource 2 of @DMA_NN
     // CHECK-DAG:  {{  }}IE.TileResource {activity_factor = {{[0-9]+.[0-9]+}} : f64} 2 of @NCE at 1.300000e+03 MHz
-    // CHECK-DAG:  {{    }}builtin.module @UsedMemory
-    // CHECK-DAG:  {{      }}IE.MemoryResource {{[0-9]+}} bytes of @CMX_NN
     // CHECK-DAG:  {{    }}IE.ExecutorResource 1 of @DPU
     // CHECK-DAG:  {{    }}IE.ExecutorResource 2 of @SHAVE_ACT
     // CHECK-DAG:  {{    }}IE.ExecutorResource 1 of @SHAVE_NN
@@ -126,7 +122,7 @@ module @ScaleShiftSubgraph {
         // CHECK-DAG:   const.Declare memref<1x1x1x12288xf16>
 
         // CHECK:       VPURT.Task waits([[barrier_0:%.*]] : !VPURT.Barrier) updates([[barrier_1:%.*]] : !VPURT.Barrier)
-        // CHECK:       VPUIP.NCEClusterTask {is_segmented, kernel_padding = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, kernel_size = [1, 1], kernel_strides = [1, 1], task_type = #VPUIP.nce_task_type<DWCONV>}
+        // CHECK:       VPUIP.NCEClusterTask {is_segmented, kernel_padding = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, kernel_size = [1, 1], kernel_strides = [1, 1], mpe_engine = #VPU.MPEEngine37XX<mode = <SCL>>, task_type = #VPUIP.nce_task_type<DWCONV>}
         // CHECK-SAME:      input([[input_0:%.*]] : memref<1x512x10x20xf16, {order = #NHWC, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 512 : i64>}, [@CMX_NN, 0]>)
         // CHECK-SAME:      weights([[weight_0:%.*]] : memref<512x16x1x1xf16, #NHWC, [@CMX_NN, 0]>)
         // CHECK-SAME:      weight_table([[weight_table_0:%.*]] : memref<512x1x1x4xsi32, [@CMX_NN, 0]>)
@@ -142,10 +138,10 @@ module @ScaleShiftSubgraph {
         // CHECK:               DPUTask
         // CHECK:               DPUTask
         // CHECK:       } PPE : {
-        // CHECK:               PPETask {opaque_ppe = #VPU.PPEInt<mode = <LPRELU>
+        // CHECK:               PPETask {ppe = #VPU.PPEInt<mode = <LPRELU>
 
         // CHECK:       VPURT.Task waits([[barrier_0:%.*]] : !VPURT.Barrier) updates([[barrier_1:%.*]] : !VPURT.Barrier)
-        // CHECK:       VPUIP.NCEClusterTask {is_segmented, kernel_padding = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, kernel_size = [1, 1], kernel_strides = [1, 1], task_type = #VPUIP.nce_task_type<DWCONV>}
+        // CHECK:       VPUIP.NCEClusterTask {is_segmented, kernel_padding = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, kernel_size = [1, 1], kernel_strides = [1, 1], mpe_engine = #VPU.MPEEngine37XX<mode = <SCL>>, task_type = #VPUIP.nce_task_type<DWCONV>}
         // CHECK-SAME:      input([[input_1:%.*]] : memref<1x512x10x20xf16, {order = #NHWC, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 512 : i64>}, [@CMX_NN, 1]>)
         // CHECK-SAME:      weights([[weight_1:%.*]] : memref<512x16x1x1xf16, #NHWC, [@CMX_NN, 1]>)
         // CHECK-SAME:      weight_table([[weight_table_1:%.*]] : memref<512x1x1x4xsi32, [@CMX_NN, 1]>)
@@ -161,7 +157,7 @@ module @ScaleShiftSubgraph {
         // CHECK:               DPUTask
         // CHECK:               DPUTask
         // CHECK:       } PPE : {
-        // CHECK:               PPETask {opaque_ppe = #VPU.PPEInt<mode = <LPRELU>
+        // CHECK:               PPETask {ppe = #VPU.PPEInt<mode = <LPRELU>
   }
 }
 
@@ -178,8 +174,6 @@ module @DynamicReshape {
     // CHECK-DAG:  {{    }}func.func private @runtime
     // CHECK-DAG:  {{  }}IE.ExecutorResource 2 of @DMA_NN
     // CHECK-DAG:  {{  }}IE.TileResource {activity_factor = {{.+}} : f64} 2 of @NCE at 1.300000e+03 MHz
-    // CHECK-DAG:  {{    }}builtin.module @UsedMemory
-    // CHECK-DAG:  {{      }}IE.MemoryResource {{[0-9]+}} bytes of @CMX_NN
     // CHECK-DAG:  {{    }}builtin.module @ReservedMemory {
     // CHECK-DAG:  {{      }}module @SWKernelPrefetchingReservedMemory {
     // CHECK-DAG:  {{        }}IE.MemoryResource {{[0-9]+}} bytes of @CMX_NN offset {{[0-9]+}}
@@ -221,7 +215,9 @@ module @DynamicReshape {
         // CHECK-SAME:          resultSegmentSizes = array<i32: 1, 1, 0>
         // CHECK-SAME:      @VPU.SW::@builtin_Convert
         // CHECK-SAME:          inputs({{%.+}} as {{%.+}}: memref<1x3x10x16xf32, [@CMX_NN, 0]>)
+        // CHECK-SAME:          dynamicInputShapes({{%[0-9]+}} : memref<4xsi32, [@CMX_NN, 0]>)
         // CHECK-SAME:          outputs({{%.+}} as {{%.+}}: memref<1x3x10x16xf16, [@CMX_NN, 0]>)
+        // CHECK-SAME:          dynamicOutputShapes({{%.+}} : memref<4xsi32, [@CMX_NN, 0]>)
 
         // CHECK:       VPURT.Task waits([[barrier_1]] : !VPURT.Barrier) updates([[barrier_2:%.+]] : !VPURT.Barrier) {
         // CHECK:       [[reshape:%.+]], [[reshape_shape:%.+]] = VPUIP.SW.Kernel
@@ -229,8 +225,10 @@ module @DynamicReshape {
         // CHECK-SAME:          dynamicOutputShapesMap = array<i32: 0>
         // CHECK-SAME:          resultSegmentSizes = array<i32: 1, 1, 0>
         // CHECK-SAME:      @VPU.SW::@builtin_DynamicReshape
-        // CHECK-SAME:          inputs({{%.+}} as {{%.+}}: memref<1x3x10x16xf16, [@CMX_NN, 0]>, {{%.+}} as {{%.+}}: memref<4xsi32, [@CMX_NN, 0]>)
-        // CHECK-SAME:          outputs({{%.+}} as {{%.+}}: memref<1x1x2x240xf16, [@CMX_NN, 0]>
+        // CHECK-SAME:          inputs({{%[0-9]+}} as {{%arg[0-9]+}}: memref<1x3x10x16xf16, [@CMX_NN, 0]>, {{%[0-9]+}} as {{%arg[0-9]+}}: memref<4xsi32, [@CMX_NN, 0]>)
+        // CHECK-SAME:          dynamicInputShapes({{%[0-9]+}} : memref<4xsi32, [@CMX_NN, 0]>)
+        // CHECK-SAME:          outputs({{%[0-9]+}} as {{%arg[0-9]+}}: memref<1x1x2x240xf16, [@CMX_NN, 0]>
+        // CHECK-SAME:          dynamicOutputShapes({{%.+}} : memref<4xsi32, [@CMX_NN, 0]>)
 
         // CHECK:       VPURT.Task waits([[barrier_2:%.+]] : !VPURT.Barrier) updates([[barrier_3:%.+]] : !VPURT.Barrier) {
         // CHECK:       [[convert:%.+]], [[convert_shape:%.+]] = VPUIP.SW.Kernel
@@ -239,7 +237,9 @@ module @DynamicReshape {
         // CHECK-SAME:          resultSegmentSizes = array<i32: 1, 1, 0>
         // CHECK-SAME:      @VPU.SW::@builtin_Convert
         // CHECK-SAME:          inputs({{%.+}} as {{%.+}}: memref<1x1x2x240xf16, [@CMX_NN, 0]>)
+        // CHECK-SAME:          dynamicInputShapes({{%[0-9]+}} : memref<4xsi32, [@CMX_NN, 0]>)
         // CHECK-SAME:          outputs({{%.+}} as {{%.+}}: memref<1x1x2x240xf32, [@CMX_NN, 0]>)
+        // CHECK-SAME:          dynamicOutputShapes({{%.+}} : memref<4xsi32, [@CMX_NN, 0]>)
 
         // CHECK:       return {{%.+}}, {{%.+}} : memref<1x1x2x240xf32, @DDR>, memref<4xsi32, @DDR>
     }

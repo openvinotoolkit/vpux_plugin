@@ -15,6 +15,7 @@ namespace vpux {
 enum class DummyOpMode { ENABLED = 0, DISABLED = 1 };
 
 // instantiates mlir::DialectRegistry and registers interfaces that are common across generations
-mlir::DialectRegistry createDialectRegistry(DummyOpMode = DummyOpMode::DISABLED);
+mlir::DialectRegistry createDialectRegistry(DummyOpMode = DummyOpMode::DISABLED,
+                                            const bool enableExtraShapeBoundOps = false);
 
 }  // namespace vpux

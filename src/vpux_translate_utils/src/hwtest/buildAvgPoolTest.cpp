@@ -12,6 +12,7 @@
 #include <functional>
 #include "vpux/compiler/dialect/VPU/transforms/factories/nce_sparsity_converters.hpp"
 #include "vpux/compiler/dialect/VPU/transforms/passes.hpp"
+#include "vpux/compiler/dialect/VPU/utils/nce_sparsity.hpp"
 #include "vpux/compiler/dialect/VPU/utils/ppe_utils.hpp"
 #include "vpux/compiler/dialect/VPUIP/IR/attributes.hpp"
 #include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
@@ -20,7 +21,6 @@
 #include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPURT/IR/task.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
-#include "vpux/compiler/utils/VPU/ppe_utils.hpp"
 #include "vpux/compiler/utils/platform_resources.hpp"
 #include "vpux/compiler/utils/types.hpp"
 #include "vpux/hwtest/hwtest_utils.hpp"
@@ -168,7 +168,8 @@ void buildAvgpool(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp mod
         auto wtTblDataVals = mlir::DenseElementsAttr::get(wtTblDataDdrValueType, wtTblDataValues);
         auto wtTblDataDdr = funcBuilder.create<Const::DeclareOp>(
                 builder.getUnknownLoc(), wtTblDataDdrType,
-                Const::ContentAttr::transform(wtTblDataVals).reorder(DimsOrder::NHWC).get());
+                Const::ContentAttr::get(wtTblDataVals,
+                                        Const::ContentSetup(wtTblDataDdrValueType).reorder(DimsOrder::NHWC)));
 
         // weights table cmx tensor
 
@@ -193,9 +194,9 @@ void buildAvgpool(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp mod
     auto nceTask = vpux::VPURT::wrapIntoTaskOp<VPUIP::NCEClusterTaskOp>(
             funcBuilder, mlir::ValueRange(barrier0.getBarrier()), mlir::ValueRange(barrier1.getBarrier()), loc,
             outputCmxType, inputCmx.getOperation()->getResult(0), mlir::Value(), wtTblValue,
-            /*instruction_table_list*/ nullptr, /*spr_lookup_table*/ nullptr,
-            parentInputCmx.getOperation()->getResult(0), parentOutputCmx.getOperation()->getResult(0),
-            outputCmx.getOperation()->getResult(0), VPUIP::NCETaskType::AVEPOOL, filterSizeAttr, strides, kernelPadding,
+            /*spr_lookup_table*/ nullptr, parentInputCmx.getOperation()->getResult(0),
+            parentOutputCmx.getOperation()->getResult(0), outputCmx.getOperation()->getResult(0),
+            VPUIP::NCETaskType::AVEPOOL, filterSizeAttr, strides, kernelPadding,
             /*actChannelLength*/ nullptr, /*is_continued*/ nullptr, /*sp_pattern*/ nullptr);
 
     // Since AvgPool operation doesn't have weights table it requires final quantization scaling

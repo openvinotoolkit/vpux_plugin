@@ -8,9 +8,6 @@
 
 module @test attributes {VPU.compilationMode = #VPU.compilation_mode<DefaultHW>} {
   IE.TileResource {activity_factor = 0.092296911622323521 : f64} 4 of @NCE at 1.700000e+03 MHz {
-    builtin.module @UsedMemory {
-      IE.MemoryResource 753664 bytes of @CMX_NN
-    }
     builtin.module @ReservedMemory {
       module @DmaProfilingReservedMemory {
         IE.MemoryResource 512 bytes of @CMX_NN offset 0

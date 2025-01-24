@@ -41,6 +41,21 @@ void vpux::VPUIP::buildHardwareAdaptationPipeline(mlir::OpPassManager& pm, Logge
 }
 
 //
+// DMAUnrollingPipeline
+//
+void vpux::VPUIP::buildDMAUnrollingPipeline(mlir::OpPassManager& pm, Logger log) {
+    pm.addPass(VPUIP::createUnrollDMAAnalysisPass(log));
+    pm.addPass(VPUIP::createUnrollDepthToSpaceDMAPass(log));
+    pm.addPass(VPUIP::createUnrollSpaceToDepthDMAPass(log));
+    pm.addPass(VPUIP::createUnrollPermuteToNNDMAPass(log));
+
+    pm.addPass(VPUIP::createUnrollUpsamplingDMAPass(log));
+    pm.addPass(VPUIP::createUnrollExpandDMAPass(log));
+    pm.addPass(VPUIP::createUnrollPerAxisTileDMAPass(log));
+    pm.addPass(VPUIP::createInvalidateUnrollDMAAnalysisPass(log));
+}
+
+//
 // registerVPUIPPipelines
 //
 
@@ -51,5 +66,9 @@ void VPUIP::registerVPUIPPipelines() {
 
     mlir::PassPipelineRegistration<>("hardware-adaptation", "Hardware Adaptation", [](mlir::OpPassManager& pm) {
         VPUIP::buildHardwareAdaptationPipeline(pm);
+    });
+
+    mlir::PassPipelineRegistration<>("dma-unrolling", "DMA unrolling", [](mlir::OpPassManager& pm) {
+        VPUIP::buildDMAUnrollingPipeline(pm);
     });
 }

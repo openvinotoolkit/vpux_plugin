@@ -90,7 +90,7 @@ func.func @main(%in: !act_type_DDR, %out: !act_type_DDR) -> !act_type_DDR {
                 DPUTask { outEnd = [32, 72, 96], mpe_mode = #VPU.mpe_mode<VECTOR_FP16>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, outStart = [0, 0, 0] }
             }
             PPE : {
-                PPETask {opaque_ppe = #VPU.PPEStub<>}
+                PPETask {ppe = #VPU.PPEStub<>}
             }
         async.yield %2 : !act_type_CMX
     }
@@ -110,7 +110,7 @@ func.func @main(%in: !act_type_DDR, %out: !act_type_DDR) -> !act_type_DDR {
                 DPUTask { outEnd = [32, 72, 96], mpe_mode = #VPU.mpe_mode<VECTOR_FP16>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, outStart = [0, 0, 0] }
             }
             PPE : {
-                PPETask {opaque_ppe = #VPU.PPEStub<>}
+                PPETask {ppe = #VPU.PPEStub<>}
             }
         async.yield %2 : !act_type_CMX
     }
@@ -123,9 +123,6 @@ func.func @main(%in: !act_type_DDR, %out: !act_type_DDR) -> !act_type_DDR {
 
     %6 = async.await %r6 : !async.value<!act_type_DDR>
     return %6 : !act_type_DDR
-
-    // CHECK:       builtin.module @UsedMemory
-    // CHECK:         IE.MemoryResource 1327104 bytes of @CMX_NN
 
     // CHECK:       [[BUF_SPILL_WRITE:%.*]] = memref.alloc() : memref<1x32x72x96xf16, #NHWC, @DDR>
     // CHECK:       [[BUF_SPILL_READ:%.*]] = VPURT.DeclareBuffer
@@ -273,7 +270,7 @@ func.func @main(%in: !act_type_DDR, %out: !act_type_DDR) -> !act_type_DDR {
                 DPUTask { outEnd = [32, 72, 96], mpe_mode = #VPU.mpe_mode<VECTOR_FP16>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, outStart = [0, 0, 0] }
             }
             PPE : {
-                PPETask {opaque_ppe = #VPU.PPEStub<>}
+                PPETask {ppe = #VPU.PPEStub<>}
             }
         async.yield %0 : !act_type_CMX
     }
@@ -293,7 +290,7 @@ func.func @main(%in: !act_type_DDR, %out: !act_type_DDR) -> !act_type_DDR {
                 DPUTask { outEnd = [32, 72, 96], mpe_mode = #VPU.mpe_mode<VECTOR_FP16>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, outStart = [0, 0, 0] }
             }
             PPE : {
-                PPETask {opaque_ppe = #VPU.PPEStub<>}
+                PPETask {ppe = #VPU.PPEStub<>}
             }
         async.yield %0 : !act_type_CMX
     }
@@ -306,9 +303,6 @@ func.func @main(%in: !act_type_DDR, %out: !act_type_DDR) -> !act_type_DDR {
 
     %3 = async.await %r5 : !async.value<!act_type_DDR>
     return %3 : !act_type_DDR
-
-    // CHECK:       builtin.module @UsedMemory
-    // CHECK:         IE.MemoryResource 1327104 bytes of @CMX_NN
 
     // CHECK:       [[T0:%.+]], [[R0:%.+]] = async.execute ->
     // CHECK-NEXT       VPUIP.NNDMA
@@ -493,7 +487,7 @@ func.func @main(%in: !act_type_DDR, %out: !act_type_DDR) -> !act_type_DDR {
                 DPUTask { outEnd = [32, 48, 64], mpe_mode = #VPU.mpe_mode<VECTOR_FP16>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, outStart = [0, 0, 0] }
             }
             PPE : {
-                PPETask {opaque_ppe = #VPU.PPEStub<>}
+                PPETask {ppe = #VPU.PPEStub<>}
             }
         async.yield %0 : !act_type_CMX
     }
@@ -515,7 +509,7 @@ func.func @main(%in: !act_type_DDR, %out: !act_type_DDR) -> !act_type_DDR {
                 DPUTask { outEnd = [32, 48, 64], mpe_mode = #VPU.mpe_mode<VECTOR_FP16>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, outStart = [0, 0, 0] }
             }
             PPE : {
-                PPETask {opaque_ppe = #VPU.PPEStub<>}
+                PPETask {ppe = #VPU.PPEStub<>}
             }
         async.yield %0 : !act_type_CMX
     }
@@ -538,7 +532,7 @@ func.func @main(%in: !act_type_DDR, %out: !act_type_DDR) -> !act_type_DDR {
                 DPUTask { outEnd = [32, 48, 64], mpe_mode = #VPU.mpe_mode<VECTOR_FP16>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, outStart = [0, 0, 0] }
             }
             PPE : {
-                PPETask {opaque_ppe = #VPU.PPEStub<>}
+                PPETask {ppe = #VPU.PPEStub<>}
             }
         async.yield %1 : !act_type_CMX
     }
@@ -560,7 +554,7 @@ func.func @main(%in: !act_type_DDR, %out: !act_type_DDR) -> !act_type_DDR {
                 DPUTask { outEnd = [32, 48, 64], mpe_mode = #VPU.mpe_mode<VECTOR_FP16>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, outStart = [0, 0, 0] }
             }
             PPE : {
-                PPETask {opaque_ppe = #VPU.PPEStub<>}
+                PPETask {ppe = #VPU.PPEStub<>}
             }
         async.yield %0 : !act_type_CMX
     }
@@ -573,9 +567,6 @@ func.func @main(%in: !act_type_DDR, %out: !act_type_DDR) -> !act_type_DDR {
 
     %result = async.await %r_dma_out : !async.value<!act_type_DDR>
     return %result : !act_type_DDR
-
-    // CHECK:       builtin.module @UsedMemory
-    // CHECK:         IE.MemoryResource 1179648 bytes of @CMX_NN
 
     // CHECK:       [[BUF_MASTER:%.*]] = VPURT.DeclareBuffer
     // CHECK-SAME:      > -> memref<1x64x48x64xf16, {order = #NHWC, strides = [196608, 1, 4096, 64]}, [@CMX_NN, 0]>
@@ -758,9 +749,6 @@ func.func @main(%in: !act_type_DDR, %out0: !act_type_DDR, %out1: !act_type_DDR) 
     // Optimization of token dependencies (transitive reduction) is beyond
     // this pass and done as a separate step
 
-    // CHECK:       builtin.module @UsedMemory
-    // CHECK:         IE.MemoryResource 1204224 bytes of @CMX_NN
-
     // CHECK:       [[BUF0:%.*]] = VPURT.DeclareBuffer <CMX_NN> [0] <0>
     // CHECK:       [[BUF1:%.*]] = VPURT.DeclareBuffer <CMX_NN> [0] <602112>
     // CHECK:       [[BUF2:%.*]] = VPURT.DeclareBuffer <CMX_NN> [0] <602112>
@@ -875,7 +863,7 @@ func.func @main(%in: !act_type_DDR, %out: !act_type_DDR) -> !act_type_DDR {
                 DPUTask { outEnd = [80, 45, 60], mpe_mode = #VPU.mpe_mode<VECTOR_FP16>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, outStart = [0, 0, 0] }
             }
             PPE : {
-                PPETask {opaque_ppe = #VPU.PPEStub<>}
+                PPETask {ppe = #VPU.PPEStub<>}
             }
         async.yield %2 : !act_type_CMX
     }
@@ -895,7 +883,7 @@ func.func @main(%in: !act_type_DDR, %out: !act_type_DDR) -> !act_type_DDR {
                 DPUTask { outEnd = [80, 45, 60], mpe_mode = #VPU.mpe_mode<VECTOR_FP16>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, outStart = [0, 0, 0] }
             }
             PPE : {
-                PPETask {opaque_ppe = #VPU.PPEStub<>}
+                PPETask {ppe = #VPU.PPEStub<>}
             }
         async.yield %2 : !act_type_CMX
     }
@@ -926,9 +914,6 @@ func.func @main(%in: !act_type_DDR, %out: !act_type_DDR) -> !act_type_DDR {
     //
     // Optimization of token dependencies (transitive reduction) is beyond
     // this pass and done as a separate step
-
-    // CHECK:       builtin.module @UsedMemory
-    // CHECK:         IE.MemoryResource 1296000 bytes of @CMX_NN
 
     // CHECK:       [[BUF0:%.*]] = VPURT.DeclareBuffer <CMX_NN> [0] <0>
     // CHECK:       [[BUF1:%.*]] = VPURT.DeclareBuffer <CMX_NN> [0] <432000>
@@ -1112,9 +1097,6 @@ func.func @main(%input: !Input_DDR) -> !Output_DDR {
     return %output: !Output_DDR
 
 
-    // CHECK:       builtin.module @UsedMemory
-    // CHECK:         IE.MemoryResource 50176 bytes of @CMX_NN
-
     // CHECK-DAG:       [[CST_WEIGHTS:%.*]] = const.Declare memref<64x32x3x3xf16, #NHWC, @DDR>
     // CHECK-DAG:       [[CST_WEIGHTS_TABLE:%.*]] = const.Declare memref<64x1x1x4xsi32, #NHWC, @DDR>
     // CHECK:       [[BUF0:%.*]] = VPURT.DeclareBuffer <CMX_NN> <45056> -> !VPUIP.DistributedBuffer
@@ -1267,7 +1249,7 @@ func.func @main(%input: !BufMemrefDDR) -> !BufMemrefDDR {
                 DPUTask { outEnd = [16, 96, 96], mpe_mode = #VPU.mpe_mode<VECTOR_FP16>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, outStart = [0, 0, 0] }
             }
             PPE : {
-                PPETask {opaque_ppe = #VPU.PPEStub<>}
+                PPETask {ppe = #VPU.PPEStub<>}
             }
         async.yield %0: !BufDistributed
     }
@@ -1287,7 +1269,7 @@ func.func @main(%input: !BufMemrefDDR) -> !BufMemrefDDR {
                 DPUTask { outEnd = [16, 96, 96], mpe_mode = #VPU.mpe_mode<VECTOR_FP16>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, outStart = [0, 0, 0] }
             }
             PPE : {
-                PPETask {opaque_ppe = #VPU.PPEStub<>}
+                PPETask {ppe = #VPU.PPEStub<>}
             }
         async.yield %0: !BufDistributed
     }
@@ -1300,9 +1282,6 @@ func.func @main(%input: !BufMemrefDDR) -> !BufMemrefDDR {
 
      %6 = async.await %r6 : !async.value<!BufMemrefDDR>
      return %6 : !BufMemrefDDR
-
-    // CHECK:       builtin.module @UsedMemory
-    // CHECK:         IE.MemoryResource 1180672 bytes of @CMX_NN
 
     // CHECK-DAG:       [[CST0:%.*]] = const.Declare memref<1x64x48x64xf16, #NHWC, @DDR>
     // CHECK-DAG:       [[CST1:%.*]] = const.Declare memref<64x1x1x4xsi32, #NHWC, @DDR>
@@ -1492,9 +1471,6 @@ func.func @main(%in: memref<1x32x16x16xf16, #NHWC>, %out: memref<1x128x4x4xf16, 
     %44 = async.await %result_44 : !async.value<memref<1x128x4x4xf16, #NHWC>>
     return %44 : memref<1x128x4x4xf16, #NHWC>
 
-    // CHECK:       builtin.module @UsedMemory
-    // CHECK:         IE.MemoryResource 211968 bytes of @CMX_NN
-
     // CHECK:       {VPUIP.executor = @DMA_NN, VPUIP.executorIdx = [0], "async-deps-index" = 0 : i64
     // CHECK:           VPUIP.NNDMA
 
@@ -1671,9 +1647,6 @@ func.func @main(%in0: memref<1x32x48x48xf16, #NHWC>, %in1: memref<1x32x48x48xf16
     %end_vp2 = async.await %r_out_vp2 : !async.value<memref<1x32x48x48xf16, #NHWC>>
     return %end_vp1, %end_vp2 : memref<1x32x48x48xf16, #NHWC>, memref<1x32x48x48xf16, #NHWC>
 
-    // CHECK:       builtin.module @UsedMemory
-    // CHECK:         IE.MemoryResource 589824 bytes of @CMX_NN
-
     // CHECK:       [[T0:%.*]], [[R0:%.*]] = async.execute
     // CHECK-SAME:      attributes {VPUIP.executor = @DMA_NN, VPUIP.executorIdx = [0], VPUIP.num_units = 1 : i64, "async-deps-index" = 0 : i64,
 
@@ -1814,9 +1787,6 @@ func.func @main(%arg0: memref<1x1x1x1000xf16, @DDR>, %arg1: memref<1x1x1x1000xf1
 
     %9 = async.await %results_15 : !async.value<memref<1x1x1x1000xf16, @DDR>>
     return %9 : memref<1x1x1x1000xf16, @DDR>
-
-    // CHECK:       builtin.module @UsedMemory
-    // CHECK:         IE.MemoryResource 12240 bytes of @CMX_NN
 
     // CHECK:       {VPUIP.executor = @DMA_NN, VPUIP.executorIdx = [0], "async-deps-index" = 0 : i64
     // CHECK:           VPUIP.NNDMA

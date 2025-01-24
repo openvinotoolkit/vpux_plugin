@@ -1417,7 +1417,7 @@ mlir::LogicalResult ReorderWithLayer::matchAndRewrite(IE::LayoutInfoOpInterface 
             insertReorderForInput(layerOp, input, supportedOrder, rewriter, _log.nest());
         }
 
-        if (curOrder != propagatingOrder && mlir::isa<IE::PowerOp>(layerOp.getOperation())) {
+        if (curOrder != propagatingOrder && mlir::isa<IE::PowerOp, IE::MVN6Op>(layerOp.getOperation())) {
             insertReorderForInput(layerOp, input, propagatingOrder, rewriter, _log.nest());
         }
     }
@@ -1599,8 +1599,9 @@ mlir::LogicalResult ReorderWithHWAdd<ConcreteOp>::matchAndRewrite(IE::ReorderOp 
         return mlir::failure();
     }
 
-    // E#122076: ReorderWithHWAdd only supports for HW AddOp (DimOrder::NHWC) who could be converted to NCE.Eltwise.Add
-    // ReorderWithHWAdd should only be a temporary solution. ReorderWithHWAdd rewriter should be work for any DimOrder.
+    // E#122076: ReorderWithHWAdd only supports for HW AddOp (DimOrder::NHWC) who could be converted to
+    // NCE.Eltwise.Add ReorderWithHWAdd should only be a temporary solution. ReorderWithHWAdd rewriter should be
+    // work for any DimOrder.
     const auto targetInOutOrder = DimsOrder::NHWC;
     const auto parentAddOutOrder = DimsOrder::fromValue(parentAdd.getOutput());
     if (parentAddOutOrder != targetInOutOrder) {
@@ -1662,29 +1663,41 @@ private:
     Logger _log;
 };
 
-// This rewriter aims to propagate Reorder through EltwiseOp with 'illegal' layout,
+// This rewriter aims to propagate Reorder through Eltwise-like op with 'illegal' layout,
 // which cannot be done by ReorderWithLayer.
-// Since Eltwise ops do not really care about the layout, so we can insert PermuteCast around
+// Since Eltwise-like ops do not really care about the layout, so we can insert PermuteCast around
 // the op to make an identical layout, then Reorder can be propagated.
 
 template <class ConcreteOp>
 mlir::LogicalResult ReorderWithEltwise<ConcreteOp>::matchAndRewrite(ConcreteOp origOp,
                                                                     mlir::PatternRewriter& rewriter) const {
-    if (!(ConcreteOp::template hasTrait<IE::EltwiseOp>())) {
+    if (!ConcreteOp::template hasTrait<IE::EltwiseOp>()) {
         return mlir::failure();
     }
-    _log.trace("[{0}] Got IE::EltwiseOp at {1}", this->getDebugName(), origOp->getLoc());
+    _log.debug("[{0}] Got Eltwise-like Op at {1}", this->getDebugName(), origOp->getLoc());
+
+    auto nestedLog = _log.nest();
+
+    if (origOp->getNumOperands() > 1 || origOp->getNumResults() > 1) {
+        nestedLog.trace("Op has more than one input and/or output.");
+        return mlir::failure();
+    }
 
     const auto ctx = rewriter.getContext();
     auto inputReorder = origOp.getOperand().template getDefiningOp<IE::ReorderOp>();
     if (inputReorder == nullptr || !inputReorder.getResult().hasOneUse()) {
+        nestedLog.trace("Parent Op is not Reorder or the parent op has multiple uses.");
         return mlir::failure();
     }
 
-    const auto inputType = inputReorder.getInput().getType().template cast<NDTypeInterface>();
+    const auto inputType = mlir::cast<NDTypeInterface>(inputReorder.getInput().getType());
     const auto origInOrder = inputType.getDimsOrder();
 
-    auto layerOp = mlir::dyn_cast<IE::LayoutInfoOpInterface>(origOp->getResult(0).getDefiningOp());
+    auto layerOp = mlir::dyn_cast<IE::LayoutInfoOpInterface>(origOp.getOperation());
+    if (layerOp == nullptr) {
+        nestedLog.trace("Op does not implement LayoutInfoOpInterface.");
+        return mlir::failure();
+    }
     auto orderInfo = layerOp.getLayoutInfo();
     orderInfo.setInput(0, origInOrder);
     layerOp.inferLayoutInfo(orderInfo, /*seOpsEnabled=*/false, /*seExperimentalOpsEnabled=*/false);
@@ -1692,23 +1705,26 @@ mlir::LogicalResult ReorderWithEltwise<ConcreteOp>::matchAndRewrite(ConcreteOp o
     auto identityMap = mlir::AffineMap::getMultiDimIdentityMap(checked_cast<unsigned>(inputType.getRank()), ctx);
     const auto inPermuteCastType = inferNewTypeWithMemPerm(inputType, identityMap, orderInfo.getInput(0));
     auto inPermuteCast = rewriter.create<IE::PermuteCastOp>(
-            origOp->getLoc(), inPermuteCastType, inputReorder.getInput(),
+            appendLoc(origOp->getLoc(), "_perm_cast_in"), inPermuteCastType, inputReorder.getInput(),
             mlir::AffineMapAttr::get(orderInfo.getInput(0).toAffineMap(ctx)), mlir::AffineMapAttr::get(identityMap));
+
+    auto origOutElemType = mlir::cast<NDTypeInterface>(origOp->getResult(0).getType()).getElementType();
+    auto outType = mlir::cast<NDTypeInterface>(inPermuteCast.getResult().getType()).changeElemType(origOutElemType);
 
     mlir::IRMapping mapper;
     mapper.map(origOp.getOperand(), inPermuteCast.getResult());
     auto newConcreteOp = mlir::cast<ConcreteOp>(rewriter.clone(*origOp, mapper));
-    newConcreteOp.getOutput().setType(inPermuteCast.getResult().getType().template cast<mlir::RankedTensorType>());
+    newConcreteOp.getOutput().setType(mlir::cast<mlir::RankedTensorType>(outType));
 
     const auto outPermuteCastType = inferNewTypeWithMemPerm(
-            newConcreteOp.getOutput().getType().template cast<NDTypeInterface>(), identityMap, origInOrder);
+            mlir::cast<NDTypeInterface>(newConcreteOp.getOutput().getType()), identityMap, origInOrder);
     auto outPermuteCast = rewriter.create<IE::PermuteCastOp>(
-            origOp->getLoc(), outPermuteCastType, newConcreteOp.getOutput(),
+            appendLoc(origOp->getLoc(), "_perm_cast_out"), outPermuteCastType, newConcreteOp.getOutput(),
             mlir::AffineMapAttr::get(origInOrder.toAffineMap(ctx)), mlir::AffineMapAttr::get(identityMap));
 
     rewriter.replaceOpWithNewOp<IE::ReorderOp>(origOp, outPermuteCast.getResult(), inputReorder.getDstOrderAttr());
 
-    _log.trace("Propagate Reorder through Eltwise by inserting PermuteCast");
+    _log.debug("Propagate Reorder through Eltwise-like op by inserting PermuteCast");
     return mlir::success();
 }
 
@@ -1809,6 +1825,7 @@ void OptimizeReordersPass::safeRunOnFunc() {
     cleanupPatterns.add<ReorderWithExpandSlice>(&ctx, _log);
     cleanupPatterns.add<ReorderWithAffineReshapeTile>(&ctx, _log);
     cleanupPatterns.add<ReorderWithEltwise<IE::GeluOp>>(&ctx, _log);
+
     IE::ReorderOp::getCanonicalizationPatterns(cleanupPatterns, &ctx);
 
     if (mlir::failed(mlir::applyPatternsAndFoldGreedily(func, std::move(cleanupPatterns),

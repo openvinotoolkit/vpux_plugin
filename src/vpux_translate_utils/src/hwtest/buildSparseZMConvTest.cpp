@@ -184,27 +184,26 @@ void buildSparseZMajorConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::Mod
                           "buildSparseZMajorConv: types with sizeof less than BYTE is not supported for weights");
     }
     const auto weightsValues = generateWeights(builder, weightsShape, weightsType, ctx, weightsFileName);
-    auto weightsAttributeSetup = vpux::Const::ContentAttr::transform(weightsValues);
+    Const::ContentSetup weightsAttributeSetup(weightsValues.getType());
     weightsAttributeSetup = weightsAttributeSetup.reorder(vpux::DimsOrder::OYXI);
 
     if (qty != nullptr) {
-        weightsAttributeSetup = weightsAttributeSetup.quantCast(qty);
+        weightsAttributeSetup = weightsAttributeSetup.castElemType(qty);
     }
 
     const auto weightsDDRType =
             getMemRefType(VPURT::BufferSection::Constant, weightsShape, weightsType, DimsOrder::NHWC);
 
-    auto weightsSparsityMap = weightsAttributeSetup.clone().getSparsityMap().get();
+    auto weightsSparsityMap = Const::ContentAttr::get(weightsValues, weightsAttributeSetup.clone().getSparsityMap());
 
-    auto weightsAttribute = weightsAttributeSetup.get();
+    auto weightsAttribute = Const::ContentAttr::get(weightsValues, weightsAttributeSetup);
     auto numNonSparseElements = vpux::countNonSparseElementsPerOC(weightsAttribute.fold(), weightsType);
     const auto numNonSparseElementsType =
             mlir::RankedTensorType::get({static_cast<int64_t>(numNonSparseElements.size())}, getInt64Type(ctx));
     const auto numElemsAttr = mlir::DenseElementsAttr::get(numNonSparseElementsType, ArrayRef(numNonSparseElements));
     weightsAttributeSetup = weightsAttributeSetup.sparsify(true, numElemsAttr);
-    auto compressedContentType = Const::inferFinalTypeAndSplat(weightsAttributeSetup.getBaseContent(),
-                                                               weightsAttributeSetup.getTransformations())
-                                         .first;
+    auto compressedContentType =
+            Const::inferFinalTypeAndSplat(weightsValues, weightsAttributeSetup.getTransformations()).first;
     const auto compressedWeightsTensorType = compressedContentType;
     const auto compressedWeightsDDRType =
             getMemRefType(VPURT::BufferSection::DDR, compressedWeightsTensorType.getShape().raw(),
@@ -241,8 +240,8 @@ void buildSparseZMajorConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::Mod
             createDeclareTensorOp(functionBuilder, VPURT::BufferSection::CMX_NN, weightsSMShape, sparsityElementType,
                                   vpux::DimsOrder::OIYX, weightsSMStrides, 0, WEIGHTS_SM_CMX_OFFSET);
 
-    auto weightsDDR =
-            functionBuilder.create<vpux::Const::DeclareOp>(loc, compressedWeightsDDRType, weightsAttributeSetup.get());
+    auto weightsDDR = functionBuilder.create<vpux::Const::DeclareOp>(
+            loc, compressedWeightsDDRType, Const::ContentAttr::get(weightsValues, std::move(weightsAttributeSetup)));
 
     auto weightsSMDDR = functionBuilder.create<vpux::Const::DeclareOp>(builder.getUnknownLoc(), weightsSMDDRType,
                                                                        std::move(weightsSparsityMap));
@@ -285,7 +284,8 @@ void buildSparseZMajorConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::Mod
             mlir::DenseElementsAttr::get(weightsTableDDRType, llvm::ArrayRef<std::int32_t>(weightsTable));
     auto weightsTableDDR = functionBuilder.create<vpux::Const::DeclareOp>(
             loc, weightsTableDDRMemRef,
-            vpux::Const::ContentAttr::transform(weightsTableValues).reorder(vpux::DimsOrder::NHWC).get());
+            vpux::Const::ContentAttr::get(weightsTableValues,
+                                          Const::ContentSetup(weightsTableDDRType).reorder(vpux::DimsOrder::NHWC)));
 
     auto weightsTableCMX_0 = createDeclareTensorOp(functionBuilder, VPURT::BufferSection::CMX_NN, weightsTableShape,
                                                    int32, DimsOrder::NHWC, 0, WEIGHTSTABLE_CMX_OFFSET);
@@ -326,12 +326,13 @@ void buildSparseZMajorConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::Mod
             functionBuilder, mlir::ValueRange(waitBarrier.getBarrier()), mlir::ValueRange(updateBarrier.getBarrier()),
             loc, inputCMX.getBuffer(), /*input_sparsity_map=*/inputSMCmxBuffer,
             /*input_storage_element_table=*/nullptr, weightsDenseViewCMX.getBuffer(), weightsSMCMX.getBuffer(),
-            weightsTableCMX_0.getBuffer(), nullptr, nullptr, inputCMX.getBuffer(),
+            weightsTableCMX_0.getBuffer(), /*spr_lookup_table=*/nullptr, inputCMX.getBuffer(),
             /*parent_input_sparsity_map=*/inputSMCmxBuffer,
             /*parent_input_storage_element_table=*/nullptr, outputCMX.getBuffer(),
             /*parent_output_sparsity_map=*/nullptr, outputCMX.getBuffer(), /*output_sparsity_map=*/nullptr,
-            /*profiling_data=*/nullptr, vpux::VPUIP::NCETaskType::CONV, kernelSize, strides, kernelPaddings, nullptr,
-            nullptr);
+            /*profiling_data=*/nullptr, /*max_per_xy=*/nullptr, /*min_per_xy=*/nullptr,
+            /*min_max_per_tensor=*/mlir::ValueRange(), vpux::VPUIP::NCETaskType::CONV, kernelSize, strides,
+            kernelPaddings, nullptr, nullptr);
 
     const auto start = getIntArrayAttr(ctx, std::vector<std::int64_t>{0, 0, 0});
     const auto outEnd =

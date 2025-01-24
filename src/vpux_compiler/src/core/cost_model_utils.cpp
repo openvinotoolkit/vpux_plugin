@@ -11,6 +11,7 @@
 #include "vpux/compiler/dialect/VPUIP/utils/sw_utils.hpp"
 #include "vpux/compiler/utils/swizzling_utils.hpp"
 
+#include <vpu/shave/layers.h>
 #include <bitset>
 
 using namespace vpux;
@@ -64,9 +65,9 @@ VPUNN::Swizzling getVPUNNSwizzlingKey(mlir::Type type) {
     return swizzlingKeyVPUNN[swizzlingKey];
 }
 
-VPUNN::ActivationFunction vpux::getVPUNNActivationFunction(VPU::PPEAttr ppeOpaqueAttr) {
-    const auto ppeMode = VPU::PpeVersionConfig::getFactoryAs<VPU::IPpeAdapterMode>().getMode(ppeOpaqueAttr);
-    const auto clampLow = VPU::PpeVersionConfig::getFactoryAs<VPU::IPpeAdapterClamp>().getClamps(ppeOpaqueAttr).first;
+VPUNN::ActivationFunction vpux::getVPUNNActivationFunction(VPU::PPEAttr ppeAttr) {
+    const auto ppeMode = VPU::PpeVersionConfig::getFactoryAs<VPU::IPpeAdapterMode>().getMode(ppeAttr);
+    const auto clampLow = VPU::PpeVersionConfig::getFactoryAs<VPU::IPpeAdapterClamp>().getClamps(ppeAttr).first;
 
     switch (ppeMode) {
     case VPU::PPEMode::LRELU:
@@ -104,7 +105,8 @@ VPUNN::DPUWorkload vpux::getDPUWorkload(VPUIP::DPUTaskOp dpuTaskOp, VPU::ArchKin
     auto outputElemType = outputType.cast<vpux::NDTypeInterface>().getElementType();
 
     // CostModel does not support F32/SI32 layers
-    if (inputElemType.isF32() || outputElemType.isF32()) {
+    // TODO: Support FP32 output element type E#149202
+    if (inputElemType.isF32()) {
         VPUX_THROW("Can't convert a F32/SI32 workload as CostModel does not support");
     }
     if (inputElemType.isSignedInteger(32) || outputElemType.isSignedInteger(32)) {
@@ -118,7 +120,7 @@ VPUNN::DPUWorkload vpux::getDPUWorkload(VPUIP::DPUTaskOp dpuTaskOp, VPU::ArchKin
     VPUNN::ActivationFunction activationFunction = VPUNN::ActivationFunction::NONE;
     auto ppeOps = to_small_vector(nceClusterOp.getPpe().getOps<VPUIP::PPETaskOp>());
     if (!ppeOps.empty()) {
-        activationFunction = getVPUNNActivationFunction(ppeOps.front().getOpaquePpeAttr());
+        activationFunction = getVPUNNActivationFunction(ppeOps.front().getPpeAttr());
     }
 
     unsigned int outputWriteTiles = 1;
@@ -156,7 +158,8 @@ VPUNN::DPUWorkload vpux::getDPUWorkload(VPUIP::DPUTaskOp dpuTaskOp, VPU::ArchKin
 
     bool isWeightsSparsityEnabled = false;
     float weightsSparsityRatio = 0;
-    if (auto weightsSparsityMap = nceClusterOp.getWeightsSparsityMap()) {
+    auto weightsSparsityMap = nceClusterOp.getWeightsSparsityMap();
+    if (weightsSparsityMap != nullptr && nceClusterOp.getTaskType() != VPUIP::NCETaskType::ELTWISE) {
         isWeightsSparsityEnabled = true;
 
         auto weightsType = nceClusterOp.getWeights().getType().cast<vpux::NDTypeInterface>();
@@ -475,7 +478,10 @@ std::string getSwKernelOperationName(VPUIP::SwKernelOp swKernelOp) {
     auto strKernelOp = swKernelOp.getKernelFunction().getLeafReference().str();
 
     auto prefIndex = strKernelOp.find(vpux::VPUIP::SW_KERNEL_NAME_PREFIX.str());
-    VPUX_THROW_WHEN(prefIndex == std::string::npos, "Not a valid swKernelOp name - {0}", strKernelOp);
+    if (prefIndex == std::string::npos) {
+        auto prefIndex2 = strKernelOp.find("generated_");
+        VPUX_THROW_WHEN(prefIndex2 == std::string::npos, "Not a valid swKernelOp name - {0}", strKernelOp);
+    }
     auto prefEndIndex = prefIndex + vpux::VPUIP::SW_KERNEL_NAME_PREFIX.size();
     VPUX_THROW_WHEN(prefEndIndex > strKernelOp.size(), "Not a valid swKernelOp name length - {0}", strKernelOp);
 

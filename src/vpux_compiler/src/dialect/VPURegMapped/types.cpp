@@ -216,7 +216,7 @@ mlir::Type VPURegMapped::RegFieldType::parse(mlir::AsmParser& parser) {
 //
 
 Byte vpux::VPURegMapped::RegisterType::getSizeInBytes() const {
-    return Bit(getSize()).to<Byte>();
+    return Byte(getSize());
 }
 
 std::vector<uint8_t> vpux::VPURegMapped::RegisterType::serialize() const {
@@ -277,10 +277,6 @@ mlir::LogicalResult vpux::VPURegMapped::RegisterType::verify(
         return printTo(emitError(), "RegisterType - name is empty.");
     }
 
-    if (size % CHAR_BIT != 0) {
-        return printTo(emitError(), "RegisterType - size {0} is not multiple of 8. Allowed sizes: 8, 16, 32, 64", size);
-    }
-
     uint32_t totalWidth(0);
     uint32_t currentAddress(0x0);
     std::map<std::string, uint64_t> wholeRegisterMap;
@@ -320,7 +316,7 @@ mlir::LogicalResult vpux::VPURegMapped::RegisterType::verify(
         currentAddress = address;
     }
 
-    if (!allowOverlap && (totalWidth > size)) {
+    if (!allowOverlap && (totalWidth > size * CHAR_BIT)) {
         return printTo(emitError(), "RegisterType - {0} - invalid size {1}.", name, totalWidth);
     }
 #endif
@@ -335,7 +331,7 @@ void VPURegMapped::RegisterType::print(mlir::AsmPrinter& printer) const {
     }
     auto regFields = getRegFields().getValue();
     auto firstRegField = regFields.front().cast<VPURegMapped::RegisterFieldAttr>().getRegField();
-    if (getName() == firstRegField.getName() && getSize() == firstRegField.getWidth()) {
+    if (getName() == firstRegField.getName() && getSize() * CHAR_BIT == firstRegField.getWidth()) {
         printer << " = " << VPURegMapped::stringifyEnum(firstRegField.getDataType()) << " "
                 << getFormattedValue(firstRegField.getValue());
         auto requiredMiVersion = firstRegField.getRequiredMIVersion();
@@ -405,7 +401,7 @@ mlir::Type VPURegMapped::RegisterType::parse(mlir::AsmParser& parser) {
                                          : elf::Version();
 
         auto regFieldType =
-                RegFieldType::get(parser.getContext(), size, 0, value, name,
+                RegFieldType::get(parser.getContext(), size * CHAR_BIT, 0, value, name,
                                   VPURegMapped::symbolizeEnum<RegFieldDataType>(dataType).value(), requiredMiVersion);
         auto regFieldAttr = RegisterFieldAttr::get(parser.getContext(), regFieldType);
         regFields = parser.getBuilder().getArrayAttr(regFieldAttr);

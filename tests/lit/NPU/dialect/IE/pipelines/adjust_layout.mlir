@@ -30,7 +30,7 @@ func.func @main(%arg0: tensor<1x77x4096x1xf32>) -> tensor<1x77x4096x1xf32> {
     %4 = IE.Transpose(%3) {order_value = #HCNW} : tensor<4096x77x1x1xf32> -> tensor<1x77x4096x1xf32>
     return %4: tensor<1x77x4096x1xf32>
 
-    // CHECK:        [[SOFTMAX:%.*]] = IE.SoftMax(%arg0) {axisInd = 1 : i64} : tensor<1x77x4096x1xf32> -> tensor<1x77x4096x1xf32>
+    // CHECK:        [[SOFTMAX:%.+]] = IE.SoftMax([[ARG0]]) {axisInd = 1 : i64} : tensor<1x77x4096x1xf32> -> tensor<1x77x4096x1xf32>
     // CHECK:        return [[SOFTMAX]] : tensor<1x77x4096x1xf32>
 }
 

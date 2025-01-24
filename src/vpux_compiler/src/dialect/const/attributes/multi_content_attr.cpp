@@ -18,9 +18,15 @@ mlir::LogicalResult vpux::Const::MultiContentAttr::verify(::llvm::function_ref<:
         return printTo(emitError(), "'baseContent' cannot be empty");
     }
 
+    SmallVector<mlir::Type> contentTypes;
+    contentTypes.reserve(baseContent.size());
+
     // verification is mostly identical to ContentAttr
     for (auto content : baseContent) {
-        if (auto result = ContentAttr::verify(emitError, content, transformations); mlir::failed(result)) {
+        const auto [type, isSplat] = vpux::Const::inferFinalTypeAndSplat(content, transformations.getValue());
+        const mlir::UnitAttr splatAttr = isSplat ? mlir::UnitAttr::get(baseContent.getContext()) : nullptr;
+        if (auto result = ContentAttr::verify(emitError, content, transformations, type, splatAttr);
+            mlir::failed(result)) {
             return result;
         }
 
@@ -29,13 +35,13 @@ mlir::LogicalResult vpux::Const::MultiContentAttr::verify(::llvm::function_ref<:
             return printTo(emitError(), "Got unsupported type '{0}' for 'baseContent' in 'MultiContentAttr'",
                            content.getType());
         }
+
+        contentTypes.push_back(type);
     }
 
     // Having the same base type in all 'baseContent' elements implies that all applications of 'transformations' yields
     // the same final type.
-    bool allBaseTypesEqual = llvm::all_equal(llvm::map_range(baseContent, [transformations](auto content) {
-        return Const::inferFinalType(content.getType(), transformations);
-    }));
+    bool allBaseTypesEqual = llvm::all_equal(contentTypes);
     if (!allBaseTypesEqual) {
         return printTo(emitError(), "All base types in 'baseContent' must be equal");
     }

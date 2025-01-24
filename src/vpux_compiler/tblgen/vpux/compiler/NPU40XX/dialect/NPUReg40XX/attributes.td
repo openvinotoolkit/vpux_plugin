@@ -52,4 +52,14 @@ def NPUReg40XX_TaskTypeAttr : NPUReg40XX_EnumAttr<NPUReg40XX_TaskType, "task_typ
 
 def DMADescriptorAttr : DescriptorAttrBase<NPUReg40XX_Dialect, "vpux::NPUReg40XX::Descriptors::DMARegister", "DMARegister"> {}
 
+def DPUInvariantDescriptorAttr : DescriptorAttrBase<NPUReg40XX_Dialect, "vpux::NPUReg40XX::Descriptors::DpuInvariantRegister", "DpuInvariantRegister"> {}
+
+def DPUVariantDescriptorAttr : DescriptorAttrBase<NPUReg40XX_Dialect, "vpux::NPUReg40XX::Descriptors::DpuVariantRegister", "DpuVariantRegister"> {}
+
+def ActKernelInvocationDescriptorAttr : DescriptorAttrBase<NPUReg40XX_Dialect, "vpux::NPUReg40XX::Descriptors::VpuActKernelInvocation", "VpuActKernelInvocation"> {}
+
+def ActKernelRangeDescriptorAttr : DescriptorAttrBase<NPUReg40XX_Dialect, "vpux::NPUReg40XX::Descriptors::VpuActKernelRange", "VpuActKernelRange"> {}
+
+def M2IDescriptorAttr : DescriptorAttrBase<NPUReg40XX_Dialect, "vpux::NPUReg40XX::Descriptors::VpuMediaTask", "VpuMediaTask"> {}
+
 #endif  // VPUX_COMPILER_DIALECT_NPUReg40XX_ATTRIBUTES

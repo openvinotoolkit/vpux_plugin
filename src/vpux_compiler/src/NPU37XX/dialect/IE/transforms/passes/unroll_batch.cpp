@@ -8,6 +8,7 @@
 
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
+#include "vpux/compiler/utils/permute_utils.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 #include "vpux/compiler/utils/types.hpp"
 
@@ -51,12 +52,34 @@ void UnrollBatchPass::safeRunOnFunc() {
     target.addDynamicallyLegalOp<IE::GroupConvolutionOp>(&isLegalOp<IE::GroupConvolutionOp>);
     target.addDynamicallyLegalOp<IE::ExpOp>(&isLegalOp<IE::ExpOp>);
     target.addDynamicallyLegalOp<IE::SigmoidOp>(&isLegalOp<IE::SigmoidOp>);
+    target.addDynamicallyLegalOp<IE::InterpolateOp>(&isLegalOp<IE::InterpolateOp>);
+    target.addDynamicallyLegalOp<IE::MemPermuteOp>([&](IE::MemPermuteOp op) -> bool {
+        // If dim N changed after permute, skip the unrolling.
+        auto memPerm = DimsOrder::fromAffineMap(op.getMemPerm());
+        if (memPerm.dimAt(0) != Dims4D::Act::N) {
+            return true;
+        }
+        // If the unrolled MemPermute cannot convert to pooling, skip the unrolling.
+        auto totalSize = mlir::cast<vpux::NDTypeInterface>(op.getInput().getType()).getTotalAllocSize().count();
+        totalSize = totalSize / getShape(op.getInput())[Dims4D::Act::N];
+        if (totalSize < PERMUTE_TO_POOLING_THRESHOLD) {
+            return true;
+        }
+
+        return vpux::IE::isShapeRankEqualToZero(op.getInput()) || vpux::IE::isBatchEqualToOne(op.getInput()) ||
+               mlir::isa_and_nonnull<Const::DeclareOp>(op.getInput().getDefiningOp());
+    });
     target.addDynamicallyLegalOp<IE::AndOp>([&](IE::AndOp op) -> bool {
         return (vpux::IE::isShapeRankEqualToZero(op.getInput1()) || vpux::IE::isShapeRankEqualToZero(op.getInput2())) ||
                !vpux::IE::areShapeRanksEqual(op.getInput1(), op.getInput2()) ||
                (vpux::IE::isBatchEqualToOne(op.getInput1()) || vpux::IE::isBatchEqualToOne(op.getInput2()));
     });
     target.addDynamicallyLegalOp<IE::AddOp>([&](IE::AddOp op) -> bool {
+        return (vpux::IE::isShapeRankEqualToZero(op.getInput1()) || vpux::IE::isShapeRankEqualToZero(op.getInput2())) ||
+               !vpux::IE::areShapeRanksEqual(op.getInput1(), op.getInput2()) ||
+               (vpux::IE::isBatchEqualToOne(op.getInput1()) || vpux::IE::isBatchEqualToOne(op.getInput2()));
+    });
+    target.addDynamicallyLegalOp<IE::MultiplyOp>([&](IE::MultiplyOp op) -> bool {
         return (vpux::IE::isShapeRankEqualToZero(op.getInput1()) || vpux::IE::isShapeRankEqualToZero(op.getInput2())) ||
                !vpux::IE::areShapeRanksEqual(op.getInput1(), op.getInput2()) ||
                (vpux::IE::isBatchEqualToOne(op.getInput1()) || vpux::IE::isBatchEqualToOne(op.getInput2()));
@@ -71,8 +94,11 @@ void UnrollBatchPass::safeRunOnFunc() {
     patterns.add<vpux::IE::BatchUnrollConverter<IE::GroupConvolutionOp>>(&ctx, _log, 1);
     patterns.add<vpux::IE::BatchUnrollConverter<IE::ExpOp>>(&ctx, _log, 1);
     patterns.add<vpux::IE::BatchUnrollConverter<IE::SigmoidOp>>(&ctx, _log, 1);
+    patterns.add<vpux::IE::BatchUnrollConverter<IE::InterpolateOp>>(&ctx, _log, 1);
+    patterns.add<vpux::IE::BatchUnrollConverter<IE::MemPermuteOp>>(&ctx, _log, 1);
     patterns.add<vpux::IE::BatchUnrollConverter<IE::AndOp>>(&ctx, _log, 2);
     patterns.add<vpux::IE::BatchUnrollConverter<IE::AddOp>>(&ctx, _log, 2);
+    patterns.add<vpux::IE::BatchUnrollConverter<IE::MultiplyOp>>(&ctx, _log, 2);
 
     if (!_skipUnrollBatch) {
         target.addDynamicallyLegalOp<IE::ConvolutionOp>(&isLegalOp<IE::ConvolutionOp>);

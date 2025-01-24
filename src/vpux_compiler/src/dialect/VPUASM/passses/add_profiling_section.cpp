@@ -4,10 +4,8 @@
 //
 
 #include "vpux/compiler/NPU40XX/dialect/ELF/ops.hpp"
-#include "vpux/compiler/dialect/VPUASM/dialect.hpp"
 #include "vpux/compiler/dialect/VPUASM/ops.hpp"
 #include "vpux/compiler/dialect/VPUASM/passes.hpp"
-#include "vpux/compiler/utils/logging.hpp"
 
 using namespace vpux;
 
@@ -27,6 +25,7 @@ void AddProfilingSection::safeRunOnModule() {
     IE::CNNNetworkOp netOp;
     mlir::func::FuncOp netFunc;
     IE::CNNNetworkOp::getFromModule(moduleOp, netOp, netFunc);
+    const auto arch = VPU::getArch(moduleOp);
     if (netOp.getProfilingOutputsInfo().empty()) {
         return;
     }
@@ -49,7 +48,7 @@ void AddProfilingSection::safeRunOnModule() {
     auto op = builder.create<VPUASM::ProfilingMetadataOp>(metadataOp.getLoc(), metadataOp.getSymNameAttr(),
                                                           metadataOp.getMetadataAttr());
 
-    auto actualAlignment = builder.getIntegerAttr(builder.getIntegerType(64, false), op.getAlignmentRequirements());
+    auto actualAlignment = builder.getIntegerAttr(builder.getIntegerType(64, false), op.getAlignmentRequirements(arch));
     profilingSection.setSecAddrAlignAttr(actualAlignment);
 }
 }  // namespace

@@ -178,7 +178,8 @@ void buildRaceConditionDPUDMAACTTest(const nb::TestCaseJsonDescriptor& testDesc,
             mlir::DenseElementsAttr::get(weightsTableDDRType, llvm::ArrayRef<std::int32_t>(weightsTable));
     auto weightsTableDDR = functionBuilder.create<vpux::Const::DeclareOp>(
             loc, weightsTableDDRMemRef,
-            vpux::Const::ContentAttr::transform(weightsTableValues).reorder(vpux::DimsOrder::NHWC).get());
+            vpux::Const::ContentAttr::get(weightsTableValues,
+                                          Const::ContentSetup(weightsTableDDRType).reorder(vpux::DimsOrder::NHWC)));
 
     auto weightsTableCMX = createDeclareTensorOp(functionBuilder, VPURT::BufferSection::CMX_NN, weightsTableShape,
                                                  int32, DimsOrder::NHWC, 0, WEIGHTSTABLE_CMX_OFFSET);
@@ -222,9 +223,9 @@ void buildRaceConditionDPUDMAACTTest(const nb::TestCaseJsonDescriptor& testDesc,
         auto nceTask_0 = VPURT::wrapIntoTaskOp<VPUIP::NCEClusterTaskOp>(
                 functionBuilder, mlir::ValueRange(waitBarrier.getBarrier()),
                 mlir::ValueRange(updateBarrier.getBarrier()), loc, inputCMXVec[0].getBuffer(), weightsCMX.getBuffer(),
-                weightsTableCMX.getBuffer(), nullptr, nullptr, inputCMXVec[0].getBuffer(), outputCMX_0.getBuffer(),
-                outputCMX_0.getBuffer(), vpux::VPUIP::NCETaskType::CONV, kernelSize, strides, kernelPaddings, nullptr,
-                nullptr);
+                weightsTableCMX.getBuffer(), /*spr_lookup_table=*/nullptr, inputCMXVec[0].getBuffer(),
+                outputCMX_0.getBuffer(), outputCMX_0.getBuffer(), vpux::VPUIP::NCETaskType::CONV, kernelSize, strides,
+                kernelPaddings, nullptr, nullptr);
 
         const auto start = getIntArrayAttr(ctx, std::vector<std::int64_t>{0, 0, 0});
         const auto outEnd = getIntArrayAttr(

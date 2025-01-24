@@ -1,4 +1,4 @@
-// Copyright (C) Intel Corporation
+// Copyright (C) 2021 - 2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -7,30 +7,30 @@
 #include "vpu_ov2_layer_test.hpp"
 
 namespace ov {
-
 namespace test {
 
 class ScatterNDUpdateLayerTestCommon : public ScatterNDUpdateLayerTest, virtual public VpuOv2LayerTest {};
+class ScatterNDUpdateLayerTestHW : public ScatterNDUpdateLayerTest, virtual public VpuOv2LayerTest {};
 
-class ScatterNDUpdateLayerTest_NPU3720 : public ScatterNDUpdateLayerTestCommon {};
-class ScatterNDUpdateLayerTest_NPU4000 : public ScatterNDUpdateLayerTestCommon {};
-
-TEST_P(ScatterNDUpdateLayerTest_NPU3720, HW) {
+TEST_P(ScatterNDUpdateLayerTestCommon, NPU3720_HW) {
     setDefaultHardwareMode();
     run(Platform::NPU3720);
 }
 
-TEST_P(ScatterNDUpdateLayerTest_NPU4000, SW) {
+TEST_P(ScatterNDUpdateLayerTestHW, NPU3720_HW) {
+    setDefaultHardwareMode();
+    run(Platform::NPU3720);
+}
+
+TEST_P(ScatterNDUpdateLayerTestCommon, NPU4000_SW) {
     setReferenceSoftwareMode();
     run(Platform::NPU4000);
 }
-
 }  // namespace test
-
 }  // namespace ov
 
-using ov::test::ScatterNDUpdateLayerTest_NPU3720;
-using ov::test::ScatterNDUpdateLayerTest_NPU4000;
+using ov::test::ScatterNDUpdateLayerTestCommon;
+using ov::test::ScatterNDUpdateLayerTestHW;
 
 namespace {
 
@@ -94,17 +94,10 @@ const auto precommit_params = testing::Combine(testing::ValuesIn(combineShapes(p
                                                testing::Values(ov::element::i32),  // indices
                                                testing::Values(ov::test::utils::DEVICE_NPU));
 
-// --------- NPU3720 ---------
+INSTANTIATE_TEST_SUITE_P(smoke_ScatterNDUpdate, ScatterNDUpdateLayerTestHW, params,
+                         ScatterNDUpdateLayerTestHW::getTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(smoke_ScatterNDUpdate, ScatterNDUpdateLayerTest_NPU3720, params,
-                         ScatterNDUpdateLayerTest_NPU3720::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_ScatterNDUpdate, ScatterNDUpdateLayerTest_NPU3720, precommit_params,
-                         ScatterNDUpdateLayerTest_NPU3720::getTestCaseName);
-
-// --------- NPU4000 ---------
-
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_ScatterNDUpdate, ScatterNDUpdateLayerTest_NPU4000, precommit_params,
-                         ScatterNDUpdateLayerTest_NPU4000::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_ScatterNDUpdate, ScatterNDUpdateLayerTestCommon, precommit_params,
+                         ScatterNDUpdateLayerTestCommon::getTestCaseName);
 
 }  // namespace

@@ -19,12 +19,12 @@ void vpux::VPUASM::DeclareKernelTextOp::serialize(elf::writer::BinaryDataSection
     binDataSection.appendData(text.data(), text.size());
 }
 
-size_t vpux::VPUASM::DeclareKernelTextOp::getBinarySize() {
+size_t vpux::VPUASM::DeclareKernelTextOp::getBinarySize(VPU::ArchKind) {
     return vpux::ELF::getKernelELF(getOperation(), getKernelPath(), {".text"}).size();
 }
 
 // The .text sections for the sw layers must be 1kB aligned as an ActShave requirement
-size_t vpux::VPUASM::DeclareKernelTextOp::getAlignmentRequirements() {
+size_t vpux::VPUASM::DeclareKernelTextOp::getAlignmentRequirements(VPU::ArchKind) {
     return ELF::VPUX_SHAVE_ALIGNMENT;
 }
 

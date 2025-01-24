@@ -145,9 +145,9 @@ mlir::Value reshapeBias(mlir::PatternRewriter& rewriter, mlir::Value bias, Shape
         return bias;
     }
     auto contentAttrSetup = cst.transformContentAttr();
-    Shape newOutSahpe(biasShape.raw());
-    newOutSahpe[Dims4D::Act::C] = outShape[Dims4D::Act::C];
-    newOutSahpe[Dims4D::Act::W] = outShape[Dims4D::Act::W];
+    Shape newOutShape(biasShape.raw());
+    newOutShape[Dims4D::Act::C] = outShape[Dims4D::Act::C];
+    newOutShape[Dims4D::Act::W] = outShape[Dims4D::Act::W];
     if (biasCxW != outCxW) {
         auto dimValue = outShape[Dims4D::Act::C];
         auto broadCastDim = Dims4D::Act::C;
@@ -155,11 +155,11 @@ mlir::Value reshapeBias(mlir::PatternRewriter& rewriter, mlir::Value bias, Shape
             dimValue = outCxW / biasShape[Dims4D::Act::C];
             broadCastDim = Dims4D::Act::W;
         } else {
-            newOutSahpe[Dims4D::Act::W] = biasShape[Dims4D::Act::W];
+            newOutShape[Dims4D::Act::W] = biasShape[Dims4D::Act::W];
         }
         contentAttrSetup = contentAttrSetup.broadcast(broadCastDim, dimValue);
     }
-    auto contentAttr = contentAttrSetup.reshape(newOutSahpe).get();
+    auto contentAttr = contentAttrSetup.reshape(newOutShape).get();
     return rewriter.create<Const::DeclareOp>(bias.getLoc(), contentAttr.getType(), std::move(contentAttr));
 }
 
@@ -322,7 +322,7 @@ mlir::LogicalResult AdjustConvShape::matchAndRewrite(IE::ConvolutionOp convOp, m
     auto newFilterICxKX = newFilterShape[Dims4D::Filter::IC] * newFilterShape[Dims4D::Filter::KX];
     auto oldFilterICxKX = filterShape[Dims4D::Filter::IC] * filterShape[Dims4D::Filter::KX];
     Shape middleFilterShape = {filterShape[Dims4D::Filter::OC], oldFilterICxKX, 1, filterShape[Dims4D::Filter::KY]};
-    auto cstContentAttrFilter = filter.getDefiningOp<Const::DeclareOp>().getContentAttr();
+    const auto& cstContentAttrFilter = filter.getDefiningOp<Const::DeclareOp>().getContentAttr();
     const auto totalPading = newFilterICxKX - oldFilterICxKX;
     SmallVector<mlir::Value> filterConst;
     //
@@ -403,7 +403,15 @@ mlir::LogicalResult AdjustConvShape::matchAndRewrite(IE::ConvolutionOp convOp, m
             getIntArrayAttr(ctx, padBVect), getIntArrayAttr(ctx, padEVect), convOp.getDilationsAttr(),
             convOp.getPostOpAttr(), convOp.getClampAttr(), convOp.getStaticScaleAttr(), convOp.getOutputChannelsAttr(),
             convOp.getInputChannelsAttr());
-    changeDimsOrder(newConvOp, outDimOrder, _log.nest());
+
+    auto newConvType = mlir::cast<vpux::NDTypeInterface>(newConvOp.getOutput().getType());
+    newConvType = newConvType.changeDimsOrder(outDimOrder);
+    newConvType = newConvType.changeElemType(outNDInterface.getElementType());
+
+    rewriter.modifyOpInPlace(newConvOp, [&] {
+        newConvOp.getOutput().setType(mlir::cast<mlir::RankedTensorType>(newConvType));
+    });
+
     const auto outShapeAttr = getIntArrayAttr(ctx, outNDInterface.getShape().raw());
     rewriter.replaceOpWithNewOp<IE::ShapeCastOp>(convOp, outNDInterface, newConvOp.getOutput(), outShapeAttr);
     _log.trace("Successfully adjusted convolution shape");

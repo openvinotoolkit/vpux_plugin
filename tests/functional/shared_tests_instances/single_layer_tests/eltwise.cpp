@@ -76,7 +76,6 @@ TEST_P(EltwiseLayerTestF32Common, NPU3720_HW) {
     setDefaultHardwareMode();
     run(Platform::NPU3720);
 }
-
 TEST_P(EltwiseEmptyShapeInputLayerTest, NPU3720_HW) {
     setDefaultHardwareMode();
     run(Platform::NPU3720);
@@ -124,7 +123,6 @@ TEST_P(EltwiseIntegerLayerTest, NPU4000_SW) {
     setReferenceSoftwareMode();
     run(Platform::NPU4000);
 }
-
 }  // namespace test
 }  // namespace ov
 

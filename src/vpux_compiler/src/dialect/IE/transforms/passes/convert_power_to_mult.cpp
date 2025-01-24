@@ -3,9 +3,9 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
-#include "vpux/compiler/dialect/IE/transforms/passes.hpp"
-
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
+#include "vpux/compiler/dialect/IE/transforms/passes.hpp"
+#include "vpux/compiler/utils/rewriter.hpp"
 
 #include <mlir/Transforms/DialectConversion.h>
 
@@ -16,6 +16,8 @@ namespace {
 //
 // PowerToMultRewriter
 //
+
+constexpr int64_t MAX_CONVERSION_EXPONENT = 3;
 
 class PowerToMultRewriter final : public mlir::OpRewritePattern<IE::PowerOp> {
 public:
@@ -34,30 +36,32 @@ mlir::LogicalResult PowerToMultRewriter::matchAndRewrite(IE::PowerOp powerOp, ml
     auto cstOp = powerOp.getInput2().getDefiningOp<Const::DeclareOp>();
     VPUX_THROW_WHEN(cstOp == nullptr, "PowerOp exponent input is not a constant");
 
-    auto constAttr = cstOp.getContentAttr().fold();
+    auto constContent = cstOp.getContentAttr().fold();
 
-    auto exponent = constAttr.getSplatValue<double>();
-    VPUX_THROW_UNLESS(exponent == 2, "For now only exponent equal to 2 is supported for conversion to multiplication");
-
-    // If there is a Sqrt + Power with Exponents 2 pattern, the pattern could be eliminated.
-    auto sqrtOp = powerOp.getInput1().getDefiningOp<IE::SqrtOp>();
-    if (sqrtOp) {
-        _log.trace("Remove sqrt + power pattern.");
-        powerOp.replaceAllUsesWith(sqrtOp.getInput());
-        rewriter.eraseOp(sqrtOp);
-        rewriter.eraseOp(powerOp);
-        return mlir::success();
-    }
-
-    // TODO: Exponents of N > 2 could also be replaced by a chain/tree of multiplication
-    // operations.
+    auto exponent = checked_cast<int64_t>(constContent.getSplatValue<float>());
+    VPUX_THROW_UNLESS(exponent <= MAX_CONVERSION_EXPONENT,
+                      "Only exponents less than or equal to {1} are supported for conversion to multiplication. Given "
+                      "exponent: {0}",
+                      exponent, MAX_CONVERSION_EXPONENT);
 
     const auto broadcastType =
             vpux::IE::AutoBroadcastTypeAttr::get(getContext(), IE::AutoBroadcastType::NONE_OR_EXPLICIT);
 
-    rewriter.replaceOpWithNewOp<IE::MultiplyOp>(powerOp, powerOp.getInput1(), powerOp.getInput1(), broadcastType,
-                                                /*post_op=*/nullptr, /*clamp=*/nullptr, /*output_channels=*/nullptr,
-                                                /*input_channels=*/nullptr);
+    auto createMultiplyOp = [&](mlir::Value input1, mlir::Value input2, int64_t idx) {
+        const auto newLoc = takeOpLoc(powerOp, StringLiteral("exponent_{0}"), idx);
+        return rewriter
+                .create<IE::MultiplyOp>(newLoc, input1, input2, broadcastType,
+                                        /*post_op=*/nullptr, /*clamp=*/nullptr, /*output_channels=*/nullptr,
+                                        /*input_channels=*/nullptr)
+                .getResult();
+    };
+
+    auto input1 = powerOp.getInput1();
+    for (auto idx = 0; idx < exponent - 1; idx++) {
+        input1 = createMultiplyOp(input1, powerOp.getInput1(), idx);
+    }
+
+    rewriter.replaceOp(powerOp, input1);
 
     return mlir::success();
 }
@@ -84,16 +88,16 @@ void ConvertPowerToMultPass::safeRunOnFunc() {
         // with small value. If yes then such PowerOp should be converted
         // to Mult
         if (auto cstOp = powerOp.getInput2().getDefiningOp<Const::DeclareOp>()) {
-            // Exponent constant must be a scalar or tensor with
-            // all elements equal
-            auto constAttr = cstOp.getContentAttr();
+            // Exponent must be a scalar or tensor with all elements equal
+            const auto& constAttr = cstOp.getContentAttr();
             if (!constAttr.isSplat()) {
                 return true;
             }
 
-            // Currently only convert power to multiply operation
-            // only when exponent equals to 2
-            if (constAttr.fold().getSplatValue<double>() == 2) {
+            const auto exponent = constAttr.fold().getSplatValue<float>();
+            auto isIntegerExponent = isFloatEqual(std::floor(exponent), exponent);
+            auto isConversionBeneficial = (static_cast<int64_t>(exponent) <= MAX_CONVERSION_EXPONENT);
+            if (isIntegerExponent && isConversionBeneficial) {
                 return false;
             }
         }

@@ -128,12 +128,12 @@ void buildDWConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp modu
 
     auto wt_data_vals =
             generateWeights(builder, wt_data_shape_padded, weightsType, builder.getContext(), weight_file_name);
-    auto wt_data_attr_setup = Const::ContentAttr::transform(wt_data_vals);
+    Const::ContentSetup wt_data_attr_setup(wt_data_vals.getType());
     if (auto qty = weightsType.dyn_cast<mlir::quant::QuantizedType>()) {
-        wt_data_attr_setup = wt_data_attr_setup.quantCast(qty);
+        wt_data_attr_setup = wt_data_attr_setup.castElemType(qty);
     }
 
-    auto wt_data_attr = wt_data_attr_setup.reorder(DimsOrder::NHWC).get();
+    auto wt_data_attr = Const::ContentAttr::get(wt_data_vals, wt_data_attr_setup.reorder(DimsOrder::NHWC));
     auto weight_data_ddr =
             funcbuilder.create<Const::DeclareOp>(builder.getUnknownLoc(), weightData_ddr_type, std::move(wt_data_attr));
 
@@ -208,7 +208,8 @@ void buildDWConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp modu
     auto wtTbl_data_vals = mlir::DenseElementsAttr::get(wtTblData_ddr_valueType, wtTbl_data_values);
     auto weightTbl_data_ddr = funcbuilder.create<Const::DeclareOp>(
             builder.getUnknownLoc(), weightTblData_ddr_type,
-            Const::ContentAttr::transform(wtTbl_data_vals).reorder(DimsOrder::NHWC).get());
+            Const::ContentAttr::get(wtTbl_data_vals,
+                                    Const::ContentSetup(wtTblData_ddr_valueType).reorder(DimsOrder::NHWC)));
 
     // weights table cmx tensor
     auto wtTbl_cmx_type = getMemRefType(VPURT::BufferSection::CMX_NN, 0, wtTbl_data_shape,
@@ -229,21 +230,35 @@ void buildDWConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp modu
     auto kernel_padding = VPU::getPaddingAttr(ctx, padding_vec[PAD_NCETASK_LEFT], padding_vec[PAD_NCETASK_RIGHT],
                                               padding_vec[PAD_NCETASK_TOP], padding_vec[PAD_NCETASK_BOTTOM]);
 
+    mlir::UnitAttr isSmallKernelOptimized = nullptr;
+    if (supportsSmallKernelOpt(arch, filter_size[vpux::Dims4D::Kernel::X.ind()],
+                               stried_vec[vpux::Dims4D::Strides::X.ind()], in_shape[vpux::Dims4D::Act::C.ind()],
+                               INPUT_CMX_OFFSET, getElemTypeSize(inputType).count(),
+                               getElemTypeSize(weightsType).count(), VPUIP::NCETaskType::DWCONV)) {
+        isSmallKernelOptimized = mlir::UnitAttr::get(ctx);
+    }
+
+    // getIntOrFloatBitWidth
     auto nceTask = vpux::VPURT::wrapIntoTaskOp<VPUIP::NCEClusterTaskOp>(
             funcbuilder, mlir::ValueRange(barrier0.getBarrier()), mlir::ValueRange(barrier1.getBarrier()), loc,
             outputcmx_type, inputcmx.getOperation()->getResult(0), wtData_cmx.getOperation()->getResult(0),
-            wtTbl_cmx.getOperation()->getResult(0), /*instruction_table_list*/ nullptr, /*spr_lookup_table*/ nullptr,
+            wtTbl_cmx.getOperation()->getResult(0), /*spr_lookup_table*/ nullptr,
             parent_inputcmx.getOperation()->getResult(0), parent_outputcmx.getOperation()->getResult(0),
             outputcmx.getOperation()->getResult(0), VPUIP::NCETaskType::DWCONV, filtersize, strides, kernel_padding,
-            /*is_continued*/ nullptr,
-            /*sp_pattern*/ nullptr);
+            /*is_continued*/ nullptr, /*sp_pattern*/ nullptr, /*is_segmented=*/nullptr, /*out_channel_offset=*/nullptr,
+            /*input_channels_compression*/ nullptr, /*is_zero_offset_weights_table=*/nullptr, /*is_superdense=*/nullptr,
+            /*is_inplace=*/nullptr,
+            /*input_se_size=*/nullptr, /*output_se_size=*/nullptr, /*isPermuteQuantize*/ nullptr,
+            isSmallKernelOptimized);
 
     int64_t clampLow = std::numeric_limits<int32_t>::min();
     int64_t clampHigh = std::numeric_limits<int32_t>::max();
     int64_t bypassMult = 1;
     int64_t bypassShift = 0;
+
     if (auto outElemQType = outputType.template dyn_cast<mlir::quant::QuantizedType>()) {
         const auto zps = extractScalesAndZeroPoints(outputType).second;
+
         clampLow = outElemQType.getStorageTypeMin() - zps.front();
         clampHigh = outElemQType.getStorageTypeMax() - zps.front();
     }

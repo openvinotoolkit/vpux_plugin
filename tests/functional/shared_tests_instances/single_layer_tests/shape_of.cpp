@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation
+// Copyright (C) 2022-2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -9,29 +9,23 @@
 #include "vpu_ov2_layer_test.hpp"
 
 namespace ov {
-
 namespace test {
 
 class ShapeOfLayerTestCommon : public ShapeOfLayerTest, virtual public VpuOv2LayerTest {};
-class ShapeOfLayerTest_NPU3720 : public ShapeOfLayerTestCommon {};
-class ShapeOfLayerTest_NPU4000 : public ShapeOfLayerTestCommon {};
 
-TEST_P(ShapeOfLayerTest_NPU3720, SW) {
+TEST_P(ShapeOfLayerTestCommon, NPU3720_SW) {
     setReferenceSoftwareMode();
     run(Platform::NPU3720);
 }
 
-TEST_P(ShapeOfLayerTest_NPU4000, SW) {
+TEST_P(ShapeOfLayerTestCommon, NPU4000_SW) {
     setReferenceSoftwareMode();
     run(Platform::NPU4000);
 }
-
 }  // namespace test
-
 }  // namespace ov
 
-using ov::test::ShapeOfLayerTest_NPU3720;
-using ov::test::ShapeOfLayerTest_NPU4000;
+using ov::test::ShapeOfLayerTestCommon;
 
 namespace {
 const std::vector<ov::element::Type> modelTypes = {ov::element::f16, ov::element::u8};
@@ -60,19 +54,9 @@ const auto paramsPrecommit =
                          ::testing::ValuesIn(ov::test::static_shapes_to_test_representation(inShapes_precommit)),
                          ::testing::Values(ov::test::utils::DEVICE_NPU));
 
-// --------- NPU3720 ---------
+INSTANTIATE_TEST_SUITE_P(smoke_ShapeOf, ShapeOfLayerTestCommon, paramsConfig1, ShapeOfLayerTestCommon::getTestCaseName);
 
-INSTANTIATE_TEST_SUITE_P(smoke_ShapeOf, ShapeOfLayerTest_NPU3720, paramsConfig1,
-                         ShapeOfLayerTest_NPU3720::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_ShapeOf, ShapeOfLayerTest_NPU3720, paramsPrecommit,
-                         ShapeOfLayerTest_NPU3720::getTestCaseName);
-
-// --------- NPU4000 ---------
-INSTANTIATE_TEST_SUITE_P(smoke_ShapeOf, ShapeOfLayerTest_NPU4000, paramsConfig1,
-                         ShapeOfLayerTest_NPU4000::getTestCaseName);
-
-INSTANTIATE_TEST_SUITE_P(smoke_precommit_ShapeOf, ShapeOfLayerTest_NPU4000, paramsPrecommit,
-                         ShapeOfLayerTest_NPU4000::getTestCaseName);
+INSTANTIATE_TEST_SUITE_P(smoke_precommit_ShapeOf, ShapeOfLayerTestCommon, paramsPrecommit,
+                         ShapeOfLayerTestCommon::getTestCaseName);
 
 }  // namespace

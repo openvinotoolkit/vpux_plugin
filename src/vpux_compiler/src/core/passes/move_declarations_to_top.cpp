@@ -11,6 +11,8 @@
 
 #include <mlir/Dialect/MemRef/IR/MemRef.h>
 
+#include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
+
 using namespace vpux;
 
 namespace {
@@ -30,25 +32,8 @@ private:
 };
 
 void MoveDeclarationsToTopPass::safeRunOnFunc() {
-    auto& block = getOperation().getBody().front();
-
-    SmallVector<mlir::Operation*> allDeclOps;
-    for (auto& op : block) {
-        if (op.hasTrait<DeclarationOp>() || mlir::isa<mlir::memref::AllocOp>(&op)) {
-            allDeclOps.push_back(&op);
-        }
-    }
-
-    if (allDeclOps.empty()) {
-        return;
-    }
-
-    auto* firstDeclOp = allDeclOps.front();
-    firstDeclOp->moveBefore(&block, block.begin());
-
-    for (auto i : irange(allDeclOps.size() - 1)) {
-        allDeclOps[i + 1]->moveAfter(allDeclOps[i]);
-    }
+    auto func = getOperation();
+    VPUIP::moveDeclarationsToTop(func);
 }
 
 }  // namespace

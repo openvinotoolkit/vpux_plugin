@@ -9,6 +9,7 @@
 #include "vpux/compiler/dialect/IE/utils/handle_kernels_utils.hpp"
 #include "vpux/compiler/dialect/IE/utils/reduce_infer.hpp"
 #include "vpux/compiler/dialect/VPU/utils/max_kernel_size_utils.hpp"
+#include "vpux/compiler/dialect/VPU/utils/nce_reduce_utils.hpp"
 #include "vpux/compiler/dialect/const/utils/utils.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
@@ -412,6 +413,17 @@ void ConvertReduceToPoolingPass::safeRunOnFunc() {
     auto func = getOperation();
 
     const auto isLegalOp = [&](mlir::Operation* op) {
+        const auto logCb = [&](const formatv_object_base& msg) {
+            _log.trace("{0}", msg.str());
+        };
+
+        /*To do: remove this check and implement E#129361*/
+        if (mlir::isa<IE::ReduceMeanOp>(op)) {
+            if (VPU::isReduceOpSupportedOnNCE(op) && VPU::isNCEReduceSupported(op, logCb)) {
+                return true;
+            }
+        }
+
         const auto inputShape = getShape(op->getOperand(0)).raw();
         int64_t mergedDim = 1;
 

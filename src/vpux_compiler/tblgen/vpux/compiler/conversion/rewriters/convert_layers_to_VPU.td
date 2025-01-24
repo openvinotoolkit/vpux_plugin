@@ -1258,6 +1258,22 @@ def RewriteDetectionOutput :
         >;
 
 //
+// IE.Reverse -> VPU.Reverse
+//
+
+def createReverseOp :
+        NativeCodeCall<[{
+            $_builder.create<vpux::VPU::ReverseOp>(
+                $_loc, $0, $1, $2)
+        }]>;
+
+def RewriteReverse :
+        Pat<
+            (IE_ReverseOp $data, $axis, $axis_value, $mode),
+            (createReverseOp $data, $axis_value, $mode)
+        >;
+
+//
 // IE.ScaleShift -> VPU.ScaleShift
 //
 
@@ -1287,7 +1303,7 @@ def createUpsamplingOp :
 
 def RewriteUpsampling :
         Pat<
-            (IE_UpsamplingOp $input, $upsampling_factor, $pad),
+            (IE_UpsamplingOp $input, $upsampling_factor, $pad, $output_channels),
             (createUpsamplingOp $input, $upsampling_factor, $pad)
         >;
 
@@ -1393,13 +1409,13 @@ def createPadOp :
                 $1.size() == 1 ? $1[0] : nullptr,
                 $2.size() == 1 ? $2[0] : nullptr,
                 $3.size() == 1 ? $3[0] : nullptr,
-                $4, $5, $6, $7)
+                $4, $5, $6, $7, $8)
         }]>;
 
 def RewritePad :
         Pat<
-            (IE_PadOp $input, $pads_begin, $pads_end, $pad_value, $pads_begin_attr, $pads_end_attr, $pad_value_attr, $mode),
-            (createPadOp $input, $pads_begin, $pads_end, $pad_value, $pads_begin_attr, $pads_end_attr, $pad_value_attr, $mode)
+            (IE_PadOp $input, $pads_begin, $pads_end, $pad_value, $pads_begin_attr, $pads_end_attr, $pad_value_attr, $mode, $output_channels),
+            (createPadOp $input, $pads_begin, $pads_end, $pad_value, $pads_begin_attr, $pads_end_attr, $pad_value_attr, $mode, $output_channels)
         >;
 
 //
@@ -2115,6 +2131,21 @@ def RewriteShapeOf :
         >;
 
 //
+// IE.Range -> VPU.Range
+//
+
+def createRangeOp :
+        NativeCodeCall<[{
+            $_builder.create<vpux::VPU::RangeOp>($_loc, $0, $1, $2, $3)
+        }]>;
+
+def RewriteRange :
+        Pat<
+            (IE_RangeOp $start, $stop, $step, $dstElemType),
+            (createRangeOp $start, $stop, $step, $dstElemType)
+        >;
+
+//
 // IE.NonZero -> VPU.NonZero
 //
 
@@ -2170,6 +2201,34 @@ def RewriteDeformableConvolution :
         Pat<
             (IE_DeformableConvolutionOp $input, $offset, $kernel, $mask, $strides, $pads_begin, $pads_end, $dilations, $group, $deformable_group, $biliniar_interpolate_pad),
             (createDeformableConvolutionOp $input, $offset, $kernel, $mask, $strides, $pads_begin, $pads_end, $dilations, $group, $deformable_group, $biliniar_interpolate_pad)
+        >;
+
+//
+// IE.DynamicExpandOp -> VPU.DynamicExpandOp
+//
+
+def RewriteDynamicExpandOp :
+        Pat<
+            (IE_DynamicExpandOp $input),
+            (VPU_DynamicExpandOp $input)
+        >;
+
+//
+// IE.DynamicDequantizeOp -> VPU.DynamicDequantizeOp
+//
+
+def createDynamicDequantizeOp :
+        NativeCodeCall<[{
+            $_builder.create<vpux::VPU::DynamicDequantizeOp>(
+                $_loc, $0, $1,
+                $2.size() == 1 ? $2[0] : nullptr,
+                $3)
+        }]>;
+
+def RewriteDynamicDequantizeOp :
+        Pat<
+            (IE_DynamicDequantizeOp $input, $scale, $zp, $dstElemType),
+            (createDynamicDequantizeOp $input, $scale, $zp, $dstElemType)
         >;
 
 #endif

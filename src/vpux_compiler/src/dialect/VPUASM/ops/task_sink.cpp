@@ -17,11 +17,11 @@ void VPUASM::TaskSinkOp::serialize(elf::writer::BinaryDataSection<uint8_t>&) {
     return;
 }
 
-size_t VPUASM::TaskSinkOp::getBinarySize() {
+size_t VPUASM::TaskSinkOp::getBinarySize(VPU::ArchKind) {
     return sizeof(uint32_t);
 }
 
-size_t VPUASM::TaskSinkOp::getAlignmentRequirements() {
+size_t VPUASM::TaskSinkOp::getAlignmentRequirements(VPU::ArchKind) {
     return sizeof(uint32_t);
 }
 

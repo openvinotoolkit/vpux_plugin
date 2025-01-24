@@ -22,3 +22,7 @@ endif()
 if (ENABLE_NPU_FUZZ_TESTS)
     add_subdirectory(fuzz)
 endif()
+
+if (ENABLE_NPU_MICRO_BENCHMARKS AND ENABLE_MLIR_COMPILER)
+    add_subdirectory(micro_bechmarks)
+endif()

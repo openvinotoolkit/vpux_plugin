@@ -98,9 +98,9 @@ func.func @main(%1: memref<1x1x1x1000xsi32>, %2: memref<1x1x1x1000xsi32>, %3: me
 //CHECK-NOT: VPURT.Task
 //CHECK-NEXT: %[[VAL5:.*]] = VPUMI40XX.NNDMA {port = 0 : i64} inputs(%[[VAL6:.*]] : memref<1x1x1x1000xsi32>) outputs(%[[VAL0]] : memref<1x1x1x1000xsi32, [@CMX_NN, 0]>) updates(%[[VAL3]] : !VPURegMapped.Index<0:0:0>) start_after(0) clean_after(0) acceleration_mode(<DISABLE>){{.*}}-> !VPURegMapped.Index<0:0:0>
 //CHECK-NEXT: %[[VAL7:.*]] = VPUMI40XX.NNDMA {port = 0 : i64} inputs(%[[VAL8:.*]] : memref<1x1x1x1000xsi32>) outputs(%[[VAL1]] : memref<1x1x1x1000xsi32, [@CMX_NN, 0]>) previousDMA(%[[VAL5]] : !VPURegMapped.Index<0:0:0>) updates(%[[VAL3]] : !VPURegMapped.Index<0:0:0>) start_after(0) clean_after(0) acceleration_mode(<DISABLE>){{.*}}-> !VPURegMapped.Index<0:0:1>
-//CHECK-NEXT: %[[VAL9:.*]] = VPUMI40XX.DeclareKernelText kernel_path([[VAL10:.*]]) -> !VPURegMapped.Index<0:0:0>
-//CHECK-NEXT: %[[VAL11:.*]] = VPUMI40XX.DeclareKernelEntry kernel_path([[VAL10]]) -> !VPURegMapped.Index<0:0:0>
-//CHECK-NEXT: %[[VAL12:.*]] = VPUMI40XX.DeclareKernelArgs kernel_path([[VAL10]]) -> !VPURegMapped.Index<0:0:0>
+//CHECK-DAG: %[[VAL9:.*]] = VPUMI40XX.DeclareKernelText kernel_path([[VAL10:.*]]) -> !VPURegMapped.Index<0:0:0>
+//CHECK-DAG: %[[VAL11:.*]] = VPUMI40XX.DeclareKernelEntry kernel_path([[VAL10]]) -> !VPURegMapped.Index<0:0:0>
+//CHECK-DAG: %[[VAL12:.*]] = VPUMI40XX.DeclareKernelArgs kernel_path([[VAL10]]) -> !VPURegMapped.Index<0:0:0>
 //CHECK-NEXT: %[[VAL13:.*]] = VPUMI40XX.ActKernelRange kernel_text_index(%[[VAL9]] : !VPURegMapped.Index<0:0:0>) kernel_args_index(%[[VAL12]] : !VPURegMapped.Index<0:0:0>) kernel_entry_index(%[[VAL11]] : !VPURegMapped.Index<0:0:0>) kernelTaskType(@COMPUTE) -> !VPURegMapped.Index<0:0:0>
 //CHECK-NEXT: %[[VAL14:.*]] = VPUMI40XX.KernelParams inputs(%[[VAL0]], %[[VAL1]] : memref<1x1x1x1000xsi32, [@CMX_NN, 0]>, memref<1x1x1x1000xsi32, [@CMX_NN, 0]>) outputs(%[[VAL2]] : memref<1x1x1x1000xsi32, [@CMX_NN, 0]>) kernel_type([[VAL10]]) kernel_params({{.*}}) -> !VPURegMapped.Index<0:0:0>
 //CHECK-NEXT: %[[VAL15:.*]] = VPUMI40XX.ActKernelInvocation range_index(%[[VAL13]] : <0:0:0>) kernel_params(%[[VAL14]] : <0:0:0>) waits(%[[VAL3]] : !VPURegMapped.Index<0:0:0>) updates(%[[VAL4]] : !VPURegMapped.Index<0:0:1>) tile(0) start_after(0) clean_after(0) -> !VPURegMapped.Index<0:0:0>

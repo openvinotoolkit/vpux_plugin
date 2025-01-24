@@ -212,14 +212,16 @@ void updateNceOps(NCEClusterTaskOp nceOp, DenseMap<NCEClusterTaskOp, NceOpOutput
             outSparsityMapType, profilingOutputType, nceOp.getInput(), nceOp.getInputSparsityMap(),
             nceOp.getInputStorageElementTable(), nceOp.getWeights(), nceOp.getWeightsSparsityMap(),
             nceOp.getWeightTable(),
-            /*instruction_list_table*/ nullptr, /*str_lookup_table=*/nullptr, nceOp.getParentInput(),
-            nceOp.getParentInputSparsityMap(), nceOp.getParentInputStorageElementTable(), output, outSparsityMap,
-            mlir::ValueRange(newOutputItis), output, outSparsityMap, nceOp.getProfilingData(), nceOp.getTaskType(),
-            nceOp.getKernelSizeAttr(), nceOp.getKernelStridesAttr(), nceOp.getKernelPaddingAttr(),
+            /*spr_lookup_table=*/nullptr, nceOp.getParentInput(), nceOp.getParentInputSparsityMap(),
+            nceOp.getParentInputStorageElementTable(), output, outSparsityMap, mlir::ValueRange(newOutputItis), output,
+            outSparsityMap, nceOp.getProfilingData(),
+            /*max_per_xy=*/nullptr, /*min_per_xy=*/nullptr, /*min_max_per_tensor=*/mlir::ValueRange(),
+            nceOp.getTaskType(), nceOp.getKernelSizeAttr(), nceOp.getKernelStridesAttr(), nceOp.getKernelPaddingAttr(),
             nceOp.getIsContinuedAttr(), nceOp.getCmSpPatternAttr(),
             /*is_segmented*/ nullptr, nceOp.getOutChannelOffsetAttr(), nceOp.getInputChannelsCompressionAttr(),
-            nceOp.getIsSuperdenseAttr(), nceOp.getIsInplaceAttr(), nceOp.getInputSeSizeAttr(),
-            nceOp.getOutputSeSizeAttr());
+            nceOp.getIsZeroOffsetWeightsTableAttr(), nceOp.getIsSuperdenseAttr(), nceOp.getIsInplaceAttr(),
+            nceOp.getInputSeSizeAttr(), nceOp.getOutputSeSizeAttr(), nceOp.getIsPermuteQuantizeAttr(),
+            nceOp.getIsSmallKernelOptimizedAttr());
     if (auto profMetadata = nceOp.getProfilingMetadataAttr()) {
         updatedNceOp.setProfilingMetadataAttr(profMetadata);
     }

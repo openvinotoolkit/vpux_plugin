@@ -4,6 +4,7 @@
 //
 
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
+#include "vpux/compiler/dialect/IE/utils/dynamic_shape_utils.hpp"
 #include "vpux/compiler/utils/attributes_utils.hpp"
 #include "vpux/utils/core/checked_cast.hpp"
 
@@ -40,14 +41,41 @@ mlir::OpFoldResult vpux::IE::SoftMaxOp::fold(FoldAdaptor) {
 
     VPUX_THROW_UNLESS(axis >= 0 && axis < inRank, "Wrong SoftMax axis {0}", axis);
 
+    // Avoid folding to Constant with dynamic shape
+    if (hasDynamicTensors(getOperation())) {
+        return nullptr;
+    }
+
     if (inShape[axis] > 1) {
         return nullptr;
     }
 
     const auto valueType = mlir::RankedTensorType::get(inShape, mlir::Float32Type::get(getContext()));
-    return Const::ContentAttr::transform(mlir::DenseElementsAttr::get(valueType, 1.0f))
-            .castElemType(getOutput().getType().cast<mlir::ShapedType>().getElementType())
-            .get();
+    return Const::ContentAttr::get(mlir::DenseElementsAttr::get(valueType, 1.0f),
+                                   Const::ContentSetup(valueType).castElemType(
+                                           getOutput().getType().cast<mlir::ShapedType>().getElementType()));
+}
+
+mlir::LogicalResult vpux::IE::SoftMaxOp::reifyResultShapes(mlir::OpBuilder& builder,
+                                                           mlir::ReifiedRankedShapedTypeDims& reifiedReturnShapes) {
+    auto loc = getLoc();
+    auto input = getInput();
+    auto inputType = mlir::cast<mlir::RankedTensorType>(input.getType());
+    auto rank = inputType.getRank();
+
+    SmallVector<mlir::OpFoldResult> dims;
+    for (auto i : irange(rank)) {
+        if (inputType.isDynamicDim(i)) {
+            auto dim = builder.createOrFold<mlir::tensor::DimOp>(loc, input, i);
+            dims.push_back(dim);
+        } else {
+            auto dim = builder.getIndexAttr(inputType.getDimSize(i));
+            dims.push_back(dim);
+        }
+    }
+
+    reifiedReturnShapes.emplace_back(std::move(dims));
+    return mlir::success();
 }
 
 //

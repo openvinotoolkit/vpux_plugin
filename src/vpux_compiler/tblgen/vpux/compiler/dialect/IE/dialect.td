@@ -70,11 +70,6 @@ IE.TileResource 4 of @NCE {
 IE.ExecutorResource 1 of @DMA_NN
 
 IE.MemoryResource 31457280 bytes of @DDR {VPUIP.bandwidth = 8 : i64, VPUIP.derateFactor = 6.000000e-01 : f64}
-
-module @UsedMemory : {
-    IE.MemoryResource 2048 bytes of @DDR
-    IE.MemoryResource 1048576 bytes of @CMX_NN
-}
 ```
 
 The `IE.ExecutorResource` and `IE.MemoryResource` are added by underlying low-level dialect to provide information about HW-specific resources.
@@ -95,6 +90,7 @@ The `IE.ExecutorResource` and `IE.MemoryResource` are added by underlying low-le
 
     let extraClassDeclaration = [{
         void registerAttributes();
+        static void setupExtraInterfaces(mlir::DialectRegistry& registry);
     }];
 
     let hasConstantMaterializer = 1;

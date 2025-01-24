@@ -52,12 +52,20 @@ def VPUIPDPU_DPUInvariantOp :
 
         OptionalAttr<SymbolRefAttr>:$weights,
         OptionalAttr<SymbolRefAttr>:$weights_sparsity_map,
+
         OptionalAttr<SymbolRefAttr>:$weight_table,
+        OptionalAttr<SymbolRefAttr>:$weight_table_scale,
+
         OptionalAttr<SymbolRefAttr>:$spr_lookup_table,
 
         OptionalAttr<SymbolRefAttr>:$output,
         OptionalAttr<SymbolRefAttr>:$output_sparsity_map,
         OptionalAttr<SymbolRefAttr>:$profiling_data,
+        UnitAttr:$is_zero_offset_weights_table,
+
+        OptionalAttr<SymbolRefAttr>:$max_per_xy,
+        OptionalAttr<SymbolRefAttr>:$min_per_xy,
+        OptionalAttr<SymbolRefArrayAttr>:$min_max_per_tensor,
 
         VPUIP_NCETaskTypeAttr:$nce_task_type,
         UnitAttr:$is_continued
@@ -99,7 +107,14 @@ def VPUIPDPU_DPUVariantOp :
         SymbolRefAttr:$invariant_task_location,
 
         OptionalAttr<SymbolRefAttr>:$weights,
+
         OptionalAttr<SymbolRefAttr>:$weight_table,
+        OptionalAttr<SymbolRefAttr>:$weight_table_data_ptr,
+        OptionalAttr<SymbolRefAttr>:$weight_table_sp_ptr,
+        OptionalAttr<SymbolRefAttr>:$weight_table_scale,
+        OptionalAttr<SymbolRefAttr>:$weight_table_bias,
+        OptionalAttr<SymbolRefAttr>:$weight_zero_points,
+
         VPUIP_NCETaskTypeAttr:$nce_task_type,
         OptionalAttr<IntAttr>:$workload_id
     );

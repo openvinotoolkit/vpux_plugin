@@ -9,9 +9,9 @@
 namespace vpux {
 namespace vpumi40xx2vpuasm {
 
-mlir::LogicalResult DeclareTaskAddrBuffRewriter::symbolize(VPURegMapped::DeclareTaskAddrBufferOp op,
-                                                           SymbolMapper& mapper,
-                                                           mlir::ConversionPatternRewriter& rewriter) const {
+mlir::FailureOr<SymbolizationResult> DeclareTaskAddrBuffRewriter::symbolize(
+        VPURegMapped::DeclareTaskAddrBufferOp op, SymbolMapper& mapper,
+        mlir::ConversionPatternRewriter& rewriter) const {
     mlir::MLIRContext* ctx = rewriter.getContext();
     auto result = op.getResult();
     auto symNameIt = mapper.find(result);
@@ -35,10 +35,10 @@ mlir::LogicalResult DeclareTaskAddrBuffRewriter::symbolize(VPURegMapped::Declare
 
     // TODO: E101726
     auto taskType = VPURegMapped::TaskType::DPUVariant;
-    rewriter.create<VPUASM::DeclareTaskAddrBufOp>(op.getLoc(), symName, first, last, bufferType, taskType);
+    auto newOp = rewriter.create<VPUASM::DeclareTaskAddrBufOp>(op.getLoc(), symName, first, last, bufferType, taskType);
     rewriter.eraseOp(op);
 
-    return mlir::success();
+    return SymbolizationResult(newOp);
 }
 
 llvm::SmallVector<mlir::FlatSymbolRefAttr> DeclareTaskAddrBuffRewriter::getSymbolicNames(

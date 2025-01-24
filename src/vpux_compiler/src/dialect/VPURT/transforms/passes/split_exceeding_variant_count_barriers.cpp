@@ -62,7 +62,7 @@ void SplitExceedingVariantCountBarriersPass::safeRunOnFunc() {
     VPUX_THROW_UNLESS(barrierInfo.verifyControlGraphSplit(), "Encountered split of control graph is incorrect");
     barrierInfo.clearAttributes();
     VPURT::postProcessBarrierOps(func);
-    VPURT::verifyBarrierSlots(func, _log);
+    VPUX_THROW_UNLESS(VPURT::verifyBarrierSlots(func, _log), "Barrier slot count check failed");
 }
 
 }  // namespace

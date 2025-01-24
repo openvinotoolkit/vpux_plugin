@@ -46,7 +46,7 @@ bool vpux::IE::isSupportedNearestNCEInterpolate(IE::InterpolateOp interpolateOp,
         (outShape[Dims4D::Act::W] > inputShape[Dims4D::Act::W]) &&
         (outShape[Dims4D::Act::H] > inputShape[Dims4D::Act::H]) &&
         VPU::NCEInterpolateOp::isSupported(interpolateOp, logCb, /*checkLayout=*/false,
-                                           /*checkChannelAlignment=*/false)) {
+                                           /*checkChannelAlignment=*/false, /*checkBatch=*/false)) {
         return true;
     }
 
@@ -182,6 +182,15 @@ mlir::FailureOr<mlir::Type> vpux::IE::inferElemTypeAffineReshape(AffineReshapeOp
 
     if (outQAxis == -1) {
         return mlir::failure();
+    }
+
+    if (const auto perAxisQuantileQType = inputElemType.dyn_cast_or_null<mlir::quant::QuantileQuantizedPerAxisType>()) {
+        return mlir::quant::QuantileQuantizedPerAxisType::get(
+                perAxisQuantileQType.getFlags(), perAxisQuantileQType.getStorageType(),
+                perAxisQuantileQType.getQuantileType(), perAxisQuantileQType.getExpressedType(),
+                perAxisQuantileQType.getQuantiles(), perAxisQuantileQType.getScales(),
+                perAxisQuantileQType.getZeroPoints(), static_cast<int32_t>(outQAxis),
+                perAxisQuantileQType.getStorageTypeMin(), perAxisQuantileQType.getStorageTypeMax());
     }
 
     return mlir::quant::UniformQuantizedPerAxisType::get(
@@ -409,6 +418,15 @@ mlir::Type vpux::IE::inferElemTypeReorder(IE::ReorderOpAdaptor reorder, mlir::Ty
 
     const auto outAxis = DimsOrder::fromAffineMap(memPerm).toPermutation()[inputAxis];
 
+    if (const auto perAxisQuantileQType = inputElemType.dyn_cast_or_null<mlir::quant::QuantileQuantizedPerAxisType>()) {
+        return mlir::quant::QuantileQuantizedPerAxisType::get(
+                perAxisQuantileQType.getFlags(), perAxisQuantileQType.getStorageType(),
+                perAxisQuantileQType.getQuantileType(), perAxisQuantileQType.getExpressedType(),
+                perAxisQuantileQType.getQuantiles(), perAxisQuantileQType.getScales(),
+                perAxisQuantileQType.getZeroPoints(), outAxis.ind(), perAxisQuantileQType.getStorageTypeMin(),
+                perAxisQuantileQType.getStorageTypeMax());
+    }
+
     return mlir::quant::UniformQuantizedPerAxisType::get(
             perAxisQType.getFlags(), perAxisQType.getStorageType(), perAxisQType.getExpressedType(),
             perAxisQType.getScales(), perAxisQType.getZeroPoints(), outAxis.ind(), perAxisQType.getStorageTypeMin(),
@@ -427,6 +445,15 @@ mlir::Type vpux::IE::inferElemTypeTranspose(mlir::AffineMap map, mlir::Type inpu
 
     const auto origAxis = perAxisQType.getQuantizedDimension();
     const auto newAxis = DimsOrder::fromAffineMap(map).dimPos(Dim(origAxis));
+
+    if (const auto perAxisQuantileQType = inputElemType.dyn_cast_or_null<mlir::quant::QuantileQuantizedPerAxisType>()) {
+        return mlir::quant::QuantileQuantizedPerAxisType::get(
+                perAxisQuantileQType.getFlags(), perAxisQuantileQType.getStorageType(),
+                perAxisQuantileQType.getQuantileType(), perAxisQuantileQType.getExpressedType(),
+                perAxisQuantileQType.getQuantiles(), perAxisQuantileQType.getScales(),
+                perAxisQuantileQType.getZeroPoints(), newAxis, perAxisQuantileQType.getStorageTypeMin(),
+                perAxisQuantileQType.getStorageTypeMax());
+    }
 
     return mlir::quant::UniformQuantizedPerAxisType::get(
             perAxisQType.getFlags(), perAxisQType.getStorageType(), perAxisQType.getExpressedType(),

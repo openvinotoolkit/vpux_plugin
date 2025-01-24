@@ -101,7 +101,8 @@ public:
                                                           ArrayRef<int64_t> kernelShape) const override;
 
 private:  // methods
-    vpux::VPU::PPEIntAttr castToConcreteAttr(PPEAttr opaqueAttr) const;
+    // casts opaque PPE attributes to the type expected by this factory
+    vpux::VPU::PPEIntAttr castToConcreteAttr(PPEAttr ppeAttr) const;
 
     void applyStaticScale(mlir::Operation* op, AttrBuilder& builder) const;
     void configureAttrForAvgPool(mlir::Operation* operation, AttrBuilder& builder) const;

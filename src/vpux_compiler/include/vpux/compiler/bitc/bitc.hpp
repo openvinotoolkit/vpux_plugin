@@ -12,7 +12,7 @@ namespace vpux::bitc {
 enum class ArchType : uint32_t { NPU27, NPU4 };
 
 struct BitCompactorConfig {
-    ArchType arch_type;  // NPU37XX / NPU40XX
+    ArchType arch_type;  // NPU27 / NPU4
     bool weight_compress_enable{true};
     bool bypass_compression{false};
     bool mode_fp16_enable{false};  // NPU40XX

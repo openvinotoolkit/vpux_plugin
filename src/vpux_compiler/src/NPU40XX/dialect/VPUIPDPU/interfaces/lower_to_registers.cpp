@@ -108,14 +108,31 @@ void lowerToRegBarrierCfgOpWithDPUInvariantParent(
 void lowerToRegBarrierCfgOpWithDPUVariantParent(
         VPUIPDPU::DPUVariantOp& dpuVariantOp,
         std::map<std::string, std::map<std::string, vpux::VPURegMapped::RegFieldValue>>& initValues) {
+    // TODO: E146560 - use barrierCfgOps only in variants that need to update barriers
+    auto taskListCfgOps = to_small_vector(dpuVariantOp.getRegion().getOps<VPUIPDPU::DPUGroupOp>());
     auto barrierCfgOps = to_small_vector(dpuVariantOp.getRegion().getOps<VPUIPDPU::BarrierCfgOp>());
-    if (barrierCfgOps.size() == 1) {
+
+    if (barrierCfgOps.size() == 1 && taskListCfgOps.size() == 1) {
+        auto taskListCfgOp = taskListCfgOps[0];
+        auto variantCount = taskListCfgOp.getVariantCount();
+        bool isFirstVariant = taskListCfgOp.getIsFirstVariant() || (variantCount == 1);
+        bool isLastVariant = taskListCfgOp.getIsLastVariant() || (variantCount == 1);
         auto barrierCfgOp = barrierCfgOps[0];
 
-        uint64_t prodMaskLo = vpux::VPUMI40XX::computeMaskLo(barrierCfgOp.getUpdateBarriers());
-        uint64_t prodMaskHi = vpux::VPUMI40XX::computeMaskHi(barrierCfgOp.getUpdateBarriers());
-        uint64_t consMaskLo = vpux::VPUMI40XX::computeMaskLo(barrierCfgOp.getWaitBarriers());
-        uint64_t consMaskHi = vpux::VPUMI40XX::computeMaskHi(barrierCfgOp.getWaitBarriers());
+        uint64_t prodMaskLo = 0;
+        uint64_t prodMaskHi = 0;
+        uint64_t consMaskLo = 0;
+        uint64_t consMaskHi = 0;
+
+        if (isFirstVariant) {
+            consMaskLo = vpux::VPUMI40XX::computeMaskLo(barrierCfgOp.getWaitBarriers());
+            consMaskHi = vpux::VPUMI40XX::computeMaskHi(barrierCfgOp.getWaitBarriers());
+        }
+
+        if (isLastVariant) {
+            prodMaskLo = vpux::VPUMI40XX::computeMaskLo(barrierCfgOp.getUpdateBarriers());
+            prodMaskHi = vpux::VPUMI40XX::computeMaskHi(barrierCfgOp.getUpdateBarriers());
+        }
 
         VPURegMapped::updateRegMappedInitializationValues(initValues, {{"cbarrier_hi", {{"cbarrier_hi", consMaskHi}}},
                                                                        {"cbarrier_lo", {{"cbarrier_lo", consMaskLo}}},
@@ -155,6 +172,13 @@ void vpux::VPUIPDPU::IDUBinaryConfigOp::lowerToRegisters(
         std::map<std::string, std::map<std::string, vpux::VPURegMapped::RegFieldValue>>& initValues) {
     VPURegMapped::updateRegMappedInitializationValues(initValues, {
                                                                           {"offset_addr", {{"bin_cfg", 1}}},
+                                                                  });
+}
+
+void vpux::VPUIPDPU::ForceInvReadOp::lowerToRegisters(
+        std::map<std::string, std::map<std::string, vpux::VPURegMapped::RegFieldValue>>& initValues) {
+    VPURegMapped::updateRegMappedInitializationValues(initValues, {
+                                                                          {"var_cfg", {{"invar_lptr_force", 1}}},
                                                                   });
 }
 
@@ -263,6 +287,23 @@ using RegistersIDUWeightsOp = struct RegistersIDUWeightsOp {
     using TRegField_wmodeType = NPUReg40XX::RegField_wmodeType;
     using TRegField_wt_denseType = NPUReg40XX::RegField_wt_denseType;
     using TRegField_pool_wt_dataType = NPUReg40XX::RegField_pool_wt_dataType;
+    using TRegField_wt_plt_cfgType = NPUReg40XX::RegField_wt_plt_cfgType;
+    using TRegField_plt_idx_0Type = NPUReg40XX::RegField_plt_idx_0Type;
+    using TRegField_plt_idx_1Type = NPUReg40XX::RegField_plt_idx_1Type;
+    using TRegField_plt_idx_2Type = NPUReg40XX::RegField_plt_idx_2Type;
+    using TRegField_plt_idx_3Type = NPUReg40XX::RegField_plt_idx_3Type;
+    using TRegField_plt_idx_4Type = NPUReg40XX::RegField_plt_idx_4Type;
+    using TRegField_plt_idx_5Type = NPUReg40XX::RegField_plt_idx_5Type;
+    using TRegField_plt_idx_6Type = NPUReg40XX::RegField_plt_idx_6Type;
+    using TRegField_plt_idx_7Type = NPUReg40XX::RegField_plt_idx_7Type;
+    using TRegField_plt_idx_8Type = NPUReg40XX::RegField_plt_idx_8Type;
+    using TRegField_plt_idx_9Type = NPUReg40XX::RegField_plt_idx_9Type;
+    using TRegField_plt_idx_10Type = NPUReg40XX::RegField_plt_idx_10Type;
+    using TRegField_plt_idx_11Type = NPUReg40XX::RegField_plt_idx_11Type;
+    using TRegField_plt_idx_12Type = NPUReg40XX::RegField_plt_idx_12Type;
+    using TRegField_plt_idx_13Type = NPUReg40XX::RegField_plt_idx_13Type;
+    using TRegField_plt_idx_14Type = NPUReg40XX::RegField_plt_idx_14Type;
+    using TRegField_plt_idx_15Type = NPUReg40XX::RegField_plt_idx_15Type;
     using TTensorModeAcceptedRegisters = TensorModeAcceptedRegisters;
 };
 

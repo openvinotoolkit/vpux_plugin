@@ -191,10 +191,7 @@ func.func @UseDequantize() -> tensor<1x3x30x30xf32> {
     return %0 : tensor<1x3x30x30xf32>
 
     // CHECK-DAG:       [[VAL0:%.*]] = const.Declare tensor<1x3x30x30x!qElemType> =
-    // CHECK-SAME:      dense<10> : tensor<1x3x30x30xui8
-    // CHECK-SAME:      #const.CastElemType<f32>
-    // CHECK-SAME:      #const.CastElemType<ui8>
-    // CHECK-SAME:      #const.CastElemType<!qElemType>
+    // CHECK-SAME:      dense<10> : tensor<1x3x30x30xui8>, [#const.CastElemType<!qElemType>]
 
     // CHECK:       [[VAL1:%.*]] = IE.Dequantize([[VAL0]])
     // CHECK-SAME:      {dstElemType = f32}
@@ -431,8 +428,8 @@ func.func @ConstantsSplitFakeQuant(%arg0: tensor<1x16x16x16xf16>) -> tensor<1x16
     %1 = IE.Convolution(%arg0, %0) {dilations = [1, 1], pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]} : tensor<1x16x16x16xf16>, tensor<16x16x1x1xf16> -> tensor<1x16x16x16xf16>
     return %1 : tensor<1x16x16x16xf16>
     // CHECK-NOT:       IE.FakeQuantize
-    // CHECK:       [[Q_CST:%.*]] = const.Declare tensor<16x16x1x1x!qElemType> = dense<1.270000e+02> : tensor<16x16x1x1xf16>,
-    // CHECK-SAME:      [#const.CastElemType<si8>, #const.CastElemType<!qElemType>]
+    // CHECK:       [[Q_CST:%.*]] = const.Declare tensor<16x16x1x1x!qElemType> = dense<1.000000e+00> : tensor<16x16x1x1xf16>,
+    // CHECK-SAME:      [#const.Quantize<!qElemType>, #const.CastElemType<!qElemType>]
     // CHECK:       [[DQ_CST:%.*]] = IE.Dequantize([[Q_CST]]) {dstElemType = f16}
     // CHECK:       [[CONV:%.*]] = IE.Convolution([[ARG0:%.*]], [[DQ_CST]])
     // CHECK:       return [[CONV]] : tensor<1x16x16x16xf16>
@@ -453,7 +450,7 @@ func.func @I4ConstantsSplitFakeQuant(%arg0: tensor<1x16x16x16xf16>) -> tensor<1x
     return %1 : tensor<1x16x16x16xf16>
     // CHECK-NOT:       IE.FakeQuantize
     // CHECK:       [[Q_CST:%.*]] = const.Declare tensor<16x16x1x1x!qElemType> = dense<0.000000e+00> : tensor<16x16x1x1xf16>,
-    // CHECK-SAME:      [#const.CastElemType<si4>, #const.CastElemType<!qElemType>]
+    // CHECK-SAME:      [#const.CastElemType<!qElemType>]
     // CHECK:       [[DQ_CST:%.*]] = IE.Dequantize([[Q_CST]]) {dstElemType = f16}
     // CHECK:       [[CONV:%.*]] = IE.Convolution([[ARG0:%.*]], [[DQ_CST]])
     // CHECK:       return [[CONV]] : tensor<1x16x16x16xf16>
@@ -462,6 +459,7 @@ func.func @I4ConstantsSplitFakeQuant(%arg0: tensor<1x16x16x16xf16>) -> tensor<1x
 // -----
 
 // CHECK:       !qElemType = !quant.uniform<i8:f16, 0.39215686274509803:127>
+// CHECK:       !qElemType1 = !quant.uniform<i8:f16, 1.000000e+00:127>
 // CHECK-LABEL: @BringConstIn8BitRepresentableFormat
 func.func @BringConstIn8BitRepresentableFormat() -> tensor<1x3x1x1xf16> {
     %cst = const.Declare tensor<1x1x1x1xf16> = dense<-1.000000e+02> : tensor<1x1x1x1xf16>
@@ -473,8 +471,8 @@ func.func @BringConstIn8BitRepresentableFormat() -> tensor<1x3x1x1xf16> {
 
     // CHECK-NOT:       IE.FakeQuantize
     // CHECK: [[Q_CST:%.*]] = const.Declare tensor<1x3x1x1x!qElemType> =
-    // CHECK-SAME{LITERAL}:      dense<[[[[5.800000e+01]], [[-1.230000e+02]], [[-1.030000e+02]]]]> : tensor<1x3x1x1xf16>,
-    // CHECK-SAME:      [#const.CastElemType<si8>, #const.CastElemType<!qElemType>]
+    // CHECK-SAME{LITERAL}:      dense<[[[-6.900000e+01]], [[-2.500000e+02]], [[-2.300000e+02]]]> : tensor<3x1x1xf32>
+    // CHECK-SAME:      [#const.CastElemType<f16>, #const.Reshape<[1, 3, 1, 1]>, #const.Quantize<!qElemType1>, #const.CastElemType<!qElemType>]
     // CHECK: [[DEQUANTIZE:%.*]] = IE.Dequantize([[Q_CST]]) {dstElemType = f16} : tensor<1x3x1x1x!qElemType> -> tensor<1x3x1x1xf16>
 
     //CHECK: return [[DEQUANTIZE]] : tensor<1x3x1x1xf16>
@@ -483,6 +481,7 @@ func.func @BringConstIn8BitRepresentableFormat() -> tensor<1x3x1x1xf16> {
 // -----
 
 // CHECK:       !qElemType = !quant.uniform<i8:f16, 0.0028435202205882352:127>
+// CHECK:       !qElemType1 = !quant.uniform<i8:f16, 1.000000e+00:127>
 // CHECK-LABEL: @BringConstIn8BitRepresentableFormatWithBroadcast
 func.func @BringConstIn8BitRepresentableFormatWithBroadcast() -> tensor<1x12x1x1xf16> {
     %cst_0 = const.Declare tensor<1x12x1x1xf16> = dense<2.300000e+02> : tensor<1xf32>, [#const.CastElemType<f16>, #const.Reshape<[1, 1, 1, 1]>, #const.Rescale<-1.000000e+00 : f64>, #const.Broadcast<1 : i64, 12 : i64>]
@@ -494,8 +493,8 @@ func.func @BringConstIn8BitRepresentableFormatWithBroadcast() -> tensor<1x12x1x1
 
     // CHECK-NOT:       IE.FakeQuantize
     // CHECK: [[Q_CST:%.*]] = const.Declare tensor<1x12x1x1x!qElemType> =
-    // CHECK-SAME:      dense<-1.030000e+02> : tensor<1x12x1x1xf16>,
-    // CHECK-SAME:      [#const.CastElemType<si8>, #const.CastElemType<!qElemType>]
+    // CHECK-SAME:      dense<2.300000e+02> : tensor<1xf32>
+    // CHECK-SAME:      [#const.CastElemType<f16>, #const.Reshape<[1, 1, 1, 1]>, #const.Rescale<-1.000000e+00 : f64>, #const.Broadcast<1 : i64, 12 : i64>, #const.Quantize<!qElemType1>, #const.CastElemType<!qElemType>]
     // CHECK: [[DEQUANTIZE:%.*]] = IE.Dequantize([[Q_CST]]) {dstElemType = f16} : tensor<1x12x1x1x!qElemType> -> tensor<1x12x1x1xf16>
     //CHECK: return [[DEQUANTIZE]] : tensor<1x12x1x1xf16>
 }
@@ -517,7 +516,7 @@ func.func @ConstantsSplitFakeQuantForMultiZP(%arg0: tensor<1x3x16x16xf16>) -> te
     return %1 : tensor<1x3x16x16xf16>
 
     // CHECK-NOT:   IE.FakeQuantize
-    // CHECK-DAG:   [[CST:%.*]] = const.Declare tensor<3x3x1x1xf16> = dense<9> : tensor<3x3x1x1xui8>, [#const.CastElemType<f16>, #const.CastElemType<si8>, #const.CastElemType<!qElemType>, #const.Dequantize]
+    // CHECK-DAG:   [[CST:%.*]] = const.Declare tensor<3x3x1x1xf16> = dense<9> : tensor<3x3x1x1xui8>, [#const.CastElemType<!qElemType>, #const.Dequantize]
     // CHECK:       [[CONV:%.*]] =  IE.Convolution(%arg0, [[CST]]) {dilations = [1, 1], pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]} : tensor<1x3x16x16xf16>, tensor<3x3x1x1xf16> -> tensor<1x3x16x16xf16>
 
     // CHECK:       return [[CONV]] : tensor<1x3x16x16xf16>
@@ -545,12 +544,13 @@ func.func @NonConstNoSplitFakeQuantForMultiZP(%arg0: tensor<1x3x16x16xf16>, %arg
 // -----
 
 // CHECK: !qElemType = !quant.uniform<i8:f16, 0.48553921568627451:127>
+// CHECK: !qElemType1 = !quant.uniform<i8:f16, 1.000000e+00:127>
 
 // CHECK-LABEL: @GarbageFq
 // CHECK-SAME: -> tensor<1x3x1x1xf16>
 func.func @GarbageFq() -> tensor<1x3x1x1xf16> {
     %data = const.Declare tensor<1x3x1x1xf16> = dense<[[[8]], [[249]], [[222]]]> : tensor<3x1x1xui8>,
-    [#const.Reshape<[1, 3, 1, 1]>, #const.CastElemType<f32>, #const.CastElemType<f16>,
+    [#const.Reshape<[1, 3, 1, 1]>, #const.CastElemType<f16>,
      #const.Rescale<-1.000000e+00 : f64>]
 
     %in_low = const.Declare tensor<1x1x1x1xf16> = dense<-2.550000e+02> : tensor<1x1x1x1xf16>
@@ -569,9 +569,65 @@ func.func @GarbageFq() -> tensor<1x3x1x1xf16> {
     return %fq_with_bad_input_range : tensor<1x3x1x1xf16>
 
     // CHECK: [[NEW_CONST:%.+]] = const.Declare tensor<1x3x1x1x!qElemType>
-    // CHECK-SAME{LITERAL}: dense<[[[[1.190000e+02]], [[-1.220000e+02]], [[-9.500000e+01]]]]>
-    // CHECK-SAME: [#const.CastElemType<si8>, #const.CastElemType<!qElemType>]
+    // CHECK-SAME{LITERAL}: dense<[[[8]], [[249]], [[222]]]>
+    // CHECK-SAME: [#const.Reshape<[1, 3, 1, 1]>, #const.CastElemType<f16>, #const.Rescale<-1.000000e+00 : f64>, #const.Quantize<!qElemType1>, #const.CastElemType<!qElemType>]
 
     // CHECK: [[DQ:%.+]] = IE.Dequantize([[NEW_CONST]]) {dstElemType = f16}
     // CHECK: return [[DQ]]
+}
+
+// -----
+
+{-#
+  dialect_resources: {
+    builtin: {
+      blob: "0x040000002222"
+    }
+  }
+#-}
+
+!quantFloatType = !QuantileFloat.quantileFloat<4, {-1.0, -0.8, -0.7, -0.6, -0.5, -0.4, -0.3, 0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 1.0}>
+
+// CHECK: !qElemType = !quant.quantile<i4:f16:f16, {-1.000000e+00,-8.000000e-01,-0.69999999999999996,-6.000000e-01,-5.000000e-01,-4.000000e-01,-3.000000e-01,0.000000e+00,1.000000e-01,2.000000e-01,3.000000e-01,4.000000e-01,5.000000e-01,6.000000e-01,0.69999999999999996,1.000000e+00}:0.02211761474609375>
+
+// CHECK-LABEL: @NF4ConstantsSplitFakeQuant
+// CHECK-SAME:  [[INPUT:%.+]]: tensor<1x1x28x28xf16>
+func.func @NF4ConstantsSplitFakeQuant(%arg0: tensor<1x1x28x28xf16>) -> tensor<1x1x29x29xf16> {
+    %cst = const.Declare tensor<1x1x1x1xf16> = dense<-8.000000e+00> : tensor<1x1x1x1xf16>
+    %cst_0 = const.Declare tensor<1x1x1x1xf16> = dense<7.000000e+00> : tensor<1x1x1x1xf16>
+    %cst_1 = const.Declare tensor<1x1x1x1xf16> = dense<-2.359010e-02> : tensor<1x1x1x1xf16>
+    %cst_2 = const.Declare tensor<1x1x1x1xf16> = dense<2.064510e-02> : tensor<1x1x1x1xf16>
+    %cst_3 = const.Declare tensor<1x1x2x2xf16> = dense_resource<blob> : tensor<1x1x2x2x!quantFloatType>, [#const.ConvertElemType<si8>, #const.CastElemType<f16>]
+    %0 = IE.FakeQuantize(%cst_3, %cst, %cst_0, %cst_1, %cst_2) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>, low_fp_type = !quantFloatType} : tensor<1x1x2x2xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16>, tensor<1x1x1x1xf16> -> tensor<1x1x2x2xf16>
+    %1 = IE.Convolution(%arg0, %0) {dilations = [1, 1], pads_begin = [1, 1], pads_end = [1, 1], strides = [1, 1]} : tensor<1x1x28x28xf16>, tensor<1x1x2x2xf16> -> tensor<1x1x29x29xf16>
+    return %1 : tensor<1x1x29x29xf16>
+
+    // CHECK-NOT:       IE.FakeQuantize
+    // CHECK: [[CST:%.+]] = const.Declare tensor<1x1x2x2x!qElemType> = dense_resource<blob> : tensor<1x1x2x2x!QuantileFloat.quantileFloat<4, {-1.000000e+00,-8.000000e-01,-0.69999999999999996,-6.000000e-01,-5.000000e-01,-4.000000e-01,-3.000000e-01,0.000000e+00,1.000000e-01,2.000000e-01,3.000000e-01,4.000000e-01,5.000000e-01,6.000000e-01,0.69999999999999996,1.000000e+00}>> isSplat, [#const.ConvertElemType<si8>, #const.CastElemType<!qElemType>]
+    // CHECK: [[DQ_CST:%.+]] = IE.Dequantize([[CST]]) {dstElemType = f16}
+    // CHECK: [[CONV:%.+]] = IE.Convolution([[INPUT]], [[DQ_CST]]) {dilations = [1, 1], pads_begin = [1, 1], pads_end = [1, 1], strides = [1, 1]} : tensor<1x1x28x28xf16>, tensor<1x1x2x2xf16> -> tensor<1x1x29x29xf16>
+    // CHECK: return [[CONV]]
+}
+
+// -----
+
+// CHECK: !qElemType = !quant.uniform<i8:f16:0, {-0.0010833141850490197,6.7138671875E-4,-6.371591605392157E-4}>
+
+// CHECK-LABEL: @NegativeScalesSplitFakeQuant
+// CHECK-SAME:      [[INPUT:%.+]]: tensor<1x3xf16>
+func.func @NegativeScalesSplitFakeQuant(%arg0: tensor<1x3xf16>) -> tensor<1x3xf16> {
+    %cst = const.Declare tensor<1x1xf16> = dense<-1.280000e+02> : tensor<1x1xf16>
+    %cst_0 = const.Declare tensor<1x1xf16> = dense<1.270000e+02> : tensor<1x1xf16>
+    %cst_1 = const.Declare tensor<3x1xf16> = dense<[[1.386720e-01], [-8.593750e-02], [8.154300e-02]]> : tensor<3x1xf16>
+    %cst_2 = const.Declare tensor<3x1xf16> = dense<[[-1.375730e-01], [8.526610e-02], [-8.093260e-02]]> : tensor<3x1xf16>
+    %cst_3 = const.Declare tensor<3x3xf16> = dense<[[64, 63, 112], [-8, 62, -8], [8, 63, 16]]> : tensor<3x3xsi8>, [#const.CastElemType<f16>]
+    %0 = IE.FakeQuantize(%cst_3, %cst, %cst_0, %cst_1, %cst_2) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>, levels = 256 : i64} : tensor<3x3xf16>, tensor<1x1xf16>, tensor<1x1xf16>, tensor<3x1xf16>, tensor<3x1xf16> -> tensor<3x3xf16>
+    %1 = IE.FullyConnected(%arg0, %0) : tensor<1x3xf16>, tensor<3x3xf16> -> tensor<1x3xf16>
+    return %1 : tensor<1x3xf16>
+
+    // CHECK: [[WT:%.+]] = const.Declare tensor<3x3x!qElemType>
+    // CHECK-SAME-LITERAL: dense<[[64, 63, 112], [-8, 62, -8], [8, 63, 16]]> : tensor<3x3xsi8>, [#const.CastElemType<!qElemType>]
+    // CHECK: [[DQ_WT:%.+]] = IE.Dequantize([[WT]]) {dstElemType = f16} : tensor<3x3x!qElemType> -> tensor<3x3xf16>
+    // CHECK: [[FC:%.+]] = IE.FullyConnected([[INPUT]], [[DQ_WT]]) : tensor<1x3xf16>, tensor<3x3xf16> -> tensor<1x3xf16>
+    // CHECK: return [[FC]] : tensor<1x3xf16>
 }

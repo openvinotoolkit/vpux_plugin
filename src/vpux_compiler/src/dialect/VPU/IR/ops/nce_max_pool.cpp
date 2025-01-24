@@ -1,8 +1,9 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
+#include "vpux/compiler/core/type_interfaces.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops_interfaces.hpp"
 #include "vpux/compiler/dialect/VPU/utils/const_utils.hpp"
@@ -13,11 +14,9 @@
 #include "vpux/compiler/core/layers.hpp"
 #include "vpux/compiler/core/tiling.hpp"
 #include "vpux/compiler/dialect/VPU/utils/generate_tiling.hpp"
-#include "vpux/compiler/dialect/VPU/utils/max_kernel_size_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_invariant.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_sparsity.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
-#include "vpux/compiler/utils/empty_node.hpp"
 #include "vpux/compiler/utils/error.hpp"
 
 #include "vpux/compiler/utils/infer_output_shape.hpp"
@@ -187,8 +186,6 @@ mlir::LogicalResult vpux::VPU::NCEMaxPoolOp::inferReturnTypes(mlir::MLIRContext*
         return mlir::failure();
     }
 
-    const auto inShape = getShape(op.getInput()).raw();
-
     const auto windowShape = parseIntArrayAttr<int64_t>(op.getKernelSize());
     const auto windowStrides = parseIntArrayAttr<int64_t>(op.getStrides());
 
@@ -199,15 +196,20 @@ mlir::LogicalResult vpux::VPU::NCEMaxPoolOp::inferReturnTypes(mlir::MLIRContext*
 
     const auto dataPaddingBelow = SmallVector<int64_t>({padTop, padLeft});
     const auto dataPaddingAbove = SmallVector<int64_t>({padBottom, padRight});
+    const auto inType = mlir::cast<NDTypeInterface>(op.getInput().getType());
+    const auto inShapeInfo = ShapeInfo::fromNDType(inType);
 
-    const auto shapeI64 =
-            inferMaxPoolOutputShape(inShape, windowStrides, dataPaddingBelow, dataPaddingAbove, windowShape);
+    const auto outShapeInfo =
+            inferMaxPoolOutputShape(inShapeInfo, windowStrides, dataPaddingBelow, dataPaddingAbove, windowShape);
 
-    auto inputType = mlir::cast<vpux::NDTypeInterface>(op.getInput().getType());
-    auto outputType =
-            mlir::RankedTensorType::get(shapeI64, inputType.getElementType(), createTensorAttrFromType(inputType));
+    auto outputShape = outShapeInfo.shape;
+    if (op.getOutputChannels().has_value()) {
+        outputShape[Dims4D::Act::C.ind()] = op.getOutputChannels().value();
+    }
 
-    inferredReturnTypes.push_back(outputType);
+    auto outType = mlir::RankedTensorType::get(outputShape, inType.getElementType(), createTensorAttrFromType(inType));
+
+    inferredReturnTypes.push_back(outType);
 
     return mlir::success();
 }

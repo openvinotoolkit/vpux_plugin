@@ -56,7 +56,7 @@ bool isIdentityPooling(ConcreteOp poolingOp) {
         return false;
     }
 
-    return poolingOp.getPostOpAttr() == nullptr;
+    return poolingOp.getPostOpAttr() == nullptr && poolingOp.getClampAttr() == nullptr;
 }
 
 mlir::Operation* createIdentityAvgPool(mlir::Value input, mlir::Type outType, mlir::PatternRewriter& rewriter,

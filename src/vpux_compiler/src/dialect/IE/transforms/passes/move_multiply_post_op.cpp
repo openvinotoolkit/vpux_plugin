@@ -3,14 +3,12 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
-#include <mlir/Transforms/DialectConversion.h>
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/IE/transforms/passes.hpp"
+#include "vpux/compiler/dialect/IE/utils/concat_utils.hpp"
 #include "vpux/compiler/dialect/IE/utils/const_attributes.hpp"
-#include "vpux/compiler/dialect/VPU/utils/const_utils.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
-#include "vpux/compiler/utils/types.hpp"
 
 using namespace vpux;
 
@@ -116,238 +114,128 @@ mlir::LogicalResult MoveMultiplyPostMatmul::matchAndRewrite(IE::MultiplyOp origO
     return mlir::success();
 }
 
-//
-// MoveMultiplyPostFC
-//
-
-class MoveMultiplyPostFC final : public mlir::OpRewritePattern<IE::MultiplyOp> {
+class MoveMultiplyPostConcat final : public mlir::OpRewritePattern<IE::ConcatOp> {
 public:
-    MoveMultiplyPostFC(mlir::MLIRContext* ctx, Logger log): mlir::OpRewritePattern<IE::MultiplyOp>(ctx), _log(log) {
-        setDebugName("MoveMultiplyPost");
+    MoveMultiplyPostConcat(mlir::MLIRContext* ctx, Logger log): mlir::OpRewritePattern<IE::ConcatOp>(ctx), _log(log) {
+        setDebugName("MoveMultiplyPostConcat");
     }
 
 public:
-    mlir::LogicalResult matchAndRewrite(IE::MultiplyOp multiplyOp, mlir::PatternRewriter& rewriter) const final;
+    mlir::LogicalResult matchAndRewrite(IE::ConcatOp origOp, mlir::PatternRewriter& rewriter) const final;
 
 private:
     Logger _log;
 };
 
-bool isMultiplyUsedForQuantization(IE::MultiplyOp multiplyOp) {
-    mlir::Value input = multiplyOp.getInput1();
-    while (input) {
-        auto inputBlock = mlir::dyn_cast_or_null<mlir::BlockArgument>(input);
-        if (inputBlock == nullptr) {
-            auto parentOp = input.getDefiningOp();
-            if (mlir::isa_and_nonnull<IE::ConvertOp, IE::SubtractOp>(parentOp)) {
-                input = parentOp->getOperand(0);
-                continue;
-            } else {
-                return false;
-            }
-        } else {
-            auto outType = mlir::cast<vpux::NDTypeInterface>(input.getType());
-            auto outElementType = outType.getElementType();
-            return outElementType.isInteger(8) || outElementType.isInteger(4) || outElementType.isUnsignedInteger(8) ||
-                   outElementType.isUnsignedInteger(4);
-        }
+// Reshape from 32x64 to 1x32x64
+bool isUnsqueezeLikeReshape(IE::ReshapeOp reshapeOp) {
+    SmallVector<int64_t> inShape(getShape(reshapeOp.getInput()).raw());
+    SmallVector<int64_t> outShape(getShape(reshapeOp.getOutput()).raw());
+    if (outShape.size() <= inShape.size()) {
+        return false;
     }
+    outShape.erase(outShape.begin(), outShape.begin() + outShape.size() - inShape.size());
 
-    return false;
+    return inShape == outShape;
 }
 
-mlir::LogicalResult MoveMultiplyPostFC::matchAndRewrite(IE::MultiplyOp multiplyOp,
-                                                        mlir::PatternRewriter& rewriter) const {
-    _log.trace("[{0}] Got multiply layer at '{1}'", multiplyOp->getName(), multiplyOp->getLoc());
+bool isOptimizableMultiplyOp(IE::MultiplyOp multiplyOp) {
+    auto leftInShape = getShape(multiplyOp.getInput1());
+    auto rightInShape = getShape(multiplyOp.getInput2());
+    auto outShape = getShape(multiplyOp.getOutput());
+    if (leftInShape != outShape || rightInShape != outShape) {
+        return false;
+    }
+
     if (multiplyOp.getPostOpAttr() != nullptr || multiplyOp.getClampAttr() != nullptr ||
         multiplyOp.getOutputChannelsAttr() != nullptr || multiplyOp.getInputChannelsAttr() != nullptr) {
-        return matchFailed(rewriter, multiplyOp, "multiply should not have extra attribute");
-    }
-
-    auto inputBlock = mlir::dyn_cast_or_null<mlir::BlockArgument>(multiplyOp.getInput2());
-    if (inputBlock == nullptr) {
-        return matchFailed(rewriter, multiplyOp, "second input of multiply is not a argument input");
-    }
-
-    if (!multiplyOp->hasOneUse()) {
-        return matchFailed(rewriter, multiplyOp, "multiply has multi users");
-    }
-
-    if (!isMultiplyUsedForQuantization(multiplyOp)) {
-        return matchFailed(rewriter, multiplyOp, "multiply is not used for quantization");
-    }
-
-    IE::FullyConnectedOp fcOp = nullptr;
-    auto convertOp = mlir::dyn_cast<IE::ConvertOp>(*multiplyOp->user_begin());
-    if (convertOp != nullptr && convertOp->hasOneUse()) {
-        fcOp = mlir::dyn_cast<IE::FullyConnectedOp>(*convertOp->user_begin());
-    } else {
-        fcOp = mlir::dyn_cast<IE::FullyConnectedOp>(*multiplyOp->user_begin());
-    }
-
-    // MultiplyOp need to be the weights of FC
-    if (fcOp == nullptr ||
-        (fcOp.getWeights().getDefiningOp() != convertOp && fcOp.getWeights().getDefiningOp() != multiplyOp)) {
-        return matchFailed(rewriter, multiplyOp, "multiply user is not FC");
-    }
-
-    auto fcOutShape = getShape(fcOp.getOutput());
-    auto scaleShape = getShape(multiplyOp.getInput2());
-    auto isChannelWiseQuant = [](ShapeRef shape) {
-        const auto greaterThanOne = [](auto dim) {
-            return dim > 1;
-        };
-        if (shape.size() != 2) {
-            return false;
-        }
-        if (llvm::count_if(shape.raw(), greaterThanOne) == 1) {
-            return true;
-        }
         return false;
-    };
-
-    if (!isChannelWiseQuant(scaleShape)) {
-        return matchFailed(rewriter, multiplyOp, "not channel wise quant");
     }
 
-    if (fcOutShape.raw().back() != scaleShape.raw().front()) {
-        return matchFailed(rewriter, multiplyOp, "scale shape doesn't match with FC output shape");
-    }
-
-    const auto memPerm = mlir::AffineMapAttr::get(
-            mlir::AffineMap::getPermutationMap(SmallVector<unsigned>{1, 0}, multiplyOp->getContext()));
-    auto transpose = rewriter.create<IE::TransposeOp>(appendLoc(multiplyOp->getLoc(), "_transpose"), inputBlock,
-                                                      nullptr, memPerm)
-                             .getOutput();
-    rewriter.setInsertionPointAfter(fcOp);
-    auto argMultiply = rewriter.create<IE::MultiplyOp>(appendLoc(multiplyOp->getLoc(), "_arg_multiply"),
-                                                       fcOp.getOutput(), transpose, multiplyOp.getAutoBroadcastAttr(),
-                                                       nullptr, nullptr, nullptr, nullptr);
-    fcOp.getOutput().replaceUsesWithIf(argMultiply.getOutput(), [&](mlir::OpOperand& opOperand) {
-        return opOperand.getOwner() != argMultiply;
-    });
-    rewriter.replaceOp(multiplyOp, multiplyOp.getInput1());
-
-    _log.trace("Successfully move multiply post FC for Argument input");
-    return mlir::success();
+    // In LLM, the optimization is only for KVcache, still need to keep multiply after FC/Matmul
+    // for prefill to get better performance.
+    return outShape.raw().front() == 1;
 }
 
-//
-// MoveMultiplySubtractPostGather
-//
+mlir::LogicalResult MoveMultiplyPostConcat::matchAndRewrite(IE::ConcatOp origOp,
+                                                            mlir::PatternRewriter& rewriter) const {
+    _log.trace("[{0}] Got Concat layer at '{1}'", origOp->getName(), origOp->getLoc());
 
-class MoveMultiplySubtractPostGather final : public mlir::OpRewritePattern<IE::GatherOp> {
-public:
-    MoveMultiplySubtractPostGather(mlir::MLIRContext* ctx, Logger log)
-            : mlir::OpRewritePattern<IE::GatherOp>(ctx), _log(log) {
-        setDebugName("MoveMultiplySubtractPostGather");
-    }
-
-public:
-    mlir::LogicalResult matchAndRewrite(IE::GatherOp gatherOp, mlir::PatternRewriter& rewriter) const final;
-
-private:
-    Logger _log;
-};
-
-mlir::LogicalResult MoveMultiplySubtractPostGather::matchAndRewrite(IE::GatherOp gatherOp,
-                                                                    mlir::PatternRewriter& rewriter) const {
-    _log.trace("Got '{0}' at '{1}' ..{2} ", gatherOp->getName(), gatherOp->getLoc(), &rewriter);
-
-    // benefit when gather output size is smaller than input size.
-    if (!isBeneficialToConvert(getShape(gatherOp.getInput()), getShape(gatherOp.getOutput()))) {
-        return matchFailed(rewriter, gatherOp, "not beneficial to do the convert");
-    }
-
-    if (gatherOp.getAxisValueAttr() != nullptr && gatherOp.getAxisValue().value() != 0) {
-        return matchFailed(rewriter, gatherOp, "axis need to be the first dim");
-    }
-
-    IE::MultiplyOp multiplyOp = nullptr;
-    IE::ConvertOp convertOpBeforeGather = mlir::dyn_cast_or_null<IE::ConvertOp>(gatherOp.getInput().getDefiningOp());
-    if (convertOpBeforeGather != nullptr) {
-        multiplyOp = mlir::dyn_cast_or_null<IE::MultiplyOp>(convertOpBeforeGather.getInput().getDefiningOp());
-    } else {
-        multiplyOp = mlir::dyn_cast_or_null<IE::MultiplyOp>(gatherOp.getInput().getDefiningOp());
-    }
-
-    if (multiplyOp == nullptr || multiplyOp.getPostOpAttr() != nullptr || multiplyOp.getClampAttr() != nullptr ||
-        multiplyOp.getOutputChannelsAttr() != nullptr || multiplyOp.getInputChannelsAttr() != nullptr) {
-        return matchFailed(rewriter, gatherOp, "not a required multiplyOp");
-    }
-
-    // multiply need to be used for quantization
-    if (!isMultiplyUsedForQuantization(multiplyOp)) {
-        return matchFailed(rewriter, multiplyOp, "multiply is not used for quantization");
-    }
-
-    if (mlir::dyn_cast<mlir::BlockArgument>(multiplyOp.getInput2()) == nullptr) {
-        return matchFailed(rewriter, gatherOp, "multiply input2 is not a block argument");
-    }
-
-    IE::SubtractOp subtractOp = nullptr;
-    IE::ConvertOp convertOpAfterInArg = nullptr;
-    convertOpAfterInArg = mlir::dyn_cast_or_null<IE::ConvertOp>(multiplyOp.getInput1().getDefiningOp());
-    if (convertOpAfterInArg == nullptr) {
-        subtractOp = mlir::dyn_cast_or_null<IE::SubtractOp>(multiplyOp.getInput1().getDefiningOp());
-        if (subtractOp == nullptr || subtractOp.getPostOpAttr() != nullptr || subtractOp.getClampAttr() != nullptr ||
-            subtractOp.getOutputChannelsAttr() != nullptr || subtractOp.getInputChannelsAttr() != nullptr) {
-            return matchFailed(rewriter, gatherOp, "not a required subtractOp");
+    auto ctx = origOp.getContext();
+    // if concat doesn't have static offst attr, then it is single axis concat
+    if (origOp.getStaticOffsetsAttr() != nullptr) {
+        auto axis = IE::getConcatModifiedAxis(origOp);
+        if (axis.size() > 1) {
+            return matchFailed(rewriter, origOp, "concat has multi axis");
         }
+    }
 
-        if (mlir::dyn_cast<mlir::BlockArgument>(subtractOp.getInput2()) == nullptr) {
-            return matchFailed(rewriter, gatherOp, "subtractOp input2 is not a block argument");
+    SmallVector<IE::MultiplyOp> multiplyOps;
+    SmallVector<IE::ReshapeOp> reshapeOps;
+    auto inputNums = origOp.getOperands().size();
+    for (auto input : origOp.getOperands()) {
+        if (auto reshapeOp = mlir::dyn_cast_or_null<IE::ReshapeOp>(input.getDefiningOp())) {
+            if (reshapeOp->hasOneUse() && isUnsqueezeLikeReshape(reshapeOp)) {
+                if (auto multiplyOp = mlir::dyn_cast_or_null<IE::MultiplyOp>(reshapeOp.getInput().getDefiningOp())) {
+                    reshapeOps.push_back(reshapeOp);
+                    multiplyOps.push_back(multiplyOp);
+                }
+            }
         }
-
-        convertOpAfterInArg = mlir::dyn_cast_or_null<IE::ConvertOp>(subtractOp.getInput1().getDefiningOp());
+        if (auto multiplyOp = mlir::dyn_cast_or_null<IE::MultiplyOp>(input.getDefiningOp())) {
+            multiplyOps.push_back(multiplyOp);
+        }
     }
 
-    if (convertOpAfterInArg == nullptr) {
-        return matchFailed(rewriter, gatherOp, "there is not convertOp");
-    }
-    auto convertInArg = mlir::dyn_cast<mlir::BlockArgument>(convertOpAfterInArg.getInput());
-    if (convertInArg == nullptr) {
-        return matchFailed(rewriter, gatherOp, "convertOp input is not a block argument");
+    if (multiplyOps.size() != inputNums || (reshapeOps.size() != 0 && reshapeOps.size() != inputNums)) {
+        return matchFailed(rewriter, origOp, "not all of concat parent is multiply");
     }
 
-    if (getShape(gatherOp.getInput()) != getShape(convertOpAfterInArg.getInput())) {
-        return matchFailed(rewriter, gatherOp, "block argument shape doesn't match with gather input shape");
+    SmallVector<mlir::Value> multiplyLeftInputs;
+    SmallVector<mlir::Value> multiplyRightInputs;
+    for (auto multiplyOp : multiplyOps) {
+        if (!isOptimizableMultiplyOp(multiplyOp)) {
+            return matchFailed(rewriter, origOp, "not optimizable multiply");
+        }
+        multiplyLeftInputs.push_back(multiplyOp.getInput1());
+        multiplyRightInputs.push_back(multiplyOp.getInput2());
     }
 
-    auto newGather = rewriter.create<IE::GatherOp>(gatherOp->getLoc(), convertInArg, gatherOp.getIndices(), nullptr,
-                                                   gatherOp.getAxisValueAttr(), gatherOp.getBatchDims(),
-                                                   gatherOp.getIndicesRankAttr());
-    // newGather output type is int or uint, convert it to original one
-    const auto convertOutType = mlir::dyn_cast<vpux::NDTypeInterface>(convertOpAfterInArg.getOutput().getType());
-    auto multiplyInput = rewriter.create<IE::ConvertOp>(convertOpAfterInArg->getLoc(), newGather.getOutput(),
-                                                        convertOutType.getElementType())
-                                 .getOutput();
+    if (reshapeOps.size() == inputNums) {
+        multiplyLeftInputs.clear();
+        multiplyRightInputs.clear();
+        for (auto p : multiplyOps | indexed) {
+            auto multiplyOp = p.value();
+            auto reshapeOp = reshapeOps[p.index()];
+            auto leftReshape =
+                    rewriter.create<IE::ReshapeOp>(appendLoc(reshapeOp->getLoc(), "_left_reshape"),
+                                                   multiplyOp.getInput1(), nullptr, false,
+                                                   getIntArrayAttr(ctx, getShape(reshapeOp.getOutput()).raw()))
+                            .getOutput();
+            multiplyLeftInputs.push_back(leftReshape);
 
-    if (subtractOp) {
-        auto subtractGather = rewriter.create<IE::GatherOp>(
-                appendLoc(gatherOp->getLoc(), "_subtract"), subtractOp.getInput2(), gatherOp.getIndices(), nullptr,
-                gatherOp.getAxisValueAttr(), gatherOp.getBatchDims(), gatherOp.getIndicesRankAttr());
-        multiplyInput =
-                rewriter.create<IE::SubtractOp>(subtractOp->getLoc(), multiplyInput, subtractGather.getOutput(),
-                                                subtractOp.getAutoBroadcast(), nullptr, nullptr, nullptr, nullptr);
+            auto rightReshape =
+                    rewriter.create<IE::ReshapeOp>(appendLoc(reshapeOp->getLoc(), "_right_reshape"),
+                                                   multiplyOp.getInput2(), nullptr, false,
+                                                   getIntArrayAttr(ctx, getShape(reshapeOp.getOutput()).raw()))
+                            .getOutput();
+            multiplyRightInputs.push_back(rightReshape);
+        }
     }
 
-    auto multiplyGather = rewriter.create<IE::GatherOp>(
-            appendLoc(gatherOp->getLoc(), "_multiply"), multiplyOp.getInput2(), gatherOp.getIndices(), nullptr,
-            gatherOp.getAxisValueAttr(), gatherOp.getBatchDims(), gatherOp.getIndicesRankAttr());
-    auto postMultiply =
-            rewriter.create<IE::MultiplyOp>(multiplyOp->getLoc(), multiplyInput, multiplyGather.getOutput(),
-                                            multiplyOp.getAutoBroadcastAttr(), nullptr, nullptr, nullptr, nullptr)
-                    .getOutput();
-    if (convertOpBeforeGather) {
-        const auto gatherOutType = mlir::dyn_cast<vpux::NDTypeInterface>(gatherOp.getOutput().getType());
-        postMultiply = rewriter.create<IE::ConvertOp>(convertOpBeforeGather->getLoc(), postMultiply,
-                                                      gatherOutType.getElementType())
-                               .getOutput();
-    }
-    rewriter.replaceOp(gatherOp, postMultiply);
+    auto multiplyRightConcat = rewriter.create<IE::ConcatOp>(appendLoc(origOp->getLoc(), "_right_concat"),
+                                                             mlir::ValueRange(multiplyRightInputs),
+                                                             origOp.getPerAxisAttr(), origOp.getStaticOffsetsAttr());
+    auto multiplyLeftConcat = rewriter.create<IE::ConcatOp>(appendLoc(origOp->getLoc(), "_left_concat"),
+                                                            mlir::ValueRange(multiplyLeftInputs),
+                                                            origOp.getPerAxisAttr(), origOp.getStaticOffsetsAttr());
+    auto multiply = rewriter.create<IE::MultiplyOp>(appendLoc(multiplyOps.front()->getLoc(), "_multiply_after_concat"),
+                                                    multiplyLeftConcat.getOutput(), multiplyRightConcat.getOutput(),
+                                                    multiplyOps.front().getAutoBroadcastAttr(), nullptr, nullptr,
+                                                    nullptr, nullptr);
+    rewriter.replaceOp(origOp, multiply.getOutput());
 
-    _log.trace("Successfully move multiply post gather");
+    _log.trace("Successfully move multiply post Concat");
     return mlir::success();
 }
 
@@ -357,33 +245,13 @@ mlir::LogicalResult MoveMultiplySubtractPostGather::matchAndRewrite(IE::GatherOp
 
 class MoveMultiplyPostOpPass final : public IE::MoveMultiplyPostOpBase<MoveMultiplyPostOpPass> {
 public:
-    explicit MoveMultiplyPostOpPass(Logger log, bool moveMultiplyPostFCForDynamicQuant)
-            : _moveMultiplyPostFCForDynamicQuant(moveMultiplyPostFCForDynamicQuant) {
+    explicit MoveMultiplyPostOpPass(Logger log) {
         Base::initLogger(log, Base::getArgumentName());
     }
-    mlir::LogicalResult initialize(mlir::MLIRContext* ctx) final;
 
 private:
     void safeRunOnFunc() final;
-    bool _moveMultiplyPostFCForDynamicQuant = false;
 };
-
-mlir::LogicalResult MoveMultiplyPostOpPass::initialize(mlir::MLIRContext* ctx) {
-    if (mlir::failed(Base::initialize(ctx))) {
-        return mlir::failure();
-    }
-
-    if (moveMultiplyPostFCForDynamicQuant.hasValue()) {
-        _log.trace("Overloading the default value {0} of the '_moveMultiplyPostFCForDynamicQuant' field to the "
-                   "value {1} of the "
-                   "pass option "
-                   "'moveMultiplyPostFCForDynamicQuant' generated by MLIR",
-                   _moveMultiplyPostFCForDynamicQuant, moveMultiplyPostFCForDynamicQuant);
-        _moveMultiplyPostFCForDynamicQuant = moveMultiplyPostFCForDynamicQuant;
-    }
-
-    return mlir::success();
-}
 
 //
 // safeRunOnFunc
@@ -394,10 +262,7 @@ void MoveMultiplyPostOpPass::safeRunOnFunc() {
 
     mlir::RewritePatternSet patterns(&ctx);
     patterns.add<MoveMultiplyPostMatmul>(&ctx, _log);
-    patterns.add<MoveMultiplySubtractPostGather>(&ctx, _log);
-    if (_moveMultiplyPostFCForDynamicQuant) {
-        patterns.add<MoveMultiplyPostFC>(&ctx, _log);
-    }
+    patterns.add<MoveMultiplyPostConcat>(&ctx, _log);
 
     auto func = getOperation();
     if (mlir::failed(applyPatternsAndFoldGreedily(func, std::move(patterns), getDefaultGreedyRewriteConfig()))) {
@@ -411,6 +276,6 @@ void MoveMultiplyPostOpPass::safeRunOnFunc() {
 // createMoveMultiplyPostOpPass
 //
 
-std::unique_ptr<mlir::Pass> vpux::IE::createMoveMultiplyPostOpPass(Logger log, bool moveMultiplyPostFCForDynamicQuant) {
-    return std::make_unique<MoveMultiplyPostOpPass>(log, moveMultiplyPostFCForDynamicQuant);
+std::unique_ptr<mlir::Pass> vpux::IE::createMoveMultiplyPostOpPass(Logger log) {
+    return std::make_unique<MoveMultiplyPostOpPass>(log);
 }

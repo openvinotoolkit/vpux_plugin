@@ -88,9 +88,11 @@ struct BatchedCallOpPreInliner : public CallOPPreInliner {
         DebatchedCallOpData callOpData;
         size_t totalAvailableTilesCount;
         std::optional<size_t> singleFunctionDDRConsumptionBytes;
+        size_t maxDDRBytesAvailable;
 
         std::string to_string() const;
-        static ResourceDescriptor create(::mlir::func::CallOp callOp, Logger log);
+        static ResourceDescriptor create(::mlir::func::CallOp callOp,
+                                         ::mlir::iterator_range<::mlir::Region::iterator> inlinedBlocks, Logger log);
 
     private:
         ResourceDescriptor() = delete;
@@ -144,7 +146,7 @@ struct BatchedCallOpPreInliner : public CallOPPreInliner {
             bool applyCMX(VPURT::DeclareBufferOp& op, const DebatchedCallOpData& callOpData,
                           size_t totalAvailableTilesCount) const;
             bool applyDDR(VPURT::DeclareBufferOp& op, const DebatchedCallOpData& callOpData,
-                          size_t offsetDDRAllocatationBytes) const;
+                          size_t offsetDDRAllocationBytes, size_t maxDDRBytesAvailable) const;
             mutable Logger _log;
         };
 
@@ -202,7 +204,8 @@ mlir::func::FuncOp getCalledFunction(mlir::func::CallOp callOp) {
 
 void BatchedCallOpPreInliner::apply(mlir::Operation* call,
                                     mlir::iterator_range<mlir::Region::iterator> inlinedBlocks) const {
-    ResourceDescriptor resourse = ResourceDescriptor::create(mlir::dyn_cast<::mlir::func::CallOp>(call), _log);
+    ResourceDescriptor resourse =
+            ResourceDescriptor::create(mlir::dyn_cast<::mlir::func::CallOp>(call), inlinedBlocks, _log);
 
     _log.info("apply BatchedCallOpPreInliner: {0}", resourse.to_string());
     for (mlir::Block& block : inlinedBlocks) {
@@ -224,11 +227,12 @@ std::string BatchedCallOpPreInliner::ResourceDescriptor::to_string() const {
     } else {
         ss << ", DDR offset: UNDETERMINED";
     }
+    ss << ", DDR available bytes: " << maxDDRBytesAvailable;
     return ss.str();
 }
 
 BatchedCallOpPreInliner::ResourceDescriptor BatchedCallOpPreInliner::ResourceDescriptor::create(
-        ::mlir::func::CallOp call, Logger log) {
+        ::mlir::func::CallOp call, ::mlir::iterator_range<::mlir::Region::iterator> inlinedBlocks, Logger log) {
     auto debatchedAttr = DebatchedCallOpAttributeView::extract(call);
     VPUX_THROW_UNLESS(debatchedAttr.has_value(), "BatchedCallOpPreInliner::apply expected an attribute: {0}",
                       DebatchedCallOpAttributeView::name());
@@ -237,26 +241,52 @@ BatchedCallOpPreInliner::ResourceDescriptor BatchedCallOpPreInliner::ResourceDes
     auto tileOp = IE::getTileExecutor(module);
     auto tileExecutorCount = tileOp.getCount();
     // get used memory
-    auto functionOP = getCalledFunction(call);
-    auto usedMemory = IE::getUsedMemory(functionOP);
-    size_t usedBytes = 0;
-    if (usedMemory.size() != 0) {
-        for (size_t i = 0; i < usedMemory.size(); i++) {
-            usedBytes += usedMemory[i].getByteSize();
+    auto maxDDRBytesAvailable =
+            checked_cast<uint64_t>(IE::getAvailableMemory(module, vpux::VPU::MemoryKind::DDR).getByteSize());
+    log.debug("Procced with gathering all DDR buffer allocations to determine a device memory occupation range");
+    std::map<size_t, size_t> allocationsOffsetSize;
+    for (mlir::Block& block : inlinedBlocks) {
+        for (auto& op : block.getOperations()) {
+            if (!mlir::isa<VPURT::DeclareBufferOp>(op)) {
+                continue;
+            }
+
+            auto declareOp = mlir::dyn_cast<VPURT::DeclareBufferOp>(op);
+
+            auto ndType = mlir::dyn_cast<vpux::NDTypeInterface>(declareOp.getType());
+            if (ndType.getMemoryKind() != VPU::MemoryKind::DDR) {
+                continue;
+            }
+            size_t offset = declareOp.getByteOffset();
+            int64_t shapeSize = calcTotalShapeSize(ndType.getShape());
+            int64_t memorySize = shapeSize * getElemTypeSize(ndType.getElementType()).to<Byte>().count();
+            allocationsOffsetSize.emplace(offset, memorySize);
         }
-        return ResourceDescriptor{callOpData, static_cast<size_t>(tileExecutorCount), usedBytes};
     }
 
-    log.info("There is no information regarding DDR consumption by a function, try to get whole module instead");
-    usedMemory = IE::getUsedMemory(module);
-    if (usedMemory.size() != 0) {
-        for (size_t i = 0; i < usedMemory.size(); i++) {
-            usedBytes += usedMemory[i].getByteSize();
-        }
-        return ResourceDescriptor{callOpData, static_cast<size_t>(tileExecutorCount), usedBytes};
+    if (allocationsOffsetSize.empty()) {
+        log.debug("No DDR allocations, no any offset recalculation required");
+        return ResourceDescriptor{callOpData, static_cast<size_t>(tileExecutorCount), {}, maxDDRBytesAvailable};
     }
-    log.info("No any information about memory exists in IR, cannot proceed with batch DDR inlining");
-    return ResourceDescriptor{callOpData, static_cast<size_t>(tileExecutorCount), {}};
+
+    log.debug("collected DDR allocations: {0}", allocationsOffsetSize.size());
+    size_t index = 0;
+    std::pair<size_t, size_t> occupiedDDRAdressesRange{std::numeric_limits<size_t>::max(), 0};
+    for (auto [offset, size] : allocationsOffsetSize) {
+        log.trace("{0}: {1}, {2}", index, offset, size);
+        index++;
+        occupiedDDRAdressesRange.first = std::min(offset, occupiedDDRAdressesRange.first);           // left border
+        occupiedDDRAdressesRange.second = std::max(offset + size, occupiedDDRAdressesRange.second);  // right border
+        log.trace("occupied DDR adresses range: [{0},{1}]", occupiedDDRAdressesRange.first,
+                  occupiedDDRAdressesRange.second);
+    }
+    log.debug("calculated occupied DDR adresses range: [{0},{1}]", occupiedDDRAdressesRange.first,
+              occupiedDDRAdressesRange.second);
+    VPUX_THROW_WHEN(occupiedDDRAdressesRange.first > occupiedDDRAdressesRange.second,
+                    "DDR adress range determined incorrectly, left border: {0} cann't be greater than right: {1}",
+                    occupiedDDRAdressesRange.first, occupiedDDRAdressesRange.second);
+    return ResourceDescriptor{callOpData, static_cast<size_t>(tileExecutorCount),
+                              occupiedDDRAdressesRange.first + occupiedDDRAdressesRange.second, maxDDRBytesAvailable};
 }
 
 /*
@@ -302,7 +332,7 @@ size_t BatchedCallOpPreInliner::CMXTypeModifier::recalculateIndex(size_t index, 
 
 mlir::Type BatchedCallOpPreInliner::CMXTypeModifier::transform(mlir::Type type, const DebatchedCallOpData& callOpData,
                                                                size_t totalAvailableTilesCount) const {
-    auto ndType = type.dyn_cast<vpux::NDTypeInterface>();
+    auto ndType = mlir::dyn_cast<vpux::NDTypeInterface>(type);
     if (ndType == nullptr || ndType.getMemoryKind() != VPU::MemoryKind::CMX_NN) {
         return type;
     }
@@ -326,7 +356,7 @@ mlir::Type BatchedCallOpPreInliner::CMXTypeModifier::transform(mlir::Type type, 
     auto newMemSpace = vpux::IndexedSymbolAttr::get(ndType.getContext(), memSpace.getRootName(), newCMXIndex);
     auto newType = ndType.changeMemSpace(newMemSpace);
 
-    auto itiBufferTypeFromOp = type.dyn_cast<vpux::VPUIP::ITIBufferType>();
+    auto itiBufferTypeFromOp = mlir::dyn_cast<vpux::VPUIP::ITIBufferType>(type);
     if (itiBufferTypeFromOp) {
         // HALO regions require for additional processing
         ArrayRef<vpux::VPUIP::HaloRegionAttr> inwardHalos = itiBufferTypeFromOp.getInwardHaloRegions();
@@ -409,12 +439,13 @@ bool BatchedCallOpPreInliner::Dispatcher::CMXModifierForDeclareOp::apply(mlir::O
     }
 
     auto declareOp = mlir::dyn_cast<VPURT::DeclareBufferOp>(op);
-    auto ndType = declareOp.getType().dyn_cast<vpux::NDTypeInterface>();
+    auto ndType = mlir::dyn_cast<vpux::NDTypeInterface>(declareOp.getType());
     if (ndType.getMemoryKind() == VPU::MemoryKind::CMX_NN) {
         return applyCMX(declareOp, resource.callOpData, resource.totalAvailableTilesCount);
     } else if (ndType.getMemoryKind() == VPU::MemoryKind::DDR &&
                resource.singleFunctionDDRConsumptionBytes.has_value()) {
-        return applyDDR(declareOp, resource.callOpData, resource.singleFunctionDDRConsumptionBytes.value());
+        return applyDDR(declareOp, resource.callOpData, resource.singleFunctionDDRConsumptionBytes.value(),
+                        resource.maxDDRBytesAvailable);
     }
 
     return false;
@@ -445,9 +476,18 @@ bool BatchedCallOpPreInliner::Dispatcher::CMXModifierForDeclareOp::applyCMX(VPUR
 
 bool BatchedCallOpPreInliner::Dispatcher::CMXModifierForDeclareOp::applyDDR(VPURT::DeclareBufferOp& op,
                                                                             const DebatchedCallOpData& callOpData,
-                                                                            size_t offsetDDRAllocatationBytes) const {
-    size_t currentBatchedCallDDROffset = callOpData.getCallIndex() * offsetDDRAllocatationBytes;
+                                                                            size_t offsetDDRAllocationBytes,
+                                                                            size_t maxDDRBytesAvailable) const {
+    size_t currentBatchedCallDDROffset = callOpData.getCallIndex() * offsetDDRAllocationBytes;
     auto opBytesOffset = op.getByteOffset();
+    auto ndType = mlir::dyn_cast<vpux::NDTypeInterface>(op.getType());
+    int64_t shapeSize = calcTotalShapeSize(ndType.getShape());
+    int64_t memorySize = shapeSize * getElemTypeSize(ndType.getElementType()).to<Byte>().count();
+    VPUX_THROW_WHEN(
+            currentBatchedCallDDROffset + opBytesOffset + memorySize > maxDDRBytesAvailable,
+            "Cannot substitute DDR offset: {0} by a new one: {1} as available memory range is limited by: {2} bytes."
+            "Please try on \"debatching-inlining-method=naive\" instead",
+            opBytesOffset, currentBatchedCallDDROffset + opBytesOffset, maxDDRBytesAvailable);
     _log.debug("{0} DDR offset old: {1}, new: {2}", op->getName(), opBytesOffset,
                currentBatchedCallDDROffset + opBytesOffset);
     op.setByteOffset(currentBatchedCallDDROffset + opBytesOffset);

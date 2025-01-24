@@ -7,7 +7,6 @@
 #include "vpux/compiler/utils/ELF/utils.hpp"
 
 #include <npu_40xx_nnrt.hpp>
-using namespace npu40xx;
 
 using namespace vpux;
 
@@ -16,15 +15,19 @@ using namespace vpux;
 //
 
 void vpux::VPUASM::WorkItemOp::serialize(elf::writer::BinaryDataSection<uint8_t>&) {
-    return;
+    // TODO: E#80148 after interface refactoring should we not require serialization for work Item
+#ifdef VPUX_DEVELOPER_BUILD
+    auto logger = Logger::global();
+    logger.warning("Serializing {0} op, which may mean invalid usage");
+#endif
 }
 
-size_t vpux::VPUASM::WorkItemOp::getBinarySize() {
-    return sizeof(nn_public::VpuWorkItem);
+size_t vpux::VPUASM::WorkItemOp::getBinarySize(VPU::ArchKind /*arch*/) {
+    return sizeof(npu40xx::nn_public::VpuWorkItem);
 }
 
-size_t vpux::VPUASM::WorkItemOp::getAlignmentRequirements() {
-    return alignof(nn_public::VpuWorkItem);
+size_t vpux::VPUASM::WorkItemOp::getAlignmentRequirements(VPU::ArchKind /*arch*/) {
+    return alignof(npu40xx::nn_public::VpuWorkItem);
 }
 
 vpux::ELF::SectionFlagsAttr vpux::VPUASM::WorkItemOp::getPredefinedMemoryAccessors() {
@@ -37,26 +40,4 @@ std::optional<ELF::SectionSignature> vpux::VPUASM::WorkItemOp::getSectionSignatu
 
 bool vpux::VPUASM::WorkItemOp::hasMemoryFootprint() {
     return true;
-}
-
-std::vector<ELF::RelocationInfo> vpux::VPUASM::WorkItemOp::getRelocationInfo(ELF::SymbolReferenceMap& symRefMap) {
-    std::vector<ELF::RelocationInfo> relocs;
-
-    ELF::ElfSectionInterface targetSection = mlir::dyn_cast<ELF::ElfSectionInterface>(getOperation()->getParentOp());
-    VPUX_THROW_UNLESS(targetSection, "The relocation info can be retrieved only if the op is included into a section");
-
-    auto firstTaskOffset = offsetof(nn_public::VpuWorkItem, wi_desc_ptr);
-    if (auto firstTask = getFirstTask()) {
-        if (getTaskType() == VPURegMapped::TaskType::DMA) {
-            relocs.push_back(ELF::RelocationInfo(
-                    firstTask, targetSection, firstTaskOffset, ELF::RelocationType::R_VPU_64,
-                    ELF::getOffsetOfSymRef(symRefMap, firstTask), "First task (DMA) in work item reloc"));
-        } else {
-            relocs.push_back(ELF::RelocationInfo(
-                    firstTask, targetSection, firstTaskOffset, ELF::RelocationType::R_VPU_64_BIT_OR_B21_B26_UNSET,
-                    ELF::getOffsetOfSymRef(symRefMap, firstTask), "First task in work item reloc"));
-        }
-    }
-
-    return relocs;
 }

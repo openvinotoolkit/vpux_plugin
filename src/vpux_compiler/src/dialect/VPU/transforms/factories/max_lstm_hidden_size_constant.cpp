@@ -10,15 +10,31 @@
 
 using namespace vpux;
 
-constexpr int64_t maxLstmHiddenSizeConstant = 0;
+constexpr int64_t maxLstmSequenceHiddenSizeConstant = 0;
+constexpr int64_t maxLstmCellHiddenSizeConstant = 0;
 
-int64_t VPU::getMaxLstmHiddenSizeConstant(VPU::ArchKind arch, bool sequenceEnabled) {
+int64_t VPU::getMaxLstmSequenceHiddenSizeConstant(VPU::ArchKind arch) {
     switch (arch) {
     case VPU::ArchKind::NPU40XX: {
-        return VPU::arch40xx::getMaxLstmHiddenSizeConstant(sequenceEnabled);
+        return VPU::arch40xx::getMaxLstmSequenceHiddenSizeConstant();
     }
     case VPU::ArchKind::NPU37XX: {
-        return maxLstmHiddenSizeConstant;
+        return maxLstmSequenceHiddenSizeConstant;
+    }
+    case VPU::ArchKind::UNKNOWN:
+    default: {
+        VPUX_THROW("Unexpected architecture {0}", arch);
+    }
+    }
+}
+
+int64_t VPU::getMaxLstmCellHiddenSizeConstant(VPU::ArchKind arch) {
+    switch (arch) {
+    case VPU::ArchKind::NPU40XX: {
+        return VPU::arch40xx::getMaxLstmCellHiddenSizeConstant();
+    }
+    case VPU::ArchKind::NPU37XX: {
+        return maxLstmCellHiddenSizeConstant;
     }
     case VPU::ArchKind::UNKNOWN:
     default: {

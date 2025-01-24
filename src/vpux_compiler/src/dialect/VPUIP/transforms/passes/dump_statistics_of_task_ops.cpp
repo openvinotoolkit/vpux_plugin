@@ -477,7 +477,6 @@ public:
 
         auto uncompressedConstantsCount = constantsCounter_ - compressedConstantsCounter_;
 
-        log.info("Weights statistics:");
         log = log.nest();
         if (compressedConstantsCounter_ == 0) {
             // No compression
@@ -589,6 +588,25 @@ private:
     uint64_t totalSizeOfNotSwizzledConsts_;
 };
 
+class BarrierCounter {
+public:
+    BarrierCounter(): numOfBarriers_{0} {
+    }
+
+    void count(mlir::Operation* op) {
+        if (mlir::dyn_cast<VPURT::ConfigureBarrierOp>(op)) {
+            numOfBarriers_++;
+        }
+    }
+
+    void printStatistics(vpux::Logger log) {
+        log.nest().info("VPURT.ConfigureBarrierOp - {0} ops", numOfBarriers_);
+    }
+
+private:
+    uint64_t numOfBarriers_;
+};
+
 std::tuple<uint64_t, uint64_t> getInputOutputSize(mlir::func::FuncOp funcOp) {
     uint64_t inputSize = 0;
     uint64_t outputSize = 0;
@@ -638,6 +656,7 @@ void DumpStatisticsOfTaskOpsPass::safeRunOnFunc() {
     auto func = getOperation();
 
     auto opStatisticsCounter = populateCounters();
+    BarrierCounter barrierCounter;
     CompressionRateCounter compressionCounter;
     ConstSwizzlingCounter constSwizzlingCounter;
 
@@ -650,16 +669,16 @@ void DumpStatisticsOfTaskOpsPass::safeRunOnFunc() {
 
     func->walk([&](mlir::Operation* op) {
         opStatisticsCounter.count(op);
+        barrierCounter.count(op);
         compressionCounter.count(op);
         constSwizzlingCounter.count(op);
-
-        if (VPU::getCompilationMode(func) == VPU::CompilationMode::ReferenceSW) {
-            return;
-        }
     });
 
     _log.info("VPUIP tasks statistics:");
     opStatisticsCounter.printStatistics(_log);
+    _log.info("Barrier statistics:");
+    barrierCounter.printStatistics(_log);
+    _log.info("Weights statistics:");
     compressionCounter.printStatistics(_log);
     _log.info("Const swizzling statistics:");
     constSwizzlingCounter.printStatistics(_log);

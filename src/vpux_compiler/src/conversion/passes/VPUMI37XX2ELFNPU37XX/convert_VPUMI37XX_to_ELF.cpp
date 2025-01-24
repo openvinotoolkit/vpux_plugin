@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
-#include "vpux/compiler/act_kernels/nce2p7.h"
+#include "vpux/compiler/act_kernels/shave_binary_resources.h"
 #include "vpux/compiler/conversion.hpp"
 #include "vpux/compiler/dialect/ELFNPU37XX/ops.hpp"
 #include "vpux/compiler/dialect/ELFNPU37XX/utils.hpp"
@@ -34,7 +34,7 @@
 using namespace vpux;
 using namespace npu37xx;
 
-constexpr auto NNCMX_SLICE_SIZE = mvds::nce2p7::CMX_SLICE_SIZE;
+constexpr auto NNCMX_SLICE_SIZE = vpux::ELFNPU37XX::CMX_SLICE_SIZE;
 constexpr auto ACT_RT_CODE_BUFFER_SIZE = (1_MB).to<vpux::Byte>().count();
 
 namespace {
@@ -66,9 +66,7 @@ private:
     void createDMARelocs(mlir::func::FuncOp& func, mlir::MLIRContext* ctx, mlir::SmallVector<int64_t>& dmaCount,
                          mlir::Operation::operand_range dmaTasks,
                          mlir::SmallVector<ELFNPU37XX::CreateSectionOp>& dmaSectionValues);
-    void createKernelParamsRelocs(mlir::func::FuncOp func, mlir::MLIRContext* ctx,
-                                  ELFNPU37XX::CreateSectionOp kernelParamsSection, bool& shaveScratchAccess,
-                                  bool& shaveConstAccess);
+    void createKernelParamsRelocs(mlir::func::FuncOp func, bool& shaveScratchAccess, bool& shaveConstAccess);
     void createActKernelRelocs(mlir::func::FuncOp func, ELFNPU37XX::CreateSectionOp actKernelRangeSection,
                                ELFNPU37XX::CreateSectionOp kernelTextSection,
                                ELFNPU37XX::CreateSectionOp actKernelInvocationSection,
@@ -554,9 +552,8 @@ void ConvertVPUMI37XX2ELFPass::createBlockArgReloc(T op, mlir::OpBuilder builder
     }
 }
 
-void ConvertVPUMI37XX2ELFPass::createKernelParamsRelocs(mlir::func::FuncOp func, mlir::MLIRContext* ctx,
-                                                        ELFNPU37XX::CreateSectionOp kernelParamsSection,
-                                                        bool& shaveScratchAccess, bool& shaveConstAccess) {
+void ConvertVPUMI37XX2ELFPass::createKernelParamsRelocs(mlir::func::FuncOp func, bool& shaveScratchAccess,
+                                                        bool& shaveConstAccess) {
     auto kernelParamsOps = func.getOps<vpux::VPUMI37XX::KernelParamsOp>();
 
     if (kernelParamsOps.empty()) {
@@ -584,42 +581,6 @@ void ConvertVPUMI37XX2ELFPass::createKernelParamsRelocs(mlir::func::FuncOp func,
         auto kernelParamsOp = kernelParamsOpIt.value();
         auto kernelParamsOpName = kernelParamsOp.getOperationName().str();
 
-        ELFNPU37XX::CreateRelocationSectionOp createInputRelocationSectionOp = builderFunc.create<
-                ELFNPU37XX::CreateRelocationSectionOp>(
-                mlir::UnknownLoc::get(ctx),
-                vpux::ELFNPU37XX::SectionType::get(ctx),                            // mlir::Type
-                ".rlt.Kernel_NetInput" + std::to_string(kernelParamsOpIt.index()),  // llvm::StringRef secName,
-                networkInputSymTabValue,                                            // sourceSymbolTableSection,
-                kernelParamsSection.getResult(),                                    // targetSection,
-                vpux::ELFNPU37XX::SectionFlagsAttr::SHF_INFO_LINK | vpux::ELFNPU37XX::SectionFlagsAttr::VPU_SHF_JIT |
-                        vpux::ELFNPU37XX::SectionFlagsAttr::VPU_SHF_USERINPUT  // vpux::ELFNPU37XX::SectionFlagsAttr
-                                                                               // secFlags,
-        );
-
-        mlir::Region& regInputRelocSec = createInputRelocationSectionOp.getOperation()->getRegion(0);
-        mlir::Block* blkInputRelocSec = new mlir::Block();
-
-        regInputRelocSec.push_back(blkInputRelocSec);
-
-        mlir::OpBuilder builderInputRelocSec(blkInputRelocSec, blkInputRelocSec->begin());
-
-        ELFNPU37XX::CreateRelocationSectionOp createOutputRelocationSectionOp = builderFunc.create<
-                ELFNPU37XX::CreateRelocationSectionOp>(
-                mlir::UnknownLoc::get(ctx),
-                vpux::ELFNPU37XX::SectionType::get(ctx),                             // mlir::Type
-                ".rlt.Kernel_NetOutput" + std::to_string(kernelParamsOpIt.index()),  // llvm::StringRef secName,
-                networkOutputSymTabValue,                                            // sourceSymbolTableSection,
-                kernelParamsSection.getResult(),                                     // targetSection,
-                vpux::ELFNPU37XX::SectionFlagsAttr::SHF_INFO_LINK | vpux::ELFNPU37XX::SectionFlagsAttr::VPU_SHF_JIT |
-                        vpux::ELFNPU37XX::SectionFlagsAttr::VPU_SHF_USEROUTPUT  // vpux::ELFNPU37XX::SectionFlagsAttr
-                                                                                // secFlags,
-        );
-        mlir::Region& regOutputRelocSec = createOutputRelocationSectionOp.getOperation()->getRegion(0);
-        mlir::Block* blkOutputRelocSec = new mlir::Block();
-        regOutputRelocSec.push_back(blkOutputRelocSec);
-
-        mlir::OpBuilder builderOutputRelocSec(blkOutputRelocSec, blkOutputRelocSec->begin());
-
         auto kernelParamsOpVal = kernelParamsOp.getResult();
         auto partial_addend =
                 ELFNPU37XX::getOffsetOfOpInSection(kernelParamsOpVal, kernelParamsSectionValue, offsetCache) +
@@ -628,76 +589,56 @@ void ConvertVPUMI37XX2ELFPass::createKernelParamsRelocs(mlir::func::FuncOp func,
         auto kernelInputs = kernelParamsOp.getInputs();
 
         // input addr
+        size_t inputRelocOffset = 0, shaveCodeOffsetTracker = 0;
         for (auto kernelInputIt : kernelInputs | indexed) {
             auto kernelInput = kernelInputIt.value();
-            auto inputRelocOffset =
-                    kernelInputIt.index() * sizeof(sw_params::MemRefData) + offsetof(sw_params::MemRefData, dataAddr);
+            if (kernelParamsOp.getIsCompiled()) {
+                const auto shape = getShape(kernelInput);
+                int64_t rankMemref = checked_cast<uint32_t>(shape.size());
+                inputRelocOffset = shaveCodeOffsetTracker +
+                                   sizeof(uint32_t); /* offset of allignedPointer in the struct - since this field comes
+                                                        after 1st field of struct, of uint32_t type */
+                shaveCodeOffsetTracker +=
+                        sizeof(uint32_t) * 2 + sizeof(int32_t) +
+                        rankMemref * sizeof(int32_t) * 2 /* sizeof MemRef LLVM struct at inputsItValue */;
+            } else {
+                inputRelocOffset = kernelInputIt.index() * sizeof(sw_params::MemRefData) +
+                                   offsetof(sw_params::MemRefData, dataAddr);
+            }
+
             if (kernelInput.getDefiningOp<Const::DeclareOp>() != nullptr) {
                 shaveConstAccess = true;
             }
-            if (auto kernelInputArg = kernelInput.dyn_cast<mlir::BlockArgument>()) {
-                createBlockArgReloc(kernelParamsOp, builderInputRelocSec, builderOutputRelocSec, inputRelocOffset,
-                                    vpux::ELFNPU37XX::RelocationType::R_VPU_32, kernelInputArg);
-            } else {
-                auto kernelInputBuff = kernelInput.getDefiningOp<VPURT::DeclareBufferOp>();
-                if (kernelInputBuff && (kernelInputBuff.getMemorySpace() == VPURT::BufferSection::DDR)) {
-                    shaveScratchAccess = true;
-                }
-                if (kernelInputBuff && (kernelInputBuff.getMemorySpace() == VPURT::BufferSection::NetworkInput)) {
-                    auto kernelInputIndex = parseIntArrayAttr<int64_t>(kernelInputBuff.getSectionIndex().value());
-                    auto kernelInputOffset = kernelInputBuff.getByteOffset();
-                    auto funcArg = func.getArgument(kernelInputIndex[0]);
-                    if (mlir::Value netInputSymValue = lookupELFSymbol(networkInputSymTabValue, funcArg)) {
-                        builderInputRelocSec.create<ELFNPU37XX::RelocOp>(
-                                builderInputRelocSec.getUnknownLoc(), kernelParamsOp.getResult(), inputRelocOffset,
-                                vpux::ELFNPU37XX::RelocationType::R_VPU_32,  // relocationType
-                                netInputSymValue,                            // ::mlir::Value sourceSymbol
-                                kernelInputOffset,                           // int64_t addend
-                                kernelParamsOpName + " input from network input kernel params reloc");
-                    }
-                } else if (kernelInputBuff &&
-                           (kernelInputBuff.getMemorySpace() == VPURT::BufferSection::NetworkOutput)) {
-                    auto kernelInputIndex = parseIntArrayAttr<int64_t>(kernelInputBuff.getSectionIndex().value());
-                    auto kernelInputOffset = kernelInputBuff.getByteOffset();
-                    auto funcArg =
-                            func.getArgument(kernelInputIndex[0] + func.getNumArguments() - func.getNumResults());
-                    if (mlir::Value netOutputSymValue = lookupELFSymbol(networkOutputSymTabValue, funcArg)) {
-                        builderOutputRelocSec.create<ELFNPU37XX::RelocOp>(
-                                builderOutputRelocSec.getUnknownLoc(), kernelParamsOp.getResult(), inputRelocOffset,
-                                vpux::ELFNPU37XX::RelocationType::R_VPU_32,  // relocationType
-                                netOutputSymValue,                           // ::mlir::Value sourceSymbol
-                                kernelInputOffset,                           // int64_t addend
-                                kernelParamsOpName + " input from network output kernel params reloc");
-                    }
-                } else {
-                    symTab = relocationManager.getSymTab(kernelInput);
 
-                    relocSection = relocationManager.getRelocSection(targetSection, symTab);
-
-                    auto builder = mlir::OpBuilder::atBlockEnd(relocSection.getBlock());
-
-                    auto kernelInputBinaryOp =
-                            mlir::dyn_cast<ELFNPU37XX::BinaryOpInterface>(kernelInput.getDefiningOp());
-
-                    size_t addend = 0;
-
-                    if (kernelInputBinaryOp.getMemorySpace() == VPURT::BufferSection::CMX_NN) {
-                        sourceSym = elfCMXMappingSyms[static_cast<int>(
-                                vpux::ELFNPU37XX::CMXMappingSymbol::VPU_NNRD_SYM_NNCXM_SLICE_BASE_ADDR)];
-                        addend = ELFNPU37XX::getOffsetOfOpInSection(kernelInput);
-                    } else {
-                        auto kernelInputSection = relocationManager.getSection(kernelInput);
-                        sourceSym = ELFNPU37XX::RelocationManager::getSymbol(kernelInputSection);
-                        mlir::Value kernelInputSectionValue = kernelInputSection.getOperation()->getResult(0);
-                        addend = ELFNPU37XX::getOffsetOfOpInSection(kernelInput, kernelInputSectionValue, offsetCache);
-                    }
-
-                    builder.create<ELFNPU37XX::RelocOp>(kernelInput.getLoc(), kernelParamsOp.getResult(),
-                                                        inputRelocOffset, vpux::ELFNPU37XX::RelocationType::R_VPU_32,
-                                                        sourceSym, addend,
-                                                        kernelParamsOpName + " input kernel params reloc");
-                }
+            auto kernelInputBuff = kernelInput.getDefiningOp<VPURT::DeclareBufferOp>();
+            if (kernelInputBuff && (kernelInputBuff.getMemorySpace() == VPURT::BufferSection::DDR)) {
+                shaveScratchAccess = true;
             }
+
+            symTab = relocationManager.getSymTab(kernelInput);
+
+            relocSection = relocationManager.getRelocSection(targetSection, symTab);
+
+            auto builder = mlir::OpBuilder::atBlockEnd(relocSection.getBlock());
+
+            auto kernelInputBinaryOp = mlir::dyn_cast<ELFNPU37XX::BinaryOpInterface>(kernelInput.getDefiningOp());
+
+            size_t addend = 0;
+
+            if (kernelInputBinaryOp.getMemorySpace() == VPURT::BufferSection::CMX_NN) {
+                sourceSym = elfCMXMappingSyms[static_cast<int>(
+                        vpux::ELFNPU37XX::CMXMappingSymbol::VPU_NNRD_SYM_NNCXM_SLICE_BASE_ADDR)];
+                addend = ELFNPU37XX::getOffsetOfOpInSection(kernelInput);
+            } else {
+                auto kernelInputSection = relocationManager.getSection(kernelInput);
+                sourceSym = ELFNPU37XX::RelocationManager::getSymbol(kernelInputSection);
+                mlir::Value kernelInputSectionValue = kernelInputSection.getOperation()->getResult(0);
+                addend = ELFNPU37XX::getOffsetOfOpInSection(kernelInput, kernelInputSectionValue, offsetCache);
+            }
+
+            builder.create<ELFNPU37XX::RelocOp>(kernelInput.getLoc(), kernelParamsOp.getResult(), inputRelocOffset,
+                                                vpux::ELFNPU37XX::RelocationType::R_VPU_32, sourceSym, addend,
+                                                kernelParamsOpName + " input kernel params reloc");
         }
 
         auto addDynamicShapeRelocation = [&](mlir::Value dims, uint64_t offset) {
@@ -720,7 +661,7 @@ void ConvertVPUMI37XX2ELFPass::createKernelParamsRelocs(mlir::func::FuncOp func,
             auto builder = mlir::OpBuilder::atBlockEnd(relocSection.getBlock());
             builder.create<ELFNPU37XX::RelocOp>(kernelParamsOp.getLoc(), kernelParamsOp.getResult(), offset,
                                                 vpux::ELFNPU37XX::RelocationType::R_VPU_32, sourceSym, addend,
-                                                kernelParamsOpName + " dynamic shape I/O kernel params reloc");
+                                                kernelParamsOpName + " dynamic shape I/O dims kernel params reloc");
         };
 
         const auto& dynInputShapes = kernelParamsOp.getDynamicInputShapes();
@@ -733,93 +674,88 @@ void ConvertVPUMI37XX2ELFPass::createKernelParamsRelocs(mlir::func::FuncOp func,
         }
 
         // input Dims addr
-        for (const auto& kernelInputsIt : kernelInputs | indexed) {
-            if (!dynInputShapes.empty() && !dynInputShapes[kernelInputsIt.index()].empty()) {
-                const auto& inputShape = dynInputShapes[kernelInputsIt.index()];
-                VPUX_THROW_WHEN(inputShape.size() > 1, "The number of dynamic shapes per input must be either 0 or 1");
-                addDynamicShapeRelocation(inputShape[0], kernelInputsIt.index() * sizeof(sw_params::MemRefData) +
-                                                                 offsetof(sw_params::MemRefData, dimsAddr));
-            } else {
+        if (!kernelParamsOp.getIsCompiled()) {
+            for (const auto& kernelInputsIt : kernelInputs | indexed) {
+                if (!dynInputShapes.empty() && !dynInputShapes[kernelInputsIt.index()].empty()) {
+                    const auto& inputShape = dynInputShapes[kernelInputsIt.index()];
+                    VPUX_THROW_WHEN(inputShape.size() > 1,
+                                    "The number of dynamic shapes per input must be either 0 or 1");
+                    addDynamicShapeRelocation(inputShape[0], kernelInputsIt.index() * sizeof(sw_params::MemRefData) +
+                                                                     offsetof(sw_params::MemRefData, dimsAddr));
+                } else {
+                    paramsAutoRelocBuilder.create<ELFNPU37XX::RelocOp>(
+                            kernelParamsOp.getLoc(), kernelParamsOp.getResult(),
+                            kernelInputsIt.index() * sizeof(sw_params::MemRefData) +
+                                    offsetof(sw_params::MemRefData, dimsAddr),
+                            vpux::ELFNPU37XX::RelocationType::R_VPU_32, kernelParamsSectionSym, partial_addend,
+                            kernelParamsOpName + " static input dims kernel params reloc");
+                }
+                partial_addend += sizeof(int32_t) * getShape(kernelInputsIt.value()).size();
+            }
+
+            // input Strides addr
+            for (auto kernelInputsIt : kernelInputs | indexed) {
                 paramsAutoRelocBuilder.create<ELFNPU37XX::RelocOp>(
                         kernelParamsOp.getLoc(), kernelParamsOp.getResult(),
                         kernelInputsIt.index() * sizeof(sw_params::MemRefData) +
-                                offsetof(sw_params::MemRefData, dimsAddr),
+                                offsetof(sw_params::MemRefData, stridesAddr),
                         vpux::ELFNPU37XX::RelocationType::R_VPU_32, kernelParamsSectionSym, partial_addend,
-                        kernelParamsOpName + " static input shape kernel params reloc");
+                        kernelParamsOpName + " static input strides kernel params reloc");
+
+                partial_addend += sizeof(int64_t) * getMemStrides(kernelInputsIt.value()).size();
             }
-            partial_addend += sizeof(int32_t) * getShape(kernelInputsIt.value()).size();
-        }
-
-        // input Strides addr
-        for (auto kernelInputsIt : kernelInputs | indexed) {
-            paramsAutoRelocBuilder.create<ELFNPU37XX::RelocOp>(
-                    kernelParamsOp.getLoc(), kernelParamsOp.getResult(),
-                    kernelInputsIt.index() * sizeof(sw_params::MemRefData) +
-                            offsetof(sw_params::MemRefData, stridesAddr),
-                    vpux::ELFNPU37XX::RelocationType::R_VPU_32, kernelParamsSectionSym, partial_addend,
-                    kernelParamsOpName + " input strides kernal params reloc");
-
-            partial_addend += sizeof(int64_t) * getMemStrides(kernelInputsIt.value()).size();
         }
 
         auto kernelOutputs = kernelParamsOp.getOutputs();
         auto kernelInputsSize = kernelInputs.size();
 
         // output addr
+        size_t outputRelocOffset = 0;
         for (auto kernelOutputIt : kernelOutputs | indexed) {
             auto kernelOutput = kernelOutputIt.value();
-            auto outputRelocOffset = (kernelInputsSize + kernelOutputIt.index()) * sizeof(sw_params::MemRefData) +
-                                     offsetof(sw_params::MemRefData, dataAddr);
-            if (auto kernelOutputArg = kernelOutput.dyn_cast<mlir::BlockArgument>()) {
-                createBlockArgReloc(kernelParamsOp, builderInputRelocSec, builderOutputRelocSec, outputRelocOffset,
-                                    vpux::ELFNPU37XX::RelocationType::R_VPU_32, kernelOutputArg);
+            if (kernelParamsOp.getIsCompiled()) {
+                const auto shape = getShape(kernelOutput);
+                int64_t rankMemref = checked_cast<uint32_t>(shape.size());
+                outputRelocOffset = shaveCodeOffsetTracker +
+                                    sizeof(uint32_t); /* offset of allignedPointer in the struct - since this field
+                                                        comes after 1st field of struct, of uint32_t type */
+                shaveCodeOffsetTracker +=
+                        sizeof(uint32_t) * 2 + sizeof(int32_t) +
+                        rankMemref * sizeof(int32_t) * 2 /* sizeof MemRef LLVM struct at inputsItValue */;
             } else {
-                auto kernelOutputBuff = kernelOutput.getDefiningOp<VPURT::DeclareBufferOp>();
-                if (kernelOutputBuff && (kernelOutputBuff.getMemorySpace() == VPURT::BufferSection::DDR)) {
-                    shaveScratchAccess = true;
-                }
-                if (kernelOutputBuff && (kernelOutputBuff.getMemorySpace() == VPURT::BufferSection::NetworkOutput)) {
-                    auto kernelOutputIndex = parseIntArrayAttr<int64_t>(kernelOutputBuff.getSectionIndex().value());
-                    auto kernelOutputOffset = kernelOutputBuff.getByteOffset();
-                    auto funcArg =
-                            func.getArgument(kernelOutputIndex[0] + func.getNumArguments() - func.getNumResults());
-                    if (mlir::Value netOutputSymValue = lookupELFSymbol(networkOutputSymTabValue, funcArg)) {
-                        builderOutputRelocSec.create<ELFNPU37XX::RelocOp>(
-                                builderOutputRelocSec.getUnknownLoc(), kernelParamsOp.getResult(), outputRelocOffset,
-                                vpux::ELFNPU37XX::RelocationType::R_VPU_32,  // relocationType
-                                netOutputSymValue,                           // ::mlir::Value sourceSymbol
-                                kernelOutputOffset,                          // int64_t addend
-                                kernelParamsOpName + " output in network output kernel params reloc");
-                    }
-                } else {
-                    symTab = relocationManager.getSymTab(kernelOutput);
-
-                    relocSection = relocationManager.getRelocSection(targetSection, symTab);
-
-                    auto builder = mlir::OpBuilder::atBlockEnd(relocSection.getBlock());
-
-                    auto kernelOutputBinaryOp =
-                            mlir::dyn_cast<ELFNPU37XX::BinaryOpInterface>(kernelOutput.getDefiningOp());
-
-                    size_t addend = 0;
-
-                    if (kernelOutputBinaryOp.getMemorySpace() == VPURT::BufferSection::CMX_NN) {
-                        sourceSym = elfCMXMappingSyms[static_cast<int>(
-                                vpux::ELFNPU37XX::CMXMappingSymbol::VPU_NNRD_SYM_NNCXM_SLICE_BASE_ADDR)];
-                        addend = ELFNPU37XX::getOffsetOfOpInSection(kernelOutput);
-                    } else {
-                        auto kernelOutputSection = relocationManager.getSection(kernelOutput);
-                        sourceSym = ELFNPU37XX::RelocationManager::getSymbol(kernelOutputSection);
-                        mlir::Value kernelOutputSectionValue = kernelOutputSection.getOperation()->getResult(0);
-                        addend =
-                                ELFNPU37XX::getOffsetOfOpInSection(kernelOutput, kernelOutputSectionValue, offsetCache);
-                    }
-
-                    builder.create<ELFNPU37XX::RelocOp>(kernelOutput.getLoc(), kernelParamsOp, outputRelocOffset,
-                                                        vpux::ELFNPU37XX::RelocationType::R_VPU_32, sourceSym, addend,
-                                                        kernelParamsOpName + " output kernel params reloc");
-                }
+                outputRelocOffset = (kernelInputsSize + kernelOutputIt.index()) * sizeof(sw_params::MemRefData) +
+                                    offsetof(sw_params::MemRefData, dataAddr);
             }
+
+            auto kernelOutputBuff = kernelOutput.getDefiningOp<VPURT::DeclareBufferOp>();
+            if (kernelOutputBuff && (kernelOutputBuff.getMemorySpace() == VPURT::BufferSection::DDR)) {
+                shaveScratchAccess = true;
+            }
+
+            symTab = relocationManager.getSymTab(kernelOutput);
+
+            relocSection = relocationManager.getRelocSection(targetSection, symTab);
+
+            auto builder = mlir::OpBuilder::atBlockEnd(relocSection.getBlock());
+
+            auto kernelOutputBinaryOp = mlir::dyn_cast<ELFNPU37XX::BinaryOpInterface>(kernelOutput.getDefiningOp());
+
+            size_t addend = 0;
+
+            if (kernelOutputBinaryOp.getMemorySpace() == VPURT::BufferSection::CMX_NN) {
+                sourceSym = elfCMXMappingSyms[static_cast<int>(
+                        vpux::ELFNPU37XX::CMXMappingSymbol::VPU_NNRD_SYM_NNCXM_SLICE_BASE_ADDR)];
+                addend = ELFNPU37XX::getOffsetOfOpInSection(kernelOutput);
+            } else {
+                auto kernelOutputSection = relocationManager.getSection(kernelOutput);
+                sourceSym = ELFNPU37XX::RelocationManager::getSymbol(kernelOutputSection);
+                mlir::Value kernelOutputSectionValue = kernelOutputSection.getOperation()->getResult(0);
+                addend = ELFNPU37XX::getOffsetOfOpInSection(kernelOutput, kernelOutputSectionValue, offsetCache);
+            }
+
+            builder.create<ELFNPU37XX::RelocOp>(kernelOutput.getLoc(), kernelParamsOp, outputRelocOffset,
+                                                vpux::ELFNPU37XX::RelocationType::R_VPU_32, sourceSym, addend,
+                                                kernelParamsOpName + " output kernel params reloc");
         }
 
         const auto& dynamicOutputShapes = kernelParamsOp.getDynamicOutputShapes();
@@ -831,37 +767,39 @@ void ConvertVPUMI37XX2ELFPass::createKernelParamsRelocs(mlir::func::FuncOp func,
                     dynamicOutputShapes.size(), kernelOutputs.size());
         }
 
-        // output Dims addr
-        for (const auto& kernelOutputsIt : kernelOutputs | indexed) {
-            if (!dynamicOutputShapes.empty() && !dynamicOutputShapes[kernelOutputsIt.index()].empty()) {
-                const auto& outputShape = dynamicOutputShapes[kernelOutputsIt.index()];
-                VPUX_THROW_WHEN(outputShape.size() > 1,
-                                "The number of dynamic shapes per output must be either 0 or 1");
-                addDynamicShapeRelocation(outputShape[0],
-                                          (kernelInputsSize + kernelOutputsIt.index()) * sizeof(sw_params::MemRefData) +
-                                                  offsetof(sw_params::MemRefData, dimsAddr));
-            } else {
+        if (!kernelParamsOp.getIsCompiled()) {
+            // output Dims addr
+            for (const auto& kernelOutputsIt : kernelOutputs | indexed) {
+                if (!dynamicOutputShapes.empty() && !dynamicOutputShapes[kernelOutputsIt.index()].empty()) {
+                    const auto& outputShape = dynamicOutputShapes[kernelOutputsIt.index()];
+                    VPUX_THROW_WHEN(outputShape.size() > 1,
+                                    "The number of dynamic shapes per output must be either 0 or 1");
+                    addDynamicShapeRelocation(outputShape[0], (kernelInputsSize + kernelOutputsIt.index()) *
+                                                                              sizeof(sw_params::MemRefData) +
+                                                                      offsetof(sw_params::MemRefData, dimsAddr));
+                } else {
+                    paramsAutoRelocBuilder.create<ELFNPU37XX::RelocOp>(
+                            kernelParamsOp.getLoc(), kernelParamsOp.getResult(),
+                            (kernelInputsSize + kernelOutputsIt.index()) * sizeof(sw_params::MemRefData) +
+                                    offsetof(sw_params::MemRefData, dimsAddr),
+                            vpux::ELFNPU37XX::RelocationType::R_VPU_32, kernelParamsSectionSym, partial_addend,
+                            kernelParamsOpName + " static output dims kernel params reloc");
+                }
+
+                partial_addend += sizeof(int32_t) * getShape(kernelOutputsIt.value()).size();
+            }
+
+            // output Strides addr
+            for (auto kernelOutputsIt : kernelOutputs | indexed) {
                 paramsAutoRelocBuilder.create<ELFNPU37XX::RelocOp>(
                         kernelParamsOp.getLoc(), kernelParamsOp.getResult(),
                         (kernelInputsSize + kernelOutputsIt.index()) * sizeof(sw_params::MemRefData) +
-                                offsetof(sw_params::MemRefData, dimsAddr),
+                                offsetof(sw_params::MemRefData, stridesAddr),
                         vpux::ELFNPU37XX::RelocationType::R_VPU_32, kernelParamsSectionSym, partial_addend,
-                        kernelParamsOpName + " static output shape kernel params reloc");
+                        kernelParamsOpName + " static output strides kernel params reloc");
+
+                partial_addend += sizeof(int64_t) * getMemStrides(kernelOutputsIt.value()).size();
             }
-
-            partial_addend += sizeof(int32_t) * getShape(kernelOutputsIt.value()).size();
-        }
-
-        // output Strides addr
-        for (auto kernelOutputsIt : kernelOutputs | indexed) {
-            paramsAutoRelocBuilder.create<ELFNPU37XX::RelocOp>(
-                    kernelParamsOp.getLoc(), kernelParamsOp.getResult(),
-                    (kernelInputsSize + kernelOutputsIt.index()) * sizeof(sw_params::MemRefData) +
-                            offsetof(sw_params::MemRefData, stridesAddr),
-                    vpux::ELFNPU37XX::RelocationType::R_VPU_32, kernelParamsSectionSym, partial_addend,
-                    kernelParamsOpName + " output strides kernel params reloc");
-
-            partial_addend += sizeof(int64_t) * getMemStrides(kernelOutputsIt.value()).size();
         }
     }
 }
@@ -1946,6 +1884,8 @@ void ConvertVPUMI37XX2ELFPass::safeRunOnModule() {
     mlir::func::FuncOp funcOp;
     mlir::ModuleOp moduleOp = getOperation();
 
+    ShaveBinaryResources::loadElfData(moduleOp);
+
     _log.trace("ConvertVPUMI37XX2ELFPass::safeRunOnFunc(): START\n {0}\n", moduleOp);
 
     vpux::IE::CNNNetworkOp cnnOp;
@@ -2304,7 +2244,7 @@ void ConvertVPUMI37XX2ELFPass::safeRunOnModule() {
 
     bool shaveScratchAccess = false;
     bool shaveConstAccess = false;
-    createKernelParamsRelocs(funcOp, ctx, kernelParamsSectionOp, shaveScratchAccess, shaveConstAccess);
+    createKernelParamsRelocs(funcOp, shaveScratchAccess, shaveConstAccess);
     if (shaveScratchAccess) {
         VPUX_THROW_UNLESS(scratchBufferSectionOp != nullptr, "Scratch buffer section result is null");
         auto currFlagsAttrVal = scratchBufferSectionOp.getSecFlags();

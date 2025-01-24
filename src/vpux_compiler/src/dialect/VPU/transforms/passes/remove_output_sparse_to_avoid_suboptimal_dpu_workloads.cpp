@@ -32,7 +32,7 @@ void removeOutputSparse(VPU::NCEOpInterface nceOp, Logger log) {
         while (!users.empty()) {
             auto currentOp = users.back();
             users.pop_back();
-            if (mlir::isa_and_nonnull<vpux::VPU::ViewLikeOpInterface>(currentOp)) {
+            if (mlir::isa_and_nonnull<vpux::VPU::ViewLikeOpInterface, VPU::UnrolledTypeOp>(currentOp)) {
                 vpux::inferReturnTypes(currentOp, vpux::InferShapedTypeMode::ALL);
                 auto nextOps = to_small_vector(currentOp->getUsers());
                 users.insert(users.end(), nextOps.begin(), nextOps.end());

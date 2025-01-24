@@ -8,6 +8,7 @@
 #include "vpux/compiler/dialect/VPUIP/interfaces/dma_descriptor_generator.hpp"
 #include "vpux/compiler/dialect/VPUIP/transforms/passes.hpp"
 #include "vpux/compiler/dialect/VPUIP/utils/convert_to_dma_utils.hpp"
+#include "vpux/compiler/dialect/VPUIP/utils/unroll_dma_analysis.hpp"
 #include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPURT/IR/task.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
@@ -753,7 +754,11 @@ private:
 void UnrollPermuteToNNDMAPass::safeRunOnFunc() {
     auto& ctx = getContext();
     auto func = getOperation();
-
+    markAnalysesPreserved<VPUIP::UnrollDMAAnalysis>();
+    auto analysis = getAnalysis<VPUIP::UnrollDMAAnalysis>();
+    if (!analysis.passNeeded(VPUIP::UnrollDMAAnalysisNeeded::UnrollPermuteToNNDMAPass)) {
+        return;
+    }
     auto module = func->getParentOfType<mlir::ModuleOp>();
     auto dmaOp = IE::getAvailableExecutor(module, VPU::ExecutorKind::DMA_NN);
     auto dmaPortCount = dmaOp.getCount();

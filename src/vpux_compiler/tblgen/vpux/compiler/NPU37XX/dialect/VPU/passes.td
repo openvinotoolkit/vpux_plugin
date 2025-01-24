@@ -96,6 +96,14 @@ def ApplyTilingMVN1Sum : PassBase<"apply-tiling-mvn1sum", "vpux::FunctionPass"> 
     let dependentDialects = [
         "vpux::VPU::VPUDialect"
     ];
+
+    let options = [
+        Option<
+            "tilingMode", "tiling-mode",
+            "std::string", [{"PREFETCH"}],
+            "[Optional] Set tiling mode as `ISOLATED` or `PREFETCH`"
+        >
+    ];
 }
 
 //

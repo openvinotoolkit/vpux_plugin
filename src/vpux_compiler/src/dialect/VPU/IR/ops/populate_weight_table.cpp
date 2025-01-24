@@ -21,8 +21,22 @@ mlir::LogicalResult vpux::VPU::PopulateWeightTableOp::inferReturnTypes(
         return mlir::failure();
     }
 
-    const auto dstType = populateWT.getDstType();
-    inferredReturnTypes.push_back(dstType);
+    auto inType = mlir::cast<NDTypeInterface>(populateWT.getScale().getType());
+    auto shape = inType.getShape();
+    llvm::SmallVector<int64_t> wtShape = {shape[Dims4D::Filter::OC], 1, 1, 4};
+
+    const auto newOutputType = TypeComponents()
+                                       .setDimsOrder(inType.getDimsOrder())
+                                       .setShape(Shape(wtShape))
+                                       .setElementType(getSInt32Type(ctx));
+
+    const auto bounds =
+            mlir::isa<BoundedTypeInterface>(inType) ? mlir::cast<BoundedTypeInterface>(inType).getBounds() : nullptr;
+    vpux::DimsOrder outOrder = newOutputType.dimsOrder.value();
+    auto outTensorAttr = vpux::getTensorAttr(outOrder.toAffineMap(ctx), inType.getMemSpace(), bounds);
+    auto outputType = mlir::RankedTensorType::get(wtShape, getSInt32Type(ctx), outTensorAttr);
+
+    inferredReturnTypes.push_back(outputType);
 
     return mlir::success();
 }
@@ -96,6 +110,6 @@ bool vpux::VPU::PopulateWeightTableOp::supportCycleCostCalculation() {
 //
 
 void vpux::VPU::PopulateWeightTableOp::build(::mlir::OpBuilder& builder, ::mlir::OperationState& state,
-                                             ::mlir::Value scale, mlir::Type outType, int64_t base, int64_t step) {
-    build(builder, state, scale, outType, base, step, {});
+                                             ::mlir::Value scale, int64_t base, int64_t step) {
+    build(builder, state, scale, base, step, {});
 }

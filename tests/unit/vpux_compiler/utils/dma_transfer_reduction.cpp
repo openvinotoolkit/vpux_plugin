@@ -228,6 +228,20 @@ std::vector<DMAReductionTestParams> dmaReductionTestValues = {
          /*elementType=*/"u8",
          /*expectedReducedDims=*/{2, 3, 4},
          /*expectedReducedStrides=*/{64, 32, 8}},
+        {// Single stride, 4 bit, inner dim compact
+         /*dims=*/{1, 5, 308, 128},
+         /*strides=*/{16515072, 589824, 128, 1},
+         /*dimsOrder=*/0x1234,
+         /*elementType=*/"i4",
+         /*expectedReducedDims=*/{5, 19712},
+         /*expectedReducedStrides=*/{8257536, 294912}},
+        {// Overlap stride, inner dim compact
+         /*dims=*/{2, 1, 3, 56, 224},
+         /*strides=*/{12544, 150528, 50176, 224, 1},
+         /*dimsOrder=*/0x12345,
+         /*elementType=*/"f16",
+         /*expectedReducedDims=*/{2, 3, 25088},
+         /*expectedReducedStrides=*/{50176, 25088, 100352}},
 };
 
 INSTANTIATE_TEST_SUITE_P(ArbitraryTest, DMAReductionTest, testing::ValuesIn(dmaReductionTestValues));

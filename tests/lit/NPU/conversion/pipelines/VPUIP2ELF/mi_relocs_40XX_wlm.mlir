@@ -1,7 +1,7 @@
 //
 // Copyright (C) 2022-2023 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
-//v
+//
 
 // RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch% allow-custom-values=true" --lower-VPUIP-to-ELF %s | FileCheck %s
 // REQUIRES: arch-NPU40XX
@@ -103,7 +103,7 @@ func.func @main(%1: memref<1x1x1x32xf16>, %2: memref<1x1x1x32xf16>) -> memref<1x
   // CHECK:       ELF.Reloc offset(1568) sourceSym(@symtab::@elfsym.program.managedBarrier) relocType(<R_VPU_64>) addend(0)
   // CHECK:       ELF.Reloc offset(1600) sourceSym(@symtab::@elfsym.shave.runtime) relocType(<R_VPU_64>) addend(0)
   // CHECK:       ELF.Reloc offset(1760) sourceSym(@symtab::@elfsym.program.workItem) relocType(<R_VPU_64>) addend(0)
-  // CHECK:       ELF.Reloc offset(1800) sourceSym(@symtab::@elfsym.program.managedBarrier) relocType(<R_VPU_64>) addend(0) 
+  // CHECK:       ELF.Reloc offset(1800) sourceSym(@symtab::@elfsym.program.managedBarrier) relocType(<R_VPU_64>) addend(0)
   // CHECK:       ELF.Reloc offset(2080) sourceSym(@symtab::@elfsym.program.bootstrap) relocType(<R_VPU_64>) addend(0)
-
+  // CHECK:       ELF.Reloc offset(2120) sourceSym(@symtab::@elfsym.program.nnrt_config) relocType(<R_VPU_64>) addend(0)
 }

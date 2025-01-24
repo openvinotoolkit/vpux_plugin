@@ -11,7 +11,7 @@
 #include <common_test_utils/ov_tensor_utils.hpp>
 #include "common_test_utils/node_builders/reduce.hpp"
 #include "common_test_utils/test_constants.hpp"
-#include "npu_private_properties.hpp"
+#include "intel_npu/npu_private_properties.hpp"
 #include "vpu_ov2_layer_test.hpp"
 
 using namespace ov::test::utils;
@@ -92,7 +92,6 @@ TEST_P(ReduceLayerTest_SW_FP16, NPU4000) {
     VpuOv2LayerTest::setReferenceSoftwareMode();
     VpuOv2LayerTest::run(Platform::NPU4000);
 }
-
 /// FP32 HW
 TEST_P(ReduceLayerTest_FP32, NPU3720_HW) {
     VpuOv2LayerTest::setDefaultHardwareMode();
@@ -103,7 +102,6 @@ TEST_P(ReduceLayerTest_FP32, NPU4000_HW) {
     VpuOv2LayerTest::setDefaultHardwareMode();
     VpuOv2LayerTest::run(Platform::NPU4000);
 }
-
 /// FP32 SW
 TEST_P(ReduceLayerTest_FP32, NPU3720_SW) {
     VpuOv2LayerTest::setReferenceSoftwareMode();
@@ -114,7 +112,6 @@ TEST_P(ReduceLayerTest_FP32, NPU4000_SW) {
     VpuOv2LayerTest::setReferenceSoftwareMode();
     VpuOv2LayerTest::run(Platform::NPU4000);
 }
-
 class ReduceOpsLayerWithSpecificInputTestCommon :
         public ReduceOpsLayerWithSpecificInputTest,
         virtual public VpuOv2LayerTest {

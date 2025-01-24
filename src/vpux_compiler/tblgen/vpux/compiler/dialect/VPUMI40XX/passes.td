@@ -44,7 +44,7 @@ def BarrierComputation : PassBase<"barrier-computation-VPUMI40XX", "vpux::Functi
     let summary = "Compute and setup scheduling related fields";
 
     let description = [{
-        This pass computes and sets up the (barrier) scheduling related fields - next_same_id, start_after, clean_after.
+        This pass computes and sets up the (barrier) scheduling related fields - next_same_id, previousSameId, start_after, clean_after.
         This logic was clasically part of the parser, but in ELF pipeline, it is included in the lowering.
     }];
 
@@ -80,10 +80,19 @@ def BarrierTopologicalMapping : PassBase<"barrier-topological-mapping", "vpux::F
     let summary = [{Construct barrier topological dependencies}];
 
     let description = [{
-        Calculates mapped inference specific barrier topological ordering and materializez BarrierTask dependencies.
-        The defintion of an inter-barrier task topological depency is defined as follows :
-            - A barrier task B1 has a topological dependency over another barrier task B0 IF AND ONLY IF the PRODUCTION of B1 is
-            GUARANTEED to happen AFTER the CONSUMPTION of B0.
+        Created bar-to-bar dependencies represent a barrier only graph generated
+        from original schedule with task nodes removed.
+        Example schedule:
+            BAR0 -> OP0 -> BAR1 -> OP1 -> BAR2
+              \------------OP2---------->/
+        Barrier dependencies:
+            BAR0 --------> BAR1 --------> BAR2
+              \------------------------->/
+
+        Definition:
+        BARx depends on BARy if BARx can get updated (BARx pcount decremented) when BARy was produced
+
+        Those dependencies are to be used by add-enqueue-ops pass.
     }];
 
     let constructor = "vpux::VPUMI40XX::createBarrierTopologicalMappingPass()";
@@ -101,10 +110,16 @@ def UnGroupExecutionOps : PassBase<"ungroup-execution-ops", "vpux::FunctionPass"
     let constructor = "vpux::VPUMI40XX::createUnGroupExecutionOpsPass()";
 }
 
-def WorkloadManagement : PassBase<"workload-management", "vpux::FunctionPass"> {
-    let summary = [{Workload management pass}];
+def AddFetchOps : PassBase<"add-fetch-ops", "vpux::FunctionPass"> {
+    let summary = [{ Insert Fetch operations }];
 
-    let constructor = "vpux::VPUMI40XX::createWorkloadManagementPass()";
+    let description = [{
+        Insert FetchOps for DPU & Shv tasks
+        These tasks are responsible to copy descriptors for Variant,Invariant,ShaveInvocation and ShaveRange
+        to CMX Metadata space. Lower in the pipeline these tasks are lowered to NNDMAs
+    }];
+
+    let constructor = "vpux::VPUMI40XX::createAddFetchOpsPass()";
 }
 
 def ResolveWLMTaskLocation : PassBase<"resolve-wlm-task-location", "vpux::FunctionPass"> {
@@ -126,7 +141,24 @@ def PropagateFinalBarrier : PassBase<"propagate-final-barrier", "vpux::FunctionP
 }
 
 def AddEnqueueOps : PassBase<"add-enqueue-ops", "vpux::FunctionPass"> {
-    let summary = [{ Add Enqueue Ops}];
+    let summary = [{ Schedule Enqeue operations }];
+
+    let description = [{
+        Schedule Enqueu operations for DMA, DPU & Shave tasks.
+        Even though DMAs are not fetched into CMX metadata space, they still need to be enqueued.
+
+        It accounts for enqueues scheduled at the same barriers and fuses them into single enqueue ->
+        enqueue can cover secondaries from different primaries -> enqueue can cover secondaries across
+        Fetch task boundary.
+    }];
+
+    let options = [
+        Option<
+            "enableWlmVpurtEnqueueOpt", "enable-wlm-vpurt-enqueue",
+            "bool", "false",
+            "Enable usage of predefined enqueue targets from VPURT"
+        >
+    ];
 
     let constructor = "vpux::VPUMI40XX::createAddEnqueueOpsPass()";
 }
@@ -156,19 +188,30 @@ def LinkAllOps : PassBase<"link-all-ops", "vpux::FunctionPass"> {
 }
 
 def UnrollFetchTaskOps : PassBase<"unroll-fetch-ops", "vpux::FunctionPass"> {
-    let summary = [{ Unroll FetchTask Ops}];
+    let summary = [{ Unroll FetchTask Ops }];
+
+    let description = [{
+        Replaces single Fetch operation for a task group with 2 DMA operations: one for "primary" task type
+        (e.g. invariant) range and one for "secondary" task type range.
+    }];
 
     let constructor = "vpux::VPUMI40XX::createUnrollFetchTaskOpsPass()";
 }
 
 def SplitEnqueueOps : PassBase<"split-enqueue-ops", "vpux::FunctionPass"> {
-    let summary = [{ Split enqueue Ops fot avoid bug when we have last op in task buffer in LL}];
+    let summary = [{ Split enqueue Ops fot avoid bug when we have last op in task buffer in LL }];
 
     let description = [{
-        There is a situation in which we are preempting at a boundary level and, in specific case of operations which linked,
-        we might end up reading incorrect information from CMX during save state stage.
-        Every enqueue op has [start, end] range inside. This pass split existing enqueue in two if find the task which contains special attribute
-        As a result enqueue[start,end] will be transformed to two enqueues: enqueue[start, task_with_attr] , enqueue[task_with_attr+1, end]
+        To account for preemption at a group boundary level scenario we have to leave last task in fetch group
+        unlinked. The problem with preemmption is due to concurrency between thread processing preemption and execution
+        thread, upon restore of previous state we can't realiably check if last task in group was linked, since it could be
+        replaced already with tasks from next group by execution thread. The solution is to leave last tasks in groups
+        always unlinked.
+
+        This pass splits single enqueue operation into multiple based on special attribute
+        (lastSecondaryTaskInExecutionGroup) set by previous passes in the pipeline (group-execution-ops). Since single
+        enqueue operation may cover a range of tasks spanning through multiple Fetch groups, it may be split into more
+        than 2 enqueue operations.
     }];
 
     let constructor = "vpux::VPUMI40XX::createSplitEnqueueOpsPass()";
@@ -193,11 +236,53 @@ def NextSameIdAssignment : PassBase<"next-same-id-assignment", "vpux::FunctionPa
     let summary = "Compute and setup scheduling related fields";
 
     let description = [{
-        This pass computes and sets up the (barrier) scheduling related fields - next_same_id
+        This pass computes and sets up the (barrier) scheduling related fields - next_same_id, previousSameId
     }];
 
     let constructor = "vpux::VPUMI40XX::createNextSameIdAssignmentPass()";
 
+}
+
+def AddPlatformInfo : PassBase<"add-platform-info", "vpux::FunctionPass"> {
+    let summary = "Adds platform info operation which provides info such as arch kind";
+
+    let constructor = "vpux::VPUMI40XX::createAddPlatformInfoPass()";
+
+}
+
+def DumpStatisticsOfWlmOps : PassBase<"dump-statistics-of-wlm-ops", "vpux::FunctionPass"> {
+    let summary = "Print stats on WLM related ops";
+
+    let description = [{
+        This pass dumps count of enqueue and fetch DMA ops inserted as part of WLM
+    }];
+
+    let constructor = "vpux::VPUMI40XX::createDumpStatisticsOfWlmOpsPass()";
+
+}
+
+def AddInitialBarrierConfigurationOps : PassBase<"add-initial-barrier-confuguration-ops", "vpux::FunctionPass"> {
+    let summary = "Prepare information for initial barrier configuration";
+
+    let constructor = "vpux::VPUMI40XX::createAddInitialBarrierConfigurationOps()";
+}
+
+def AddMappedInferenceVersionOp : PassBase<"add-mapped-inference-version-op", "vpux::FunctionPass"> {
+    let summary = "Add explicit operation for Mapped Inference and Managed Mapped inference version representation";
+
+    let constructor = "vpux::VPUMI40XX::createAddMappedInferenceVersionOpPass()";
+}
+
+def UpdateMappedInferenceVersionOp : PassBase<"update-mapped-inference-version-op", "vpux::FunctionPass"> {
+    let summary = "WA for NPU4 platform which allow us set different version of mapped inference based on IR content";
+
+    let description = [{
+        UD2024.48 release contains new set of features for WLM which require new API. At the same time we want to keep forward compatibility
+        between UD2024.44 and future releases. This pass analyzing IR content and looking for specific operations/attributes which signed that we are using new features and new API is required.
+        If we found such operations we will update version of mapped inference.
+    }];
+
+    let constructor = "vpux::VPUMI40XX::createUpdateMappedInferenceVersionOpPass()";
 }
 
 #endif

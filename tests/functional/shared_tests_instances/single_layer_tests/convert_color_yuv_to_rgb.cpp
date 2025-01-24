@@ -1,10 +1,10 @@
 //
-// Copyright (C) Intel Corporation
+// Copyright (C) 2022 - 2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
 #include "common_test_utils/test_constants.hpp"
-#include "npu_private_properties.hpp"
+#include "intel_npu/npu_private_properties.hpp"
 #include "single_op_tests/convert_color_i420.hpp"
 #include "single_op_tests/convert_color_nv12.hpp"
 #include "vpu_ov2_layer_test.hpp"
@@ -62,7 +62,6 @@ TEST_P(ConvertColorI420M2ILayerTest, NPU4000_HW) {
     setDefaultHardwareMode();
     run(Platform::NPU4000);
 }
-
 }  // namespace test
 }  // namespace ov
 
@@ -105,7 +104,7 @@ ov::element::Type dTypes[] = {
         ov::element::f16,
 };
 
-// Cases for 3720/4000/5010
+// Cases for 3720/4000
 auto inputShapeTrueI420 = generate_input_static_shapes(inShapes, I420, true);
 auto inputShapeFalseI420 = generate_input_static_shapes(inShapes, I420, false);
 auto inputShapeTrueNV12 = generate_input_static_shapes(inShapes, NV12, true);

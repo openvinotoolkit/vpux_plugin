@@ -91,12 +91,12 @@ size_t vpux::ELFNPU37XX::getOffsetOfOpInSection(mlir::Value& op) {
 
     auto tile = type.getMemSpace().getIndex().value_or(0);
 
-    return tile * mvds::nce2p7::CMX_SLICE_SIZE + declareBufferOp.getByteOffset();
+    return tile * vpux::ELFNPU37XX::CMX_SLICE_SIZE + declareBufferOp.getByteOffset();
 }
 
-SmallString vpux::ELFNPU37XX::getSwKernelArchString(VPU::ArchKind archKind) {
+llvm::SmallString<128> vpux::ELFNPU37XX::getSwKernelArchString(VPU::ArchKind archKind) {
     VPUX_THROW_UNLESS(archKind == VPU::ArchKind::NPU37XX, "The only supported architecture for sw kernels is 3720xx");
-    return SmallString("3720xx");
+    return llvm::SmallString<128>("3720xx");
 }
 
 void vpux::ELFNPU37XX::RelocationManager::init(mlir::func::FuncOp funcOp) {

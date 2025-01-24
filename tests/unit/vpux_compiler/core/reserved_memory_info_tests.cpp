@@ -49,10 +49,6 @@ TEST_F(MLIR_ArgAllocationInfo, MultipleCallOps) {
             func.func private @foo3(%arg0: memref<1x3x60x60xf16, @DDR>, %arg2: memref<1x1x20x60xf16, @DDR>, %arg3: memref<1x4x60x60xf16, @DDR>) -> memref<1x4x60x60xf16, @DDR>
 
             func.func @main(%arg0: memref<1x8x60x60xf16, @DDR>, %arg1: memref<1x4x60x60xf16, @DDR>, %arg2: memref<1x2x60x60xf16, @DDR>) -> (memref<1x4x60x60xf16, @DDR>, memref<1x2x60x60xf16, @DDR>) {
-                builtin.module @UsedMemory {
-                    IE.MemoryResource 0 bytes of @CMX_NN
-                }
-
                 %alloc = memref.alloc() : memref<1x4x60x60xf16, @DDR>
                 %token, %bodyResults:2 = async.execute -> (!async.value<memref<1x4x60x60xf16, @DDR>>, !async.value<memref<1x2x60x60xf16, @DDR>>)
                                             attributes {VPUIP.executor = @NCE, "async-deps-index" = 0 : i64, cycleBegin = 0 : i64, cycleCost = 1 : i64, cycleEnd = 1 : i64} {
@@ -149,10 +145,6 @@ TEST_F(MLIR_ArgAllocationInfo, MultipleCallOpsWithMultipleUses) {
             func.func private @foo5(%arg0: memref<1x4x60x60xf16, @DDR>, %arg2: memref<1x3x60x60xf16, @DDR>) -> memref<1x3x60x60xf16, @DDR>
 
             func.func @main(%arg0: memref<1x8x60x60xf16, @DDR>, %arg1: memref<1x4x60x60xf16, @DDR>, %arg2: memref<1x2x60x60xf16, @DDR>, %arg3: memref<1x4x60x60xf16, @DDR>, %arg4: memref<1x3x60x60xf16, @DDR>) -> (memref<1x4x60x60xf16, @DDR>, memref<1x2x60x60xf16, @DDR>, memref<1x4x60x60xf16, @DDR>, memref<1x3x60x60xf16, @DDR>) {
-                builtin.module @UsedMemory {
-                    IE.MemoryResource 0 bytes of @CMX_NN
-                }
-
                 %alloc = memref.alloc() : memref<1x4x60x60xf16, @DDR>
                 %token, %bodyResults:2 = async.execute -> (!async.value<memref<1x4x60x60xf16, @DDR>>, !async.value<memref<1x2x60x60xf16, @DDR>>)
                                             attributes {VPUIP.executor = @NCE, "async-deps-index" = 0 : i64, cycleBegin = 0 : i64, cycleCost = 1 : i64, cycleEnd = 1 : i64} {

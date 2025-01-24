@@ -14,8 +14,8 @@ namespace vpumi40xx2vpuasm {
 class ViewTaskRangeRewriter : public VPUASMSymbolizationPattern<VPURegMapped::ViewTaskRangeOp> {
 public:
     using Base::Base;
-    mlir::LogicalResult symbolize(VPURegMapped::ViewTaskRangeOp op, SymbolMapper& mapper,
-                                  mlir::ConversionPatternRewriter& rewriter) const override;
+    mlir::FailureOr<SymbolizationResult> symbolize(VPURegMapped::ViewTaskRangeOp op, SymbolMapper& mapper,
+                                                   mlir::ConversionPatternRewriter& rewriter) const override;
     llvm::SmallVector<mlir::FlatSymbolRefAttr> getSymbolicNames(VPURegMapped::ViewTaskRangeOp op,
                                                                 size_t counter) override;
 };

@@ -160,7 +160,7 @@ mlir::LogicalResult TransposeInterpolation::matchAndRewrite(IE::InterpolateOp or
     auto newInterpolate = rewriter.create<IE::InterpolateOp>(
             origOp->getLoc(), inTranspose, origOp.getSizes(), origOp.getScales(), origOp.getAxes(), newSizesAttr,
             newScalesAttr, newAxesAttr, origOp.getTileOffsetAttrAttr(), origOp.getInitialInputDimsAttrAttr(),
-            origOp.getInitialOutputDimsAttrAttr(), origOp.getAttr());
+            origOp.getInitialOutputDimsAttrAttr(), origOp.getAttr(), origOp.getOutputChannelsAttr());
 
     // Create output Transpose
     auto outTransposeOutput = createOutTranspose(inOrderMap, newInterpolate.getOutput(),

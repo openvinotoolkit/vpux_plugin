@@ -9,7 +9,7 @@
 #include <sstream>
 #include <vpux/utils/core/logger.hpp>
 #include "gtest/gtest.h"
-#include "npu_private_properties.hpp"
+#include "intel_npu/npu_private_properties.hpp"
 #include "vpu_test_report.hpp"
 #include "vpu_test_tool.hpp"
 #include "vpux/utils/IE/config.hpp"

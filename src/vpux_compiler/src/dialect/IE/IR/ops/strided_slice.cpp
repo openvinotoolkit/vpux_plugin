@@ -63,9 +63,6 @@ mlir::LogicalResult vpux::IE::StridedSliceOp::inferReturnTypeComponents(
         return mlir::failure();
     }
 
-    const auto inDataType = slice.getInput().getType().cast<mlir::ShapedType>();
-    const auto inDataShape = inDataType.getShape();
-
     const auto inputData = extractData(loc, slice);
     const auto beginsShape =
             slice.getBegins() != nullptr
@@ -85,7 +82,9 @@ mlir::LogicalResult vpux::IE::StridedSliceOp::inferReturnTypeComponents(
     const auto shrinkAxisMask = parseIntArrayAttr<int64_t>(slice.getShrinkAxisMask());
     const auto ellipsisMask = parseIntArrayAttr<int64_t>(slice.getEllipsisMask());
 
-    auto outputShapeInfo = inferStridedSliceOutputShape(inDataShape, inputData.begins, inputData.ends,
+    const auto inDataType = mlir::cast<NDTypeInterface>(slice.getInput().getType());
+    const auto inShapeInfo = ShapeInfo::fromNDType(inDataType);
+    auto outputShapeInfo = inferStridedSliceOutputShape(inShapeInfo, inputData.begins, inputData.ends,
                                                         inputData.strides, beginsShape, endsShape, stridesShape,
                                                         beginMask, endMask, newAxisMask, shrinkAxisMask, ellipsisMask);
 

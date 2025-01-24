@@ -59,7 +59,7 @@ TEST_F(MLIR_FeasibleMemorySchedulerSpilling, RemoveComputeOpRelocationSpillsForI
                     %1 = VPUIP.NCEClusterTask {is_inplace = true, minimumHardwareExecutionCost = 21125 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>} input(%arg2 : !Type_CMX) weights(%arg3 : !Type_CMX) parent_input(%arg2 : !Type_CMX) parent_output(%buf_cmx_1 : !Type_CMX) outputs(%buf_cmx_1 : !Type_CMX) -> !Type_CMX  variants : {
                             DPUTask {cluster_id = 0 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [31, 31, 31], outStart = [0, 0, 0], pad = #VPU.Padding<bottom = 0 : i64, left = 0 : i64, right = 0 : i64, top = 0 : i64>}
                         } PPE : {
-                            PPETask {opaque_ppe = #VPU.PPEStub<>}
+                            PPETask {ppe = #VPU.PPEStub<>}
                         }
                     async.yield %1: !Type_CMX
                 }
@@ -238,7 +238,7 @@ TEST_F(MLIR_FeasibleMemorySchedulerSpilling, RemoveComputeOpRelocationSpillsForS
                     %270 = VPUIP.NCEClusterTask {is_inplace = true, minimumHardwareExecutionCost = 21125 : i64, task_type = #VPUIP.nce_task_type<ELTWISE>} input(%arg2 : !Type_CMX) weights(%arg3 : !Type_CMX) parent_input(%arg2 : !Type_CMX) parent_output(%buf_cmx_3 : !Type_CMX) outputs(%buf_cmx_3 : !Type_CMX) -> !Type_CMX  variants : {
                             DPUTask {cluster_id = 0 : i64, mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [15, 71, 127], outStart = [0, 0, 0], pad = #VPU.Padding<bottom = 0 : i64, left = 0 : i64, right = 0 : i64, top = 0 : i64>}
                         } PPE : {
-                            PPETask {opaque_ppe = #VPU.PPEStub<>}
+                            PPETask {ppe = #VPU.PPEStub<>}
                         }
                     async.yield %270: !Type_CMX
                 }

@@ -179,8 +179,8 @@ mlir::LogicalResult ZeroPointWithConvolution::matchAndRewrite(IE::ConvolutionOp 
     auto scale = std::fabs(originalWeightValue);
     auto quantType = mlir::quant::UniformQuantizedType::get(
             mlir::quant::QuantizationFlags::Signed, getSInt8Type(context), mlir::Float16Type::get(context), scale,
-            /*zp=*/0, /*min=*/int8Min,
-            /*max=*/int8Max);
+            /*zp=*/0, /*min=*/static_cast<int64_t>(int8Min),
+            /*max=*/static_cast<int64_t>(int8Max));
     auto newFilterVal = Const::createFloatConst(rewriter, appendLoc(convOp.getLoc(), "new_filter"), filterShape,
                                                 weightsForNewConvolution);
     auto quantizedFilter =

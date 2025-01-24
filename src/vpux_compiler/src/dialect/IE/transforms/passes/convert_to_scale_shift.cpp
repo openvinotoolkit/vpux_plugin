@@ -13,8 +13,74 @@ using namespace vpux;
 
 namespace {
 
+mlir::LogicalResult checkIfShapesAreBroadcastable(ArrayRef<int64_t> shape1, ArrayRef<int64_t> shape2,
+                                                  IE::AutoBroadcastType broadcastType) {
+    if (broadcastType == IE::AutoBroadcastType::NONE_OR_EXPLICIT) {
+        if (shape1 != shape2) {
+            return mlir::failure();
+        }
+
+        return mlir::success();
+    } else if (broadcastType == IE::AutoBroadcastType::NUMPY) {
+        auto in1ShapeIter = shape1.rbegin();
+        auto in2ShapeIter = shape2.rbegin();
+        while (in1ShapeIter != shape1.rend() && in2ShapeIter != shape2.rend()) {
+            if (*in1ShapeIter != 1 && *in2ShapeIter != 1 && *in1ShapeIter != *in2ShapeIter) {
+                return mlir::failure();
+            }
+
+            if (in1ShapeIter != shape1.rend()) {
+                ++in1ShapeIter;
+            }
+            if (in2ShapeIter != shape2.rend()) {
+                ++in2ShapeIter;
+            }
+        }
+
+        return mlir::success();
+    }
+
+    return mlir::failure();
+}
+
+bool checkIfNeedToCloneOpChain(mlir::Operation* chainOp, ShapeRef dataConstOpShape) {
+    for (auto* userOp : chainOp->getUsers()) {
+        auto outputShape = getShape(userOp->getResult(0));
+        bool needsClone = false;
+
+        if (userOp->hasAttr("auto_broadcast")) {
+            static const auto N = Dims4D::Act::N;
+            static const auto C = Dims4D::Act::C;
+            static const auto H = Dims4D::Act::H;
+            static const auto W = Dims4D::Act::W;
+
+            auto broadcastType = userOp->getAttr("auto_broadcast").dyn_cast<IE::AutoBroadcastTypeAttr>().getValue();
+
+            SmallVector<int64_t> shape1 = {outputShape[N], outputShape[C], outputShape[H], outputShape[W]};
+            SmallVector<int64_t> shape2 = {dataConstOpShape[N], dataConstOpShape[C], dataConstOpShape[H],
+                                           dataConstOpShape[W]};
+
+            if (mlir::failed(checkIfShapesAreBroadcastable(shape1, shape2, broadcastType))) {
+                return true;
+            }
+        } else if (!mlir::isa<IE::ReshapeOp>(userOp) && outputShape != dataConstOpShape) {
+            return true;
+        }
+
+        if (mlir::isa<IE::ReshapeOp, IE::FakeQuantizeOp>(userOp)) {
+            needsClone = checkIfNeedToCloneOpChain(userOp, dataConstOpShape);
+        }
+
+        if (needsClone) {
+            return true;
+        }
+    }
+    return false;
+}
+
 mlir::LogicalResult verifyAndBroadcastInput(mlir::Location loc, mlir::Value& input, vpux::ShapeRef inputShape,
-                                            vpux::ShapeRef outputShape, mlir::PatternRewriter& rewriter) {
+                                            vpux::ShapeRef outputShape, mlir::Value& newInput,
+                                            mlir::PatternRewriter& rewriter) {
     static const auto N = Dims4D::Act::N;
     static const auto C = Dims4D::Act::C;
     static const auto H = Dims4D::Act::H;
@@ -66,15 +132,40 @@ mlir::LogicalResult verifyAndBroadcastInput(mlir::Location loc, mlir::Value& inp
         }
 
         auto dataConstOp = rewriter.create<Const::DeclareOp>(loc, dataAttr.getType(), std::move(dataAttr));
+        auto dataConstOpShape = getShape(dataConstOp.getOutput());
+
+        bool needToCloneOpChain = checkIfNeedToCloneOpChain(input2Const, dataConstOpShape);
 
         if (opsVec.size() == 0) {
             // [Const]->[Multiply/Add] case
-            input = dataConstOp.getOutput();
+            if (needToCloneOpChain) {
+                newInput = dataConstOp.getOutput();
+            } else {
+                input = dataConstOp.getOutput();
+                newInput = input;
+            }
         } else {
             // [Const] -> [several Reshapes]-> [FQ] -> [several Reshapes] -> [Multiply/Add] case
-            opsVec.front()->getOpOperand(0).set(dataConstOp.getOutput());
-            for (auto op : opsVec) {
-                inferReturnTypes(op, InferShapedTypeMode::SHAPE);
+            if (needToCloneOpChain) {
+                SmallVector<mlir::Operation*> opsVecCopy;
+                for (auto op : opsVec) {
+                    auto copyOp = rewriter.clone(*op);
+                    copyOp->setLoc(appendLoc(loc, "copy_scale_shift"));
+                    opsVecCopy.push_back(copyOp);
+                }
+
+                opsVecCopy.front()->getOpOperand(0).set(dataConstOp.getOutput());
+                for (auto op : opsVecCopy) {
+                    inferReturnTypes(op, InferShapedTypeMode::SHAPE);
+                }
+
+                newInput = opsVecCopy.front()->getResult(0);
+            } else {
+                opsVec.front()->getOpOperand(0).set(dataConstOp.getOutput());
+                for (auto op : opsVec) {
+                    inferReturnTypes(op, InferShapedTypeMode::SHAPE);
+                }
+                newInput = input;
             }
         }
     }
@@ -136,12 +227,13 @@ mlir::LogicalResult ConvertBiasToScaleShift<BiasTypeOp>::matchAndRewrite(BiasTyp
     auto mulOutShape = getShape(biasOp.getOutput());
     auto biasesShape = getShape(biasInput);
 
-    if (verifyAndBroadcastInput(biasOp.getLoc(), biasInput, biasesShape, mulOutShape, rewriter).failed()) {
+    auto newInput = biasInput;
+    if (verifyAndBroadcastInput(biasOp.getLoc(), biasInput, biasesShape, mulOutShape, newInput, rewriter).failed()) {
         _log.nest().trace("op {0} input cannot be broadcast", biasOp->getName());
         return mlir::failure();
     }
 
-    findBiasConst = IE::getConstParentOp(biasInput);
+    findBiasConst = IE::getConstParentOp(newInput);
     auto biasConst = findBiasConst.value();
 
     // Convert:
@@ -162,15 +254,15 @@ mlir::LogicalResult ConvertBiasToScaleShift<BiasTypeOp>::matchAndRewrite(BiasTyp
     //     \___ScaleShift___/
     //              |
 
-    if (mlir::isa<IE::NegativeOp>(biasInput.getDefiningOp()) || mlir::isa<IE::SubtractOp>(biasOp)) {
+    if (mlir::isa<IE::NegativeOp>(newInput.getDefiningOp()) || mlir::isa<IE::SubtractOp>(biasOp)) {
         auto negativeConstAttr = biasConst.transformContentAttr().rescale(-1.0).get();
-        biasInput = rewriter.create<Const::DeclareOp>(takeOpLoc(biasOp, "bias_in"), biasConst.getType(),
-                                                      std::move(negativeConstAttr))
-                            .getOutput();
+        newInput = rewriter.create<Const::DeclareOp>(takeOpLoc(biasOp, "bias_in"), biasConst.getType(),
+                                                     std::move(negativeConstAttr))
+                           .getOutput();
     }
 
     _log.nest().trace("replaced op {0} with ScaleShift", biasOp->getName());
-    rewriter.replaceOpWithNewOp<IE::ScaleShiftOp>(biasOp, biasOp.getType(), activationInput, nullptr, biasInput);
+    rewriter.replaceOpWithNewOp<IE::ScaleShiftOp>(biasOp, biasOp.getType(), activationInput, nullptr, newInput);
 
     return mlir::success();
 }
@@ -222,12 +314,13 @@ mlir::LogicalResult ConvertMultiplyToScaleShift::matchAndRewrite(IE::MultiplyOp 
         return mlir::failure();
     }
 
-    if (verifyAndBroadcastInput(mulOp.getLoc(), weightsInput, weightsShape, mulOutShape, rewriter).failed()) {
+    auto newInput = weightsInput;
+    if (verifyAndBroadcastInput(mulOp.getLoc(), weightsInput, weightsShape, mulOutShape, newInput, rewriter).failed()) {
         return mlir::failure();
     }
 
     _log.nest().trace("replaced op {0} with ScaleShift", mulOp->getName());
-    rewriter.replaceOpWithNewOp<IE::ScaleShiftOp>(mulOp, mulOp.getType(), activationInput, weightsInput, nullptr);
+    rewriter.replaceOpWithNewOp<IE::ScaleShiftOp>(mulOp, mulOp.getType(), activationInput, newInput, nullptr);
 
     return mlir::success();
 }

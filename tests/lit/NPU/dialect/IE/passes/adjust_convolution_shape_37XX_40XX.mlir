@@ -632,3 +632,68 @@ func.func @NotAdjustConvWithAsymmetricStrides(%arg0: tensor<1x1x1x256xf16, {orde
   // CHECK-SAME:  tensor<64x1x1x4xf16, {order = #NHWC}> -> tensor<1x64x1x64xf16, {order = #NHWC}>
   // CHECK:       return [[CONV]]
 }
+
+// -----
+
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+// CHECK-LABEL: @PreserveOutElemTypeFoldStrideIntoKernel
+// CHECK-SAME: ([[ARG0:%.+]]: tensor<1x8x128x128xf16, {order = #NHWC}>)
+func.func @PreserveOutElemTypeFoldStrideIntoKernel(%arg0: tensor<1x8x128x128xf16, {order = #NHWC}>) -> tensor<1x2x128x64xf32, {order = #NHWC}> {
+  %cst = const.Declare tensor<2x8x1x2xf16, {order = #NHWC}> = dense<1.250000e-01> : tensor<2x8x1x2xf16>, [#const.Reorder<#NHWC>]
+  %0 = IE.Convolution(%arg0, %cst) {dilations = [1, 1], pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 2]} : tensor<1x8x128x128xf16, {order = #NHWC}>, tensor<2x8x1x2xf16, {order = #NHWC}> -> tensor<1x2x128x64xf32, {order = #NHWC}>
+  return %0 : tensor<1x2x128x64xf32, {order = #NHWC}>
+
+  // CHECK-DAG:   [[CST_WEIGHTS:%.+]] = const.Declare tensor<2x16x1x1xf16, {order = #NHWC}>
+  // CHECK:       [[INPUT:%.+]] = IE.ShapeCast {shape = [1, 16, 128, 64]}
+  // CHECK-SAME:      inputs([[ARG0]] : tensor<1x8x128x128xf16, {order = #NHWC}>) -> tensor<1x16x128x64xf16, {order = #NHWC}>
+  // CHECK:       [[CONV_RET:%.+]] = IE.Convolution([[INPUT]], [[CST_WEIGHTS]])
+  // CHECK-SAME:       {dilations = [1, 1], pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]}
+  // CHECK-SAME:    -> tensor<1x2x128x64xf32, {order = #NHWC}>
+  // CHECK:       return [[CONV_RET]] : tensor<1x2x128x64xf32, {order = #NHWC}>
+}
+
+// -----
+
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+// CHECK-LABEL: @PreserveOutElemTypeAdjustConvolutionShape
+// CHECK-SAME: ([[ARG0:%.+]]: tensor<1x3x1080x1920xf16, {order = #NHWC}>)
+func.func @PreserveOutElemTypeAdjustConvolutionShape(%arg0: tensor<1x3x1080x1920xf16, {order = #NHWC}>) -> tensor<1x3x1080x1920xf32, {order = #NHWC}> {
+  %cst = const.Declare tensor<3x3x1x1xf16, {order = #NHWC}> = dense<1.250000e-01> : tensor<3x3x1x1xf16>, [#const.Reorder<#NHWC>]
+  %bias = const.Declare tensor<1x1x1x1xf16, {order = #NHWC}> = dense<1.0e-01> : tensor<1x1x1x1xf16>, [#const.Reorder<#NHWC>]
+  %0 = IE.Convolution(%arg0, %cst, %bias) {dilations = [1, 1], pads_begin = [0, 0], pads_end = [0, 0], strides = [1, 1]} : tensor<1x3x1080x1920xf16, {order = #NHWC}>, tensor<3x3x1x1xf16, {order = #NHWC}>, tensor<1x1x1x1xf16, {order = #NHWC}> -> tensor<1x3x1080x1920xf32, {order = #NHWC}>
+  return %0 : tensor<1x3x1080x1920xf32, {order = #NHWC}>
+
+  // CHECK-DAG:   [[CST_WEIGHTS_0:%.+]] = const.Declare tensor<3x48x1x1xf16, {order = #NHWC}> = dense<1.250000e-01> : tensor<3x3x1x1xf16>, [#const.Reorder<#NHWC>, #const.Reshape<[3, 3, 1, 1]>, #const.PadWithZero<[0, 0, 0, 0], [0, 45, 0, 0]>]
+  // CHECK-DAG:   [[CST_WEIGHTS_1:%.+]] = const.Declare tensor<3x48x1x1xf16, {order = #NHWC}> = dense<1.250000e-01> : tensor<3x3x1x1xf16>, [#const.Reorder<#NHWC>, #const.Reshape<[3, 3, 1, 1]>, #const.PadWithZero<[0, 3, 0, 0], [0, 42, 0, 0]>]
+  // CHECK-DAG:   [[CST_WEIGHTS_2:%.+]] = const.Declare tensor<3x48x1x1xf16, {order = #NHWC}> = dense<1.250000e-01> : tensor<3x3x1x1xf16>, [#const.Reorder<#NHWC>, #const.Reshape<[3, 3, 1, 1]>, #const.PadWithZero<[0, 6, 0, 0], [0, 39, 0, 0]>]
+  // CHECK-DAG:   [[CST_WEIGHTS_3:%.+]] = const.Declare tensor<3x48x1x1xf16, {order = #NHWC}> = dense<1.250000e-01> : tensor<3x3x1x1xf16>, [#const.Reorder<#NHWC>, #const.Reshape<[3, 3, 1, 1]>, #const.PadWithZero<[0, 9, 0, 0], [0, 36, 0, 0]>]
+  // CHECK-DAG:   [[CST_WEIGHTS_4:%.+]] = const.Declare tensor<3x48x1x1xf16, {order = #NHWC}> = dense<1.250000e-01> : tensor<3x3x1x1xf16>, [#const.Reorder<#NHWC>, #const.Reshape<[3, 3, 1, 1]>, #const.PadWithZero<[0, 12, 0, 0], [0, 33, 0, 0]>]
+  // CHECK-DAG:   [[CST_WEIGHTS_5:%.+]] = const.Declare tensor<3x48x1x1xf16, {order = #NHWC}> = dense<1.250000e-01> : tensor<3x3x1x1xf16>, [#const.Reorder<#NHWC>, #const.Reshape<[3, 3, 1, 1]>, #const.PadWithZero<[0, 15, 0, 0], [0, 30, 0, 0]>]
+  // CHECK-DAG:   [[CST_WEIGHTS_6:%.+]] = const.Declare tensor<3x48x1x1xf16, {order = #NHWC}> = dense<1.250000e-01> : tensor<3x3x1x1xf16>, [#const.Reorder<#NHWC>, #const.Reshape<[3, 3, 1, 1]>, #const.PadWithZero<[0, 18, 0, 0], [0, 27, 0, 0]>]
+  // CHECK-DAG:   [[CST_WEIGHTS_7:%.+]] = const.Declare tensor<3x48x1x1xf16, {order = #NHWC}> = dense<1.250000e-01> : tensor<3x3x1x1xf16>, [#const.Reorder<#NHWC>, #const.Reshape<[3, 3, 1, 1]>, #const.PadWithZero<[0, 21, 0, 0], [0, 24, 0, 0]>]
+  // CHECK-DAG:   [[CST_WEIGHTS_8:%.+]] = const.Declare tensor<3x48x1x1xf16, {order = #NHWC}> = dense<1.250000e-01> : tensor<3x3x1x1xf16>, [#const.Reorder<#NHWC>, #const.Reshape<[3, 3, 1, 1]>, #const.PadWithZero<[0, 24, 0, 0], [0, 21, 0, 0]>]
+  // CHECK-DAG:   [[CST_WEIGHTS_9:%.+]] = const.Declare tensor<3x48x1x1xf16, {order = #NHWC}> = dense<1.250000e-01> : tensor<3x3x1x1xf16>, [#const.Reorder<#NHWC>, #const.Reshape<[3, 3, 1, 1]>, #const.PadWithZero<[0, 27, 0, 0], [0, 18, 0, 0]>]
+  // CHECK-DAG:   [[CST_WEIGHTS_10:%.+]] = const.Declare tensor<3x48x1x1xf16, {order = #NHWC}> = dense<1.250000e-01> : tensor<3x3x1x1xf16>, [#const.Reorder<#NHWC>, #const.Reshape<[3, 3, 1, 1]>, #const.PadWithZero<[0, 30, 0, 0], [0, 15, 0, 0]>]
+  // CHECK-DAG:   [[CST_WEIGHTS_11:%.+]] = const.Declare tensor<3x48x1x1xf16, {order = #NHWC}> = dense<1.250000e-01> : tensor<3x3x1x1xf16>, [#const.Reorder<#NHWC>, #const.Reshape<[3, 3, 1, 1]>, #const.PadWithZero<[0, 33, 0, 0], [0, 12, 0, 0]>]
+  // CHECK-DAG:   [[CST_WEIGHTS_12:%.+]] = const.Declare tensor<3x48x1x1xf16, {order = #NHWC}> = dense<1.250000e-01> : tensor<3x3x1x1xf16>, [#const.Reorder<#NHWC>, #const.Reshape<[3, 3, 1, 1]>, #const.PadWithZero<[0, 36, 0, 0], [0, 9, 0, 0]>]
+  // CHECK-DAG:   [[CST_WEIGHTS_13:%.+]] = const.Declare tensor<3x48x1x1xf16, {order = #NHWC}> = dense<1.250000e-01> : tensor<3x3x1x1xf16>, [#const.Reorder<#NHWC>, #const.Reshape<[3, 3, 1, 1]>, #const.PadWithZero<[0, 39, 0, 0], [0, 6, 0, 0]>]
+  // CHECK-DAG:   [[CST_WEIGHTS_14:%.+]] = const.Declare tensor<3x48x1x1xf16, {order = #NHWC}> = dense<1.250000e-01> : tensor<3x3x1x1xf16>, [#const.Reorder<#NHWC>, #const.Reshape<[3, 3, 1, 1]>, #const.PadWithZero<[0, 42, 0, 0], [0, 3, 0, 0]>]
+  // CHECK-DAG:   [[CST_WEIGHTS_15:%.+]] = const.Declare tensor<3x48x1x1xf16, {order = #NHWC}> = dense<1.250000e-01> : tensor<3x3x1x1xf16>, [#const.Reorder<#NHWC>, #const.Reshape<[3, 3, 1, 1]>, #const.PadWithZero<[0, 45, 0, 0], [0, 0, 0, 0]>]
+  // CHECK-DAG:   [[BIAS_CST:%.+]] = const.Declare tensor<1x1x1x1xf16, {order = #NHWC}> = dense<9.997550e-02> : tensor<1x1x1x1xf16>, [#const.Reorder<#NHWC>]
+
+  // CHECK:       [[FILTER_CST:%.+]] = IE.Concat([[CST_WEIGHTS_0]], [[CST_WEIGHTS_1]], [[CST_WEIGHTS_2]], [[CST_WEIGHTS_3]], [[CST_WEIGHTS_4]], [[CST_WEIGHTS_5]], [[CST_WEIGHTS_6]], [[CST_WEIGHTS_7]], [[CST_WEIGHTS_8]], [[CST_WEIGHTS_9]], [[CST_WEIGHTS_10]], [[CST_WEIGHTS_11]], [[CST_WEIGHTS_12]], [[CST_WEIGHTS_13]], [[CST_WEIGHTS_14]], [[CST_WEIGHTS_15]]) {
+  // CHECK:         per_axis = #IE.Concat<axis = 0 : i64>}
+  // CHECK:         tensor<48x48x1x1xf16, {order = #NHWC}>
+
+  // CHECK:       [[INPUT_CAST:%.+]] = IE.ShapeCast {shape = [1, 48, 1080, 120]}
+  // CHECK-SAME:      inputs([[ARG0]] : tensor<1x3x1080x1920xf16, {order = #NHWC}>)
+  // CHECK-SAME     -> tensor<1x48x1080x120xf16, {order = #NHWC}>
+
+  // CHECK:       [[CONV_RET:%.+]] = IE.Convolution([[INPUT_CAST]], [[FILTER_CST]], [[BIAS_CST]])
+  // CHECK-SAME:      -> tensor<1x48x1080x120xf32, {order = #NHWC}>
+
+  // CHECK:       [[RET_CAST:%.+]] = IE.ShapeCast {shape = [1, 3, 1080, 1920]}
+  // CHECK-SAME:      inputs([[CONV_RET]] : tensor<1x48x1080x120xf32, {order = #NHWC}>)
+  // CHECK-SAME:    -> tensor<1x3x1080x1920xf32, {order = #NHWC}>
+  // CHECK:       return [[RET_CAST]]
+}

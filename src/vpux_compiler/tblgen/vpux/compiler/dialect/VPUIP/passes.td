@@ -176,6 +176,24 @@ def ConvertEltwiseToInPlace : PassBase<"convert-eltwise-to-in-place", "vpux::Fun
 }
 
 //
+// ConvertSprLUTToConst
+//
+
+def ConvertSprLUTToConst : PassBase<"convert-sprlut-to-const", "vpux::FunctionPass"> {
+    let summary = "Convert sprLUT from PPE attribute to Const";
+
+    let description = [{
+        Software Programmable Lookup Table for NCE operation is treated in similar way as weights table,
+        i.e. it's just yet another input. Introducing this input on VPU level would require changes for
+        every possible NCE operation we have there, which is hard to maintain and test. In VPUIP all NCE
+        operations are converted to the same NCEClusterTask, so here we need to change only op.
+        This pass performs this conversion, extracting sprLUT from PPE attribute and making it Const.
+    }];
+
+    let constructor = "vpux::VPUIP::createConvertSprLUTToConstPass()";
+}
+
+//
 // InsertCopyForEltwiseInPlaceInput
 //
 
@@ -402,6 +420,10 @@ def DPUProfiling : PassBase<"dpu-profiling", "vpux::ModulePass"> {
     }];
 
 }
+
+//
+// M2IProfiling
+//
 
 def LegalizeRepeatingFuncCalls : PassBase<"legalize-repeating-func-calls", "vpux::FunctionPass"> {
     let summary = "Ensure repeating func calls adhere to VPUIP constaints";
@@ -677,6 +699,21 @@ def GroupProfilingBuffers : PassBase<"group-profiling-buffers", "vpux::ModulePas
     }];
 
     let constructor = "vpux::VPUIP::createGroupProfilingBuffersPass()";
+}
+
+//
+// UpdateSwKernelParams
+//
+
+def UpdateSwKernelParams : PassBase<"update-sw-kernel-params", "vpux::FunctionPass"> {
+    let summary = "Update parameters sent to sw kernel for selected operations";
+
+    let description = [{
+        Part of shave kernel attributes depend by resolution. Pass allow update them
+        based on final resolution information.
+    }];
+
+    let constructor = "vpux::VPUIP::createUpdateSwKernelParamsPass()";
 }
 
 //
@@ -1280,6 +1317,33 @@ def TileActShaveKernelTask : PassBase<"tile-act-shave-kernel-task", "vpux::Funct
 }
 
 //
+// SetZeroOffsetWeightsTable
+//
+
+def SetZeroOffsetWeightsTable : PassBase<"set-zero-offset-weights-table", "vpux::FunctionPass"> {
+    let summary = "Set NCEClusterTask isZeroOffsetWeightsTable attribute";
+
+    let description = [{
+        Identifies NCEClusterTask operations whose weights table pointers can be relative to the start of the
+        weights base address (i.e. the pointers start from zero) and adds the `isZeroOffsetWeightsTable`
+        attribute to them. This will prevent future passes like PatchWeightsTable and
+        PatchPopulateWeightTableWithShave to patch the weights table content, keeping the data offset starting from 0.
+
+        This allows such operations to share the weights table buffer, if the pointer steps are the same.
+        Compared to the operations targeted by this pass, the remaining NCEClusterTasks will have their
+        weights table pointers relative to the start of the CMX address, which prevents the table from
+        being shared.
+
+        Currently, only operations that have sparse weights are not marked with `isZeroOffsetWeightsTable`,
+        because we're forced to have a common base address for both the data pointer and sparsity pointer.
+        Also the pointers inside the table are highly unlikely to be the same across multiple operations,
+        meaning that the table contents are not similar.
+    }];
+
+    let constructor = "vpux::VPUIP::createSetZeroOffsetWeightsTablePass()";
+}
+
+//
 // SegmentHalos
 //
 
@@ -1444,50 +1508,6 @@ def UngroupBoundedBuffersAsFuncArgs : PassBase<"ungroup-bounded-buffers-as-func-
     ];
 }
 
-//
-// CollectUsedMemory
-//
-
-def CollectUsedMemory : PassBase<"collect-used-memory", "vpux::ModulePass"> {
-    let summary = "Collect info from tempopary modules in functions and erase them";
-
-    let description = [{
-        "Temporary" because the function should contain only IR operations,
-        the rest of the information should be stored in the parent module.
-        This WA is introduced for function passes ran in multithreaded mode,
-        the results of which include some statistics.
-        These passes are required not to modify the parent module for thread safety reasons.
-        This module pass should collect the information,
-        transfer it to the main module and delete the temporary ones.
-        More info about operation passes:
-        https://mlir.llvm.org/docs/PassManagement/#operation-pass
-
-        This pass must be called after StaticAllocation and FeasibleAllocation passes
-    }];
-
-    let constructor = "vpux::VPUIP::createCollectUsedMemoryPass()";
-}
-
-//
-// IntroduceInitFunction
-//
-
-def IntroduceInitFunction : PassBase<"introduce-init-function", "vpux::ModulePass"> {
-    let summary = "Intooduce the `init` function into the IR";
-
-    let description = [{
-        Extract the constant operations that read data from the @ov_bin section into a
-        dedicated `init` function. This function will contain explicit operations that
-        perform the same changes to the data as the existing list of transformations does.
-        The `init` function will store the results into a dedicated section, from which
-        `main` will read them.
-
-        This pass is intended to be used as part of the weights separation feature.
-    }];
-
-    let constructor = "vpux::VPUIP::createIntroduceInitFunctionPass()";
-}
-
 def BatchMatMulToMatMul : PassBase<"batch-matmul-to-matmul", "vpux::FunctionPass"> {
     let summary = "Converts NCE MatMul tasks with batch > 1 to NCE MatMul tasks with batch = 1";
 
@@ -1523,5 +1543,35 @@ def AddCopyBetweenSWKernelsAndNetworkIO : PassBase<"add-copy-between-swkernels-a
     }];
 
     let constructor = "vpux::VPUIP::createAddCopyBetweenSWKernelsAndNetworkIOPass()";
+}
+
+//
+// UnrollAnalysis
+//
+
+def UnrollDMAAnalysis : PassBase<"unroll-analysis", "vpux::FunctionPass"> {
+    let summary = "Analysis pass to cache which unroll dma passes are needed";
+
+    let description = [{
+        This pass creates and fill UnrollDMAAnalysis. It traverses the IR and looks for DMA ops that have to be unrolled.
+        The DMA unrolling passes use UnrollDMAAnalysis analysis to return early if unrolling is not needed.
+        Prevents slow IR traversal and checks and speedup compile time especially for bigger graphs.
+    }];
+
+    let constructor = "vpux::VPUIP::createUnrollDMAAnalysisPass()";
+}
+
+//
+// InvalidateUnrollAnalysis
+//
+
+def InvalidateUnrollDMAAnalysis : PassBase<"invalidate-unroll-dma-analysis", "vpux::FunctionPass"> {
+    let summary = "Invalidates UnrollDMAAnalysis";
+
+    let description = [{
+        Invalidates UnrollDMAAnalysis which is used to skipp unnecessary DMA unroll passes.
+    }];
+
+    let constructor = "vpux::VPUIP::createInvalidateUnrollDMAAnalysisPass()";
 }
 #endif

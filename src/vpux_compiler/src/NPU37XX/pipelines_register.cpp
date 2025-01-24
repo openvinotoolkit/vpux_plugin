@@ -21,10 +21,11 @@ using namespace vpux;
 //
 
 void PipelineRegistry37XX::registerPipelines() {
-    mlir::PassPipelineRegistration<>("ShaveCodeGen", "Compile both from IE to VPUIP and from IERT to LLVM for NPU37XX",
-                                     [](mlir::OpPassManager& pm) {
-                                         buildShaveCodeGenPipeline37XX(pm);
-                                     });
+    mlir::PassPipelineRegistration<ShaveCodeGenOptions37XX>(
+            "ShaveCodeGen", "Compile both from IE to VPUIP and from IERT to LLVM for NPU37XX",
+            [](mlir::OpPassManager& pm, const ShaveCodeGenOptions37XX& options) {
+                buildShaveCodeGenPipeline(pm, options);
+            });
 
     mlir::PassPipelineRegistration<ReferenceSWOptions37XX>(
             "reference-sw-mode", "Compile IE Network in Reference Software mode (SW only execution) for NPU37XX",

@@ -6,6 +6,7 @@
 #include "vpux/compiler/dialect/IE/utils/resources.hpp"
 #include "vpux/compiler/dialect/VPUIP/interfaces/dma_descriptor_generator.hpp"
 #include "vpux/compiler/dialect/VPUIP/transforms/passes.hpp"
+#include "vpux/compiler/dialect/VPUIP/utils/unroll_dma_analysis.hpp"
 
 #include "vpux/compiler/dialect/VPU/IR/attributes.hpp"
 #include "vpux/compiler/dialect/VPURT/IR/attributes.hpp"
@@ -389,6 +390,11 @@ private:
 };
 
 void UnrollExpandDMAPass::safeRunOnFunc() {
+    markAnalysesPreserved<VPUIP::UnrollDMAAnalysis>();
+    auto analysis = getAnalysis<VPUIP::UnrollDMAAnalysis>();
+    if (!analysis.passNeeded(VPUIP::UnrollDMAAnalysisNeeded::UnrollExpandDMAPass)) {
+        return;
+    }
     auto& ctx = getContext();
     auto func = getOperation();
     auto module = func->getParentOfType<mlir::ModuleOp>();

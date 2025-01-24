@@ -7,6 +7,7 @@
 #include "vpux/compiler/core/cost_model_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/distributed_tensor_utils.hpp"
 #include "vpux/compiler/dialect/VPURT/IR/task.hpp"
+#include "vpux/compiler/dialect/const/utils/utils.hpp"
 #include "vpux/compiler/utils/compression_utils.hpp"
 #include "vpux/compiler/utils/memref_attr_utils.hpp"
 #include "vpux/compiler/utils/strings.hpp"
@@ -266,10 +267,22 @@ void VPUIP::ClusterNCEBaseRewriter::matchAndRewrite(VPUIP::NCEClusterTaskOp nceT
     auto weightsBuffs = getWeightsBuffers(loc, nceTask, numClusters, builder);
     auto weightsSparsityMapBuffs = VPUIP::getPerClusterMemoryBuffers(
             _ctx, loc, "weightsSparsityMap", nceTask.getWeightsSparsityMap(), numClusters, builder);
-    auto weightTableBuffs =
-            VPUIP::getPerClusterMemoryBuffers(_ctx, loc, "weightTable", nceTask.getWeightTable(), numClusters, builder);
-    auto instructionListTableBuffs = VPUIP::getPerClusterMemoryBuffers(
-            _ctx, loc, "instructionListTable", nceTask.getInstructionListTable(), numClusters, builder);
+
+    bool isDuplicatedOverSegmentedMode = false;
+    if (nceTask.getWeightTable() != nullptr) {
+        auto distType = mlir::dyn_cast<VPUIP::DistributedBufferType>(nceTask.getWeightTable().getType());
+        VPUX_THROW_WHEN(distType == nullptr, "Unsupported operand type {0}", nceTask.getWeightTable().getType());
+        if (distType.getDistribution().getMode().getValue() ==
+            (VPU::DistributionMode::DUPLICATED | VPU::DistributionMode::SEGMENTED)) {
+            isDuplicatedOverSegmentedMode = true;
+        }
+    }
+
+    auto weightTableBuffs = isDuplicatedOverSegmentedMode
+                                    ? VPUIP::getDuplOverSegPerClusterMemoryBuffers(
+                                              _ctx, loc, "weightTable", nceTask.getWeightTable(), numClusters, builder)
+                                    : VPUIP::getPerClusterMemoryBuffers(_ctx, loc, "weightTable",
+                                                                        nceTask.getWeightTable(), numClusters, builder);
     auto sprLookupTableBuffs = VPUIP::getPerClusterMemoryBuffers(_ctx, loc, "sprLookupTable",
                                                                  nceTask.getSprLookupTable(), numClusters, builder);
 
@@ -332,16 +345,18 @@ void VPUIP::ClusterNCEBaseRewriter::matchAndRewrite(VPUIP::NCEClusterTaskOp nceT
                 builder, vpurtTask.getWaitBarriers(), vpurtTask.getUpdateBarriers(), newLoc, outputType,
                 outputSparsityMapType, profilingOutputType, inputBuffs[clusterId], inputSparsityMapBuffs[clusterId],
                 inputSETableBuffs[clusterId], weightsBuffs[clusterId], weightsSparsityMapBuffs[clusterId],
-                weightTableBuffs[clusterId], instructionListTableBuffs[clusterId], sprLookupTableBuffs[clusterId],
-                parentInputBuffs[clusterId], parentInputSparsityMap[clusterId], parentInputSETable[clusterId],
-                parentOutputBuffs[clusterId], parentOutputSparsityMap[clusterId],
-                mlir::ValueRange(outputItiBuffs[clusterId]), outputBuffs[clusterId], outputSparsityMap, profilingData,
+                weightTableBuffs[clusterId], sprLookupTableBuffs[clusterId], parentInputBuffs[clusterId],
+                parentInputSparsityMap[clusterId], parentInputSETable[clusterId], parentOutputBuffs[clusterId],
+                parentOutputSparsityMap[clusterId], mlir::ValueRange(outputItiBuffs[clusterId]), outputBuffs[clusterId],
+                outputSparsityMap, profilingData,
+                /*max_per_xy=*/nullptr, /*min_per_xy=*/nullptr, /*min_max_per_tensor=*/mlir::ValueRange(),
                 nceTask.getTaskType(), nceTask.getKernelSizeAttr(), nceTask.getKernelStridesAttr(),
                 padAttrForCluster[clusterId], nceTask.getIsContinuedAttr(), nceTask.getCmSpPatternAttr(),
                 isSegmentedNCETask(parentInputType), outChannelOffsets[clusterId],
-                nceTask.getInputChannelsCompressionAttr(), nceTask.getIsSuperdenseAttr(), nceTask.getIsInplaceAttr(),
-                nceTask.getInputSeSizeAttr(), nceTask.getOutputSeSizeAttr(), nceTask.getIsPermuteQuantizeAttr(),
-                nullptr, nceTask.getEltwiseTypeAttr());
+                nceTask.getInputChannelsCompressionAttr(), nceTask.getIsZeroOffsetWeightsTableAttr(),
+                nceTask.getIsSuperdenseAttr(), nceTask.getIsInplaceAttr(), nceTask.getInputSeSizeAttr(),
+                nceTask.getOutputSeSizeAttr(), nceTask.getIsPermuteQuantizeAttr(),
+                nceTask.getIsSmallKernelOptimizedAttr(), nceTask.getMpeEngineAttr(), nceTask.getEltwiseTypeAttr());
 
         {
             mlir::OpBuilder::InsertionGuard guard(builder);
@@ -497,10 +512,12 @@ bool isStorageElementTableConstantOp(Const::DeclareOp constOp) {
             return false;
         }
 
+        bool onlyCopyUser = true;
         for (auto copyUser : copyOp.getOutputBuff().getUsers()) {
             if (copyUser == copyOp) {
                 continue;
             }
+            onlyCopyUser = false;
 
             auto nceTask = mlir::dyn_cast<VPUIP::NCEClusterTaskOp>(copyUser);
             if (nceTask == nullptr) {
@@ -510,6 +527,9 @@ bool isStorageElementTableConstantOp(Const::DeclareOp constOp) {
             if (nceTask.getInputStorageElementTable() != copyOp.getOutputBuff()) {
                 return false;
             }
+        }
+        if (onlyCopyUser) {
+            return false;
         }
     }
 
@@ -553,8 +573,9 @@ mlir::Value patchSETableValue(mlir::Location loc, Const::DeclareOp constOp, cons
             seTableVals[index] = seTableVals[index] - baseSEPointer + clusterId;
         }
     }
-    const auto denseAttr = mlir::DenseElementsAttr::get(seTableContent.getType().cast<mlir::RankedTensorType>(),
-                                                        ArrayRef(seTableVals));
+
+    const auto denseAttr = Const::createConstContent(mlir::cast<mlir::RankedTensorType>(seTableContent.getType()),
+                                                     ArrayRef(seTableVals));
     return builder.create<Const::DeclareOp>(loc, constOp.getType(), Const::ContentAttr::get(denseAttr));
 }
 

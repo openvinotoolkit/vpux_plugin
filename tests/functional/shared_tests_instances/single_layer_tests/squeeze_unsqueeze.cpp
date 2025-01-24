@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2022-2023 Intel Corporation
+// Copyright (C) 2022-2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -7,7 +7,6 @@
 #include "vpu_ov2_layer_test.hpp"
 
 namespace ov {
-
 namespace test {
 
 class SqueezeUnsqueezeLayerTestCommon : public SqueezeUnsqueezeLayerTest, virtual public VpuOv2LayerTest {
@@ -27,20 +26,18 @@ protected:
     };
 };
 
-TEST_P(SqueezeUnsqueezeLayerTestCommon, NPU3720) {
+TEST_P(SqueezeUnsqueezeLayerTestCommon, NPU3720_HW) {
     setSkipCompilationCallback(skipCompilationCallback);
     setDefaultHardwareMode();
     run(Platform::NPU3720);
 }
 
-TEST_P(SqueezeUnsqueezeLayerTestCommon, NPU4000) {
+TEST_P(SqueezeUnsqueezeLayerTestCommon, NPU4000_HW) {
     setSkipCompilationCallback(skipCompilationCallback);
     setDefaultHardwareMode();
     run(Platform::NPU4000);
 }
-
 }  // namespace test
-
 }  // namespace ov
 
 using ov::test::SqueezeUnsqueezeLayerTestCommon;

@@ -33,6 +33,7 @@ using memref_type_if = enable_t<OutT, std::is_enum<Enum>, details::HasStringifyE
 //
 
 mlir::IntegerType getInt1Type(mlir::MLIRContext* ctx);
+mlir::IntegerType getInt2Type(mlir::MLIRContext* ctx);
 mlir::IntegerType getInt4Type(mlir::MLIRContext* ctx);
 mlir::IntegerType getInt8Type(mlir::MLIRContext* ctx);
 mlir::IntegerType getInt16Type(mlir::MLIRContext* ctx);
@@ -76,6 +77,10 @@ Byte getCompactSize(mlir::Value val);
 
 // compute axis permutation
 std::optional<int32_t> getQuantizedAxis(int32_t axis, ShapeRef prevShape, ShapeRef newShape);
+
+/// @brief Returns the expected buffer size that is described by the given type.
+/// This also supports sub-byte types.
+Byte getExpectedBufferSize(mlir::Type type);
 
 //
 // MemRefType utilities

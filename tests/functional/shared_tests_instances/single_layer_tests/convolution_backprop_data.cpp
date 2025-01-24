@@ -25,7 +25,6 @@ class ConvolutionBackpropDataSEPLayerTest_NPU3720 : public ConvolutionBackpropDa
 };
 
 class ConvolutionBackpropDataSEPLayerTest_NPU4000 : public ConvolutionBackpropDataLayerTestCommon {};
-
 TEST_P(ConvolutionBackpropDataSEPLayerTest_NPU3720, HW) {
     rel_threshold = 0.01;
     setDefaultHardwareMode();
@@ -37,7 +36,6 @@ TEST_P(ConvolutionBackpropDataSEPLayerTest_NPU4000, HW) {
     setDefaultHardwareMode();
     run(Platform::NPU4000);
 }
-
 TEST_P(ConvolutionBackpropDataLayerTest_NPU3720, HW) {
     rel_threshold = 0.01;
     setDefaultHardwareMode();
@@ -217,7 +215,6 @@ INSTANTIATE_TEST_SUITE_P(smoke_precommit_SEP_ConvolutionBackpropData2D_OutputPad
                                             ::testing::ValuesIn(static_shapes_to_test_representation(seInputShapes)),
                                             ::testing::ValuesIn(emptyOutputShape), ::testing::Values(DEVICE_NPU)),
                          ConvolutionBackpropDataSEPLayerTest_NPU4000::getTestCaseName);
-
 /* ============= 2D ConvolutionBackpropData with outputShape Convert to SEP Op ============= */
 const std::vector<std::vector<ov::Shape>> seInputShapesWithOS = {{{1, 16, 128, 128}}};
 const std::vector<ov::Shape> seSpecifiedOutputShape = {{128, 128}};

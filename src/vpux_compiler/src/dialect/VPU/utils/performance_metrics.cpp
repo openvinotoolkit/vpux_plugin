@@ -17,7 +17,7 @@ static constexpr uint32_t BW_STEP = 100;
 // Num entries in table, each entry contains set of values for particular frequency
 static constexpr uint32_t NUM_ENTRIES = 5;
 // Profiling timer block fixed frequency by MHz
-// For NPU37XX it runs at 38.4 MHz
+// For MTL it runs at 38.4 MHz
 // TODO: it should be provided by vpunn API per arch
 static constexpr double PROF_CLK = 38.4;
 
@@ -106,7 +106,7 @@ double getActivityFactor(VPU::ExecutorKind execKind, mlir::ModuleOp module, IERT
             }
             // In below situation, activityFactor may to be >1
             // 1) when the energy reference is not the maximum powervirus. Eg: the powerVirus for INT is smaller
-            // than powerVirus for FLOAT. Now we are using INT8 powervirus (for NPU37XX /w v1.5.9 VPUNN releases) as
+            // than powerVirus for FLOAT. Now we are using INT8 powervirus (for NPU2.7 /w v1.5.9 VPUNN releases) as
             // max power reference so that AF>1 is possible 2) If inferenceTime estimation is smaller than the
             // Energy estimated in powervirusDPUCycles their ratio will be >1. This is transitory because in the
             // real world the measured time will be bigger and the RuntimeNN will normalize the numbers considering

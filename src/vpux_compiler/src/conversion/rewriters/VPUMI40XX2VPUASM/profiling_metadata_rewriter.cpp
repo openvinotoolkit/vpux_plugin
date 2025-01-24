@@ -14,15 +14,15 @@ llvm::SmallVector<mlir::FlatSymbolRefAttr> ProfilingMetadataRewriter::getSymboli
     return {mlir::FlatSymbolRefAttr::get(getContext(), "ProfilingMetadata")};
 }
 
-mlir::LogicalResult ProfilingMetadataRewriter::symbolize(VPUMI40XX::ProfilingMetadataOp op, SymbolMapper&,
-                                                         mlir::ConversionPatternRewriter& rewriter) const {
+mlir::FailureOr<SymbolizationResult> ProfilingMetadataRewriter::symbolize(
+        VPUMI40XX::ProfilingMetadataOp op, SymbolMapper&, mlir::ConversionPatternRewriter& rewriter) const {
     auto result = op.getResult();
     mlir::StringAttr symName = findSym(result).getRootReference();
 
-    rewriter.create<VPUASM::ProfilingMetadataOp>(op.getLoc(), symName, op.getMetadataAttr());
+    auto newOp = rewriter.create<VPUASM::ProfilingMetadataOp>(op.getLoc(), symName, op.getMetadataAttr());
     rewriter.eraseOp(op);
 
-    return mlir::success();
+    return SymbolizationResult(newOp);
 }
 
 }  // namespace vpumi40xx2vpuasm

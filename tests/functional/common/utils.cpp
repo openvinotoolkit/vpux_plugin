@@ -5,7 +5,7 @@
 
 #include <string>
 
-#include "npu_private_properties.hpp"
+#include "intel_npu/npu_private_properties.hpp"
 #include "utils.hpp"
 
 std::string getBackendName(const ov::Core& core) {

@@ -1415,3 +1415,20 @@ func.func @SqueezeSparseTensor(%arg0: tensor<1x16x32x32xf16, {order = #NCHW, mem
     // CHECK-SAME:   -> !VPUIP.SparseBuffer<data=memref<16x32x32xf16, @CMX_NN>, sparsity_map=memref<16x32x32xi1, @CMX_NN>>
     // CHECK:      return [[RES]]
 }
+
+// -----
+
+!DataTensor = tensor<1x16x32x32xf16>
+!SMTensor = tensor<1x16x32x32xi1>
+!SETensor = tensor<1x1x32x32xi32>
+!SparseTensor = !VPU.SparseTensor<data=tensor<1x16x32x32xf16>, sparsity_map=tensor<1x16x32x32xi1>, storage_element_table=tensor<1x1x32x32xi32>>
+
+// CHECK-LABEL: @UngroupSparseTensor
+// CHECK-SAME:  ([[ARG0:%.+]]: !VPUIP.SparseBuffer<data=memref<1x16x32x32xf16>, sparsity_map=memref<1x16x32x32xi1>, storage_element_table=memref<1x1x32x32xi32>>)
+func.func @UngroupSparseTensor(%arg0: !SparseTensor) -> (!DataTensor, !SMTensor, !SETensor) {
+    %data, %sm, %se = VPU.UngroupSparseTensor(%arg0) {resultSegmentSizes = array<i32: 1, 1, 1>} -> !DataTensor, !SMTensor, !SETensor
+    return %data, %sm, %se : !DataTensor, !SMTensor, !SETensor
+
+    // CHECK:  [[DATA:%.+]], [[SM:%.+]], [[SE:%.+]] = VPUIP.UngroupSparseBuffer([[ARG0]]) {resultSegmentSizes = array<i32: 1, 1, 1>} -> memref<1x16x32x32xf16>, memref<1x16x32x32xi1>, memref<1x1x32x32xi32>
+    // CHECK:  return [[DATA]], [[SM]], [[SE]]
+}

@@ -33,13 +33,16 @@ Const::DeclareOp createFQConst(mlir::MLIRContext* ctx, mlir::Location loc, float
 mlir::Value createFQScaling(mlir::Location loc, mlir::Value input, float scaleFactor, mlir::Type elemType,
                             std::optional<int64_t> levels, std::optional<mlir::Type> lowFpType,
                             vpux::IE::AutoBroadcastTypeAttr autoBroadcast, mlir::PatternRewriter& rewriter);
-Const::details::ContentRange<float> getConst(Const::DeclareOp declOp);
+SmallVector<float> getConst(Const::DeclareOp declOp);
 mlir::Value findQuantizedInput(mlir::Value opInput, bool allowPerAxisQuantize);
 bool isSymmetricQuantType(mlir::quant::QuantizedType type);
 bool hasLeakyReLUPostOp(mlir::Operation* op);
 mlir::quant::UniformQuantizedType getQuantizedTypeFromFakeQuantize(IE::FakeQuantizeOp fqOp);
+bool hasFQSameZeroPoint(IE::FakeQuantizeOp fqOp);
 
 bool checkRescaledQuantApproximationForConvBasedOp(mlir::Operation* op);
+
+mlir::Type composeWeightsExpressedType(const mlir::Type convolutionInputType);
 
 /*
  *  Bias will be rescaled for mixed precision and written in weight table later, so need to check whether the

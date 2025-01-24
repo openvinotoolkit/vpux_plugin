@@ -130,8 +130,7 @@ def MakeOpsWithDistributedTensor : PassBase<"make-ops-with-distributed-tensor", 
 
     let description = [{
         This pass builds an IR in order to represent multi-cluster compilation. It performs a number of functions.
-        1) It creates variations of distributed tensors depending on the multi-cluster strategy of the layer.
-        2) It creates DMA operations DDR->CMX
+        It creates variations of distributed tensors depending on the multi-cluster strategy of the layer.
     }];
 
     let constructor = "vpux::VPU::createMakeOpsWithDistributedTensorPass()";
@@ -143,6 +142,24 @@ def MakeOpsWithDistributedTensor : PassBase<"make-ops-with-distributed-tensor", 
             "Flag to enable generating explicit DistributionInfoAttr for Distributed data type."
         >
     ];
+
+    let dependentDialects = [
+        "vpux::VPU::VPUDialect"
+    ];
+}
+
+//
+// Create DMAs from/to distributed tensors
+//
+
+def MakeDistributedCopies : PassBase<"make-distributed-copies", "vpux::FunctionPass"> {
+    let summary = "";
+
+    let description = [{
+        This pass creates DMA operations DDR->CMX and CMX to DDR from UnrolledType
+    }];
+
+    let constructor = "vpux::VPU::createMakeDistributedCopiesPass()";
 
     let dependentDialects = [
         "vpux::VPU::VPUDialect"
@@ -285,6 +302,68 @@ def MergeVfSubgraphs : PassBase<"merge-vertical-fusion-subgraphs", "vpux::Functi
             "tilingMode", "tiling-mode",
             "std::string", [{"PREFETCH"}],
             "[Optional] Set tiling mode as `ISOLATED` or `PREFETCH`. `PREFETCH` is set by default"
+        >
+    ];
+}
+
+
+//
+// VF outlining
+//
+
+def VerticalFusionOutlining : PassBase<"vertical-fusion-outlining", "vpux::ModulePass"> {
+    let summary = "Apply outlining on graph with vertical fusion regions as separator";
+
+    let description = [{
+        Apply outlining on graph with vertical fusion regions as the point where we separate the graph.
+        Flag options controll the outlining process based on thresholds.
+        The following function:
+
+        func.func @main (%arg) {
+            %0 = Op0(%arg)
+            %1 = VFOp(%0)
+            %2 = Op1(%1)
+            return %2
+        }
+
+        Will be outlined into:
+
+        func.func @main_vf1 (%arg) {
+            %0 = Op0(%arg)
+            return %0
+        }
+        func.func @main_vf2 (%arg) {
+            %0 = VFOp(%arg)
+            return %0
+        }
+        func.func @main_vf3 (%arg) {
+            %0 = Op1(%arg)
+            return %0
+        }
+        func.func @main (%arg) {
+            %0 = call @main_vf1(%arg)
+            %1 = call @main_vf2(%0)
+            %2 = call @main_vf3(%1)
+            return %2
+        }
+    }];
+
+    let constructor = "vpux::VPU::createVerticalFusionOutliningPass()";
+
+    let dependentDialects = [
+        "vpux::VPU::VPUDialect"
+    ];
+
+    let options = [
+        Option<
+            "verticalFusionTileThreshold", "vf-outlining-tile-threshold",
+            "int", "",
+            "Tiling threshold for outlining vertical fusion regions"
+        >,
+        Option<
+            "numInstanceThreshold", "vf-outlining-instance-threshold",
+            "int", "",
+            "Threshold for number of instances to perform outlining"
         >
     ];
 }
@@ -546,14 +625,6 @@ def CMXConcat : PassBase<"cmx-concat", "vpux::FunctionPass"> {
 
     let dependentDialects = [
         "vpux::VPU::VPUDialect"
-    ];
-
-    let options = [
-        Option<
-            "supportNCEOpInsertion", "support-nce-op-insertion",
-            "bool", "true",
-            "Flag to support NCE op insertion for CMX-Concat to handle the complex case when parent NCE has an extra non-Copy user"
-        >
     ];
 }
 
@@ -935,9 +1006,9 @@ def TilingStrategyAssignment : PassBase<"tiling-strategy-assignment", "vpux::Fun
             "[Optional] Set tiling mode as `ISOLATED` or `PREFETCH`"
         >,
         Option<
-            "vpunnCost", "vpunn-cost",
+            "enableVpunnCostForTiling", "enable-vpunn-cost-for-tiling",
             "bool", "false",
-            "Use VPUNN cost model to get the best tiling strategy"
+            "Use VPUNN cost model to determine tiling strategy, with this flag the pass will be utilizing tiling strategy selected based on least DMA+DPU cost"
         >,
         Option<
             "enableShaveDDRAccessOptimization", "enable-shave-ddr-access-optimization",
@@ -1049,6 +1120,49 @@ def TileLSTMSequence : PassBase<"tile-lstm-sequence", "vpux::FunctionPass"> {
 }
 
 //
+// ComputeInterpolateCoordinates
+//
+
+def ComputeInterpolateCoordinates : PassBase<"compute-interpolate-coordinates", "vpux::FunctionPass"> {
+    let summary = "Compute interpolate coordinates and lambdas for the innermost axis.";
+
+    let description = [{
+        The interpolate coordinates and lambdas coefficients are computed at
+        compile time to improve performance and simplify the kernel.
+
+        This computation is only done for the innermost axis because this is
+        where the kernel's main loop operates and where the most complexity
+        lies. Without this pass, the kernel would need to calculate these
+        constants multiple times to avoid excessive stack usage. Calculating
+        these constants for other axes would make the multi-cluster and
+        multi-shave tiling more restrictive.
+
+        This pass has to run after the Interpolate operation is tiled to fit
+        into CMX and before the operation is wrapped into NCEClusterTiling.
+        Additionally, the interpolate operation must ensure that the constants
+        calculated by this pass will also fit into CMX.
+
+        The coordinates are byte offsets in the tiled input. The lambdas
+        contain two interleaved values for each coordinate.
+
+    }];
+
+    let options = [
+        Option<
+            "enableExplicitDistributionInfoAttr", "enable-explicit-distributed-attr",
+            "bool", "false",
+            "Flag to enable generating explicit DistributionInfoAttr for Distributed data type."
+        >
+    ];
+
+    let constructor = "vpux::VPU::createComputeInterpolateCoordinatesPass()";
+
+    let dependentDialects = [
+        "vpux::VPU::VPUDialect"
+    ];
+}
+
+//
 // EnsureNCEOpsSizeRequirements
 //
 
@@ -1062,6 +1176,14 @@ def EnsureNCEOpsSizeRequirements : PassBase<"ensure-nce-ops-size-requirements", 
     }];
 
     let constructor = "vpux::VPU::createEnsureNCEOpsSizeRequirementsPass()";
+
+    let options = [
+        Option<
+            "enableOutputEnsurance", "enable-output-ensurance",
+            "bool", "true",
+            "Flag to enable output size ensurance"
+        >
+    ];
 
     let dependentDialects = [
         "vpux::VPU::VPUDialect"
@@ -1283,8 +1405,8 @@ def ConvertOpToDMAForPerformantExecution : PassBase<"convert-op-to-dma-for-perfo
 
     let description = [{
         If op can be done with DMA efficiently this pass will, convert the op to DMA related op.
-        Only added to VPU40XX+ pipelines as only op converted via this pass is Gather and is only supported
-        on VPU40XX+ pipelines.
+        Only added to NPU40XX+ pipelines as only op converted via this pass is Gather and is only supported
+        on NPU40XX+ pipelines.
 
         Currently GatherOp -> GatherDMAOp is supported ( on NPU40XX and newer architectures)
         Gather -> Reshape + Convert + (Optional) Copy + GatherDMA + Reshape + Copy
@@ -1399,6 +1521,69 @@ def LegalizeDynamicShapeConcatForSWLayers : PassBase<"legalize-dynamic-shape-con
 
     let constructor = "vpux::VPU::createLegalizeDynamicShapeConcatForSWLayersPass()";
 
+    let options = [
+    ];
+
+    let dependentDialects = [
+        "vpux::VPU::VPUDialect"
+    ];
+}
+//
+// ConvertConstArgsToMultiConstants
+//
+
+def ConvertConstArgsToMultiConstants : PassBase<"convert-const-args-to-multi-constants", "vpux::ModulePass"> {
+    let summary = "Converts constant arguments of outlined functions to 'const.MultiDeclare' ops";
+
+    let description = [{
+        When an outlined function's argument value comes from a 'const.Declare' op on all call sites, this pass
+        will move that 'const.Declare' op to a 'const.Rodata' op in the global scope and replace all occurances
+        of the argument value in the function body with a 'const.MultiDeclare' op. Finally, the argument is
+        deleted from the call site and the function signature.
+
+        Example:
+        ```MLIR
+        func.func @main_fn1(%arg0: tensor<48x48x3x3xf32>, %arg1: tensor<48x48x3x3xf32>) -> tensor<48x48x3x3xf32> {
+            %0 = VPU.Add(%arg0, %arg1) : tensor<48x48x3x3xf32>, tensor<48x48x3x3xf32> -> tensor<48x48x3x3xf32>
+            return %0 : tensor<48x48x3x3xf32>
+        }
+
+        func.func @main(...) {
+            ...
+            %cst = const.Declare tensor<48x48x3x3xf32> = dense<1.0> : tensor<48x48x3x3xf32>
+            %0 = call @main_fn1(%input, %cst) : (tensor<48x48x3x3xf32>, tensor<48x48x3x3xf32>) -> tensor<48x48x3x3xf32>
+            ...
+        }
+        ```
+        would get converted into
+        ```MLIR
+        const.Data @Data {
+            const.Rodata @rodata_0 dense<1.0> : tensor<48x48x3x3xf32>
+        }
+
+        const.BundleData @BundleData {
+            const.RodataBundle @bundle_0 = [@Data::@rodata_0] : tensor<48x48x3x3xf32>
+        }
+
+        func.func @main_fn1(%arg0: tensor<48x48x3x3xf32>) -> tensor<48x48x3x3xf32> {
+            %mcst = const.MultiDeclare tensor<48x48x3x3xf32> = @BundleData::@bundle_0 : tensor<48x48x3x3xf32>
+            %0 = VPU.Add(%arg0, %mcst) : tensor<48x48x3x3xf32>, tensor<48x48x3x3xf32> -> tensor<48x48x3x3xf32>
+            return %0 : tensor<48x48x3x3xf32>
+        }
+
+        func.func @main(...) {
+            ...
+            %0 = call @main_fn1(%input) : (tensor<48x48x3x3xf32>) -> tensor<48x48x3x3xf32>
+            ...
+        }
+        ```
+    }];
+
+    let constructor = "vpux::VPU::createConvertConstArgsToMultiConstantsPass()";
+
+    let options = [
+    ];
+
     let dependentDialects = [
         "vpux::VPU::VPUDialect"
     ];
@@ -1433,4 +1618,155 @@ def SetupEnableFP16CompressedConv : PassBase<"setup-enable-fp16-compressed-conv"
     let dependentDialects = [
         "vpux::VPU::VPUDialect"
     ];
+}
+
+//
+// ConcatRepeatingBlocksOutlining
+//
+
+def ConcatRepeatingBlocksOutlining : PassBase<"concat-repeating-blocks-outlining", "vpux::ModulePass"> {
+    let summary = "Outline concats with repeating input branches into functions";
+
+    let description = [{
+        Identifies concat operations that has identical input branches and outlines them into functions.
+        For example, the following concat could be a candidate for outlining:
+            A   A
+            |   |
+            B   B
+            \   /
+            Concat
+
+        The pass can be configured with the following options:
+        - min-seq-length: minimum number of compute operations that should be found on an input branch
+        - single-function-per-concat: decides whether to outline each input branch into an individual function (false)
+                                      or outline all input branches and the concat into a single function (true)
+    }];
+
+    let constructor = "vpux::VPU::createConcatRepeatingBlocksOutliningPass()";
+
+    let dependentDialects = [
+        "vpux::VPU::VPUDialect"
+    ];
+
+    let options = [
+        Option<
+            "minSeqLength", "min-seq-length",
+            "int", "",
+            "Minimum threshold for the length of an input branch"
+        >,
+
+        Option<
+            "singleFunctionPerConcat", "single-function-per-concat",
+            "bool", "true",
+            "Outline a concat operation into a single function along with its branches"
+        >,
+    ];
+}
+
+//
+// OutlineEntireMainContent
+//
+
+def OutlineEntireMainContent : PassBase<"outline-entire-main-content", "vpux::ModulePass"> {
+    let summary = "Outline all operations from main into functions if other outlining instances exist";
+
+    let description = [{
+        In case some operations were already outlined before calling this pass, all the remaining
+        operations from main will be outlined as well. The end-result will have main only containing
+        call operations (and the return terminator).
+
+        This is done to work-around a limitation in the scheduler, as it does not support scenarios
+        where call operations are mixed with non-call operations.
+
+        For cases where an input / output of a new function is set in CMX, copies to DDR are introduced
+        so that all values passed between functions are in DDR. This is to accomodate another limitation
+        in the scheduler, where each function / call operation must work with DDR values.
+        For example, if the following Convolution is targeted for outlining in this pass:
+            func @main(...) {
+                ...
+                %conv = VPU.NCEConvolution(...) -> !VPU.DistributedTensor<..., @CMX_NN, ...>
+                ...
+            }
+        the resulting IR would contain:
+            func @conv(...) -> tensor<..., @DDR> {
+                %conv = VPU.NCEConvolution(...) -> !VPU.DistributedTensor<..., @CMX_NN>
+                %copy = VPU.Copy(%conv) -> tensor<..., @DDR>
+                return %copy
+            }
+            func @main(...) {
+                ...
+                call @conv(...) -> tensor<..., @DDR>
+                ...
+            }
+    }];
+
+    let constructor = "vpux::VPU::createOutlineEntireMainContentPass()";
+
+    let dependentDialects = [
+        "vpux::VPU::VPUDialect"
+    ];
+}
+
+//
+// IntroduceInitFunction
+//
+
+def IntroduceInitFunction : PassBase<"introduce-init-function", "vpux::ModulePass"> {
+    let summary = "Introduce the `init` function into the IR";
+
+    let description = [{
+        IntroduceInitFunctionPass creates the init() function in the IR. The pass maps the transformation attributes of
+        const.Declare ops to IE-level ops, so they can be executed at inference time on the accelerator.
+
+        Every constants can have a list of transformation attributes. Most of these
+        transformation attributes can be mapped to combinations IE-dialect level operations.
+        A trivial example is
+        ```MLIR
+            %cst = const.Declare tensor<4x4xf32> = dense<[1, 2, ..., 16]> : tensor<4x4xf32>, [#const.Add<1.0 : f32>]
+        ```
+        , which can be mapped to
+        ```MLIR
+            %original = const.Declare tensor<4x4xf32> = dense<[1, 2, ..., 16]>
+            %one = const.Declare tensor<1x1xf32> = dense<1.0> : tensor<1x1xf32>
+            %1 = IE.Add(%original, %one) {...} : tensor<4x4xf32>, tensor<4x4xf32> -> tensor<4x4xf32>
+        ```
+        The IntroduceInitFunctionPass packs these IE operations into a new init() function:
+        ```MLIR
+            func @init(%arg : tensor<4x4xf32>) -> tensor<4x4xf32> {
+                %one = const.Declare tensor<1x1xf32> = dense<1.0> : tensor<1x1xf32>
+                %0 = IE.Add(%arg, %one) {...} : tensor<4x4xf32>, tensor<4x4xf32> -> tensor<4x4xf32>
+                return %0 : tensor<4x4xf32>
+            }
+
+            %original = const.Declare tensor<4x4xf32> = dense<[1, 2, ..., 16]>
+            %0 = call @init(%original) : (tensor<4x4xf32>) -> tensor<4x4xf32>
+        ```
+
+        This pass comes with 3 modes: GenMain, GenInit and GenAll. Their meaning is explained below.
+
+        GenMain (generate main):
+            This mode allows the user to produce a blob that only contains the main()-schedule.
+            The network IO info is updated accordingly. Uses of the candidate DeclareOps in main() are replaced by
+            the newly associated function inputs. Any transformations that do *not* belong into init() (e.g. SubView)
+            are inserted between associated function argument and its use in main().
+
+        GenInit (generate init):
+            This mode allows the user to produce a blob that only contains the init()-schedule.
+            The main() function is erased. The network IO info is set to reflect the function signature of init().
+
+        GenAll (generate all i.e. init and main):
+            This mode allows the user to produce a blob that contains both the init()- and the main()-schedule.
+            The entry-point function calls in sequence init() and then main(), following GenInit and GenMain
+            conventions.
+    }];
+
+    let options = [
+        Option<
+            "extractionMode", "extraction-mode",
+            "std::string", "\"\"",
+            "Can be one of the following values: 'gen-init', 'gen-main' or 'gen-all'"
+        >
+    ];
+
+    let constructor = "vpux::VPU::createIntroduceInitFunctionPass()";
 }

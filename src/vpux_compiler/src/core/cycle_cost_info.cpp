@@ -35,8 +35,8 @@ void CycleCostInfo::updateAndStoreInvalidCostCycles(size_t& cycleCost, mlir::Ope
 
         _numOfTasksWithInvalidCost++;
         _layersWithInvalidCost.insert(layerTypeStr);
-        _log.warning("Layer {0} has invalid cost - '{1}'. Assume cycleCost = {2} for op at '{3}'", layerTypeStr,
-                     cycleCost, VPU::UNIT_COST, op->getLoc());
+        _log.debug("Layer {0} has invalid cost - '{1}'. Assume cycleCost = {2} for op at '{3}'", layerTypeStr,
+                   cycleCost, VPU::UNIT_COST, op->getLoc());
     }
     cycleCost = VPU::UNIT_COST;
 }

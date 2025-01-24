@@ -13,8 +13,8 @@ namespace vpumi37xx2vpuasm {
 class MappedInferenceRewriter : public VPUASMSymbolizationPattern<VPUMI37XX::MappedInferenceOp> {
 public:
     using Base::Base;
-    mlir::LogicalResult symbolize(VPUMI37XX::MappedInferenceOp op, SymbolMapper& mapper,
-                                  mlir::ConversionPatternRewriter& rewriter) const override;
+    mlir::FailureOr<SymbolizationResult> symbolize(VPUMI37XX::MappedInferenceOp op, SymbolMapper& mapper,
+                                                   mlir::ConversionPatternRewriter& rewriter) const override;
     llvm::SmallVector<mlir::FlatSymbolRefAttr> getSymbolicNames(VPUMI37XX::MappedInferenceOp, size_t) override;
 };
 

@@ -37,7 +37,7 @@ mlir::IntegerAttr getIntAttrValue(mlir::Value operand, mlir::PatternRewriter& re
         return nullptr;
     }
     auto constOp = operand.getDefiningOp<Const::DeclareOp>();
-    if (const auto attr = constOp.getContentAttr(); !attr.isSplat()) {
+    if (const auto& attr = constOp.getContentAttr(); !attr.isSplat()) {
         return nullptr;
     }
     const auto content = constOp.getContent();
@@ -61,11 +61,11 @@ mlir::FailureOr<int64_t> getBaseContentNumElements(Const::DeclareOp constOp) {
     if (constOp == nullptr) {
         return mlir::failure();
     }
-    auto contentAttr = constOp.getContentAttr();
+    const auto& contentAttr = constOp.getContentAttr();
     if (contentAttr == nullptr) {
         return mlir::failure();
     }
-    auto baseContent = contentAttr.getBaseContent();
+    const auto& baseContent = contentAttr.getBaseContent();
     if (baseContent != nullptr) {
         return baseContent.getShapedType().getNumElements();
     }
@@ -77,11 +77,11 @@ bool isBaseContentSplat(Const::DeclareOp constOp) {
         return false;
     }
 
-    auto contentAttr = constOp.getContentAttr();
+    const auto& contentAttr = constOp.getContentAttr();
     if (contentAttr == nullptr) {
         return false;
     }
-    auto baseContent = contentAttr.getBaseContent();
+    const auto& baseContent = contentAttr.getBaseContent();
 
     return baseContent.isSplat();
 }

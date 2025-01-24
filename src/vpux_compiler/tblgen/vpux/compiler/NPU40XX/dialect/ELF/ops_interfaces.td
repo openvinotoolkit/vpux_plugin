@@ -115,7 +115,10 @@ def ELF_SectionInterface : OpInterface<"ElfSectionInterface"> {
                 auto sectionFlags = sectionFlagsAttr ? sectionFlagsAttr.getValue() : ELF::SectionFlagsAttr::SHF_NONE;
                 auto symTabFlags = ELF::SectionFlagsAttr::SHF_NONE;
                 auto name = "symtab";
-                if (static_cast<bool>(sectionFlags & ELF::SectionFlagsAttr::VPU_SHF_USERINPUT)) {
+                if (static_cast<bool>(sectionFlags & ELF::SectionFlagsAttr::VPU_SHF_JIT)) {
+                    name = "symtab.descriptor";
+                    symTabFlags = ELF::SectionFlagsAttr::VPU_SHF_JIT;
+                } else if (static_cast<bool>(sectionFlags & ELF::SectionFlagsAttr::VPU_SHF_USERINPUT)) {
                     name = "symtab.io.NetworkInput";
                     symTabFlags = ELF::SectionFlagsAttr::VPU_SHF_USERINPUT | ELF::SectionFlagsAttr::VPU_SHF_JIT;
                 } else if (static_cast<bool>(sectionFlags & ELF::SectionFlagsAttr::VPU_SHF_USEROUTPUT)) {
@@ -184,7 +187,7 @@ def ELF_BinaryOpInterface : OpInterface<"BinaryOpInterface"> {
             // E#136377
             "Get the size in bytes of the serialized form of this object; it maybe not the same as sizeof for non-POD types",
             "size_t",
-            "getBinarySize", (ins), [{}],
+            "getBinarySize", (ins "::vpux::VPU::ArchKind":$arch), [{}],
             /*defaultImplementation*/ [{
                 VPUX_THROW("Unexpected call to interface implementation.");
             }]
@@ -202,9 +205,9 @@ def ELF_BinaryOpInterface : OpInterface<"BinaryOpInterface"> {
         InterfaceMethod<
             "Get the size in bytes of the serialized form of this object, using a symbol reference map for faster look-up",
             "size_t",
-            "getBinarySizeCached", (ins "ELF::SymbolReferenceMap&":$symRefMap), [{}],
+            "getBinarySizeCached", (ins "ELF::SymbolReferenceMap&":$symRefMap, "::vpux::VPU::ArchKind":$arch), [{}],
             /*defaultImplementation*/ [{
-                return $_op.getBinarySize();
+                return $_op.getBinarySize(arch);
             }]
         >
     ];
@@ -252,7 +255,7 @@ def ELF_WrappableOpInterface : OpInterface<"WrappableOpInterface"> {
         InterfaceMethod<
             "Get the alignment requirements for the serialization of this op",
             "size_t",
-            "getAlignmentRequirements", (ins)
+            "getAlignmentRequirements", (ins "::vpux::VPU::ArchKind":$arch)
         >,
 
         InterfaceMethod<

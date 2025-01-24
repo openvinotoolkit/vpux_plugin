@@ -66,3 +66,27 @@ func.func @DynamicDequantizationWithTranspose(%weights: tensor<28x512x128xi4>, %
     // CHECK:  [[DYN_DEQUANT:%.+]] = IE.DynamicDequantize([[TRANSPOSE]], [[SCALE]]) {dstElemType = f32} : tensor<28x128x512x!qElemType>, tensor<28x1x512xf32> -> tensor<28x128x512xf32>
     // CHECK:  return [[DYN_DEQUANT]] : tensor<28x128x512xf32>
 }
+
+// -----
+
+!qElemType = !quant.uniform<i8:f16, 1.000000e+00>
+
+// CHECK-LABEL: @DynamicDequantizationForINT8Weights
+// CHECK-SAME:     [[WEIGHTS:%.+]]: tensor<73440x1536xsi8>,
+// CHECK-SAME:     [[SCALE:%.+]]: tensor<73440x1xf16>,
+// CHECK-SAME:     [[INPUT:%.+]]: tensor<1x1536xf32>
+func.func @DynamicDequantizationForINT8Weights(%weights: tensor<73440x1536xsi8>, %scale: tensor<73440x1xf16>, %input: tensor<1x1536xf32>) -> tensor<1x73440xf32> {
+    %weights_f16 = IE.Convert(%weights) {dstElemType = f16} : tensor<73440x1536xsi8> -> tensor<73440x1536xf16>
+    %multiply = IE.Multiply(%weights_f16, %scale) {auto_broadcast = #IE.auto_broadcast_type<NUMPY>} : tensor<73440x1536xf16>, tensor<73440x1xf16> -> tensor<73440x1536xf16>
+    %weights_f32 = IE.Convert(%multiply) {dstElemType = f32} : tensor<73440x1536xf16> -> tensor<73440x1536xf32>
+    %fc = IE.FullyConnected(%input, %weights_f32) : tensor<1x1536xf32>, tensor<73440x1536xf32> -> tensor<1x73440xf32>
+
+    return %fc: tensor<1x73440xf32>
+
+    // CHECK:  [[QUANT_CAST:%.+]] = IE.QuantizeCast([[WEIGHTS]]) {dstElemType = !qElemType} : tensor<73440x1536xsi8> -> tensor<73440x1536x!qElemType>
+    // CHECK:  [[DYN_DEQUANT:%.+]] = IE.DynamicDequantize([[QUANT_CAST]], [[SCALE]]) {dstElemType = f16} : tensor<73440x1536x!qElemType>, tensor<73440x1xf16> -> tensor<73440x1536xf16>
+    // CHECK:  [[CONVERT:%.+]] = IE.Convert([[DYN_DEQUANT]]) {dstElemType = f32} : tensor<73440x1536xf16> -> tensor<73440x1536xf32>
+    // CHECK:  [[FC:%.+]] = IE.FullyConnected([[INPUT]], [[CONVERT]]) : tensor<1x1536xf32>, tensor<73440x1536xf32> -> tensor<1x73440xf32>
+
+    // CHECK:  return [[FC]] : tensor<1x73440xf32>
+}

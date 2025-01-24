@@ -17,6 +17,9 @@ sw_params::DataType KernelParamsSerializer::getDataTypeFromMlirType(mlir::Type t
         case 32:
             return sw_params::DataType::NN_FP32;
         case 16:
+            if (type.isBF16()) {
+                return sw_params::DataType::NN_BF16;
+            }
             return sw_params::DataType::NN_FP16;
         case 8:
             return sw_params::DataType::NN_FP8;
@@ -76,9 +79,14 @@ sw_params::DataType KernelParamsSerializer::getDataTypeFromMlirType(mlir::Type t
             }
         }
     } else if (auto quantizeType = type.dyn_cast<mlir::quant::QuantizedType>()) {
-        return sw_params::DataType::NN_U8;
-    } else if (type.isBF16()) {
-        return sw_params::DataType::NN_BF16;
+        const auto isSigned = quantizeType.isSigned();
+        auto bitWidth = quantizeType.getStorageTypeIntegralWidth();
+        switch (bitWidth) {
+        case 8:
+            return isSigned ? sw_params::DataType::NN_I8 : sw_params::DataType::NN_U8;
+        case 4:
+            return isSigned ? sw_params::DataType::NN_I4 : sw_params::DataType::NN_U4;
+        }
     }
     return sw_params::DataType::NN_UNDEFINED;
 }
@@ -116,7 +124,64 @@ void KernelParamsSerializer::addAttrsToVector(SmallVector<uint8_t>& vec, mlir::A
     }
 }
 
+void KernelParamsSerializer::addLLVMMemrefArgToVector(SmallVector<uint8_t>& vec, mlir::Value value) {
+    const auto shape = getShape(value);
+    int64_t rankMemref = checked_cast<uint32_t>(shape.size());
+
+    // We can't have a struct in C++ that has an array field with variable
+    // length.
+    // The implementation of the struct for MemRef is documented in MLIR at:
+    //        https://mlir.llvm.org/docs/TargetLLVMIR/#ranked-memref-types
+    uint32_t allocatedPointer =
+            0;  // Both allocatedPointer and alignedPointer will be relocated (they will be solved by the linker).
+    uint32_t alignedPointer = 0;  // (They are linked before execution, in IMDemo.)
+                                  // We use only alignedPointer.
+    int32_t offset = 0;
+
+    auto sizeVec = std::vector<int32_t>(rankMemref);
+    auto strideVec = std::vector<int32_t>(rankMemref);
+
+    for (std::size_t i = 0; i < shape.size(); i++) {
+        vpux::Dim aDim(i);
+        sizeVec[i] = shape[aDim];
+    }
+
+    strideVec[shape.size() - 1] = 1;
+    for (int i = (int)shape.size() - 2; i >= 0; i--) {
+        strideVec[i] = strideVec[i + 1] * sizeVec[i + 1];
+        /*
+        The stride between the 2 array elements:
+            a[1][1][0]
+            a[1][2][0]
+          is stride[2] * size[2].
+        The stride between the 2 array elements:
+            a[1][0][0]
+            a[2][0][0]
+          is size[1] * stride[2] * size[2].
+        */
+    }
+
+    // We can't represent in C/C++ a struct with compile-time-unknown-size arrays (arrays size and stride) with
+    // contiguous memory.
+    //   Therefore we just serialize the data directly in the vector.
+    appendValueToVector(vec, allocatedPointer);
+
+    appendValueToVector(vec, alignedPointer);
+
+    appendValueToVector(vec, offset);
+
+    ArrayRef<uint8_t> sizeByteArray(reinterpret_cast<const uint8_t*>(sizeVec.data()),
+                                    sizeof(sizeVec[0]) * sizeVec.size());
+    vec.insert(vec.end(), sizeByteArray.begin(), sizeByteArray.end());
+
+    ArrayRef<uint8_t> strideByteArray(reinterpret_cast<const uint8_t*>(strideVec.data()),
+                                      sizeof(strideVec[0]) * strideVec.size());
+    vec.insert(vec.end(), strideByteArray.begin(), strideByteArray.end());
+}
+
 void KernelParamsSerializer::addTensorArgToVector(SmallVector<uint8_t>& vec, mlir::Value value, bool isDynamic) {
+    // What happened with assigning to memrefData.dimsAddr, memrefData.stridesAddr?
+    //     Answer: They will get serialized with appendValueToVector().
     sw_params::MemRefData memrefData{};
 
     const auto shape = getShape(value);
@@ -169,8 +234,10 @@ SmallVector<uint8_t> KernelParamsSerializer::createKernelParams(VPUIP::SwKernelO
 
     const auto kernelOpArgsCount = insSize + outsSize;
 
-    for (auto&& kernelRun : swKernelOp.getBody().getOps<VPUIP::SwKernelRun>()) {
-        for (auto&& operand : kernelRun.getArgs()) {
+    mlir::Operation* firstInnerOp = &(swKernelOp.getBody().front().front());
+    auto firstInnerOpPackMemrefs = mlir::dyn_cast<vpux::IERT::PackMemrefsOp>(firstInnerOp);
+    if (firstInnerOpPackMemrefs != nullptr) {
+        for (auto&& operand : firstInnerOpPackMemrefs.getOperands()) {
             auto blockArg = operand.dyn_cast_or_null<mlir::BlockArgument>();
             if (blockArg) {
                 auto blockId = blockArg.getArgNumber();
@@ -185,23 +252,56 @@ SmallVector<uint8_t> KernelParamsSerializer::createKernelParams(VPUIP::SwKernelO
                 auto ioNdTypeIf = ioType.cast<vpux::NDTypeInterface>();
                 VPUX_THROW_UNLESS(blockArgNdTypeIf != nullptr || ioNdTypeIf != nullptr,
                                   "createKernelParams: sw kernel I/O does not implement NDTypeInterface");
-                VPUX_THROW_UNLESS(vpux::areTypesCompatible(blockArgType, ioType,
-                                                           vpux::IE::TypeComparisonMode::STRICT_EQUAL, true, true),
-                                  "createKernelParams: types of sw kernel I/O do not match");
+                // The types can differ w.r.t. the address space (e.g., memref<1x1000xf16> and memref<1x1000xf16, @DDR>)
                 VPUX_THROW_UNLESS(blockArgNdTypeIf.getShape() == ioNdTypeIf.getShape(),
                                   "createKernelParams: shapes of I/O do not match");
+                VPUX_THROW_UNLESS(blockArgNdTypeIf.getElementType() == ioNdTypeIf.getElementType(),
+                                  "createKernelParams: the element types of I/O do not match");
 
-                const auto [buffer, isDynamic] = extractKernelBuffer(swKernelOp, dynInputShapesSize, blockId);
-                addTensorArgToVector(paramsVector, buffer, isDynamic);
+                const auto operandVal = swKernelOp->getOpOperand(blockId).get();
+                // We serialize the data pointed to by the pointer passed to the SHAVE sw kernel.
+                // We make this serialization in the compiler since we want
+                //   execution on LeonRT to be as efficient as possible.
+                addLLVMMemrefArgToVector(paramsVector, operandVal);
             } else {
                 VPUX_THROW("Only block arguments are supported");
             }
         }
-        if (kernelRun.getAttrs().has_value()) {
-            const mlir::ArrayAttr arrayAttrs = kernelRun.getAttrs().value();
-            const auto& attrs = arrayAttrs.getValue();
-            for (const auto& attr : attrs) {
-                addAttrsToVector(paramsVector, attr);
+    } else {
+        for (auto&& kernelRun : swKernelOp.getBody().getOps<VPUIP::SwKernelRun>()) {
+            for (auto&& operand : kernelRun.getArgs()) {
+                auto blockArg = operand.dyn_cast_or_null<mlir::BlockArgument>();
+                if (blockArg) {
+                    auto blockId = blockArg.getArgNumber();
+                    VPUX_THROW_UNLESS(blockId < kernelOpArgsCount,
+                                      "Index '{0}' of argument of Kernel.Run operation is out of range {1}'", blockId,
+                                      kernelOpArgsCount);
+
+                    auto blockArgType = blockArg.getType();
+                    auto blockArgNdTypeIf = blockArgType.cast<vpux::NDTypeInterface>();
+                    auto ioType = blockId < insSize ? swKernelOp.getInputs()[blockId].getType()
+                                                    : swKernelOp.getOutputBuffs()[blockId - insSize].getType();
+                    auto ioNdTypeIf = ioType.cast<vpux::NDTypeInterface>();
+                    VPUX_THROW_UNLESS(blockArgNdTypeIf != nullptr || ioNdTypeIf != nullptr,
+                                      "createKernelParams: sw kernel I/O does not implement NDTypeInterface");
+                    VPUX_THROW_UNLESS(vpux::areTypesCompatible(blockArgType, ioType,
+                                                               vpux::IE::TypeComparisonMode::STRICT_EQUAL, true, true),
+                                      "createKernelParams: types of sw kernel I/O do not match");
+                    VPUX_THROW_UNLESS(blockArgNdTypeIf.getShape() == ioNdTypeIf.getShape(),
+                                      "createKernelParams: shapes of I/O do not match");
+
+                    const auto [buffer, isDynamic] = extractKernelBuffer(swKernelOp, dynInputShapesSize, blockId);
+                    addTensorArgToVector(paramsVector, buffer, isDynamic);
+                } else {
+                    VPUX_THROW("Only block arguments are supported");
+                }
+            }
+            if (kernelRun.getAttrs().has_value()) {
+                const mlir::ArrayAttr arrayAttrs = kernelRun.getAttrs().value();
+                const auto& attrs = arrayAttrs.getValue();
+                for (const auto& attr : attrs) {
+                    addAttrsToVector(paramsVector, attr);
+                }
             }
         }
     }

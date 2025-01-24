@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
-// RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch% compilation-mode=DefaultHW ppe-version=IntPPE" --one-shot-bufferize-VPU-to-VPUIP --canonicalize %s | FileCheck %s
+// RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch% compilation-mode=DefaultHW" --one-shot-bufferize-VPU-to-VPUIP --canonicalize %s | FileCheck %s
 // REQUIRES: arch-NPU37XX || arch-NPU40XX
 
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
@@ -233,7 +233,7 @@ func.func @NCEClusterTilingWithNCEConv(%arg0: tensor<1x32x16x16xf16, {mem_space 
             %wt as %arg3: tensor<64x1x1x4xsi32, {mem_space = @CMX_NN, order = #NCHW}>)
                 -> tensor<1x64x14x14xf16, {mem_space = @CMX_NN, order = #NHWC}> {
         %1 = VPU.NCE.Convolution(%arg1, %arg2, %arg3) {
-                opaque_ppe = #VPU.PPEStub<>,
+                ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
                 rawFilterShape = [64, 32, 3, 3],
                 strides = [1, 1]
@@ -284,7 +284,7 @@ func.func @NCEClusterTilingWithNceCompressConv(%input: tensor<1x4x224x224xf16, {
                 -> tensor<1x64x112x112xf16, {order = #NHWC, mem_space = @CMX_NN}> {
         %1 = VPU.NCE.CompressConvolution(%arg0, %arg1, %arg2) {
                 cm_sp_pattern = 15 : i64,
-                opaque_ppe = #VPU.PPEStub<>,
+                ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 3 : i64, right = 2 : i64, top = 3 : i64, bottom = 2 : i64>,
                 rawFilterShape = [64, 4, 7, 7], strides = [2, 2]
             } -> tensor<1x64x112x112xf16, {order = #NHWC, mem_space = @CMX_NN}> {
@@ -321,4 +321,53 @@ func.func @NCEClusterTilingWithNceCompressConv(%input: tensor<1x4x224x224xf16, {
     // CHECK-SAME:    -> memref<1x64x112x112xf16, #NHWC, @CMX_NN> variants : {
 
     //CHECK: return [[OUT]] : memref<1x64x112x112xf16, #NHWC, @CMX_NN>
+}
+
+// -----
+
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
+// CHECK-LABEL: @NCEClusterTilingWithSparseInPlaceNCEEltwise
+// CHECK-SAME:  [[ARG0:%.+]]: !VPUIP.SparseBuffer<data=memref<1x64x368x29xf16, #NHWC, @CMX_NN>, sparsity_map=memref<1x64x368x29xi1, #NHWC, @CMX_NN>>
+func.func @NCEClusterTilingWithSparseInPlaceNCEEltwise(%arg0: !VPU.SparseTensor<data=tensor<1x64x368x29xf16, {mem_space = @CMX_NN, order = #NHWC}>,
+                                                                                sparsity_map=tensor<1x64x368x29xi1, {mem_space = @CMX_NN, order = #NHWC}>>)
+        -> tensor<1x64x368x29xf16, {mem_space = @CMX_NN, order = #NHWC}> {
+
+    %0 = VPU.NCE.ClusterTiling (%arg0 as %arg1: !VPU.SparseTensor<data=tensor<1x64x368x29xf16, {mem_space = @CMX_NN, order = #NHWC}>,
+                                                                  sparsity_map=tensor<1x64x368x29xi1, {mem_space = @CMX_NN, order = #NHWC}>>)
+        -> tensor<1x64x368x29xf16, {mem_space = @CMX_NN, order = #NHWC}> {
+        %1 = VPU.NCE.Eltwise(%arg1, %arg1) {
+                op_type = #VPU.eltwise_type<ADD>,
+                ppe = #VPU.PPEStub<>
+            } -> tensor<1x64x368x29xf16, {mem_space = @CMX_NN, order = #NHWC}> {
+                VPU.DPU.Workload outOffsets [0, 0, 0, 0] outSizes [1, 64, 123, 29] <left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64> <CUBOID_8x16> attributes {cluster_id = 0 : i64}
+            }
+        VPU.Yield %1
+    }
+
+    return %0 : tensor<1x64x368x29xf16, {mem_space = @CMX_NN, order = #NHWC}>
+
+    //CHECK:      [[ALLOC:%.+]] = memref.alloc() : memref<1x64x368x29xf16, #NHWC, @CMX_NN>
+    //CHECK:      [[DATA2:%.+]], [[SM2:%.+]] = VPUIP.UngroupSparseBuffer([[ARG0]]) {resultSegmentSizes = array<i32: 1, 1, 0>} -> memref<1x64x368x29xf16, #NHWC, @CMX_NN>, memref<1x64x368x29xi1, #NHWC, @CMX_NN>
+    //CHECK:      [[DATA1:%.+]], [[SM1:%.+]] = VPUIP.UngroupSparseBuffer([[ARG0]]) {resultSegmentSizes = array<i32: 1, 1, 0>} -> memref<1x64x368x29xf16, #NHWC, @CMX_NN>, memref<1x64x368x29xi1, #NHWC, @CMX_NN>
+
+    //CHECK:      [[OUT:%.+]] = VPUIP.NCEClusterTiling
+    //CHECK-SAME:    inputs([[DATA1]] as [[INNER_ARG1:[^:]+]]: memref<1x64x368x29xf16, #NHWC, @CMX_NN>,
+    //CHECK-SAME:           [[SM1]] as [[INNER_ARG2:[^:]+]]: memref<1x64x368x29xi1, #NHWC, @CMX_NN>,
+    //CHECK-SAME:           [[DATA2]] as [[INNER_ARG3:[^:]+]]: memref<1x64x368x29xf16, #NHWC, @CMX_NN>,
+    //CHECK-SAME:           [[SM2]] as [[INNER_ARG4:[^:]+]]: memref<1x64x368x29xi1, #NHWC, @CMX_NN>)
+    //CHECK-SAME:    outputs([[ALLOC]] as [[INNER_ARG5:[^:]+]]: memref<1x64x368x29xf16, #NHWC, @CMX_NN>)
+    //CHECK-SAME:    -> memref<1x64x368x29xf16, #NHWC, @CMX_NN> {
+
+    //CHECK:        [[NCE:%.+]] = VPUIP.NCEClusterTask {
+    //CHECK-SAME:       eltwise_type = #VPU.eltwise_type<ADD>,
+    //CHECK-SAME:       task_type = #VPUIP.nce_task_type<ELTWISE>
+    //CHECK-SAME:   }
+    //CHECK-SAME:       input([[INNER_ARG1]]
+    //CHECK-SAME:       input_sparsity_map([[INNER_ARG2]]
+    //CHECK-SAME:       weights([[INNER_ARG1]]
+    //CHECK-SAME:       weights_sparsity_map([[INNER_ARG2]]
+    //CHECK-SAME:       outputs([[INNER_ARG5]]
+
+    //CHECK:     return [[OUT]] : memref<1x64x368x29xf16, #NHWC, @CMX_NN>
 }

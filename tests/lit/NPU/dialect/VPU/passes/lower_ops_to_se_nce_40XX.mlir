@@ -23,7 +23,7 @@ func.func @InterpolateNearestLargeChannels(%input: tensor<1x144x3x3xf16, {order 
             axes_attr = [2, 3],
             scales_attr = [2.000000e+00, 2.000000e+00],
             sizes_attr = [6, 6],
-            operandSegmentSizes = array<i32: 1, 0, 0, 0>
+            operandSegmentSizes = array<i32: 1, 0, 0, 0, 0, 0>
         } : tensor<1x144x3x3xf16, {order = #NHWC}> -> tensor<1x144x6x6xf16, {order = #NHWC}>
 
     return %output : tensor<1x144x6x6xf16, {order = #NHWC}>
@@ -51,7 +51,7 @@ func.func @InterpolateNearestLargeChannels(%input: tensor<1x144x3x3xf16, {order 
 
     // CHECK:       [[OUTPUT:%.+]] = VPU.NCE.Interpolate([[INPUT_SPARSE]], [[WEIGHTS]], [[WEIGHTS_TABLE]])
     // CHECK-SAME:      {mode = #VPU.nce_interpolate_mode<NEAREST>,
-    // CHECK-SAME:       opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>,
+    // CHECK-SAME:       ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>,
     // CHECK-SAME:       rawFilterShape = [144, 144, 1, 1],
     // CHECK-SAME:       strides = [1, 1]}
     // CHECK-SAME:      -> tensor<1x144x6x6xf16, {order = #NHWC}>
@@ -78,7 +78,7 @@ func.func @InterpolateBilinearAsymmetricLargeChannels(%input: tensor<1x144x3x3xf
             axes_attr = [2, 3],
             scales_attr = [2.000000e+00, 2.000000e+00],
             sizes_attr = [6, 6],
-            operandSegmentSizes = array<i32: 1, 0, 0, 0>
+            operandSegmentSizes = array<i32: 1, 0, 0, 0, 0, 0>
         } : tensor<1x144x3x3xf16, {order = #NHWC}> -> tensor<1x144x6x6xf16, {order = #NHWC}>
 
     return %output : tensor<1x144x6x6xf16, {order = #NHWC}>
@@ -105,7 +105,7 @@ func.func @InterpolateBilinearAsymmetricLargeChannels(%input: tensor<1x144x3x3xf
 
     // CHECK:       [[OUTPUT:%.+]] = VPU.NCE.Interpolate([[INPUT_SPARSE]], [[WEIGHTS]], [[WEIGHTS_TABLE]])
     // CHECK-SAME:      {mode = #VPU.nce_interpolate_mode<BILINEAR>,
-    // CHECK-SAME:      opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>,
+    // CHECK-SAME:      ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>,
     // CHECK-SAME:       rawFilterShape = [144, 144, 2, 2],
     // CHECK-SAME:       strides = [1, 1]}
     // CHECK-SAME:      -> tensor<1x144x6x6xf16, {order = #NHWC}>
@@ -132,7 +132,7 @@ func.func @InterpolateBilinearHalfPixelLargeChannels(%input: tensor<1x144x3x3xf1
             axes_attr = [2, 3],
             scales_attr = [2.000000e+00, 2.000000e+00],
             sizes_attr = [6, 6],
-            operandSegmentSizes = array<i32: 1, 0, 0, 0>
+            operandSegmentSizes = array<i32: 1, 0, 0, 0, 0, 0>
         } : tensor<1x144x3x3xf16, {order = #NHWC}> -> tensor<1x144x6x6xf16, {order = #NHWC}>
 
     return %output : tensor<1x144x6x6xf16, {order = #NHWC}>
@@ -159,7 +159,7 @@ func.func @InterpolateBilinearHalfPixelLargeChannels(%input: tensor<1x144x3x3xf1
 
     // CHECK:       [[OUTPUT:%.+]] = VPU.NCE.Interpolate([[INPUT_SPARSE]], [[WEIGHTS]], [[WEIGHTS_TABLE]])
     // CHECK-SAME:      {mode = #VPU.nce_interpolate_mode<BILINEAR>,
-    // CHECK-SAME:      opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>,
+    // CHECK-SAME:      ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>,
     // CHECK-SAME:       rawFilterShape = [144, 144, 4, 4],
     // CHECK-SAME:       strides = [2, 2]}
     // CHECK-SAME:      -> tensor<1x144x6x6xf16, {order = #NHWC}>
@@ -186,7 +186,7 @@ func.func @InterpolateBilinearPytorchHalfPixelLargeChannels(%input: tensor<1x144
             axes_attr = [2, 3],
             scales_attr = [2.000000e+00, 2.000000e+00],
             sizes_attr = [6, 6],
-            operandSegmentSizes = array<i32: 1, 0, 0, 0>
+            operandSegmentSizes = array<i32: 1, 0, 0, 0, 0, 0>
         } : tensor<1x144x3x3xf16, {order = #NHWC}> -> tensor<1x144x6x6xf16, {order = #NHWC}>
 
     return %output : tensor<1x144x6x6xf16, {order = #NHWC}>
@@ -213,7 +213,7 @@ func.func @InterpolateBilinearPytorchHalfPixelLargeChannels(%input: tensor<1x144
 
     // CHECK:       [[OUTPUT:%.+]] = VPU.NCE.Interpolate([[INPUT_SPARSE]], [[WEIGHTS]], [[WEIGHTS_TABLE]])
     // CHECK-SAME:      {mode = #VPU.nce_interpolate_mode<BILINEAR>,
-    // CHECK-SAME:      opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>,
+    // CHECK-SAME:      ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>,
     // CHECK-SAME:       rawFilterShape = [144, 144, 4, 4],
     // CHECK-SAME:       strides = [2, 2]}
     // CHECK-SAME:      -> tensor<1x144x6x6xf16, {order = #NHWC}>
@@ -240,7 +240,7 @@ func.func @InterpolateBilinearAlignCornersWithLargeChannels(%input: tensor<1x144
             axes_attr = [2, 3],
             scales_attr = [1.000000e+00, 1.000000e+00],
             sizes_attr = [7, 7],
-            operandSegmentSizes = array<i32: 1, 0, 0, 0>
+            operandSegmentSizes = array<i32: 1, 0, 0, 0, 0, 0>
         } : tensor<1x144x3x3xf16, {order = #NHWC}> -> tensor<1x144x7x7xf16, {order = #NHWC}>
 
     return %output : tensor<1x144x7x7xf16, {order = #NHWC}>
@@ -270,7 +270,7 @@ func.func @InterpolateBilinearAlignCornersWithLargeChannels(%input: tensor<1x144
 
     // CHECK:       [[OUTPUT:%.+]] = VPU.NCE.Interpolate([[INPUT_SPARSE]], [[WEIGHTS]], [[WEIGHTS_TABLE]])
     // CHECK-SAME:      {mode = #VPU.nce_interpolate_mode<BILINEAR>,
-    // CHECK-SAME:      opaque_ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>,
+    // CHECK-SAME:      ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = -2147483648 : i64, clamp_high = 2147483647 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, fp_prelu_alpha = 1.000000e+00 : f64>,
     // CHECK-SAME:       rawFilterShape = [144, 144, 3, 3],
     // CHECK-SAME:       strides = [1, 1]}
     // CHECK-SAME:      -> tensor<1x144x7x7xf16, {order = #NHWC}>

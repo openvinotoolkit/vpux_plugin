@@ -10,7 +10,9 @@
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/IE/transforms/passes.hpp"
 #include "vpux/compiler/dialect/IE/utils/broadcast_utils.hpp"
+#include "vpux/compiler/dialect/IE/utils/dynamic_shape_utils.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
+#include "vpux/compiler/dialect/const/utils/utils.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 #include "vpux/utils/core/error.hpp"
@@ -44,58 +46,222 @@ private:
     Logger _log;
 };
 
+// The matrix multiplication of inputData and weights, and the addition of biases, can be computed once for the entire
+// sequence, as they are not calculated recursively.
+// However, when dealing with dynamic input for LSTMSequence, this approach cannot be applied directly because Add and
+// MatMul operations do not yet support dynamic shapes fully. Instead, we can execute these operations using an
+// upper-bounded input (via the DynamicExtend operation). Subsequently, we can use Slice to remove any unnecessary data
+// from the results.
+mlir::Value padWeightsAndBiases(mlir::PatternRewriter& rewriter, mlir::Location loc, mlir::Value inputData,
+                                mlir::Value newInputData, mlir::Value newWeights, mlir::Value biases,
+                                mlir::ArrayAttr axisOneArrayAttr, mlir::MLIRContext* ctx) {
+    auto newBiasesOp =
+            rewriter.create<IE::UnsqueezeOp>(appendLoc(loc, "_biasesUnsqueeze"), biases, nullptr, axisOneArrayAttr);
+    auto padForMatMul = rewriter.create<IE::DynamicExpandOp>(appendLoc(loc, "_padForMatMul"), newInputData);
+
+    auto matMulInputOp =
+            rewriter.create<IE::MatMulOp>(appendLoc(loc, "_matMul"), padForMatMul, newWeights, false, true);
+    auto addOp = rewriter.create<IE::AddOp>(appendLoc(loc, "_add"), matMulInputOp, newBiasesOp,
+                                            IE::AutoBroadcastTypeAttr::get(ctx, IE::AutoBroadcastType::NUMPY), nullptr,
+                                            nullptr, nullptr, nullptr);
+
+    auto addShape = to_small_vector(getShape(addOp.getOutput()));
+    auto inputDataShape = to_small_vector(getShape(inputData));
+    auto addBounds = addShape;
+
+    const auto addShapeRank = checked_cast<int64_t>(addShape.size());
+    const auto inputDataShapeRank = checked_cast<int64_t>(inputDataShape.size());
+
+    const auto seqLengthAddIndex = addShapeRank - 2;
+    const auto seqLengthDataIndex = inputDataShapeRank - 2;
+
+    addShape[seqLengthAddIndex] = to_small_vector(inputDataShape)[seqLengthDataIndex];
+    addBounds[seqLengthAddIndex] = parseIntArrayAttr<int64_t>(getBounds(inputData))[seqLengthDataIndex];
+
+    const auto shapeAttr = getIntArrayAttr(ctx, addShape);
+    const auto boundedShapeAttr = getIntArrayAttr(ctx, addBounds);
+    const auto dataTypeShapeOf = mlir::TypeAttr::get(getSInt64Type(ctx));
+
+    // In order to apply StridedSlice (to the operations that were performed with upper bounds), we need to determine
+    // the correct shape for the output tensor. To achieve this, we will obtain the actual dynamic shape using ShapeOf
+    // and use it as the ends input for StridedSlice.
+
+    // %shape_of_cst = IE.ShapeOf(%cst_0) -> 1x2x512x512
+    auto shapeOfCst = rewriter.create<IE::ShapeOfOp>(appendLoc(loc, "_shapeOfCst"), newWeights, dataTypeShapeOf);
+
+    // %slice_cst = IE.Slice %shape_of_cst [0] [2] -> 1x2
+    auto sliceCst = rewriter.create<IE::SliceOp>(appendLoc(loc, "_sliceCst"), shapeOfCst,
+                                                 /*begins=*/rewriter.getI64ArrayAttr({0}),
+                                                 /*sizes=*/rewriter.getI64ArrayAttr({2}));
+
+    // %shape_of_0 = IE.ShapeOf(%0) -> 1x1x?x512
+    auto shapeOfInput = rewriter.create<IE::ShapeOfOp>(appendLoc(loc, "_shapeOfInput"), newInputData, dataTypeShapeOf);
+
+    // %slice_0 = IE.Slice %shape_of_0 [2] [1] -> ?
+    auto sliceInput = rewriter.create<IE::SliceOp>(appendLoc(loc, "_sliceInput"), shapeOfInput,
+                                                   /*begins=*/rewriter.getI64ArrayAttr({2}),
+                                                   /*sizes=*/rewriter.getI64ArrayAttr({1}));
+
+    // %shape_of_3 = IE.ShapeOf(%3) -> 1x2x35x512
+    auto shapeOfAdd = rewriter.create<IE::ShapeOfOp>(appendLoc(loc, "_shapeOfAdd"), addOp.getOutput(), dataTypeShapeOf);
+
+    // %slice_3 = IE.Slice %shape_of_3 [3] [1] -> 512
+    auto sliceAdd = rewriter.create<IE::SliceOp>(appendLoc(loc, "_sliceAdd"), shapeOfAdd,
+                                                 /*begins=*/rewriter.getI64ArrayAttr({3}),
+                                                 /*sizes=*/rewriter.getI64ArrayAttr({1}));
+
+    // %concat = IE.Concat(%slice_cst, %slice_0, %slice_3) -> 1x2x?x512
+    const auto axisAttr = getIntAttr(ctx, 0);
+    SmallVector<mlir::Value> concatInputs;
+    concatInputs.push_back(sliceCst);
+    concatInputs.push_back(sliceInput);
+    concatInputs.push_back(sliceAdd);
+    auto concat = rewriter.create<IE::ConcatOp>(appendLoc(loc, "_concat"), concatInputs, axisAttr);
+
+    // StridedSlice operation
+    const SmallVector<int64_t> begins(addShapeRank, 0);
+    const SmallVector<int64_t> strides(addShapeRank, 1);
+
+    const auto beginsAttr = getIntArrayAttr(ctx, begins);
+    const auto stridesAttr = getIntArrayAttr(ctx, strides);
+
+    const SmallVector<int64_t> empty(addShapeRank, 0);
+    const auto emptyAttr = getIntArrayAttr(ctx, empty);
+
+    auto sliceOp = rewriter.create<IE::StridedSliceOp>(appendLoc(loc, "_inputDataSlice"),
+                                                       /*data=*/addOp.getOutput(),
+                                                       /*begins=*/nullptr,
+                                                       /*ends=*/concat.getOutput(),
+                                                       /*strides=*/nullptr,
+                                                       /*beginsAttr=*/beginsAttr,
+                                                       /*endsAttr=*/nullptr,
+                                                       /*stridesAttr=*/stridesAttr,
+                                                       /*beginMask=*/emptyAttr,
+                                                       /*endMask=*/emptyAttr,
+                                                       /*newAxisMask=*/emptyAttr,
+                                                       /*shrinkAxisMask=*/emptyAttr,
+                                                       /*ellipsisMask=*/emptyAttr);
+
+    // StridedSlice infers its output as tensor<?x?x?x?xf16> when any of the begins, ends, or strides are unknown at
+    // compile time. DynamicReshape resolves the mismatch between the output of StridedSlice and the input of
+    // mlir.return.
+    auto reshapedAddOp = rewriter.create<IE::DynamicReshapeOp>(appendLoc(loc, "_reshapedSlice"), sliceOp,
+                                                               concat.getOutput(), shapeAttr, boundedShapeAttr);
+
+    return reshapedAddOp;
+}
+
 mlir::LogicalResult ExtractWeightsAndBiasesFromLSTMSequenceRewriter::matchAndRewrite(
         IE::LSTMSequenceOp op, mlir::PatternRewriter& rewriter) const {
+    auto inputData = op.getInputData();
+
     const auto weights = op.getWeights();
     const auto biases = op.getBiases();
     if (!weights || !biases) {
         return mlir::failure();
     }
 
-    auto inputData = op.getInputData();
     const auto initialHiddenStateShape = getShape(op.getInitialHiddenState());
     const auto batchSize = initialHiddenStateShape[Dim(0)];
     const auto numDirections = initialHiddenStateShape[Dim(1)];
 
     const auto ctx = rewriter.getContext();
     const auto loc = op.getLoc();
+    const auto axisOne = 1;
     const auto axisZeroArrayAttr = getIntArrayAttr(ctx, SmallVector<int64_t>{0});
-    const auto axisOneArrayAttr = getIntArrayAttr(ctx, SmallVector<int64_t>{1});
+    const auto axisOneArrayAttr = getIntArrayAttr(ctx, SmallVector<int64_t>{axisOne});
+    const auto isInputDataDynamic = getShape(inputData).isDynamic();
 
-    mlir::Value newInputData = rewriter.create<IE::UnsqueezeOp>(appendLoc(loc, "_inputDataUnsqueeze"), inputData,
-                                                                nullptr, axisOneArrayAttr);
+    mlir::Value newInputData;
+    if (isInputDataDynamic) {
+        auto newInputDataShape = to_small_vector(getShape(inputData));
+        auto newInputDataBounds = parseIntArrayAttr<int64_t>(getBounds(inputData));
+
+        newInputDataShape.insert(newInputDataShape.begin() + axisOne, 1);
+        newInputDataBounds.insert(newInputDataBounds.begin() + axisOne, 1);
+
+        const auto newInputDataShapeAttr = getIntArrayAttr(ctx, newInputDataShape);
+        const auto newInputDataBoundsAttr = getIntArrayAttr(ctx, newInputDataBounds);
+        const auto newInputDataShapeRank = checked_cast<int64_t>(newInputDataShape.size());
+
+        const auto dataType = mlir::RankedTensorType::get({newInputDataShapeRank}, getSInt32Type(ctx));
+        auto newInputDataShapeValues = IE::replaceDynamicDimsWithValue<int32_t>(newInputDataShape, -1);
+
+        const auto shapeTensor = Const::createConst(rewriter, loc, dataType, ArrayRef(newInputDataShapeValues));
+        newInputData =
+                rewriter.create<IE::DynamicReshapeOp>(appendLoc(loc, "_inputDataUnsqueeze"), inputData, shapeTensor,
+                                                      newInputDataShapeAttr, newInputDataBoundsAttr);
+    } else {
+        newInputData = rewriter.create<IE::UnsqueezeOp>(appendLoc(loc, "_inputDataUnsqueeze"), inputData, nullptr,
+                                                        axisOneArrayAttr);
+    }
+
     mlir::Value newWeights =
             rewriter.create<IE::UnsqueezeOp>(appendLoc(loc, "_weightsUnsqueeze"), weights, nullptr, axisZeroArrayAttr);
 
     if (numDirections > 1) {
         auto newInputDataShape = Shape(getShape(newInputData));
         newInputDataShape[Dim(1)] = numDirections;
-        newInputData = rewriter.create<IE::BroadcastOp>(
-                appendLoc(loc, "_inputDataBroadcast"), newInputData,
-                IE::createShapeConstForBroadCast(rewriter, ctx, loc, newInputDataShape), nullptr,
-                IE::BroadcastTypeAttr::get(ctx, IE::BroadcastType::NUMPY));
-
         auto newWeightsShape = Shape(getShape(newWeights));
         newWeightsShape[Dim(0)] = batchSize;
+
+        if (isInputDataDynamic) {
+            const auto shapeValues = IE::replaceDynamicDimsWithValue<int32_t>(to_small_vector(newInputDataShape), -1);
+            const auto newInputDataShapeRank = checked_cast<int64_t>(newInputDataShape.size());
+
+            const auto dataType = mlir::RankedTensorType::get({newInputDataShapeRank}, getSInt32Type(ctx));
+            const auto shapeTensor = Const::createConst(rewriter, loc, dataType, ArrayRef(shapeValues));
+
+            const auto shapeAttr = getIntArrayAttr(ctx, to_small_vector(getShape(newInputData)));
+            const auto boundedShapeAttr = getIntArrayAttr(ctx, parseIntArrayAttr<int64_t>(getBounds(newInputData)));
+
+            auto reshapedInput = rewriter.create<IE::DynamicReshapeOp>(appendLoc(loc, "_reshapedInput"), newInputData,
+                                                                       shapeTensor, shapeAttr, boundedShapeAttr);
+
+            const auto dataTypeShapeOf = mlir::TypeAttr::get(getSInt64Type(ctx));
+            auto shapeOf = rewriter.create<IE::ShapeOfOp>(appendLoc(loc, "_reshapedInputShapeOf"), reshapedInput,
+                                                          dataTypeShapeOf);
+
+            newInputData = rewriter.create<IE::DynamicBroadcastOp>(
+                    appendLoc(loc, "_inputDataBroadcast"), newInputData, shapeOf.getOutput(), nullptr,
+                    IE::BroadcastTypeAttr::get(ctx, IE::BroadcastType::NUMPY), shapeAttr, boundedShapeAttr);
+        } else {
+            newInputData = rewriter.create<IE::BroadcastOp>(
+                    appendLoc(loc, "_inputDataBroadcast"), newInputData,
+                    IE::createShapeConstForBroadCast(rewriter, ctx, loc, newInputDataShape), nullptr,
+                    IE::BroadcastTypeAttr::get(ctx, IE::BroadcastType::NUMPY));
+        }
         newWeights =
                 rewriter.create<IE::BroadcastOp>(appendLoc(loc, "_weightsBroadcast"), newWeights,
                                                  IE::createShapeConstForBroadCast(rewriter, ctx, loc, newWeightsShape),
                                                  nullptr, IE::BroadcastTypeAttr::get(ctx, IE::BroadcastType::NUMPY));
     }
 
-    auto newBiasesOp =
-            rewriter.create<IE::UnsqueezeOp>(appendLoc(loc, "_biasesUnsqueeze"), biases, nullptr, axisOneArrayAttr);
-    auto matMulInputOp =
-            rewriter.create<IE::MatMulOp>(appendLoc(loc, "_matMul"), newInputData, newWeights, false, true);
-    auto addOp = rewriter.create<IE::AddOp>(appendLoc(loc, "_add"), matMulInputOp, newBiasesOp,
-                                            IE::AutoBroadcastTypeAttr::get(getContext(), IE::AutoBroadcastType::NUMPY),
-                                            nullptr, nullptr, nullptr, nullptr);
+    if (isInputDataDynamic) {
+        auto reshapedAddOp =
+                padWeightsAndBiases(rewriter, loc, inputData, newInputData, newWeights, biases, axisOneArrayAttr, ctx);
 
-    auto newLSTMSequenceOp = rewriter.create<IE::LSTMSequenceOp>(
-            loc, addOp, op.getInitialHiddenState(), op.getInitialCellState(), nullptr, op.getReccurenceWeights(),
-            nullptr, op.getSequenceLengthAttr(), op.getDirectionAttr());
+        auto newLSTMSequenceOp = rewriter.create<IE::LSTMSequenceOp>(
+                loc, reshapedAddOp, op.getInitialHiddenState(), op.getInitialCellState(), nullptr,
+                op.getReccurenceWeights(), nullptr, op.getSequenceLengthAttr(), op.getDirectionAttr());
 
-    rewriter.replaceOp(op, newLSTMSequenceOp);
+        rewriter.replaceOp(op, newLSTMSequenceOp);
+    } else {
+        auto newBiasesOp =
+                rewriter.create<IE::UnsqueezeOp>(appendLoc(loc, "_biasesUnsqueeze"), biases, nullptr, axisOneArrayAttr);
+        auto matMulInputOp =
+                rewriter.create<IE::MatMulOp>(appendLoc(loc, "_matMul"), newInputData, newWeights, false, true);
+        auto addOp =
+                rewriter.create<IE::AddOp>(appendLoc(loc, "_add"), matMulInputOp, newBiasesOp,
+                                           IE::AutoBroadcastTypeAttr::get(getContext(), IE::AutoBroadcastType::NUMPY),
+                                           nullptr, nullptr, nullptr, nullptr);
+
+        auto newLSTMSequenceOp = rewriter.create<IE::LSTMSequenceOp>(
+                loc, addOp, op.getInitialHiddenState(), op.getInitialCellState(), nullptr, op.getReccurenceWeights(),
+                nullptr, op.getSequenceLengthAttr(), op.getDirectionAttr());
+
+        rewriter.replaceOp(op, newLSTMSequenceOp);
+    }
     return mlir::success();
 }
 
@@ -255,7 +421,7 @@ mlir::LogicalResult UnrollLSTMSequenceToLSTMCellsRewriter::matchAndRewrite(IE::L
 
     const auto inputDataShape = getShape(inputData).raw();
     VPUX_THROW_UNLESS(inputDataShape.size() == 3, "inputData expected to be of rank 3, got {0}", inputDataShape.size());
-    const auto sequenceLenght = op.getSequenceLength();
+    const auto sequenceLenght = op.getSequenceLength().has_value() ? op.getSequenceLength().value() : 1;
     const auto hiddenSizeAttr = getIntAttr(ctx, getShape(hiddenState).back());
 
     SmallVector<int64_t> sliceOffsets(inputDataShape.size(), 0);

@@ -399,3 +399,14 @@ DimsOrder::DimsOrder(StorageType code): _code(code) {
         _invertedCode |= dimDigit;
     }
 }
+
+std::optional<Dim> vpux::getHighestNonTrivialDim(ShapeRef shape, const DimsOrder& dimOrder) {
+    for (auto idx : irange(dimOrder.numDims())) {
+        auto curDim = dimOrder.dimAt(idx);
+        if (shape[curDim] != 1) {
+            return curDim;
+        }
+    }
+
+    return std::nullopt;
+}

@@ -5,13 +5,16 @@
 
 #include "vpux/compiler/dialect/IE/transforms/passes.hpp"
 #include "vpux/compiler/dialect/IE/utils/reshape_utils.hpp"
+#include "vpux/compiler/dialect/const/utils/utils.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 
 using namespace vpux;
 
 namespace {
 
-mlir::FailureOr<mlir::Operation*> getConcatOpConsumer(mlir::Operation* op, bool requireAffineReshape) {
+template <class ConvolutionType = IE::ConvolutionOp>
+mlir::FailureOr<mlir::Operation*> getConcatOpConsumer(mlir::Operation* op, bool requireAffineReshape,
+                                                      bool requireConvolution) {
     if (op == nullptr || op->getUsers().empty()) {
         return mlir::failure();
     }
@@ -23,9 +26,31 @@ mlir::FailureOr<mlir::Operation*> getConcatOpConsumer(mlir::Operation* op, bool 
 
         if (requireAffineReshape) {
             if (!mlir::isa<IE::AffineReshapeOp>(operation) || operation->getUsers().empty() ||
-                !operation->hasOneUse()) {
+                (!requireConvolution && !operation->hasOneUse())) {
                 return mlir::failure();
             }
+            operation = *(operation->getUsers().begin());
+        }
+
+        if (requireConvolution) {
+            if (!mlir::isa<ConvolutionType>(operation) || operation->getUsers().empty() || !operation->hasOneUse()) {
+                return mlir::failure();
+            }
+
+            auto convOp = mlir::dyn_cast<ConvolutionType>(operation);
+            auto constFilter = mlir::dyn_cast<Const::DeclareOp>(convOp.getFilter().getDefiningOp());
+            if (constFilter == nullptr) {
+                return mlir::failure();
+            }
+
+            auto isConst = [](mlir::Value value) {
+                return mlir::isa<Const::DeclareOp>(value.getDefiningOp());
+            };
+
+            if (!isConst(convOp.getFilter())) {
+                return mlir::failure();
+            }
+
             operation = *(operation->getUsers().begin());
         }
 
@@ -64,8 +89,8 @@ mlir::FailureOr<SmallVector<Dim>> getConcatDimWithShape1(IE::ConcatOp concatOp, 
         return mlir::failure();
     }
 
-    const auto concatInputType = concatOp.getInputs()[0].getType().cast<vpux::NDTypeInterface>();
-    const auto concatOutputType = concatOp.getOutput().getType().cast<vpux::NDTypeInterface>();
+    const auto concatInputType = mlir::cast<vpux::NDTypeInterface>(concatOp.getInputs()[0].getType());
+    const auto concatOutputType = mlir::cast<vpux::NDTypeInterface>(concatOp.getOutput().getType());
     const auto concatInShape = concatInputType.getShape();
     const auto concatOutShape = concatOutputType.getShape();
     if (concatInShape.size() != concatOutShape.size()) {
@@ -85,9 +110,7 @@ mlir::FailureOr<SmallVector<Dim>> getConcatDimWithShape1(IE::ConcatOp concatOp, 
 
     for (const auto& input : concatOp.getInputs()) {
         const auto inputShape = getShape(input);
-        if (inputShape[concatDims[0]] != 1 && !supportAdjacentDims) {
-            return mlir::failure();
-        } else {
+        if (supportAdjacentDims) {
             SmallVector<Dim> adjustDims;
             if (concatDims[0].ind() - 1 > 0) {
                 adjustDims.push_back(Dim(concatDims[0].ind() - 1));
@@ -110,6 +133,29 @@ mlir::FailureOr<SmallVector<Dim>> getConcatDimWithShape1(IE::ConcatOp concatOp, 
     }
 
     return concatDims;
+}
+
+bool isSupportedAffineReshape(IE::SplitOp splitOp) {
+    auto userOp = splitOp.getOutputs()[0].getUsers().begin();
+    auto affineReshapeOp = mlir::cast<IE::AffineReshapeOp>(*userOp);
+    const auto dimMapping = parseIntArrayOfArrayAttr<int64_t>(affineReshapeOp.getDimMapping());
+
+    const auto affineInShape = getShape(affineReshapeOp.getInput());
+    const auto affineOutShape = getShape(affineReshapeOp.getOutput());
+
+    bool isInChEquivalentToOutH = affineInShape[Dims4D::Act::C] == affineOutShape[Dims4D::Act::H] &&
+                                  std::any_of(dimMapping[Dims4D::Act::C.ind()].begin(),
+                                              dimMapping[Dims4D::Act::C.ind()].end(), [](int value) {
+                                                  return value == Dims4D::Act::H.ind();
+                                              });
+    bool isInHEquivalentToOutWOrCh = (affineInShape[Dims4D::Act::H] == affineOutShape[Dims4D::Act::W] ||
+                                      affineInShape[Dims4D::Act::H] == affineOutShape[Dims4D::Act::C]) &&
+                                     std::any_of(dimMapping[Dims4D::Act::H.ind()].begin(),
+                                                 dimMapping[Dims4D::Act::H.ind()].end(), [](int value) {
+                                                     return value == Dims4D::Act::W.ind();
+                                                 });
+
+    return isInChEquivalentToOutH && isInHEquivalentToOutWOrCh;
 }
 
 bool checkAffineReshapeDimMapping(IE::SplitOp splitOp) {
@@ -185,7 +231,7 @@ mlir::LogicalResult SplitAffineReshapeConcatRewriter::matchAndRewrite(IE::SplitO
                                                                       mlir::PatternRewriter& rewriter) const {
     _log.trace("Rewrite Split operation '{0}' at '{1}'", origOp->getName(), origOp->getLoc());
 
-    auto getConsumerResult = getConcatOpConsumer(origOp, true);
+    auto getConsumerResult = getConcatOpConsumer(origOp, true, false);
     if (mlir::failed(getConsumerResult)) {
         return mlir::failure();
     }
@@ -197,7 +243,7 @@ mlir::LogicalResult SplitAffineReshapeConcatRewriter::matchAndRewrite(IE::SplitO
         return mlir::failure();
     }
 
-    const auto concatInputType = concatOp.getInputs()[0].getType().cast<vpux::NDTypeInterface>();
+    const auto concatInputType = mlir::cast<vpux::NDTypeInterface>(concatOp.getInputs()[0].getType());
     const auto concatInShape = concatInputType.getShape();
 
     // Supported case for splitOp: split the dim to shape 1
@@ -246,6 +292,202 @@ mlir::LogicalResult SplitAffineReshapeConcatRewriter::matchAndRewrite(IE::SplitO
     return mlir::success();
 }
 
+mlir::Value composeNewFilter(IE::ConcatOp concatOp, mlir::PatternRewriter& rewriter) {
+    auto convOp = concatOp.getInputs()[0].getDefiningOp();
+
+    const auto filterShape = getShape(convOp->getOperand(1));
+    auto concatSize = concatOp.getInputs().size();
+
+    SmallVector<mlir::Value> newFilterConstVec;
+    for (unsigned int idx = 0; idx < concatSize; idx++) {
+        auto inConvOp = concatOp.getInputs()[idx].getDefiningOp();
+        auto constFilter = mlir::cast<Const::DeclareOp>(inConvOp->getOperand(1).getDefiningOp());
+
+        // The split dim size after SplitOp is 1, so use the index to count the padding offset.
+        Shape cstPadBegin = {0, idx, 0, 0};
+        Shape cstPadEnd = {0, static_cast<unsigned int>(concatSize) - idx - 1, 0, 0};
+        auto newConstFilterAttr = constFilter.getContentAttr().transform().padWithZero(cstPadBegin, cstPadEnd).get();
+
+        const auto newFilterShape = Shape{filterShape[Dims4D::Filter::OC], static_cast<unsigned int>(concatSize),
+                                          filterShape[Dims4D::Filter::KY], filterShape[Dims4D::Filter::KX]};
+        auto filterExpressedType = mlir::RankedTensorType::get(
+                newFilterShape.raw(),
+                mlir::cast<vpux::NDTypeInterface>(concatOp.getOutput().getType()).getElementType());
+        auto newLoc = appendLoc(constFilter.getLoc(), "_{0}", idx);
+        auto newConstFilter =
+                rewriter.create<Const::DeclareOp>(newLoc, filterExpressedType, std::move(newConstFilterAttr));
+
+        newFilterConstVec.push_back(newConstFilter.getOutput());
+    }
+
+    auto newConcatFilterLoc = appendLoc(concatOp.getLoc(), "_composed_weights");
+    auto newFilter =
+            rewriter.create<IE::ConcatOp>(newConcatFilterLoc, newFilterConstVec, Dims4D::Act::N.ind()).getOutput();
+
+    return newFilter;
+}
+
+mlir::Value composeNewBias(IE::ConcatOp concatOp, mlir::PatternRewriter& rewriter) {
+    auto concatSize = concatOp.getInputs().size();
+
+    // If all Convolutions without bias, skip construct dummy bias.
+    const auto atLeastOneConvHasBias = llvm::any_of(concatOp.getInputs(), [](mlir::Value input) {
+        auto conv = input.getDefiningOp();
+        return conv->getNumOperands() > 2;
+    });
+
+    if (!atLeastOneConvHasBias) {
+        return nullptr;
+    }
+
+    SmallVector<mlir::Value> newBiasVec;
+    for (unsigned int idx = 0; idx < concatSize; idx++) {
+        auto inConvOp = concatOp.getInputs()[idx].getDefiningOp();
+
+        if (inConvOp->getNumOperands() > 2) {
+            newBiasVec.push_back(inConvOp->getOperand(2));
+        } else {
+            auto input = inConvOp->getOperand(0);
+            auto inputShape = getShape(input);
+            auto oc = inputShape[Dims4D::Act::C];
+            const Shape biasShape = {1, oc, 1, 1};
+            std::vector<float> biasValue(oc, .0f);
+
+            const DimsOrder biasOrder = DimsOrder::NCHW;
+            const auto biasType = mlir::RankedTensorType::get(
+                    biasShape.raw(), mlir::cast<NDTypeInterface>(input.getType()).getElementType(),
+                    getTensorAttr(rewriter.getContext(), biasOrder, nullptr, nullptr));
+
+            auto newLoc = appendLoc(inConvOp->getLoc(), "_{0}", idx);
+
+            newBiasVec.push_back(Const::buildWeightsConst(rewriter, newLoc, biasType, ArrayRef(biasValue)));
+        }
+    }
+
+    auto newConcatBiasLoc = appendLoc(concatOp.getLoc(), "_composed_weights");
+    auto newBias = rewriter.create<IE::ConcatOp>(newConcatBiasLoc, newBiasVec, Dims4D::Act::C.ind()).getOutput();
+
+    return newBias;
+}
+
+mlir::Operation* createConvolution(IE::ConcatOp origOp, mlir::Value weights, mlir::Value bias, mlir::Value activation,
+                                   mlir::PatternRewriter& rewriter) {
+    const auto weightsShape = getShape(weights);
+    const auto outChannels = weightsShape[Dims4D::Filter::OC];
+    const Shape convInShape = getShape(activation).toValues();
+    const Shape convOutShape = {convInShape[Dims4D::Act::N], outChannels, convInShape[Dims4D::Act::H],
+                                convInShape[Dims4D::Act::W]};
+
+    auto newConcatLoc = appendLoc(origOp.getLoc(), "_new_merged_conv");
+    auto convLikeOp = origOp.getInputs()[0].getDefiningOp();
+    mlir::IRMapping mapper;
+    if (bias != nullptr) {
+        // if bias found, mapping conv with bias to new conv with composed bias
+        for (auto input : origOp.getInputs()) {
+            auto convOp = input.getDefiningOp();
+            if (convOp->getNumOperands() > 2) {
+                convLikeOp = convOp;
+                mapper.map(convLikeOp->getOperand(2), bias);
+                break;
+            }
+        }
+    }
+    mapper.map(convLikeOp->getOperand(0), activation);
+    mapper.map(convLikeOp->getOperand(1), weights);
+    auto newOp = rewriter.clone(*convLikeOp, mapper);
+    newOp->setLoc(newConcatLoc);
+    return newOp;
+}
+
+//
+// SplitAffineReshapeConvConcatRewriter
+//
+
+//                 |
+//              SplitOp                                    |
+//              /      \                               Transpose
+//  AffineReshape       AffineReshape       ->             |     cst_0  cst_1
+//     |     cst_0  cst_1    |                             |        \    /
+//      \     /       \     /                              |         cst
+//   Convolution     Convolution                            \        /
+//           \        /                                     Convolution
+//            ConcatOp                                           |
+//               |
+//
+//
+
+class SplitAffineReshapeConvConcatRewriter final : public mlir::OpRewritePattern<IE::SplitOp> {
+public:
+    SplitAffineReshapeConvConcatRewriter(mlir::MLIRContext* ctx, Logger log)
+            : mlir::OpRewritePattern<IE::SplitOp>(ctx), _log(log) {
+        setDebugName("SplitAffineReshapeConvConcatRewriter");
+    }
+
+    mlir::LogicalResult matchAndRewrite(IE::SplitOp origOp, mlir::PatternRewriter& rewriter) const final;
+
+private:
+    Logger _log;
+};
+
+mlir::LogicalResult SplitAffineReshapeConvConcatRewriter::matchAndRewrite(IE::SplitOp origOp,
+                                                                          mlir::PatternRewriter& rewriter) const {
+    _log.trace("Rewrite Split-AffineReshape-Conv-Concat operation '{0}' at '{1}'", origOp->getName(), origOp->getLoc());
+    auto getConsumerResult = getConcatOpConsumer<IE::ConvolutionOp>(origOp, true, true);
+    if (mlir::failed(getConsumerResult)) {
+        getConsumerResult = getConcatOpConsumer<IE::TransposedConvolutionOp>(origOp, true, true);
+        if (mlir::failed(getConsumerResult)) {
+            _log.nest().trace("Not Split-AffineReshape-Conv-Concat pattern");
+            return mlir::failure();
+        }
+    }
+
+    auto concatOp = mlir::dyn_cast_or_null<IE::ConcatOp>(getConsumerResult.value());
+    VPUX_THROW_WHEN(concatOp == nullptr, "Not a Concat operation");
+
+    if (origOp.getOutputs().size() != concatOp.getInputs().size()) {
+        return mlir::failure();
+    }
+
+    // Supported case for splitOp: split the dim to shape 1
+    auto getSplitDim = getSplitDimToShape1(origOp);
+    if (mlir::failed(getSplitDim)) {
+        return mlir::failure();
+    }
+
+    // Supported case for concatOp: concat the dim with shape 1
+    auto getconcatDims = getConcatDimWithShape1(concatOp, false);
+    if (mlir::failed(getconcatDims)) {
+        return mlir::failure();
+    }
+
+    // Supported case for affineReshape. Currently only support split on H&W and reshape C to H.
+    if (!isSupportedAffineReshape(origOp)) {
+        return mlir::failure();
+    }
+
+    // Create new transposeOp
+    SmallVector<unsigned> transPerm;
+    if (origOp.getAxisValue().value() == 3) {
+        transPerm = {0, 3, 1, 2};
+    } else if (origOp.getAxisValue().value() == 2) {
+        transPerm = {0, 2, 1, 3};
+    }
+
+    const auto orderAttr =
+            mlir::AffineMapAttr::get(mlir::AffineMap::getPermutationMap(transPerm, rewriter.getContext()));
+    auto newTransposeOp = rewriter.create<IE::TransposeOp>(takeOpLoc(concatOp, "transpose_in"), origOp.getInput(),
+                                                           nullptr, orderAttr);
+
+    // Create new ConvolutionOp / TransposedConvolutionOp
+    auto newFilter = composeNewFilter(concatOp, rewriter);
+    auto newBias = composeNewBias(concatOp, rewriter);
+    auto convLikeOp = createConvolution(concatOp, newFilter, newBias, newTransposeOp.getOutput(), rewriter);
+    vpux::inferReturnTypes(convLikeOp, vpux::InferShapedTypeMode::ALL);
+    concatOp.replaceAllUsesWith(convLikeOp->getResult(0));
+
+    return mlir::success();
+}
+
 //
 // SplitConcatRewriter
 //
@@ -277,7 +519,7 @@ mlir::LogicalResult SplitConcatRewriter::matchAndRewrite(IE::ConcatOp origOp, ml
         return mlir::failure();
     }
 
-    auto getConsumerResult = getConcatOpConsumer(splitOp, false);
+    auto getConsumerResult = getConcatOpConsumer(splitOp, false, false);
     if (mlir::failed(getConsumerResult)) {
         return mlir::failure();
     }
@@ -340,8 +582,9 @@ void ConvertSplitConcatToTransposePass::safeRunOnFunc() {
     auto& ctx = getContext();
 
     mlir::RewritePatternSet patterns(&ctx);
-    patterns.insert<SplitAffineReshapeConcatRewriter>(&ctx, _log);
     patterns.insert<SplitConcatRewriter>(&ctx, _log);
+    patterns.insert<SplitAffineReshapeConcatRewriter>(&ctx, _log);
+    patterns.insert<SplitAffineReshapeConvConcatRewriter>(&ctx, _log);
 
     if (mlir::failed(
                 mlir::applyPatternsAndFoldGreedily(func, std::move(patterns), vpux::getDefaultGreedyRewriteConfig()))) {

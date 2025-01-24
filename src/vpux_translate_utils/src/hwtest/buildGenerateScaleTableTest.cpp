@@ -327,9 +327,34 @@ void buildGenerateScaleTableTest(const nb::TestCaseJsonDescriptor& testDesc, mli
             functionBuilder, mlir::ValueRange(), mlir::ValueRange(inputCopyBarrier.getBarrier()), loc,
             weightsDDR.getOperation()->getResult(0), weightsCMX.getOperation()->getResult(0), 0);
 
+    const auto wtableCMXSize = vpux::hwtest::totalTensorSize(weightsTableShape, int32);
+    const auto SCALE_CMX_OFFSET = WEIGHTSTABLE_CMX_OFFSET + wtableCMXSize;
+    VPUX_THROW_UNLESS(SCALE_CMX_OFFSET % alignment == 0, "SCALE_CMX_OFFSET must be multiple of {0}, got {1}", alignment,
+                      SCALE_CMX_OFFSET);
+
     SmallVector<mlir::Type, 1> actShaveInputTypes;
     actShaveInputTypes.push_back(weightsTableCMX.getType());
-    SmallVector<vpux::VPURT::DeclareBufferOp> actShaveInputs = {};
+    SmallVector<int64_t> scaleShape = {1};
+    SmallVector<vpux::VPURT::DeclareBufferOp> actShaveInputs;
+
+    const auto f32 = builder.getF32Type();
+    auto scaleValueValues =
+            mlir::DenseElementsAttr::get(mlir::RankedTensorType::get(scaleShape, f32), llvm::ArrayRef<float>({1}));
+
+    auto scaleValueDDRType = getMemRefType(VPURT::BufferSection::Constant, scaleShape, f32, DimsOrder::C);
+    auto scaleValueTypeIf = scaleValueDDRType.cast<vpux::NDTypeInterface>();
+
+    auto scaleValueDDR = functionBuilder.create<vpux::Const::DeclareOp>(
+            loc, scaleValueDDRType, vpux::Const::ContentAttr::get(scaleValueValues));
+
+    auto scaleValueCMX =
+            createDeclareTensorOp(functionBuilder, VPURT::BufferSection::CMX_NN, scaleValueTypeIf.getShape().raw(),
+                                  scaleValueTypeIf.getElementType(), scaleValueTypeIf.getDimsOrder(),
+                                  scaleValueTypeIf.getStrides(), 0, SCALE_CMX_OFFSET);
+    actShaveInputs.push_back(scaleValueCMX);
+    VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(functionBuilder, mlir::ValueRange(),
+                                          mlir::ValueRange(inputCopyBarrier.getBarrier()), loc, scaleValueDDR,
+                                          scaleValueCMX, 0);
     buildActShaveTask(testDesc, module, functionBuilder, log, ArrayRef(actShaveInputTypes), actShaveInputs,
                       weightsTableCMX, nullptr, mlir::ValueRange(inputCopyBarrier.getBarrier()),
                       mlir::ValueRange(actShaveUpdateBarrier.getBarrier()), cluster);
@@ -346,10 +371,9 @@ void buildGenerateScaleTableTest(const nb::TestCaseJsonDescriptor& testDesc, mli
     auto nceTask = VPURT::wrapIntoTaskOp<VPUIP::NCEClusterTaskOp>(
             functionBuilder, actShaveUpdateBarrier.getBarrier(), dpuUpdateBarrier.getBarrier(), loc,
             paddedInputCMX.getBuffer(), paddedWeightsCMX.getBuffer(), weightsTableCMX.getBuffer(),
-            /*instruction_table_list*/ nullptr, /*spr_lookup_table*/ nullptr, paddedInputCMX.getBuffer(),
-            outputCMX.getBuffer(), outputCMX.getBuffer(), vpux::VPUIP::NCETaskType::CONV, kernelSize, strides,
-            kernelPaddings, nullptr, vpux::getIntAttr(builder.getContext(), sparsityPattern), nullptr, nullptr,
-            inputChannelsCompression);
+            /*spr_lookup_table*/ nullptr, paddedInputCMX.getBuffer(), outputCMX.getBuffer(), outputCMX.getBuffer(),
+            vpux::VPUIP::NCETaskType::CONV, kernelSize, strides, kernelPaddings, nullptr,
+            vpux::getIntAttr(builder.getContext(), sparsityPattern), nullptr, nullptr, inputChannelsCompression);
 
     const auto start = getIntArrayAttr(ctx, std::vector<int64_t>{0, 0, 0});
     const auto outEnd =
@@ -402,7 +426,7 @@ void buildGenerateScaleTableTest(const nb::TestCaseJsonDescriptor& testDesc, mli
         pmBuilderEnd.addPass(VPUIP::createCompressWeightsBTCPass(log));
     }
     if (isWeightsSwizzlingRequired) {
-        pmBuilderEnd.nest<mlir::func::FuncOp>().addNestedPass<Const::DeclareOp>(Const::createConstantFoldingPass());
+        pmBuilderEnd.addPass(Const::createConstantFoldingPass());
     }
 
     VPUX_THROW_UNLESS(mlir::succeeded(pmBuilderEnd.run(module)), "Compilation failed");

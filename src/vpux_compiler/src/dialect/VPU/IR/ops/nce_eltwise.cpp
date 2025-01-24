@@ -13,7 +13,6 @@
 #include "vpux/compiler/core/layers.hpp"
 #include "vpux/compiler/dialect/VPU/utils/eltwise_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_invariant.hpp"
-#include "vpux/compiler/utils/VPU/ppe_utils.hpp"
 #include "vpux/compiler/utils/VPU/tile_utils.hpp"
 #include "vpux/compiler/utils/error.hpp"
 
@@ -89,16 +88,21 @@ mlir::LogicalResult vpux::VPU::NCEEltwiseOp::inferReturnTypes(mlir::MLIRContext*
         return mlir::failure();
     }
 
-    const auto shape1 = getShape(op.getInput1());
+    auto shape1 = getShape(op.getInput1());
     const auto shape2 = getShape(op.getInput2());
 
     if (shape1 != shape2) {
         return errorAt(loc, "Broadcasting is not supported for {0} operation", NCEEltwiseOp::getOperationName());
     }
 
+    auto returnShape = shape1.raw().vec();
+    if (op.getOutputChannels().has_value()) {
+        returnShape[Dims4D::Act::C.ind()] = op.getOutputChannels().value();
+    }
+
     auto inputType = mlir::cast<vpux::NDTypeInterface>(op.getInput1().getType());
     auto outputType =
-            mlir::RankedTensorType::get(shape1, inputType.getElementType(), createTensorAttrFromType(inputType));
+            mlir::RankedTensorType::get(returnShape, inputType.getElementType(), createTensorAttrFromType(inputType));
 
     inferredReturnTypes.push_back(outputType);
     return mlir::success();
@@ -258,8 +262,8 @@ mlir::LogicalResult vpux::VPU::NCEEltwiseOp::verify() {
 //
 
 static mlir::LogicalResult verifyEltwiseKernel(vpux::NDTypeInterface input1, vpux::NDTypeInterface input2,
-                                               vpux::NDTypeInterface output, const bool allowDifferentScales = false,
-                                               const bool allowDifferentZp = true) {
+                                               vpux::NDTypeInterface output, const bool allowDifferentScales,
+                                               const bool allowDifferentZp, VPU::EltwiseType eltwiseType) {
     // Eltwise add is expected to have the same shapes for all operands
     if (input1.getRank() != 4 || input2.getRank() != 4 || output.getRank() != 4) {
         return mlir::failure();
@@ -280,20 +284,10 @@ static mlir::LogicalResult verifyEltwiseKernel(vpux::NDTypeInterface input1, vpu
         }
     } else if (input1ElemType.isa<mlir::quant::UniformQuantizedType>() &&
                input2ElemType.isa<mlir::quant::UniformQuantizedType>()) {
-        auto qInput1 = input1ElemType.cast<mlir::quant::UniformQuantizedType>();
-        auto qInput2 = input2ElemType.cast<mlir::quant::UniformQuantizedType>();
-
-        if (qInput1.getExpressedType() != qInput2.getExpressedType() ||
-            qInput1.getStorageType() != qInput2.getStorageType() || qInput1.isSigned() != qInput2.isSigned()) {
+        if (!isSupportedEltwiseQuantization(input1ElemType, input2ElemType, allowDifferentScales, allowDifferentZp,
+                                            eltwiseType)) {
             return mlir::failure();
         }
-
-        if (!allowDifferentZp && qInput1.getZeroPoint() != qInput2.getZeroPoint())
-            return mlir::failure();
-
-        if (!allowDifferentScales &&
-            !isFloatEqual(static_cast<float>(qInput1.getScale()), static_cast<float>(qInput2.getScale())))
-            return mlir::failure();
     } else {
         VPUX_THROW("Unsupported inputs type. in1='{0}', in2='{1}'", input1ElemType, input2ElemType);
     }
@@ -306,30 +300,28 @@ mlir::LogicalResult vpux::VPU::NCEEltwiseOp::verifyKernel(IE::AddOp origOp, Logg
     auto input2Type = origOp.getInput2().getType().cast<vpux::NDTypeInterface>();
     auto outputType = origOp.getOutput().getType().cast<vpux::NDTypeInterface>();
 
-    const auto arch = VPU::getArch(origOp->getParentOfType<mlir::ModuleOp>());
-
-    return verifyEltwiseKernel(input1Type, input2Type, outputType, supportsPerInputEltwiseScale(arch));
+    return verifyEltwiseKernel(input1Type, input2Type, outputType, true, true, VPU::EltwiseType::ADD);
 }
 
 mlir::LogicalResult vpux::VPU::NCEEltwiseOp::verifyKernel(IE::MultiplyOp origOp, Logger) {
     auto input1Type = origOp.getInput1().getType().cast<vpux::NDTypeInterface>();
     auto input2Type = origOp.getInput2().getType().cast<vpux::NDTypeInterface>();
     auto outputType = origOp.getOutput().getType().cast<vpux::NDTypeInterface>();
-    return verifyEltwiseKernel(input1Type, input2Type, outputType, true);
+    return verifyEltwiseKernel(input1Type, input2Type, outputType, true, true, VPU::EltwiseType::MULTIPLY);
 }
 
 mlir::LogicalResult vpux::VPU::NCEEltwiseOp::verifyKernel(IE::SubtractOp origOp, Logger) {
     auto input1Type = origOp.getInput1().getType().cast<vpux::NDTypeInterface>();
     auto input2Type = origOp.getInput2().getType().cast<vpux::NDTypeInterface>();
     auto outputType = origOp.getOutput().getType().cast<vpux::NDTypeInterface>();
-    return verifyEltwiseKernel(input1Type, input2Type, outputType);
+    return verifyEltwiseKernel(input1Type, input2Type, outputType, false, true, VPU::EltwiseType::SUBTRACT);
 }
 
 mlir::LogicalResult vpux::VPU::NCEEltwiseOp::verifyKernel(IE::AndOp origOp, Logger) {
     auto input1Type = origOp.getInput1().getType().cast<vpux::NDTypeInterface>();
     auto input2Type = origOp.getInput2().getType().cast<vpux::NDTypeInterface>();
     auto outputType = origOp.getOutput().getType().cast<vpux::NDTypeInterface>();
-    return verifyEltwiseKernel(input1Type, input2Type, outputType);
+    return verifyEltwiseKernel(input1Type, input2Type, outputType, false, true, VPU::EltwiseType::AND);
 }
 
 mlir::LogicalResult vpux::VPU::NCEEltwiseOp::verifyEltwiseCMX(mlir::Location loc, mlir::ModuleOp module, bool isInplace,

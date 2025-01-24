@@ -95,19 +95,27 @@ mlir::ValueRange getClosestProductionBarriers(VPURegMapped::TaskOpInterface task
     return mlir::ValueRange{};
 }
 
-void dfs(mlir::Value val, llvm::SetVector<mlir::Value>& visited) {
+void dfs(mlir::Value val, llvm::SetVector<mlir::Value>& visited, size_t indexMax) {
     visited.insert(val);
     for (auto user : val.getUsers()) {
-        auto barr = mlir::dyn_cast<VPUMI40XX::ConfigureBarrierOp>(user);
-        if (!barr)
+        auto barOp = mlir::dyn_cast<VPUMI40XX::ConfigureBarrierOp>(user);
+        if (!barOp)
             continue;
-        if (!visited.contains(barr.getResult())) {
-            dfs(barr.getResult(), visited);
+
+        auto bar = barOp.getResult();
+
+        auto barIndex = bar.getType().cast<VPURegMapped::IndexType>().getValue();
+        if (barIndex > indexMax) {
+            continue;
+        }
+
+        if (!visited.contains(bar)) {
+            dfs(bar, visited, indexMax);
         }
     }
 }
 
-llvm::SmallVector<mlir::Value> lca(mlir::Value lhs, mlir::Value rhs, lcaCache& cache) {
+llvm::SmallVector<mlir::Value> lca(mlir::Value lhs, mlir::Value rhs, lcaCache& cache, size_t indexMax) {
     if (lhs == rhs)
         return {lhs};
 
@@ -129,8 +137,8 @@ llvm::SmallVector<mlir::Value> lca(mlir::Value lhs, mlir::Value rhs, lcaCache& c
     llvm::SetVector<mlir::Value> visitedLhs, visitedRhs;
     llvm::SetVector<mlir::Value> intersection;
 
-    dfs(lhs, visitedLhs);
-    dfs(rhs, visitedRhs);
+    dfs(lhs, visitedLhs, indexMax);
+    dfs(rhs, visitedRhs, indexMax);
 
     // get the intersection of the 2
     for (auto lhsIt : visitedLhs) {
@@ -153,17 +161,63 @@ llvm::SmallVector<mlir::Value> lca(mlir::Value lhs, mlir::Value rhs, lcaCache& c
     return lcas;
 }
 
-llvm::SmallVector<mlir::Value> lca(llvm::SmallVector<mlir::Value>& lhs, mlir::Value rhs, lcaCache& cache) {
+llvm::SmallVector<mlir::Value> lca(llvm::SmallVector<mlir::Value>& lhs, mlir::Value rhs, lcaCache& cache,
+                                   size_t indexMax) {
     llvm::SmallVector<mlir::Value> lcas;
 
     for (auto val : lhs) {
-        lcas.append(lca(val, rhs, cache));
+        lcas.append(lca(val, rhs, cache, indexMax));
     }
 
     return lcas;
 }
 
-llvm::SmallVector<mlir::Value> lca(llvm::SmallVector<mlir::Value>& barrierVals, lcaCache& cache) {
+// For given barrier get other barrier that depend on it.
+// Example bar-to-bar dependencies graph:
+// bar0 --> bar1
+//    |---> bar2
+// Dependent barrier for bar0 are {bar1, bar2}
+llvm::SmallVector<mlir::Value> getDependentBarriers(mlir::Value bar) {
+    auto barOp = mlir::cast<VPUMI40XX::ConfigureBarrierOp>(bar.getDefiningOp());
+
+    SmallVector<mlir::Value> dependentBarriers;
+
+    for (auto user : barOp.getBarrier().getUsers()) {
+        if (auto userBarOp = mlir::dyn_cast<VPUMI40XX::ConfigureBarrierOp>(user)) {
+            auto depBarIt = llvm::find_if(userBarOp.getDependencies(), [bar](mlir::Value userBarOpDep) {
+                return userBarOpDep == bar;
+            });
+            if (depBarIt != userBarOp.getDependencies().end()) {
+                dependentBarriers.push_back(userBarOp.getBarrier());
+            }
+        }
+    }
+
+    return dependentBarriers;
+}
+
+// Find enqueue barrier using LCA for given set of barrier
+// For those barrier LCA will be run on dependent barriers as enqueue target
+// requires barriers consumption guarantee
+// Example graph:
+//   V0 -> V1 -> V2
+//    |-------- >|
+// Barriers provided as argument:
+//   {V0, V1}
+// Dependent barriers:
+//   V0: {V1, V2}
+//   V1: {V2}
+// LCA arguments:
+//   LCA({V1, V2})
+// Result:
+//   V2
+// So at V2 consumption is is guaranted that V0 and V1 have been also
+// already consumed.
+//
+// IndexMax is barrier index beyond which traversal of barriers is not done
+// to reduce compile time
+mlir::Value findEnqTargetUsingLcaForBars(llvm::SmallVector<mlir::Value>& barrierVals, lcaCache& cache,
+                                         size_t indexMax) {
     // sanity... only makes sense in debug modes
     assert(std::all_of(barrierVals.begin(), barrierVals.end(),
                        [](mlir::Value val) {
@@ -171,20 +225,122 @@ llvm::SmallVector<mlir::Value> lca(llvm::SmallVector<mlir::Value>& barrierVals, 
                        }) &&
            "LCA requires all of the values to be defined by configureBarrierOps {0}");
 
-    if (barrierVals.size() <= 1) {
-        return barrierVals;
+    if (barrierVals.empty()) {
+        return nullptr;
     }
 
-    if (barrierVals.size() == 2) {
-        return lca(barrierVals[0], barrierVals[1], cache);
+    if (barrierVals.size() == 1) {
+        return barrierVals[0];
     }
 
-    llvm::SmallVector<mlir::Value> lcas = lca(barrierVals[0], barrierVals[1], cache);
-    for (size_t i = 2; i < barrierVals.size(); ++i) {
-        lcas = lca(lcas, barrierVals[i], cache);
+    // Stage 1:
+    // At first check if latest barrier (largest index) from provided barriers is a good LCA candidate
+    // This is to cover case where for the given set of barriers, latest barrier is already an LCA
+    // barrier for all other barriers. We can check only max index barrier because barriers with smaller
+    // index cannot be dependent barrier of barrier with larger index by definition
+    //
+    // Find barrier with largest index:
+    auto maxBar = *getMaxBarrier(barrierVals);
+
+    mlir::DenseSet<mlir::Value> barriersForLcaSet = {maxBar};
+
+    // Prepare a set with users of other barriers
+    for (auto& bar : barrierVals) {
+        // Skip maxBar as at first check to not delay enqueue of task
+        // we want to find out if the latest barrier is a good candidate for LCA
+        if (bar == maxBar) {
+            continue;
+        }
+        // Check barriers which depend on provided barrier to identify barriers
+        // whose production (all of them), indicate consumption of given barrier
+        auto depBars = getDependentBarriers(bar);
+        if (!depBars.empty()) {
+            barriersForLcaSet.insert(depBars.begin(), depBars.end());
+        } else {
+            // if barrier has no dependent barriers use given barrier
+            barriersForLcaSet.insert(bar);
+        }
     }
 
-    return lcas;
+    // Perform LCA on given set of barriers
+    auto getLcaOnSetOfBarriers = [&](mlir::DenseSet<mlir::Value>& barriersSet) {
+        auto barrierIt = barriersSet.begin();
+        SmallVector<mlir::Value> lcaResults = {*barrierIt};
+        while (++barrierIt != barriersSet.end()) {
+            lcaResults = lca(lcaResults, *barrierIt, cache, indexMax);
+        }
+        return lcaResults;
+    };
+
+    // Get LCA result for barriers
+    auto lcaResVec = getLcaOnSetOfBarriers(barriersForLcaSet);
+
+    // If result vector is empty then return nullptr
+    // as enqueue target barrier cannot be found using LCA
+    if (lcaResVec.empty()) {
+        return nullptr;
+    }
+
+    // Check if maxBar is good LCA candidate by comparing it
+    // with the earliest barrier (min index) from LCA results
+    auto lcaCandid = *getMinBarrier(lcaResVec);
+    if (lcaCandid == maxBar) {
+        return lcaCandid;
+    }
+
+    // If not the proceed to stage 2 search approach
+
+    // Stage 2:
+    // Take into account also maxBar users so that LCA can be done over
+    // all dependent barriers and identified LCA candidate guarantees
+    // all provided barriers consumption event happened
+
+    // Add users of maxBar to set of barriers for LCA
+    auto depBars = getDependentBarriers(maxBar);
+    if (!depBars.empty()) {
+        // Remove maxBar from barriersForLca
+        barriersForLcaSet.erase(maxBar);
+        // Add its users to set for LCA search
+        barriersForLcaSet.insert(depBars.begin(), depBars.end());
+    }
+
+    // Get LCA result for barriers
+    lcaResVec = getLcaOnSetOfBarriers(barriersForLcaSet);
+
+    // If result vector is empty then return nullptr
+    // to indicate no enqueue target barrier was found using LCA
+    if (lcaResVec.empty()) {
+        return nullptr;
+    }
+
+    // Return earliest barrier (min index) from LCA results as
+    // enqueue should be done as early as possible
+    return *getMinBarrier(lcaResVec);
+}
+
+// Get index of barrier which will be a limit for LCA search.
+size_t getLcaSearchLimit(SmallVector<mlir::Value>& barriers) {
+    // Get a limit of LCA search to largest barrier index of next barriers
+    // using same PID as barriers used by task itself. This is compile time
+    // optimization step to not do DFS (within LCA) beyond barriers which
+    // most likely cannot be used as enqueue targets as they are much further in schedule
+    // than task to be enqueued. This limit reduce compile time, but at the same
+    // does not guarantee LCA will find any ancestor
+    size_t indexMax = 0;
+    for (auto& bar : barriers) {
+        auto barOp = bar.getDefiningOp<VPUMI40XX::ConfigureBarrierOp>();
+        auto nextSameId = barOp.getNextSameId();
+        if (nextSameId < 0) {
+            // If next barrier with same PID is -1 this means that given barrier
+            // is the last instance with this PID. In that case do not limit
+            // LCA search as used barriers are close to the end of schedule
+            indexMax = std::numeric_limits<size_t>::max();
+            break;
+        }
+        indexMax = std::max(indexMax, static_cast<size_t>(nextSameId));
+    }
+
+    return indexMax;
 }
 
 VPURegMapped::TaskOpInterface getNextOp(VPURegMapped::TaskOpInterface op) {
@@ -198,31 +354,21 @@ VPURegMapped::TaskOpInterface getNextOp(VPURegMapped::TaskOpInterface op) {
     return op;
 }
 
-// TODO: (E#115494) consider explicitly materializing the "previous ID" inside the IR
-llvm::SmallVector<mlir::Value> getPreviousUsages(mlir::ValueRange barrs,
-                                                 llvm::SmallVector<VPUMI40XX::ConfigureBarrierOp> allBarrs) {
+llvm::SmallVector<mlir::Value> getPreviousUsages(mlir::ValueRange barrs) {
+    llvm::SmallDenseSet<mlir::Value> seenBarriers;
     llvm::SmallVector<mlir::Value> previousUsages;
 
-    // assuming taskIdx of barrier is the same as it's listIdx
-    auto getPreviousUsage = [&allBarrs](int64_t startIdx, uint8_t pid) -> mlir::Value {
-        if (startIdx == 0) {
-            return nullptr;
-        }
-        for (auto idx = startIdx - 1; idx >= 0; idx--) {
-            if (allBarrs[idx].getId() == pid) {
-                return allBarrs[idx].getResult();
-            }
-        }
-        return nullptr;
-    };
-
     for (auto barr : barrs) {
-        auto barrOp = mlir::cast<VPUMI40XX::ConfigureBarrierOp>(barr.getDefiningOp());
-        auto idx = barrOp.getType().getValue();
-        auto pid = barrOp.getId();
-        auto previousUsage = getPreviousUsage(idx, pid);
-        if (previousUsage)
-            previousUsages.push_back(previousUsage);
+        auto barrOp = mlir::dyn_cast<VPUMI40XX::ConfigureBarrierOp>(barr.getDefiningOp());
+        if (barrOp == nullptr) {
+            continue;
+        }
+
+        const auto previousSameId = barrOp.getPreviousSameId();
+        if (previousSameId != nullptr && !seenBarriers.contains(previousSameId)) {
+            seenBarriers.insert(previousSameId);
+            previousUsages.push_back(previousSameId);
+        }
     }
 
     return previousUsages;
@@ -241,6 +387,32 @@ VPUMI40XX::ExecutableTaskOpInterface getBarrieredOp(VPURegMapped::TaskOpInterfac
     }
 
     return nullptr;
+}
+
+//
+// ConfigureBarrier Utils
+//
+
+// Set next_same_id attribute and previousSameId operand for each ConfigureBarrier operation,
+// and here we don't need to verify barrier if it has same previousSameId with other same physical id barrier,
+// because the previousSameId operand is continuously increasing
+void setBarrierIDs(mlir::MLIRContext* ctx, mlir::func::FuncOp funcOp) {
+    auto MAX_PID = VPUIP::getNumAvailableBarriers(funcOp);
+    std::vector<VPUMI40XX::ConfigureBarrierOp> lastAssignedBarrier(MAX_PID);
+
+    for (auto op : funcOp.getOps<VPUMI40XX::ConfigureBarrierOp>()) {
+        auto vid = op.getOperation()->getResult(0).getType().cast<VPURegMapped::IndexType>().getValue();
+        auto pid = op.getId();
+
+        auto& lastBarrier = lastAssignedBarrier[pid];
+        if (lastBarrier != nullptr) {
+            op.getPreviousSameIdMutable().assign(lastBarrier.getOperation()->getResult(0));
+            lastBarrier.setNextSameIdAttr(
+                    mlir::IntegerAttr::get(mlir::IntegerType::get(ctx, 64, mlir::IntegerType::Signed), vid));
+        }
+
+        lastBarrier = op;
+    }
 }
 
 }  // namespace VPUMI40XX

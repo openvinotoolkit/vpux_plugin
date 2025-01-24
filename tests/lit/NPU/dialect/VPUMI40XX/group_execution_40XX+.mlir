@@ -11,9 +11,6 @@
 
 module @TestConvolution {
   IE.TileResource 1 of @NCE at 1.700000e+03 MHz {
-    builtin.module @UsedMemory {
-      IE.MemoryResource 21760 bytes of @CMX_NN
-    }
     builtin.module @ReservedMemory {
       module @DmaProfilingReservedMemory {
         IE.MemoryResource 512 bytes of @CMX_NN offset 0
@@ -83,9 +80,6 @@ module @TestConvolution {
 #NWCH = affine_map<(d0, d1, d2, d3) -> (d0, d3, d1, d2)>
 module @Convolution attributes {VPU.compilationMode = #VPU.compilation_mode<DefaultHW>} {
   IE.TileResource 6 of @NCE at 1.700000e+03 MHz {
-    builtin.module @UsedMemory {
-      IE.MemoryResource 27648 bytes of @CMX_NN
-    }
     builtin.module @ReservedMemory {
       module @DmaProfilingReservedMemory {
         IE.MemoryResource 512 bytes of @CMX_NN offset 0

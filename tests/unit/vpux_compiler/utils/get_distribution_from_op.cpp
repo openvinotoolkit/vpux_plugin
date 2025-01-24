@@ -62,7 +62,7 @@ TEST_F(MLIR_GetDistributedTypeFromOpSOKAlignmentTest, SWOpSOKAlignmentDuringTili
                    = dense<1.0> : tensor<144x16x1x1xf16, {order = #NHWC}>
                 %0 = VPU.NCE.Convolution(%arg0, %cst0, %cst1) {
                     multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverKernel>,
-                    opaque_ppe = #VPU.PPEStub<>,
+                    ppe = #VPU.PPEStub<>,
                     pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
                     rawFilterShape = [144, 144, 1, 1],
                     strides = [1, 1]}
@@ -75,7 +75,7 @@ TEST_F(MLIR_GetDistributedTypeFromOpSOKAlignmentTest, SWOpSOKAlignmentDuringTili
                         -> tensor<1x144x16x16xf16, {order = #NHWC}>
                 %2 = VPU.NCE.DepthConvolution(%1, %cst2, %cst1) {
                     multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverKernel>,
-                    opaque_ppe = #VPU.PPEStub<>,
+                    ppe = #VPU.PPEStub<>,
                     pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
                     rawFilterShape = [144, 1, 1, 1],
                     strides = [1, 1]}
@@ -183,7 +183,7 @@ TEST_F(MLIR_GetDistributedTypeFromOpSOKAlignmentTest, SWOpSOKAlignmentAfterSlice
                 %cst1 = const.Declare tensor<128x1x1x4xsi32> = dense<1> : tensor<128x1x1x4xsi32>
                 %0 = VPU.NCE.Convolution(%arg0, %cst0, %cst1) {
                     multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverKernel>,
-                    opaque_ppe = #VPU.PPEStub<>,
+                    ppe = #VPU.PPEStub<>,
                     pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
                     rawFilterShape = [128, 128, 1, 1],
                     strides = [1, 1]}
@@ -254,7 +254,7 @@ TEST_F(MLIR_GetDistributedTypeFromOpSOKAlignmentTest, SWOpSOKAlignmentAfterSlice
                 %cst1 = const.Declare tensor<160x1x1x4xsi32> = dense<1> : tensor<160x1x1x4xsi32>
                 %0 = VPU.NCE.Convolution(%arg0, %cst0, %cst1) {
                     multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverKernel>,
-                    opaque_ppe = #VPU.PPEStub<>,
+                    ppe = #VPU.PPEStub<>,
                     pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
                     rawFilterShape = [160, 160, 1, 1],
                     strides = [1, 1]}
@@ -399,7 +399,7 @@ std::vector<DistributedTypeFromSOKOpParams> verticalFusionWrappingParams = {
                 -> tensor<1x144x16x16xf16, {order = #NHWC}> {
                 %0 = VPU.NCE.Convolution(%arg1, %arg2, %arg3) {
                     multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverKernel>,
-                    opaque_ppe = #VPU.PPEStub<>,
+                    ppe = #VPU.PPEStub<>,
                     pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
                     rawFilterShape = [144, 144, 1, 1],
                     strides = [1, 1]}
@@ -434,7 +434,7 @@ std::vector<DistributedTypeFromSOKOpParams> verticalFusionWrappingParams = {
                 -> tensor<1x144x16x16xf16, {order = #NHWC}> {
                 %0 = VPU.NCE.Convolution(%arg1, %arg2, %arg3) {
                     multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverKernel>,
-                    opaque_ppe = #VPU.PPEStub<>,
+                    ppe = #VPU.PPEStub<>,
                     pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
                     rawFilterShape = [144, 144, 1, 1],
                     strides = [1, 1]}
@@ -469,7 +469,7 @@ std::vector<DistributedTypeFromSOKOpParams> segmentedAvgPoolParams = {
             %2 = VPU.NCE.AveragePool(%1) {
                 kernel_size = [1, 1],
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverKernel>,
-                opaque_ppe = #VPU.PPEStub<>,
+                ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
                 strides = [1, 1]}
                     -> tensor<1x144x8x16xf16, {order = #NHWC}>
@@ -503,7 +503,7 @@ std::vector<DistributedTypeFromSOKOpParams> segmentedAvgPoolParams = {
             %4 = VPU.NCE.AveragePool(%3) {
                 kernel_size = [1, 1],
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverKernel>,
-                opaque_ppe = #VPU.PPEStub<>,
+                ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
                 strides = [1, 1]}
                     -> tensor<1x96x8x16xf16, {order = #NHWC}>
@@ -512,7 +512,7 @@ std::vector<DistributedTypeFromSOKOpParams> segmentedAvgPoolParams = {
             %6 = VPU.NCE.AveragePool(%5) {
                 kernel_size = [1, 1],
                 multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverKernel>,
-                opaque_ppe = #VPU.PPEStub<>,
+                ppe = #VPU.PPEStub<>,
                 pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
                 strides = [1, 1]}
                     -> tensor<1x96x8x16xf16, {order = #NHWC}>
@@ -718,14 +718,14 @@ TEST_F(MLIR_GetDistributedTypeFromDepthwiseOpTest, MaxPoolOpWithODUPermuteToNCXX
                 %0 = VPU.NCE.MaxPool(%arg0) {
                     kernel_size = [1, 1],
                     multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverKernel>,
-                    opaque_ppe = #VPU.PPEStub<>,
+                    ppe = #VPU.PPEStub<>,
                     pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, strides = [1, 1]
                 } -> tensor<1x3136x4x32xf16>
                 %1 = VPU.AffineReshape(%0) {dim_mapping = [[0], [1], [1], [2, 3]], shape_value = [1, 784, 4, 128]} : tensor<1x3136x4x32xf16> -> tensor<1x784x4x128xf16>
                 %2 = VPU.PermuteCast(%1) {dst_order = #NHWC, mem_perm = #NCHW} : tensor<1x784x4x128xf16> -> tensor<1x128x784x4xf16, {order = #NHWC}>
                 %3 = VPU.NCE.Convolution(%2, %cst_0, %cst) {
                     multiClusterStrategy = #VPU.multi_cluster_strategy<SplitOverHeight>,
-                    opaque_ppe = #VPU.PPEStub<>,
+                    ppe = #VPU.PPEStub<>,
                     pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
                     rawFilterShape = [128, 128, 1, 1],
                     strides = [1, 1]

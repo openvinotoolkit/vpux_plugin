@@ -4,6 +4,7 @@
 //
 
 #include "vpux/compiler/NPU40XX/passes_register.hpp"
+#include "vpux/compiler/NPU37XX/dialect/IE/transforms/passes.hpp"
 #include "vpux/compiler/NPU37XX/dialect/VPU/transforms/passes.hpp"
 #include "vpux/compiler/NPU37XX/dialect/VPURT/transforms/passes.hpp"
 #include "vpux/compiler/NPU40XX/conversion.hpp"

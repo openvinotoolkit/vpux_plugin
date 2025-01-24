@@ -5,27 +5,75 @@
 
 #include "vpux/compiler/utils/infer_output_shape.hpp"
 
-#include "vpux/compiler/utils/attributes.hpp"
-#include "vpux/compiler/utils/empty_node.hpp"
-
 #include "vpux/compiler/utils/IE/transposed_convolution_utils.hpp"
 #include "vpux/utils/core/checked_cast.hpp"
-#include "vpux/utils/core/logger.hpp"
 #include "vpux/utils/core/range.hpp"
 
 #include <openvino/op/avg_pool.hpp>
+#include <openvino/op/constant.hpp>
 #include <openvino/op/convolution.hpp>
+#include <openvino/op/group_conv.hpp>
+#include <openvino/op/matmul.hpp>
 #include <openvino/op/max_pool.hpp>
 #include <openvino/op/strided_slice.hpp>
 
 #include <mlir/IR/BuiltinTypes.h>
 
 #include <cstddef>
-#include <optional>
 
 using namespace vpux;
 
-ShapeInfo vpux::inferStridedSliceOutputShape(ArrayRef<int64_t> inDataShape, ArrayRef<int64_t> begins,
+namespace {
+
+ShapeInfo createShapeInfoFromPartialShape(const ov::PartialShape& partialShape) {
+    auto resultShape = to_small_vector(partialShape | transformed([](const ov::Dimension& val) {
+                                           if (val.is_static()) {
+                                               return checked_cast<int64_t>(val.get_length());
+                                           }
+                                           return checked_cast<int64_t>(mlir::ShapedType::kDynamic);
+                                       }));
+
+    if (partialShape.is_dynamic()) {
+        const auto getUpperBound = [](const ov::Dimension& val) -> int64_t {
+            if (val.is_static()) {
+                return checked_cast<int64_t>(val.get_length());
+            }
+            return checked_cast<int64_t>(val.get_max_length());
+        };
+        auto resultBounds = to_small_vector(partialShape | transformed(getUpperBound));
+        return {std::move(resultShape), std::move(resultBounds)};
+    }
+
+    return {std::move(resultShape), {}};
+}
+
+ov::PartialShape createPartialShapeFromShapeInfo(const ShapeInfo& shapeInfo) {
+    ov::PartialShape partialShape = {};
+    const auto toDimension = [](const int64_t val) -> ov::Dimension {
+        if (val != mlir::ShapedType::kDynamic) {
+            return ov::Dimension(val);
+        }
+        return ov::Dimension::dynamic();
+    };
+    const auto shape = shapeInfo.shape;
+    std::transform(shape.begin(), shape.end(), std::back_inserter(partialShape), toDimension);
+    if (partialShape.is_static()) {
+        return partialShape;
+    }
+    const auto bounds = shapeInfo.bounds;
+    VPUX_THROW_WHEN(bounds.empty(), "Bounds are not provided for shape {0} that has dynamic dimensions", shape);
+    VPUX_THROW_UNLESS(partialShape.size() == bounds.size(), "Bounds have only {0} values while the shape has rank {1}",
+                      bounds.size(), partialShape.size());
+    for (const auto& idx : irange(partialShape.size())) {
+        if (partialShape[idx].is_dynamic()) {
+            partialShape[idx] = ov::Dimension(1, bounds[idx]);
+        }
+    }
+    return partialShape;
+}
+}  // namespace
+
+ShapeInfo vpux::inferStridedSliceOutputShape(const ShapeInfo& inDataShapeInfo, ArrayRef<int64_t> begins,
                                              ArrayRef<int64_t> ends, ArrayRef<int64_t> strides,
                                              ArrayRef<int64_t> beginsShape, ArrayRef<int64_t> endsShape,
                                              ArrayRef<int64_t> stridesShape, ArrayRef<int64_t> beginMask,
@@ -78,33 +126,12 @@ ShapeInfo vpux::inferStridedSliceOutputShape(ArrayRef<int64_t> inDataShape, Arra
                                                             ov::Shape(stridesShape.begin(), stridesShape.end()));
     }
 
-    const auto ovOp =
-            ov::op::v1::StridedSlice(std::make_shared<ov::op::v0::Parameter>(
-                                             ov::element::f16, ov::Shape(inDataShape.begin(), inDataShape.end())),
-                                     ovBegins, ovEnds, ovStrides, paddedBeginMask, paddedEndMask, paddedNewAxisMask,
-                                     paddedShrinkAxisMask, paddedEllipsisMask);
+    const auto inDataShape = createPartialShapeFromShapeInfo(inDataShapeInfo);
+    const auto ovOp = ov::op::v1::StridedSlice(std::make_shared<ov::op::v0::Parameter>(ov::element::f16, inDataShape),
+                                               ovBegins, ovEnds, ovStrides, paddedBeginMask, paddedEndMask,
+                                               paddedNewAxisMask, paddedShrinkAxisMask, paddedEllipsisMask);
 
-    const auto& outputShape = ovOp.get_output_partial_shape(0);
-
-    auto resultShape = to_small_vector(outputShape | transformed([](const ov::Dimension& val) {
-                                           if (val.is_static()) {
-                                               return checked_cast<int64_t>(val.get_length());
-                                           }
-                                           return checked_cast<int64_t>(mlir::ShapedType::kDynamic);
-                                       }));
-
-    if (outputShape.is_dynamic()) {
-        const auto getUpperBound = [](const ov::Dimension& val) -> int64_t {
-            if (val.is_static()) {
-                return checked_cast<int64_t>(val.get_length());
-            }
-            return checked_cast<int64_t>(val.get_max_length());
-        };
-        auto resultBounds = to_small_vector(outputShape | transformed(getUpperBound));
-        return {std::move(resultShape), std::move(resultBounds)};
-    }
-
-    return {std::move(resultShape), {}};
+    return createShapeInfoFromPartialShape(ovOp.get_output_partial_shape(0));
 }
 
 SmallVector<int64_t> vpux::inferAvgPoolOutputShape(ArrayRef<int64_t> inDataShape, ArrayRef<int64_t> windowStrides,
@@ -123,20 +150,18 @@ SmallVector<int64_t> vpux::inferAvgPoolOutputShape(ArrayRef<int64_t> inDataShape
                            }));
 }
 
-SmallVector<int64_t> vpux::inferMaxPoolOutputShape(ArrayRef<int64_t> inDataShape, ArrayRef<int64_t> windowStrides,
-                                                   ArrayRef<int64_t> dataPaddingBelow,
-                                                   ArrayRef<int64_t> dataPaddingAbove, ArrayRef<int64_t> windowShape,
-                                                   IE::RoundingType roundingType) {
+ShapeInfo vpux::inferMaxPoolOutputShape(const ShapeInfo& inDataShapeInfo, ArrayRef<int64_t> windowStrides,
+                                        ArrayRef<int64_t> dataPaddingBelow, ArrayRef<int64_t> dataPaddingAbove,
+                                        ArrayRef<int64_t> windowShape, IE::RoundingType roundingType) {
     const auto padsBegin = ov::Shape(dataPaddingBelow.begin(), dataPaddingBelow.end());
     const auto padsEnd = ov::Shape(dataPaddingAbove.begin(), dataPaddingAbove.end());
-    const auto ovOp = ov::op::v1::MaxPool(std::make_shared<ov::op::v0::Parameter>(
-                                                  ov::element::i32, ov::Shape(inDataShape.begin(), inDataShape.end())),
+    const auto inDataShape = createPartialShapeFromShapeInfo(inDataShapeInfo);
+    const auto ovOp = ov::op::v1::MaxPool(std::make_shared<ov::op::v0::Parameter>(ov::element::i32, inDataShape),
                                           ov::Strides(windowStrides.begin(), windowStrides.end()), padsBegin, padsEnd,
                                           ov::Shape(windowShape.begin(), windowShape.end()),
                                           static_cast<ov::op::RoundingType>(roundingType), ov::op::PadType::EXPLICIT);
-    return to_small_vector(ovOp.get_output_shape(0) | transformed([](size_t val) {
-                               return checked_cast<int64_t>(val);
-                           }));
+
+    return createShapeInfoFromPartialShape(ovOp.get_output_partial_shape(0));
 }
 
 SmallVector<int64_t> vpux::inferMaxPool8OutputShape(ArrayRef<int64_t> inDataShape, ArrayRef<int64_t> windowStrides,
@@ -275,4 +300,31 @@ SmallVector<int64_t> vpux::inferTransposedGroupConvBackpropOutputShape(
     return to_small_vector(ovOpShape | transformed([](size_t val) {
                                return checked_cast<int64_t>(val);
                            }));
+}
+
+ShapeInfo vpux::inferMatMulOutputShapeInfo(const ShapeInfo& in1ShapeInfo, const ShapeInfo& in2ShapeInfo,
+                                           bool transposeA, bool transposeB) {
+    const auto inPartialShape1 = createPartialShapeFromShapeInfo(in1ShapeInfo);
+    const auto inPartialShape2 = createPartialShapeFromShapeInfo(in2ShapeInfo);
+
+    auto op = ov::op::v0::MatMul(std::make_shared<ov::op::v0::Parameter>(ov::element::i32, inPartialShape1),
+                                 std::make_shared<ov::op::v0::Parameter>(ov::element::i32, inPartialShape2), transposeA,
+                                 transposeB);
+    return createShapeInfoFromPartialShape(op.get_output_partial_shape(0));
+}
+
+ShapeInfo vpux::inferConvoutionOutputShapeInfo(const ShapeInfo& inShapeInfo, const ShapeInfo& filterShapeInfo,
+                                               ArrayRef<int64_t> windowStrides, ArrayRef<int64_t> dataPaddingBelow,
+                                               ArrayRef<int64_t> dataPaddingAbove, ArrayRef<int64_t> windowDilations) {
+    const auto inPartialShape = createPartialShapeFromShapeInfo(inShapeInfo);
+    const auto filterPartialShape = createPartialShapeFromShapeInfo(filterShapeInfo);
+
+    const auto op =
+            ov::op::v1::Convolution(std::make_shared<ov::op::v0::Parameter>(ov::element::i32, inPartialShape),
+                                    std::make_shared<ov::op::v0::Parameter>(ov::element::i32, filterPartialShape),
+                                    ov::Strides(windowStrides.begin(), windowStrides.end()),
+                                    ov::CoordinateDiff(dataPaddingBelow.begin(), dataPaddingBelow.end()),
+                                    ov::CoordinateDiff(dataPaddingAbove.begin(), dataPaddingAbove.end()),
+                                    ov::Strides(windowDilations.begin(), windowDilations.end()));
+    return createShapeInfoFromPartialShape(op.get_output_partial_shape(0));
 }

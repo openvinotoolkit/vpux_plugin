@@ -9,6 +9,7 @@
 include "vpux/compiler/dialect/VPU/ops_interfaces.td"
 include "vpux/compiler/dialect/VPUIPDPU/attributes.td"
 include "vpux/compiler/dialect/VPUIPDPU/dialect.td"
+include "vpux/compiler/dialect/VPUIPDPU/ops_interfaces.td"
 
 //
 // Base classes
@@ -25,6 +26,49 @@ class VPUIPDPU_Op<string mnemonic, list<Trait> traits = []> :
                 ]
             )
         >;
+
+//
+// IDUWeights
+//
+
+def VPUIPDPU_IDUWeightsOp :
+        VPUIPDPU_Op<"IDUWeights",
+            [
+                HasParent<"vpux::VPUIPDPU::IDUCfgOp">
+            ]
+        > {
+    let summary = "IDU Weight offset";
+
+    let description = [{
+wt_offset - This is added to the weight sparsity and weight data address
+ read by the IDU and allows an offest to be specified from the addresses
+ in the weight control pointer.
+
+pool_wt_data - A custom constant weight that is not read from CMX.
+This is required when doing Average pool, where the data is expected to be set to 1.
+Setting this value will trigger pool_wt_rd_dis and disable reading of weights from CMX.
+
+wt_plt_cfg - This config allows to specify the weight palletization in the IDU.
+
+quantiles_lut - Optiona attribute that stores the weight palletization table values, when palletization is enabled.
+         }];
+
+    let arguments =(ins
+        TypeAttr:$wmode,
+        OptionalAttr<IntAttr>:$pool_wt_data,
+        UnitAttr:$wt_sparse,
+        VPUIPDPU_IDUWeightPalletMode:$wt_plt_cfg,
+        OptionalAttr<F64ArrayAttr>:$quantiles_lut
+        );
+
+    let assemblyFormat = [{
+        `wmode`         `(` $wmode `)`
+        `wt_plt_cfg`    `(` $wt_plt_cfg `)`
+        (`pool_wt_data` `(` $pool_wt_data^ `)`)?
+        (`quantiles_lut` `(` $quantiles_lut^ `)`)?
+        attr-dict
+    }];
+}
 
 //
 // ODUCmxPortsOp
@@ -131,6 +175,24 @@ def VPUIPDPU_ODUHaloRegionOp :
         (`sparsity_offset` `(` $sparsity_offset^ `)`)?
         `target_width` `(` $target_width `)`
         `cast_to_tile` `(` $cast_to_tile `)`
+        attr-dict
+    }];
+}
+
+//
+// ForceInvReadOp
+//
+
+def VPUIPDPU_ForceInvReadOp :
+        VPUIPDPU_Op<"ForceInvRead",
+            [
+                HasParent<"vpux::VPUIPDPU::DPUVariantOp">,
+                DeclareOpInterfaceMethods<VPUIPDPU_LowerToNPURegInterface>
+            ]
+        > {
+    let summary = "Force read of the Invariant descriptor";
+
+    let assemblyFormat = [{
         attr-dict
     }];
 }

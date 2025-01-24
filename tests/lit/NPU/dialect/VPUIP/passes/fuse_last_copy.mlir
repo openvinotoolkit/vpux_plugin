@@ -328,14 +328,82 @@ func.func @FuseLastCopyWithMultipleCastOps(%arg0 : !InputDistributedType, %arg1:
     // CHECK:   [[SUBVIEW:%.+]] = VPUIP.SubView [[INPUT]] [0, 0, 0, 0] [1, 63, 1, 1] :
     // CHECK-SAME:  !VPUIP.DistributedBuffer<1x64x1x1xf16, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 2, 1, 1], num_clusters = 2 : i64}> to
     // CHECK-SAME:  !VPUIP.DistributedBuffer<1x63x1x1xf16, {order = #NHWC, strides = [64, 1, 64, 64]}, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 2, 1, 1], num_clusters = 2 : i64}>
-    // CHECK:   [[PERMUTE_CAST:%.+]] = VPUIP.PermuteCast {dst_order = #NHWC, mem_perm = #NHWC} inputs(%arg1 : memref<1x63xf16, @DDR>) -> memref<1x63x1x1xf16, #NHWC, @DDR>
+    // CHECK:   [[RESHAPE:%.+]] = VPUIP.GenericReshape inputs([[OUTPUT]] : memref<1x63xf16, @DDR>) -> memref<1x63x1x1xf16, @DDR>
+    // CHECK:   [[PERMUTE_CAST:%.+]] = VPUIP.PermuteCast {dst_order = #NHWC, mem_perm = #NHWC} inputs([[RESHAPE]] : memref<1x63x1x1xf16, @DDR>) -> memref<1x63x1x1xf16, #NHWC, @DDR>
     // CHECK:   [[COPY_OP:%.+]] = VPUIP.Copy
     // CHECK-SAME:      inputs([[SUBVIEW]] : !VPUIP.DistributedBuffer<1x63x1x1xf16, {order = #NHWC, strides = [64, 1, 64, 64]}, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 2, 1, 1], num_clusters = 2 : i64}>)
     // CHECK-SAME:      outputs([[PERMUTE_CAST]] : memref<1x63x1x1xf16, #NHWC, @DDR>)
     // CHECK-SAME:      -> memref<1x63x1x1xf16, #NHWC, @DDR>
 
-    // CHECK:   [[RESHAPE:%.+]] = VPUIP.GenericReshape inputs([[PERMUTE_CAST]] : memref<1x63x1x1xf16, #NHWC, @DDR>) -> memref<1x63xf16, @DDR>
     // CHECK:   return [[OUTPUT]] : memref<1x63xf16, @DDR>
+}
+
+// -----
+
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+!qElemType = !quant.uniform<u8:f16, 1.000000e+00:128>
+
+// CHECK-LABEL: func.func @FuseLastCopyWithPermuteAndQuantizeCast
+// CHECK-SAME:      [[INPUT:%arg[0-9]]]: memref<1x1024x2048x1x!qElemType, #NHWC, @CMX_NN>
+// CHECK-SAME:      [[OUTPUT:%arg[0-9]]]: memref<2048x1024x1x1xui8, #NHWC, @DDR>) -> memref<2048x1024x1x1xui8, #NHWC, @DDR>
+func.func @FuseLastCopyWithPermuteAndQuantizeCast(%arg0: memref<1x1024x2048x1x!qElemType, #NHWC, @CMX_NN>,
+                                        %arg1: memref<2048x1024x1x1xui8, #NHWC, @DDR>) -> memref<2048x1024x1x1xui8, #NHWC, @DDR> {
+    %alloc = memref.alloc() : memref<1x1024x2048x1x!qElemType, #NHWC, @DDR>
+    %0 = VPUIP.Copy inputs(%arg0 : memref<1x1024x2048x1x!qElemType, #NHWC, @CMX_NN>)
+                            outputs(%alloc : memref<1x1024x2048x1x!qElemType, #NHWC, @DDR>)
+                            -> memref<1x1024x2048x1x!qElemType, #NHWC, @DDR>
+    %1 = VPUIP.PermuteCast {dst_order = #NHWC, mem_perm = affine_map<(d0, d1, d2, d3) -> (d1, d0, d2, d3)>}
+                            inputs(%0 : memref<1x1024x2048x1x!qElemType, #NHWC, @DDR>) -> memref<2048x1024x1x1x!qElemType, #NHWC, @DDR>
+    %2 = VPUIP.QuantizeCast inputs(%1 : memref<2048x1024x1x1x!qElemType, #NHWC, @DDR>) -> memref<2048x1024x1x1xui8, #NHWC, @DDR>
+    %3 = VPUIP.Copy inputs(%2 : memref<2048x1024x1x1xui8, #NHWC, @DDR>) outputs(%arg1 : memref<2048x1024x1x1xui8, #NHWC, @DDR>) -> memref<2048x1024x1x1xui8, #NHWC, @DDR>
+
+    return %3 : memref<2048x1024x1x1xui8, #NHWC, @DDR>
+
+    // CHECK:       [[QUANT_CAST:%.+]] = VPUIP.QuantizeCast inputs([[OUTPUT]] : memref<2048x1024x1x1xui8, #NHWC, @DDR>) -> memref<2048x1024x1x1x!qElemType, #NHWC, @DDR>
+    // CHECK:       [[PERM_CAST:%.+]] = VPUIP.PermuteCast {dst_order = #NHWC, mem_perm = #map} inputs([[QUANT_CAST]] :
+    // CHECK-SAME:                               memref<2048x1024x1x1x!qElemType, #NHWC, @DDR>) -> memref<1x1024x2048x1x!qElemType, #NHWC, @DDR>
+    // CHECK:                            VPUIP.Copy inputs([[INPUT]] : memref<1x1024x2048x1x!qElemType, #NHWC, @CMX_NN>)
+    // CHECK-SAME:                              outputs([[PERM_CAST]] : memref<1x1024x2048x1x!qElemType, #NHWC, @DDR>) -> memref<1x1024x2048x1x!qElemType, #NHWC, @DDR>
+
+    // CHECK-NOT:   VPUIP.PermuteCast
+    // CHECK-NOT:   VPUIP.QuantizeCast
+    // CHECK-NOT:   VPUIP.Copy
+
+    // CHECK:       return [[OUTPUT]] : memref<2048x1024x1x1xui8, #NHWC, @DDR>
+}
+
+// -----
+
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+!qElemType = !quant.uniform<u8:f16, 1.000000e+00>
+
+// CHECK-LABEL: func.func @FuseLastCopyWithShapeCastAndQuantizeCast
+// CHECK-SAME:      [[INPUT:%arg[0-9]]]: memref<1x32x56x56x!qElemType, #NHWC, @CMX_NN>
+// CHECK-SAME:      [[OUTPUT:%arg[0-9]]]: memref<1x64x28x56xui8, #NHWC, @DDR>
+func.func @FuseLastCopyWithShapeCastAndQuantizeCast(%arg0: memref<1x32x56x56x!qElemType, #NHWC, @CMX_NN>,
+                                          %arg1: memref<1x64x28x56xui8, #NHWC, @DDR>) -> memref<1x64x28x56xui8, #NHWC, @DDR> {
+    %0 = memref.alloc() : memref<1x32x56x56x!qElemType, #NHWC, @DDR>
+    %1 = VPUIP.Copy
+        inputs(%arg0 : memref<1x32x56x56x!qElemType, #NHWC, @CMX_NN>)
+        outputs(%0 : memref<1x32x56x56x!qElemType, #NHWC, @DDR>) -> memref<1x32x56x56x!qElemType, #NHWC, @DDR>
+
+    %2 = VPUIP.ShapeCast {shape = [1, 64, 28, 56]} inputs(%1 : memref<1x32x56x56x!qElemType, #NHWC, @DDR>) -> memref<1x64x28x56x!qElemType, #NHWC, @DDR>
+    %3 = VPUIP.QuantizeCast inputs(%2 : memref<1x64x28x56x!qElemType, #NHWC, @DDR>) -> memref<1x64x28x56xui8, #NHWC, @DDR>
+    %4 = VPUIP.Copy inputs(%3 : memref<1x64x28x56xui8, #NHWC, @DDR>)
+                    outputs(%arg1 : memref<1x64x28x56xui8, #NHWC, @DDR>) -> memref<1x64x28x56xui8, #NHWC, @DDR>
+
+    return %4 : memref<1x64x28x56xui8, #NHWC, @DDR>
+
+    // CHECK:       [[QUANT_CAST:%.+]] = VPUIP.QuantizeCast inputs([[OUTPUT]] : memref<1x64x28x56xui8, #NHWC, @DDR>) -> memref<1x64x28x56x!qElemType, #NHWC, @DDR>
+    // CHECK:       [[PERM_CAST:%.+]] = VPUIP.ShapeCast {shape = [1, 32, 56, 56]} inputs([[QUANT_CAST]] : memref<1x64x28x56x!qElemType, #NHWC, @DDR>) -> memref<1x32x56x56x!qElemType, #NHWC, @DDR>
+    // CHECK:                           VPUIP.Copy inputs([[INPUT]] : memref<1x32x56x56x!qElemType, #NHWC, @CMX_NN>)
+    // CHECK-SAME:                          outputs([[PERM_CAST]] : memref<1x32x56x56x!qElemType, #NHWC, @DDR>) -> memref<1x32x56x56x!qElemType, #NHWC, @DDR>
+
+    // CHECK-NOT:   VPUIP.ShapeCast
+    // CHECK-NOT:   VPUIP.QuantizeCast
+    // CHECK-NOT:   VPUIP.Copy
+
+    // CHECK:       return [[OUTPUT]] : memref<1x64x28x56xui8, #NHWC, @DDR>
 }
 
 // -----
@@ -587,4 +655,133 @@ func.func @NotFuseCopyWithPermuteCastOpWithMultipleUsers(%arg0: memref<1x131584x
     // CHECK:       [[COPY0:%.+]] = VPUIP.Copy inputs([[PERMUTECAST]] : memref<1x11x513x513xf16, #NHWC, @DDR>) outputs(%arg2 : memref<1x11x513x513xf16, #NHWC, @DDR>) -> memref<1x11x513x513xf16, #NHWC, @DDR>
     // CHECK:       [[COPY1:%.+]] = VPUIP.Copy inputs([[CLUSTERTILING]] : memref<1x11x256x513xf16, #NHWC, @CMX_NN>) outputs(%arg3 : memref<1x11x256x513xf16, #NHWC, @DDR>) -> memref<1x11x256x513xf16, #NHWC, @DDR>
     // CHECK:       return [[COPY0]], [[COPY1]] : memref<1x11x513x513xf16, #NHWC, @DDR>, memref<1x11x256x513xf16, #NHWC, @DDR>
+}
+
+// -----
+
+#NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
+
+// CHECK-LABEL: func.func @NotFuseCopyWitSubView
+// CHECK-SAME:      [[INPUT:%.+]]: memref<1x16x254x254xf16, @CMX_NN>
+// CHECK-SAME:      [[OUTPUT:%.+]]: memref<1x16x128x128xf16, @DDR>
+func.func @NotFuseCopyWitSubView(%arg0:  memref<1x16x254x254xf16, @CMX_NN>, %arg1: memref<1x16x128x128xf16, @DDR>) -> memref<1x16x128x128xf16, @DDR> {
+    %alloc = memref.alloc() : memref<1x16x254x254xf16, @DDR>
+    %0 = VPUIP.Copy inputs(%arg0 : memref<1x16x254x254xf16, @CMX_NN>) outputs(%alloc : memref<1x16x254x254xf16, @DDR>) -> memref<1x16x254x254xf16, @DDR>
+    %1 = VPUIP.SubView %0 [0, 0, 63, 63] [1, 16, 128, 128] : memref<1x16x254x254xf16, @DDR> to memref<1x16x128x128xf16, {order = #NCHW, strides = [1032256, 64516, 254, 1]}, @DDR>
+    %2 = VPUIP.Copy inputs(%1 : memref<1x16x128x128xf16, {order = #NCHW, strides = [1032256, 64516, 254, 1]}, @DDR>) outputs(%arg1 : memref<1x16x128x128xf16, @DDR>) -> memref<1x16x128x128xf16, @DDR>
+    return %2 : memref<1x16x128x128xf16, @DDR>
+
+    // CHECK:           [[ALLOC:%.+]] = memref.alloc() : memref<1x16x254x254xf16, @DDR>
+    // CHECK:           [[COPY_RESULT:%.+]] = VPUIP.Copy inputs([[INPUT]] : memref<1x16x254x254xf16, @CMX_NN>) outputs([[ALLOC]] : memref<1x16x254x254xf16, @DDR>) -> memref<1x16x254x254xf16, @DDR>
+    // CHECK:           [[SUB_VIEW:%.+]] = VPUIP.SubView [[COPY_RESULT]] [0, 0, 63, 63] [1, 16, 128, 128] :
+    // CHECK-SAME:                          memref<1x16x254x254xf16, @DDR> to memref<1x16x128x128xf16, {order = #NCHW, strides = [1032256, 64516, 254, 1]}, @DDR>
+    // CHECK:           [[DDR_COPY:%.+]] = VPUIP.Copy inputs([[SUB_VIEW]] : memref<1x16x128x128xf16, {order = #NCHW, strides = [1032256, 64516, 254, 1]}, @DDR>)
+    // CHECK-SAME:                                      outputs([[OUTPUT]] : memref<1x16x128x128xf16, @DDR>) -> memref<1x16x128x128xf16, @DDR>
+    // CHECK:           return [[DDR_COPY]] : memref<1x16x128x128xf16, @DDR>
+}
+
+// -----
+
+VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
+module @VPU.SW  {
+    func.func private @builtin_Sigmoid(memref<*xf16>, memref<*xf16>) attributes {VPU.kernel_code = "activation_sigmoid.cpp", VPU.kernel_entry = "activation_sigmoid"}
+    func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
+}
+
+// CHECK-LABEL: func.func @FuseLastCopyWithoutViewOp
+// CHECK-SAME:      [[INPUT:%arg[0-9]]]: memref<1x2x4x4xf16>
+// CHECK-SAME:      [[OUTPUT_0:%arg[0-9]]]: memref<1x2x4x4xf16>
+// CHECK-SAME:      [[OUTPUT_1:%arg[0-9]]]: memref<1x2x4x4xf16>) -> (memref<1x2x4x4xf16>, memref<1x2x4x4xf16>)
+func.func @FuseLastCopyWithoutViewOp(%arg0: memref<1x2x4x4xf16>, %arg1: memref<1x2x4x4xf16>, %arg2: memref<1x2x4x4xf16>)
+                            -> (memref<1x2x4x4xf16>, memref<1x2x4x4xf16>) {
+    %0 = const.Declare memref<1x2x4x4xf16> = dense<1.000000e+00> : tensor<1x2x4x4xf16>
+    %1 = memref.alloc() : memref<1x2x4x4xf16>
+    %2 = memref.alloc() : memref<1x2x4x4xf16>
+
+    %3 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>}
+        @VPU.SW::@builtin_Sigmoid inputs(%arg0 as %arg3: memref<1x2x4x4xf16>) outputs(%1 as %arg4: memref<1x2x4x4xf16>) on tile 0 -> memref<1x2x4x4xf16>  {
+            VPUIP.SW.Kernel.run {attrs = [0]}(%arg3, %arg4) : memref<1x2x4x4xf16>, memref<1x2x4x4xf16>
+        }
+    %4 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>}
+        @VPU.SW::@builtin_Sigmoid inputs(%0 as %arg3: memref<1x2x4x4xf16>) outputs(%2 as %arg4: memref<1x2x4x4xf16>) on tile 0 -> memref<1x2x4x4xf16>  {
+            VPUIP.SW.Kernel.run {attrs = [0]}(%arg3, %arg4) : memref<1x2x4x4xf16>, memref<1x2x4x4xf16>
+        }
+
+    %5 = VPUIP.Copy inputs(%3 : memref<1x2x4x4xf16>) outputs(%arg1 : memref<1x2x4x4xf16>) -> memref<1x2x4x4xf16>
+    %6 = VPUIP.Copy inputs(%4 : memref<1x2x4x4xf16>) outputs(%arg2 : memref<1x2x4x4xf16>) -> memref<1x2x4x4xf16>
+
+    return %5, %6 : memref<1x2x4x4xf16>, memref<1x2x4x4xf16>
+
+    // CHECK-DAG:   [[VAR0:%.+]] = const.Declare memref<1x2x4x4xf16> = dense<1.000000e+00> : tensor<1x2x4x4xf16>
+
+    // CHECK-NOT:   memref.alloc() : memref<1x2x4x4xf16>
+    // CHECK-NOT:   memref.alloc() : memref<1x2x4x4xf16>
+
+    // CHECK:   [[VAR1:%.+]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_Sigmoid
+    // CHECK-SAME:      inputs([[INPUT]] as {{[^:]+}}: memref<1x2x4x4xf16>) outputs([[OUTPUT_0]] as {{[^:]+}}: memref<1x2x4x4xf16>)
+    // CHECK:   [[VAR2:%.+]] = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_Sigmoid
+    // CHECK-SAME:      inputs([[VAR0]] as {{[^:]+}}: memref<1x2x4x4xf16>) outputs([[OUTPUT_1]] as {{[^:]+}}: memref<1x2x4x4xf16>)
+    // CHECK:   return [[VAR1]], [[VAR2]] : memref<1x2x4x4xf16>, memref<1x2x4x4xf16>
+}
+
+// -----
+
+VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
+module @VPU.SW  {
+    func.func private @builtin_Sigmoid(memref<*xf16>, memref<*xf16>) attributes {VPU.kernel_code = "activation_sigmoid.cpp", VPU.kernel_entry = "activation_sigmoid"}
+    func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
+}
+
+// CHECK-LABEL: func.func @NotFuseLastCopyChangesTypeMismatch
+// CHECK-SAME:      [[INPUT:%arg[0-9]]]: memref<1x50x1x1xf16>
+// CHECK-SAME:      [[OUTPUT:%arg[0-9]]]: memref<1x50xf16>) -> memref<1x50xf16>
+func.func @NotFuseLastCopyChangesTypeMismatch(%arg0: memref<1x50x1x1xf16>, %arg1: memref<1x50xf16>) -> memref<1x50xf16> {
+    %0 = memref.alloc() : memref<1x50x1x1xf16>
+    %1 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>}
+        @VPU.SW::@builtin_Sigmoid inputs(%arg0 as %arg2: memref<1x50x1x1xf16>) outputs(%0 as %arg3: memref<1x50x1x1xf16>) on tile 0 -> memref<1x50x1x1xf16>  {
+            VPUIP.SW.Kernel.run {attrs = [0]}(%arg2, %arg3) : memref<1x50x1x1xf16>, memref<1x50x1x1xf16>
+        }
+    %2 = VPUIP.GenericReshape inputs(%1 : memref<1x50x1x1xf16>) -> memref<1x50xf16>
+    %3 = VPUIP.Copy inputs(%2 : memref<1x50xf16>) outputs(%arg1 : memref<1x50xf16>) -> memref<1x50xf16>
+    return %3 : memref<1x50xf16>
+
+    // CHECK:       [[RESHAPE:%.+]] = VPUIP.GenericReshape inputs([[OUTPUT]] : memref<1x50xf16>) -> memref<1x50x1x1xf16>
+    // CHECK:       VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>} @VPU.SW::@builtin_Sigmoid inputs([[INPUT]] as {{[^:]+}}: memref<1x50x1x1xf16>)
+    // CHECK-SAME:                                                          outputs([[RESHAPE]] as {{[^:]+}}: memref<1x50x1x1xf16>) on tile 0 -> memref<1x50x1x1xf16>{
+    // CHECK:           VPUIP.SW.Kernel.run {attrs = [0]}({{[^:]+}}, {{[^:]+}}) : memref<1x50x1x1xf16>, memref<1x50x1x1xf16>
+
+    // CHECK:       return [[OUTPUT]] : memref<1x50xf16>
+}
+
+// -----
+
+VPURT.SW.Runtime entryPoint : @VPU.SW::@runtime stack_configuration : [4096, 4096, 4096, 4096]
+module @VPU.SW  {
+    func.func private @builtin_Sigmoid(memref<*xf16>, memref<*xf16>) attributes {VPU.kernel_code = "activation_sigmoid.cpp", VPU.kernel_entry = "activation_sigmoid"}
+    func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
+}
+
+// CHECK-LABEL: func.func @NotFuseLastCopyChangesInputIsBlockArgument
+// CHECK-SAME:      [[INPUT:%arg[0-9]]]: memref<1x2x4x4xf16>
+// CHECK-SAME:      [[OUTPUT_0:%arg[0-9]]]: memref<1x2x4x4xf16>
+// CHECK-SAME:      [[OUTPUT_1:%arg[0-9]]]: memref<1x2x4x4xf16>
+// CHECK-SAME:      [[OUTPUT_2:%arg[0-9]]]: memref<1x2x4x4xf16>) -> (memref<1x2x4x4xf16>, memref<1x2x4x4xf16>, memref<1x2x4x4xf16>)
+func.func @NotFuseLastCopyChangesInputIsBlockArgument(%arg0: memref<1x2x4x4xf16>, %arg1: memref<1x2x4x4xf16>,
+                                    %arg2: memref<1x2x4x4xf16>, %arg3: memref<1x2x4x4xf16>) ->
+                                    (memref<1x2x4x4xf16>, memref<1x2x4x4xf16>, memref<1x2x4x4xf16>) {
+    %0 = VPUIP.Copy inputs(%arg0 : memref<1x2x4x4xf16>) outputs(%arg1 : memref<1x2x4x4xf16>) -> memref<1x2x4x4xf16>
+
+    %1 = VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 1, 0, 0>}
+        @VPU.SW::@builtin_Sigmoid inputs(%arg0 as %arg4: memref<1x2x4x4xf16>) outputs(%arg2 as %arg5: memref<1x2x4x4xf16>) on tile 0 -> memref<1x2x4x4xf16>  {
+            VPUIP.SW.Kernel.run {attrs = [0]}(%arg4, %arg5) : memref<1x2x4x4xf16>, memref<1x2x4x4xf16>
+        }
+    %2 = VPUIP.Copy inputs(%1 : memref<1x2x4x4xf16>) outputs(%arg3 : memref<1x2x4x4xf16>) -> memref<1x2x4x4xf16>
+
+    return %0, %1, %2 : memref<1x2x4x4xf16>, memref<1x2x4x4xf16>, memref<1x2x4x4xf16>
+
+    // CHECK:       [[VAR0:%.+]] = VPUIP.Copy
+    // CHECK:       [[VAR1:%.+]] = VPUIP.SW.Kernel
+    // CHECK-SAME:      @VPU.SW::@builtin_Sigmoid
+    // CHECK:       [[VAR2:%.+]] = VPUIP.Copy
+    // CHECK:       return [[VAR0]], [[VAR1]], [[VAR2]]
 }

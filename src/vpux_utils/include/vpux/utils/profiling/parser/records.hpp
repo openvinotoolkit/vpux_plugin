@@ -200,16 +200,11 @@ public:
 
     virtual TaskInfo getTaskInfo(FrequenciesSetup frequenciesSetup) const {
         TaskInfo taskInfo;
+        taskInfo.name = getTaskName();
+        taskInfo.layer_type = getLayerType();
         taskInfo.exec_type = convertToTaskExec(getExecutorType());
         taskInfo.start_time_ns = static_cast<uint64_t>(getStartTime(frequenciesSetup));
         taskInfo.duration_ns = static_cast<uint64_t>(getDuration(frequenciesSetup));
-
-        const auto nameLen = getTaskName().copy(taskInfo.name, sizeof(taskInfo.name) - 1);
-        taskInfo.name[nameLen] = 0;
-
-        const auto typeLen = getLayerType().copy(taskInfo.layer_type, sizeof(taskInfo.layer_type) - 1);
-        taskInfo.layer_type[typeLen] = 0;
-
         return taskInfo;
     }
 
@@ -594,7 +589,7 @@ public:
 
     TaskInfo getTaskInfo(FrequenciesSetup frequenciesSetup) const override {
         auto profInfoItem = RawProfilingRecord::getTaskInfo(frequenciesSetup);
-        profInfoItem.active_cycles = _data.clockCycles;
+        profInfoItem.total_cycles = _data.clockCycles;
         profInfoItem.stall_cycles = _data.stallCycles;
         return profInfoItem;
     }
@@ -649,15 +644,81 @@ private:
     uint32_t _clusterId;
 };
 
-class RawProfilingM2IRecord : public RawProfilingRecord, public DebugFormattableRecordMixin {
+class RawProfilingACTExRecord : public RawProfilingRecord, public DebugFormattableRecordMixin {
 public:
-    explicit RawProfilingM2IRecord(M2IData_t data, const ProfilingFB::M2ITask* metadata, size_t inMemoryOffset)
-            : RawProfilingRecord(metadata), DebugFormattableRecordMixin(inMemoryOffset), _data(data) {
+    explicit RawProfilingACTExRecord(ActShaveDataEx_t data, const ProfilingFB::SWTask* metadata, size_t inMemoryOffset)
+            : RawProfilingRecord(metadata),
+              DebugFormattableRecordMixin(inMemoryOffset),
+              _data(data),
+              _bufferId(metadata->bufferId()),
+              _inClusterIndex(metadata->dataIndex()),
+              _clusterId(metadata->clusterId()) {
     }
 
     TaskInfo getTaskInfo(FrequenciesSetup frequenciesSetup) const override {
         auto profInfoItem = RawProfilingRecord::getTaskInfo(frequenciesSetup);
+        profInfoItem.total_cycles = _data.clockCycles;
+        profInfoItem.stall_cycles = _data.lsu0Stalls + _data.lsu1Stalls + _data.instStalls;
+        profInfoItem.stall_counters = {_data.lsu0Stalls, _data.lsu1Stalls, _data.instStalls};
         return profInfoItem;
+    }
+
+    void checkDataOrDie() const override {
+        VPUX_THROW_WHEN(_data.begin == 0 && _data.duration == 0, "Can't process ACT profiling data.");
+    }
+
+    ExecutorType getExecutorType() const override {
+        return ExecutorType::ACTSHAVE;
+    }
+
+    TimeType getStartTime(FrequenciesSetup frequenciesSetup) const override {
+        return convertTicksToNs(_data.begin, frequenciesSetup.profClk);
+    }
+
+    TimeType getFinishTime(FrequenciesSetup frequenciesSetup) const override {
+        return getStartTime(frequenciesSetup) + getDuration(frequenciesSetup);
+    }
+
+    TimeType getDuration(FrequenciesSetup frequenciesSetup) const override {
+        return convertTicksToNs(_data.duration, frequenciesSetup.profClk);
+    }
+
+    size_t getDebugDataSize() const override {
+        return sizeof(ActShaveDataEx_t);
+    }
+
+protected:
+    ColDesc getColDesc() const override {
+        return {{"Buffer ID", COL_WIDTH_32},   {"Cluster ID", COL_WIDTH_64},  {"Buffer offset", COL_WIDTH_64},
+                {"Begin", COL_WIDTH_64},       {"Duration", COL_WIDTH_32},    {"Executed", COL_WIDTH_32},
+                {"Clock", COL_WIDTH_32},       {"LSU0 Stalls", COL_WIDTH_64}, {"LSU1 Stalls", COL_WIDTH_64},
+                {"Instr Stalls", COL_WIDTH_64}};
+    }
+
+    void printDebugInfo(std::ostream& outStream) const override {
+        const auto actShaveCol = getColDesc();
+        const auto bufferOffsetBytes = _inClusterIndex * getDebugDataSize();
+
+        outStream << std::setw(actShaveCol[0].second) << _bufferId << std::setw(actShaveCol[1].second) << _clusterId
+                  << std::setw(actShaveCol[2].second) << bufferOffsetBytes << std::setw(actShaveCol[3].second)
+                  << _data.begin << std::setw(actShaveCol[4].second) << _data.duration
+                  << std::setw(actShaveCol[5].second) << _data.executedInstructions << std::setw(actShaveCol[6].second)
+                  << _data.clockCycles << std::setw(actShaveCol[7].second) << _data.lsu0Stalls
+                  << std::setw(actShaveCol[8].second) << _data.lsu1Stalls << std::setw(actShaveCol[9].second)
+                  << _data.instStalls;
+    }
+
+private:
+    ActShaveDataEx_t _data;
+    uint32_t _bufferId;
+    uint32_t _inClusterIndex;
+    uint32_t _clusterId;
+};
+
+class RawProfilingM2IRecord : public RawProfilingRecord, public DebugFormattableRecordMixin {
+public:
+    explicit RawProfilingM2IRecord(M2IData_t data, const ProfilingFB::M2ITask* metadata, size_t inMemoryOffset)
+            : RawProfilingRecord(metadata), DebugFormattableRecordMixin(inMemoryOffset), _data(data) {
     }
 
     void checkDataOrDie() const override {

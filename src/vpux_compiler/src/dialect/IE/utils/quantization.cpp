@@ -95,7 +95,7 @@ bool IE::areAllUsersQuantized(mlir::Operation* op) {
 }
 
 bool IE::isPerAxisQuant(mlir::Value val) {
-    auto elemType = val.getType().dyn_cast<vpux::NDTypeInterface>().getElementType();
+    auto elemType = mlir::cast<vpux::NDTypeInterface>(val.getType()).getElementType();
     return elemType.isa<mlir::quant::UniformQuantizedPerAxisType>();
 }
 
@@ -230,11 +230,12 @@ IE::FakeQuantizeOp vpux::IE::createFQ(mlir::PatternRewriter& rewriter, mlir::Val
 
 Const::DeclareOp vpux::IE::createFQConst(mlir::MLIRContext* ctx, mlir::Location loc, float val,
                                          mlir::RankedTensorType argType, mlir::PatternRewriter& rewriter) {
-    const auto denseElementVal = wrapData(mlir::RankedTensorType::get({1, 1, 1, 1}, mlir::Float32Type::get(ctx)), val);
+    const auto denseElementVal = Const::createConstContent(
+            mlir::RankedTensorType::get({1, 1, 1, 1}, mlir::Float32Type::get(ctx)), ArrayRef(val));
     VPUX_THROW_UNLESS(denseElementVal != nullptr, "Failed to generate the denseElementVal.");
-    auto cstAttr = Const::ContentAttr::transform(denseElementVal)
-                           .castElemType(argType.cast<vpux::NDTypeInterface>().getElementType())
-                           .get();
+    auto cstAttr = Const::ContentAttr::get(
+            denseElementVal, Const::ContentSetup(denseElementVal.getType())
+                                     .castElemType(argType.cast<vpux::NDTypeInterface>().getElementType()));
     return rewriter.create<Const::DeclareOp>(loc, argType, std::move(cstAttr));
 }
 
@@ -282,9 +283,9 @@ mlir::Value vpux::IE::createFQScaling(mlir::Location loc, mlir::Value input, flo
     VPUX_THROW("Neither levels nor lowFpType were provided.");
 }
 
-Const::details::ContentRange<float> vpux::IE::getConst(Const::DeclareOp declOp) {
+SmallVector<float> vpux::IE::getConst(Const::DeclareOp declOp) {
     const auto content = declOp.getContentAttr().fold();
-    return content.getValues<float>();
+    return to_small_vector(content.getValues<float>());
 }
 
 bool vpux::IE::checkRescaledQuantApproximationForConvBasedOp(mlir::Operation* op) {
@@ -308,7 +309,7 @@ bool vpux::IE::checkRescaledQuantApproximationForConvBasedOp(mlir::Operation* op
     broadcast(weightsQuantScales, OC);
 
     for (int64_t i = 0; i < OC; i++) {
-        uint16_t mult = 0;
+        int16_t mult = 0;
         uint8_t shift = 0;
         int8_t postShift = 0;
         double rescale = (weightsQuantScales[i] * inQuantScale[i]) / outQuantScale[i];
@@ -319,4 +320,70 @@ bool vpux::IE::checkRescaledQuantApproximationForConvBasedOp(mlir::Operation* op
     }
 
     return true;
+}
+
+bool vpux::IE::hasFQSameZeroPoint(IE::FakeQuantizeOp fqOp) {
+    auto inLowConstantOp = fqOp.getInputLow().getDefiningOp<Const::DeclareOp>();
+    auto inHighConstantOp = fqOp.getInputHigh().getDefiningOp<Const::DeclareOp>();
+    auto outLowConstantOp = fqOp.getOutputLow().getDefiningOp<Const::DeclareOp>();
+    auto outHighConstantOp = fqOp.getOutputHigh().getDefiningOp<Const::DeclareOp>();
+    if (inLowConstantOp == nullptr || inHighConstantOp == nullptr || outLowConstantOp == nullptr ||
+        outHighConstantOp == nullptr) {
+        return false;
+    }
+
+    auto allElementsEqual = [](const auto& vec) {
+        return std::all_of(vec.begin(), vec.end(), [&](const auto& val) {
+            return val == vec.front();
+        });
+    };
+
+    auto inputScalesAndZeroPoints = getScalesAndZeroPointsFromContentAttr(
+            inLowConstantOp.getContentAttr(), inHighConstantOp.getContentAttr(), fqOp.getAutoBroadcast(),
+            fqOp.getLevels(), fqOp.getLowFpType(), /*isSigned=*/false);
+    if (mlir::failed(inputScalesAndZeroPoints)) {
+        return false;
+    }
+    const auto& inZeroPoints = std::get<1>(inputScalesAndZeroPoints.value());
+
+    if (!allElementsEqual(inZeroPoints)) {
+        return false;
+    }
+
+    auto outputScalesAndZeroPoints = getScalesAndZeroPointsFromContentAttr(
+            outLowConstantOp.getContentAttr(), outHighConstantOp.getContentAttr(), fqOp.getAutoBroadcast(),
+            fqOp.getLevels(), fqOp.getLowFpType(), /*isSigned=*/false);
+    if (mlir::failed(outputScalesAndZeroPoints)) {
+        return false;
+    }
+    const auto& outZeroPoints = std::get<1>(outputScalesAndZeroPoints.value());
+
+    return allElementsEqual(outZeroPoints);
+}
+
+mlir::Type vpux::IE::composeWeightsExpressedType(const mlir::Type convolutionInputType) {
+    // Compose quantized weight type for convolution with quantized input.
+    // It must share the int/float trait of the input, have scale=1 and shift=0 and sufficient [min, max] interval
+    // for storing 1's and 0's.
+    // Let's keep it obvious: quantized 0 means 0, quantized 1 means 1.
+    // For non-quantized cases just use the provided element type.
+    if (const auto inputQuantType = mlir::dyn_cast<mlir::quant::QuantizedType>(convolutionInputType)) {
+        const auto ctx = convolutionInputType.getContext();
+
+        // Note: IEEE float types can precisely represent 0.0 and 1.0, this may not hold for all types.
+        if (vpux::isFloat8Quantized(inputQuantType)) {
+            const auto quantType = mlir::quant::UniformQuantizedType::get(
+                    /*flags=*/0, /*storageType=*/inputQuantType.getStorageType(),
+                    /*expressedType=*/mlir::Float16Type::get(ctx),
+                    /*scale=*/1.0, /*zeroPoint=*/0, /*storageTypeMin=*/inputQuantType.getStorageTypeMin(),
+                    /*storageTypeMax=*/inputQuantType.getStorageTypeMax());
+            return quantType;
+        }
+
+        const auto quantType = mlir::quant::UniformQuantizedType::get(
+                /*flags=*/0, /*storageType=*/getUInt8Type(ctx), /*expressedType=*/mlir::Float16Type::get(ctx),
+                /*scale=*/1.0, /*zeroPoint=*/0, /*storageTypeMin=*/0, /*storageTypeMax=*/255);
+        return quantType;
+    }
+    return convolutionInputType;
 }

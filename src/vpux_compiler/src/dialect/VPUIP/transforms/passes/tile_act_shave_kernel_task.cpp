@@ -178,8 +178,8 @@ Dim getSwKernelTileDim(VPUIP::SwKernelOp swKernelOp) {
         // MVN only supports tiling on C
         return Dims4D::Act::C;
     } else if (kernelEntryName == "mvn1_sum") {
-        auto outType = swKernelOp->getResult(0).getType().cast<vpux::NDTypeInterface>();
-        return VPU::getHighestDimFromType(outType);
+        auto outType = mlir::cast<vpux::NDTypeInterface>(swKernelOp->getResult(0).getType());
+        return getHighestNonTrivialDim(outType.getShape(), outType.getDimsOrder()).value_or(Dim(0));
     } else if (kernelEntryName == "mvn6") {
         // MVN6 only supports tiling on non-normalization axes
         auto dim = getHighestTileableDimOfMvn6(swKernelOp);
@@ -226,8 +226,8 @@ Dim getSwKernelTileDim(VPUIP::SwKernelOp swKernelOp) {
         return false;
     };
 
-    const auto outputType = swKernelOp->getResult(0).getType().cast<vpux::NDTypeInterface>();
-    const auto tileDim = VPU::getHighestDimFromType(outputType);
+    const auto outputType = mlir::cast<vpux::NDTypeInterface>(swKernelOp->getResult(0).getType());
+    const auto tileDim = getHighestNonTrivialDim(outputType.getShape(), outputType.getDimsOrder()).value_or(Dim(0));
 
     // for supported ops try to avoid DMAs by expressing tiling with offsets
     if (isHighestDimTilingPerformant() && hasOnlyOneOffset(swKernelOp, tileDim)) {
@@ -266,8 +266,10 @@ bool isGatherOpTileAtHighestDim(VPUIP::SwKernelOp swKernelOp) {
     VPUX_THROW_UNLESS(batchDimsAttr != nullptr, "Failed to extract batch_dim at '{0}'", swKernelOp->getLoc());
     int64_t batchDimsVal = batchDimsAttr.getValue().getSExtValue();
 
-    int64_t inHighestDimVal = VPU::getHighestDimFromType(inputType).ind();
-    int64_t indicesHighestDimVal = VPU::getHighestDimFromType(indicesType).ind();
+    const int64_t inHighestDimVal =
+            getHighestNonTrivialDim(inputType.getShape(), inputType.getDimsOrder()).value_or(Dim(0)).ind();
+    const int64_t indicesHighestDimVal =
+            getHighestNonTrivialDim(indicesType.getShape(), indicesType.getDimsOrder()).value_or(Dim(0)).ind();
     int64_t outTileDimVal = getSwKernelTileDim(swKernelOp).ind();
 
     // outTileDim is before axisDim
@@ -288,6 +290,37 @@ bool isGatherOpTileAtHighestDim(VPUIP::SwKernelOp swKernelOp) {
     // Input should be tiled at highestDim, Indices do not require tiling
     inTileDimVal = outTileDimVal - indicesType.getRank() + batchDimsVal;
     return inTileDimVal == inHighestDimVal;
+}
+
+bool canGatherElementsOpTileAtHighestDim(VPUIP::SwKernelOp swKernelOp) {
+    auto kernelEntryName = getSwKernelEntryName(swKernelOp);
+    if (kernelEntryName != "gather_elements") {
+        return false;
+    }
+
+    const auto inputType = swKernelOp->getOperand(0).getType().cast<NDTypeInterface>();
+
+    auto args = kernelArgsRange(swKernelOp);
+    const auto kernelAxisAttr = args.begin()[0].dyn_cast<mlir::IntegerAttr>();
+    VPUX_THROW_UNLESS(kernelAxisAttr != nullptr, "Failed to extract axis at '{0}'", swKernelOp->getLoc());
+    int64_t kernelAxis = kernelAxisAttr.getValue().getSExtValue();
+    // Convert the axis from kernel to compiler representation
+    int64_t axisVal = inputType.getRank() - 1 - kernelAxis;
+
+    const int64_t inHighestDimVal =
+            getHighestNonTrivialDim(inputType.getShape(), inputType.getDimsOrder()).value_or(Dim(0)).ind();
+    return axisVal != inHighestDimVal;
+}
+
+bool isRMSOpTileOverWidthDim(VPUIP::SwKernelOp swKernelOp) {
+    auto kernelEntryName = getSwKernelEntryName(swKernelOp);
+    VPUX_THROW_UNLESS(kernelEntryName == "rms_norm", "This function was designed for RMSNorm operator");
+
+    const auto outTileDimVal = getSwKernelTileDim(swKernelOp);
+    if (outTileDimVal == Dims4D::Act::W) {
+        return true;
+    }
+    return false;
 }
 
 bool doesSwKernelSupportTiling(VPUIP::SwKernelOp swKernelOp, vpux::Logger log) {
@@ -336,8 +369,8 @@ bool doesSwKernelSupportTiling(VPUIP::SwKernelOp swKernelOp, vpux::Logger log) {
         const auto acrossChannels = taskArgs[0].dyn_cast<mlir::BoolAttr>();
         return !acrossChannels.getValue();
     } else if (kernelEntryName == "mvn1_sum") {
-        auto inType = swKernelOp->getOperand(0).getType().cast<vpux::NDTypeInterface>();
-        auto inHighestDim = VPU::getHighestDimFromType(inType);
+        auto inType = mlir::cast<vpux::NDTypeInterface>(swKernelOp->getOperand(0).getType());
+        auto inHighestDim = getHighestNonTrivialDim(inType.getShape(), inType.getDimsOrder()).value_or(Dim(0));
 
         if (auto clusterTilingOp = mlir::dyn_cast<VPUIP::NCEClusterTilingOp>(swKernelOp->getParentOp())) {
             if (auto dimIdx = VPUIP::getTilingDimIndex(clusterTilingOp.getOperand(0).getType())) {
@@ -368,14 +401,14 @@ bool doesSwKernelSupportTiling(VPUIP::SwKernelOp swKernelOp, vpux::Logger log) {
             }
         }
     } else if (kernelEntryName == "topk") {
-        const auto outputType = swKernelOp->getResult(0).getType().cast<vpux::NDTypeInterface>();
-        auto highestDim = VPU::getHighestDimFromType(outputType);
+        const auto outputType = mlir::cast<vpux::NDTypeInterface>(swKernelOp->getResult(0).getType());
+        auto highestDim = getHighestNonTrivialDim(outputType.getShape(), outputType.getDimsOrder()).value_or(Dim(0));
         if (isTopKAxis(swKernelOp, highestDim)) {
             return false;
         }
     } else if (kernelEntryName == "normalize_l2") {
-        const auto outputType = swKernelOp->getResult(0).getType().cast<vpux::NDTypeInterface>();
-        auto highestDim = VPU::getHighestDimFromType(outputType);
+        const auto outputType = mlir::cast<vpux::NDTypeInterface>(swKernelOp->getResult(0).getType());
+        auto highestDim = getHighestNonTrivialDim(outputType.getShape(), outputType.getDimsOrder()).value_or(Dim(0));
         if (isNormalizeL2Axis(swKernelOp, highestDim)) {
             return false;
         }
@@ -385,12 +418,17 @@ bool doesSwKernelSupportTiling(VPUIP::SwKernelOp swKernelOp, vpux::Logger log) {
         if (!isGatherOpTileAtHighestDim(swKernelOp)) {
             return false;
         }
+    } else if (kernelEntryName == "gather_elements") {
+        // GatherElements kernel not support stride input, if enable multi-shave will produce stride input for gather,
+        // additional stride DMAs will be introduced to ensure that the input of the gather is continuous.
+        if (!canGatherElementsOpTileAtHighestDim(swKernelOp)) {
+            return false;
+        }
 
     } else if (kernelEntryName == "activation_sigmoid") {
         // E#92211: Measurements for the performance profiling, see this ticket for details.
         const auto inputSize = getTotalSize(swKernelOp.getInputs()[0]);
-        const auto minimalSize = Byte(4096);
-        if (inputSize < minimalSize) {
+        if (inputSize < VPUIP::SIGMOID_SW_KERNEL_TILING_THRESHOLD) {
             log.trace("Sigmoid has {0} bytes of total size which is not efficient for multi shave", inputSize);
             return false;
         }
@@ -425,6 +463,11 @@ bool doesSwKernelSupportTiling(VPUIP::SwKernelOp swKernelOp, vpux::Logger log) {
         if (outputSize < minimalSize) {
             log.trace("Eltwise operation has {0} bytes of total size which is not efficient for multi shave",
                       outputSize);
+            return false;
+        }
+    } else if (kernelEntryName == "rms_norm") {
+        // RMSNorm is not supporting over width tiling
+        if (isRMSOpTileOverWidthDim(swKernelOp)) {
             return false;
         }
     }
@@ -496,10 +539,10 @@ mlir::FailureOr<OutputTiling> getSwKernelOutputTiling(VPUIP::SwKernelOp swKernel
             }
         }
         const auto arch = VPU::getArch(swKernelOp);
-        Byte elemSize = swKernelOp.getOutputs().front().getType().cast<vpux::NDTypeInterface>().getElemTypeSize();
-        auto alignmentVal = std::lcm(strideOnTilingDim,
-                                     VPUIP::getSwKernelTilingAddressAlignment(swKernelOp, arch) / elemSize.count()) /
-                            strideOnTilingDim;
+        const auto addrAlign = VPUIP::getSwKernelTilingAddressAlignment(swKernelOp, arch);
+        const auto elemSize = swKernelOp.getOutputs().front().getType().cast<vpux::NDTypeInterface>().getElemTypeSize();
+        auto alignmentVal =
+                std::lcm(strideOnTilingDim, Byte(addrAlign).to<Bit>().count() / elemSize.count()) / strideOnTilingDim;
         if (alignmentVal < outputShape[tileDim]) {
             alignment[tileDim.ind()] = alignmentVal;
             optionalAlignment = std::optional<ArrayRef<int64_t>>(alignment);
@@ -795,7 +838,7 @@ bool SwKernelRewriterBase::needInsertSubviewOnly(VPUIP::SwKernelOp swKernelOp) c
     const auto tileDim = getSwKernelTileDim(swKernelOp);
 
     auto isSplitOnTheHighestDimension = [&](auto type) {
-        return tileDim == VPU::getHighestDimFromType(type);
+        return tileDim == getHighestNonTrivialDim(type.getShape(), type.getDimsOrder()).value_or(Dim(0));
     };
 
     auto isMemContiguous = llvm::all_of(getSwKernelTiledTypes(swKernelOp, tileDim), isSplitOnTheHighestDimension);
@@ -905,24 +948,28 @@ bool SwKernelRewriter::checkTilePattern(VPUIP::SwKernelOp swKernelOp, bool inser
     auto totalCMXSize = VPU::getTotalCMXSize(swKernelOp);
     auto inputs = getOuterMappingOperand(swKernelOp, swKernelOp.getInputs());
     auto outTiles = getOuterMostOutputTiling(swKernelOp);
+    const auto outType = mlir::cast<vpux::NDTypeInterface>(swKernelOp.getResult(0).getType());
     Byte requiredCMXForTiledSwKernelOp(0);
+    Byte allocCMXSizeForOutTiles(outType.getTotalAllocSize());
     for (auto outIndex : irange(outTiles.size())) {
         const auto inTiles = getOuterMostInputTiling(swKernelOp, outIndex);
         for (const auto& item : inputs | indexed) {
             auto input = item.value();
             auto index = item.index();
             auto newInputRequiredSize = getNewTiledAllocSize(input, inTiles.tiles[index].shape);
-            Byte requiredCMXForInputCopy = newInputRequiredSize * 2;
-            // check cmx requirement for each input tile copy
-            if (requiredCMXForInputCopy > totalCMXSize) {
+            // Check CMX requirement for each input tile Copy + total alloc for input Subview
+            const auto inType = mlir::cast<vpux::NDTypeInterface>(swKernelOp.getInputs()[index].getType());
+            Byte allocCMXSizeForInTile(inType.getTotalAllocSize());
+            Byte requiredCMXForSubviewAndInputCopy = allocCMXSizeForInTile + newInputRequiredSize;
+            if (requiredCMXForSubviewAndInputCopy > totalCMXSize) {
                 return false;
             }
             requiredCMXForTiledSwKernelOp += newInputRequiredSize;
         }
         auto newOutputRequiredSize = getNewTiledAllocSize(swKernelOp.getResult(0), outTiles[outIndex].shape);
-        // check cmx requirement for each output tile copy
-        Byte requiredCMXForOutputCopy = newOutputRequiredSize * 2;
-        if (requiredCMXForOutputCopy > totalCMXSize) {
+        // Check CMX requirement for each output tile Copy + total alloc for output Subview
+        Byte requiredCMXForSubviewAndCopyOut = allocCMXSizeForOutTiles + newOutputRequiredSize;
+        if (requiredCMXForSubviewAndCopyOut > totalCMXSize) {
             return false;
         }
         requiredCMXForTiledSwKernelOp += newOutputRequiredSize;
@@ -1089,6 +1136,14 @@ void SwKernelRewriter::replaceOpWithConcatView(VPUIP::SwKernelOp origOp, VPUIP::
     VPUX_THROW_UNLESS(newNumberResults % origNumberResults == 0, "Invalid result number at {0}", origOp->getLoc());
     const auto numberActShaveTiles = newNumberResults / origNumberResults;
 
+    // Get input ops
+    SmallVector<mlir::Operation*> inputOps;
+    for (const auto& input : origOp.getInputs()) {
+        if (const auto& inputOp = input.getDefiningOp()) {
+            inputOps.push_back(inputOp);
+        }
+    }
+
     const auto getOutputTiles = [&]() {
         if (insertSubview) {
             return OutputTiling{};
@@ -1141,7 +1196,12 @@ void SwKernelRewriter::replaceOpWithConcatView(VPUIP::SwKernelOp origOp, VPUIP::
     }
     rewriter.eraseOp(origOp);
 
-    return;
+    std::set<mlir::Operation*> uniqueInputSet(inputOps.begin(), inputOps.end());
+    for (auto originInputOp : uniqueInputSet) {
+        if (originInputOp != nullptr && originInputOp->use_empty()) {
+            rewriter.eraseOp(originInputOp);
+        }
+    }
 }
 
 OutputTiling SwKernelRewriter::getOuterMostOutputTiling(VPUIP::SwKernelOp swKernelOp) const {
@@ -1256,7 +1316,7 @@ bool ClusterSwKernelRewriter::requireBalancingShapeCast(VPUIP::SwKernelOp swKern
     auto needInserSubview = needInsertSubviewOnly(swKernelOp);
     if (inTiles.has_value() && needInserSubview) {
         const auto numClusters = distributedType.getDistribution().getNumClusters().getInt();
-        Byte elemSize = distributedType.getElemTypeSize();
+        const auto elemSize = distributedType.getElemTypeSize();
         auto mode = distributedType.getDistribution().getMode().getValue();
         const auto arch = VPU::getArch(swKernelOp);
         for (auto clusterId : irange(numClusters)) {
@@ -1265,8 +1325,8 @@ bool ClusterSwKernelRewriter::requireBalancingShapeCast(VPUIP::SwKernelOp swKern
                 auto tiles =
                         getTileFromList(inTiles.value(), clusterId, shaveId, numClusters, mode, needInserSubview).tiles;
                 // here only check the first input for eltwise like operation
-                auto totalSize = tiles.front().shape.totalSize();
-                if (totalSize * elemSize.count() % VPUIP::getSwKernelTilingAddressAlignment(swKernelOp, arch) != 0) {
+                auto totalSize = tiles.front().shape.totalSize() * elemSize;
+                if (Byte(totalSize).count() % VPUIP::getSwKernelTilingAddressAlignment(swKernelOp, arch) != 0) {
                     _log.trace("SwKernelOp {0} requires balancing tiling for address align", swKernelOp->getName());
                     return true;
                 }
@@ -1292,9 +1352,9 @@ bool ClusterSwKernelRewriter::requireLayoutChangePermuteCast(VPUIP::SwKernelOp s
         return false;
     }
 
-    const auto outputType = clusterTilingOp.getResult(0).getType().dyn_cast<NDTypeInterface>();
+    const auto outputType = mlir::cast<NDTypeInterface>(clusterTilingOp.getResult(0).getType());
     const auto tileDim = getSwKernelTileDim(swKernelOp);
-    const auto highestDim = VPU::getHighestDimFromType(outputType);
+    const auto highestDim = getHighestNonTrivialDim(outputType.getShape(), outputType.getDimsOrder()).value_or(Dim(0));
 
     return tileDim != highestDim;
 }
@@ -1390,9 +1450,10 @@ mlir::FailureOr<VPUIP::PermuteCastOp> ClusterSwKernelRewriter::adjustSWLayout(VP
         return mlir::failure();
     }
 
-    auto distributedOutType = clusterTilingOp.getResult(0).getType().dyn_cast<VPUIP::DistributedBufferType>();
+    auto distributedOutType = mlir::dyn_cast<VPUIP::DistributedBufferType>(clusterTilingOp.getResult(0).getType());
     const auto tileDim = getSwKernelTileDim(swKernelOp);
-    const auto highestDim = VPU::getHighestDimFromType(distributedOutType);
+    const auto highestDim =
+            getHighestNonTrivialDim(distributedOutType.getShape(), distributedOutType.getDimsOrder()).value_or(Dim(0));
 
     // The tileDim and highestDim can only be swapped when they are fusible
     // Otherwise the conversion breaks computation

@@ -12,11 +12,7 @@
 
 module @Test {
 
-IE.TileResource 1 of @NCE {
-    builtin.module @UsedMemory {
-        IE.MemoryResource 1048576 bytes of @CMX_NN
-    }
-}
+IE.TileResource 1 of @NCE
 
 IE.CNNNetwork
     entryPoint : @main

@@ -5,6 +5,7 @@
 
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
 #include "vpux/compiler/dialect/IE/transforms/passes.hpp"
+#include "vpux/compiler/dialect/VPU/utils/sparsity_utils.hpp"
 #include "vpux/compiler/dialect/const/utils/utils.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 
@@ -14,55 +15,6 @@ using namespace vpux;
 
 namespace {
 
-// =========================================================
-// [Input pattern]:
-//
-//    Input(origShape, NHWC)
-//           |
-//    Reorder(to NCHW)
-//           |
-//    Reshape(to newShape)
-//           |
-//    Reorder(back to NHWC)
-//           |
-//    MVN('newShape', NHWC)
-//           |
-//    Reorder(to NCHW)
-//           |
-//           x----------(ver 2)-------->
-//           |                         |
-//           |                    AffineReshape
-//           |                         |
-//           |                    Reorder(to NHWC)
-//        (ver 1)                      |
-//           |                    GroupConv (Multiply)
-//           |                         |
-//           |                    Reorder(to NCHW)
-//           |                         |
-//           |<-------------------------
-//           |
-//    Reshape(back to origShape)
-//           |
-//    Reorder(back to NHWC)
-//           |
-//    Output(origShape, NHWC)
-//
-//
-// [Output]:
-//
-//    Input(origShape, NHWC)
-//           |
-//    MVN('internal_reshape=newShape', NHWC)
-//           |
-//           x----------(ver 2)--------->
-//           |                          |
-//        (ver 1)                  GroupConv (Multiply)
-//           |                          |
-//           |<--------------------------
-//           |
-//    Output(origShape, NHWC)
-
-// =========================================================
 // Example of how MVN with 'internal_reshape' works in NHWC:
 //
 // Original-input(W=4)x(C=8) reshaped to (W=8)x(K=4) and back.
@@ -85,6 +37,350 @@ namespace {
 //   really the content of same K0 channel. This way, physical permutation of data in memory can be avoided.
 
 //
+// ReshapeMVNPattern
+//
+
+class ReshapeMVNPattern {
+public:
+    ReshapeMVNPattern(IE::MVNOp mvnOp, Logger log): _mvnOp(mvnOp), _log(log) {
+    }
+
+    bool init();
+
+private:
+    IE::MVNOp _mvnOp;
+    mlir::Value _patternIn = nullptr;
+    mlir::Value _patternOut = nullptr;
+    IE::GroupConvolutionOp _groupConvOp = nullptr;
+    int64_t _origChannelSize = 0;
+    int64_t _newChannelSize = 0;
+
+    Logger _log;
+
+public:
+    template <class TargetOp>
+    TargetOp getTargetOpWithSpecificLayoutAndSingleUser(mlir::Operation* op, DimsOrder inTargetOrder,
+                                                        DimsOrder outTargetOrder) const;
+
+    bool isSupportedGroupConv();
+    mlir::LogicalResult replacePattern();
+};
+
+template <class TargetOp>
+TargetOp ReshapeMVNPattern::getTargetOpWithSpecificLayoutAndSingleUser(mlir::Operation* op, DimsOrder inTargetOrder,
+                                                                       DimsOrder outTargetOrder) const {
+    if (auto targetOp = mlir::dyn_cast_or_null<TargetOp>(op)) {
+        if (targetOp->getResult(0).hasOneUse()) {
+            auto inType = targetOp->getOperand(0).getType().template cast<NDTypeInterface>();
+            auto outType = targetOp->getResult(0).getType().template cast<NDTypeInterface>();
+            if (inType.getRank() == 4 && outType.getRank() == 4 && inType.getDimsOrder() == inTargetOrder &&
+                outType.getDimsOrder() == outTargetOrder) {
+                return targetOp;
+            }
+        }
+    }
+    return nullptr;
+}
+
+bool ReshapeMVNPattern::isSupportedGroupConv() {
+    const auto log = _log.nest();
+
+    if (_groupConvOp == nullptr) {
+        log.trace("GroupConv match failed: No GroupConv operation found");
+        return false;
+    }
+
+    const auto isGreaterThanOne = [](const int64_t val) {
+        return val > 1;
+    };
+
+    const auto isNotEqualZero = [](const int64_t val) {
+        return val != 0;
+    };
+    // Pattern matching in this pass is quite complex and slow, should be refactored to use
+    // better options than applyPatternsAndFoldGreedily -> E#148655
+    if (auto inFilter = _groupConvOp.getFilter(); !mlir::dyn_cast<Const::DeclareOp>(inFilter.getDefiningOp())) {
+        _log.trace("GroupConvolution filter input not constant");
+        // Filter may not be constant, it can be runtime dequantized and reordered
+        // However this pattern will disable runtime quantization
+        auto reorderOp = _groupConvOp.getFilter().getDefiningOp<IE::ReorderOp>();
+        if (!reorderOp) {
+            _log.trace("GroupConvolution filter !reorderOp");
+            return false;
+        }
+
+        auto dequantize = reorderOp.getInput().getDefiningOp<IE::DequantizeOp>();
+        if (!dequantize) {
+            _log.trace("GroupConvolution filter !dequantize");
+            return false;
+        }
+        auto quantizedConst = dequantize.getInput().getDefiningOp<Const::DeclareOp>();
+        if (quantizedConst == nullptr) {
+            _log.trace("GroupConvolution filter !quantizedConst");
+            return false;
+        }
+    }
+
+    if (_groupConvOp.getBias()) {
+        log.trace("GroupConv match failed: GroupConv with bias is not implemented");
+        return false;
+    }
+
+    auto filterShape = getShape(_groupConvOp.getFilter());
+    if (filterShape[Dims4D::Filter::KX] != 1 || filterShape[Dims4D::Filter::KY] != 1 ||
+        filterShape[Dims4D::Filter::OC] != _groupConvOp.getGroups().value() || filterShape[Dims4D::Filter::IC] != 1) {
+        log.trace("GroupConv match failed: Unsupported filter shape");
+        return false;
+    }
+
+    if (llvm::any_of(parseIntArrayAttr<int64_t>(_groupConvOp.getStrides()), isGreaterThanOne)) {
+        log.trace("GroupConv match failed: Strides should all be one");
+        return false;
+    }
+    if (llvm::any_of(parseIntArrayAttr<int64_t>(_groupConvOp.getDilations()), isGreaterThanOne)) {
+        log.trace("GroupConv match failed: Dilations should all be one");
+        return false;
+    }
+    if (llvm::any_of(parseIntArrayAttr<int64_t>(_groupConvOp.getPadsBegin()), isNotEqualZero)) {
+        log.trace("GroupConv match failed: PadsBegin should all be zero");
+        return false;
+    }
+    if (llvm::any_of(parseIntArrayAttr<int64_t>(_groupConvOp.getPadsEnd()), isNotEqualZero)) {
+        log.trace("GroupConv match failed: PadsEnd should all be zero");
+        return false;
+    }
+
+    return true;
+}
+
+// Base Pattern:
+// From:
+// Input(NHWC) -> Reorder(NCHW) -> Reshape(NCHW) -> Reorder(NHWC) -> MVN(NHWC) ->
+//                Reorder(NCHW) -> Reshape(NCHW) -> Reorder(NHWC) -> Output(NHWC)
+// To:
+// Input(NHWC) -> MVN(NHWC) -> Output(NHWC)
+//
+// Variant 1:
+// From:
+// Input(NHWC) -> Reorder(NCHW) -> Reshape(NCHW) -> Reorder(NHWC) -> MVN(NHWC) -> Reorder(NCHW) ->
+//         [AffineReshape(NCHW) -> Reorder(NHWC) -> GroupConv(NHWC) -> Reorder(NCHW)] ->
+//                Reshape(NCHW) -> Reorder(NHWC) -> Output(NHWC)
+// To:
+// Input(NHWC) -> MVN(NHWC) -> GroupConv(NHWC) -> Output(NHWC)
+//
+// Variant 2:
+// From:
+// Concat(NCHW)
+//   ├─ Reorder(NHWC) -> [...]
+//   └─ Reshape(NCHW) -> Reorder(NHWC) -> MVN(NHWC) -> Reorder(NCHW) ->
+//                       Reshape(NCHW) -> Reorder(NHWC) -> Output(NHWC)
+// To:
+// Concat(NCHW) -> Reorder(NHWC)
+//                       ├─ [...]
+//                       └─ MVN(NHWC) -> Output(NHWC)
+
+bool ReshapeMVNPattern::init() {
+    const auto log = _log.nest();
+    const auto mvnInType = mlir::cast<NDTypeInterface>(_mvnOp.getInput().getType());
+
+    if (mvnInType.getRank() != 4 || mvnInType.getDimsOrder() != DimsOrder::NHWC) {
+        log.trace("Only support 4D MVN with NHWC layout but got {0}", mvnInType.getDimsOrder());
+        return false;
+    }
+
+    if (!_mvnOp.getOutput().hasOneUse() || _mvnOp.getInternalReshape().has_value()) {
+        log.trace("Only support single user MVN without Internal Reshape");
+        return false;
+    }
+
+    // Check pattern before MVN Op:
+    // Input(NHWC) -> Reorder1(NCHW) -> Reshape2(NCHW) -> Reorder3(NHWC) -> MVN(NHWC)
+    auto reorder3 = getTargetOpWithSpecificLayoutAndSingleUser<IE::ReorderOp>(_mvnOp.getInput().getDefiningOp(),
+                                                                              DimsOrder::NCHW, DimsOrder::NHWC);
+    if (reorder3 == nullptr) {
+        log.trace("Match failed: [Reorder]->MVN");
+        return false;
+    }
+    auto reshape2 = getTargetOpWithSpecificLayoutAndSingleUser<IE::ReshapeOp>(reorder3.getInput().getDefiningOp(),
+                                                                              DimsOrder::NCHW, DimsOrder::NCHW);
+    if (reshape2 == nullptr) {
+        log.trace("Match failed: [Reshape]->Reorder->MVN");
+        return false;
+    }
+    auto reorder1 = getTargetOpWithSpecificLayoutAndSingleUser<IE::ReorderOp>(reshape2.getInput().getDefiningOp(),
+                                                                              DimsOrder::NHWC, DimsOrder::NCHW);
+
+    if (reorder1 != nullptr) {
+        _patternIn = reorder1.getInput();
+    } else {
+        auto concatOp = mlir::dyn_cast_or_null<IE::ConcatOp>(reshape2.getInput().getDefiningOp());
+
+        if (concatOp == nullptr) {
+            log.trace("Match failed: [Reorder]->Reshape->Reorder->MVN");
+            return false;
+        }
+
+        for (auto user : concatOp.getResult().getUsers()) {
+            if (auto reorderInner = getTargetOpWithSpecificLayoutAndSingleUser<IE::ReorderOp>(user, DimsOrder::NCHW,
+                                                                                              DimsOrder::NHWC)) {
+                _patternIn = reorderInner.getOutput();
+                break;
+            }
+        }
+    }
+
+    if (_patternIn == nullptr) {
+        log.trace("Match failed: [Reorder]->Reshape->Reorder->MVN");
+        return false;
+    }
+
+    // Check pattern after MVN Op:
+    // MVN(NHWC) -> Reorder4(NCHW)
+    auto reorder4 = getTargetOpWithSpecificLayoutAndSingleUser<IE::ReorderOp>(*(_mvnOp.getOutput().getUsers().begin()),
+                                                                              DimsOrder::NHWC, DimsOrder::NCHW);
+    if (reorder4 == nullptr) {
+        log.trace("Match failed: MVN->[Reorder]");
+        return false;
+    }
+
+    _patternOut = reorder4.getOutput();
+
+    // Check [Optional Part] pattern
+    // [AffineReshape(NCHW) -> Reorder(NHWC) -> GroupConv(NHWC) -> Reorder(NCHW)]
+    if (auto affineReshape = getTargetOpWithSpecificLayoutAndSingleUser<IE::AffineReshapeOp>(
+                *(_patternOut.getUsers().begin()), DimsOrder::NCHW, DimsOrder::NCHW)) {
+        auto reorderPreGc = getTargetOpWithSpecificLayoutAndSingleUser<IE::ReorderOp>(
+                *(affineReshape.getOutput().getUsers().begin()), DimsOrder::NCHW, DimsOrder::NHWC);
+        if (reorderPreGc == nullptr) {
+            log.trace("Match failed: MVN->AffineReshape->[Reorder]");
+            return false;
+        }
+
+        _groupConvOp = getTargetOpWithSpecificLayoutAndSingleUser<IE::GroupConvolutionOp>(
+                *(reorderPreGc.getOutput().getUsers().begin()), DimsOrder::NHWC, DimsOrder::NHWC);
+
+        if (!isSupportedGroupConv()) {
+            log.trace("Match failed: MVN->AffineReshape->Reorder->[GroupConv]");
+            return false;
+        }
+
+        auto reorderPostGc = getTargetOpWithSpecificLayoutAndSingleUser<IE::ReorderOp>(
+                *(_groupConvOp.getOutput().getUsers().begin()), DimsOrder::NHWC, DimsOrder::NCHW);
+        if (reorderPostGc == nullptr) {
+            log.trace("Match failed: MVN->AffineReshape->Reorder->GroupConv->[Reorder]");
+            return false;
+        }
+
+        _patternOut = reorderPostGc.getOutput();
+    }
+
+    // Back to common pattern
+    // MVN(NHWC) -> Reorder4(NCHW) -> [Optional Part](NCHW) -> Reshape5(NCHW) -> Reorder6(NHWC) -> Output(NHWC)
+    auto reshape5 = getTargetOpWithSpecificLayoutAndSingleUser<IE::ReshapeOp>(*(_patternOut.getUsers().begin()),
+                                                                              DimsOrder::NCHW, DimsOrder::NCHW);
+    if (reshape5 == nullptr) {
+        log.trace("Match failed: MVN->Reorder->(Optional Part)->[Reshape]");
+        return false;
+    }
+
+    auto reorder6 = getTargetOpWithSpecificLayoutAndSingleUser<IE::ReorderOp>(
+            *(reshape5.getOutput().getUsers().begin()), DimsOrder::NCHW, DimsOrder::NHWC);
+    if (reorder6 == nullptr) {
+        log.trace("Match failed: MVN->Reorder->(Optional Part)->Reshape->[Reorder]");
+        return false;
+    }
+
+    _patternOut = reorder6.getOutput();
+
+    // Check patern input and output has the same type
+    auto patternInType = mlir::cast<NDTypeInterface>(_patternIn.getType());
+    auto patternOutType = mlir::cast<NDTypeInterface>(_patternOut.getType());
+    if (patternInType != patternOutType) {
+        log.trace("Mismatching pattern input type {0} and output type {1}", patternInType, patternOutType);
+        return false;
+    }
+
+    // Checks for C reshape value
+    _newChannelSize = patternInType.getShape()[Dims4D::Act::C];
+    _origChannelSize = mvnInType.getShape()[Dims4D::Act::C];
+    if ((_newChannelSize % _origChannelSize) || (_newChannelSize <= _origChannelSize)) {
+        log.trace("Expecting in-C to be a multiple of reshaped-C, got {0}, {1}", _newChannelSize, _origChannelSize);
+        return false;
+    }
+
+    return true;
+}
+
+mlir::LogicalResult ReshapeMVNPattern::replacePattern() {
+    mlir::OpBuilder builder(_mvnOp);
+    auto ctx = builder.getContext();
+
+    const auto mvnInputType = mlir::cast<NDTypeInterface>(_mvnOp.getInput().getType());
+    auto internalReshapeAttr = getIntArrayAttr(ctx, mvnInputType.getShape());
+
+    auto cloneOpAndReplaceInputs = [&](mlir::Operation* op, SmallVector<mlir::Value> origInputs,
+                                       SmallVector<mlir::Value> newInputs) -> mlir::Operation* {
+        mlir::IRMapping mapper;
+        mapper.map(origInputs, newInputs);
+        return builder.clone(*op, mapper);
+    };
+
+    auto newMvnOp = mlir::cast<IE::MVNOp>(cloneOpAndReplaceInputs(_mvnOp, {_mvnOp.getInput()}, {_patternIn}));
+    newMvnOp.setInternalReshapeAttr(internalReshapeAttr);
+    vpux::inferReturnTypes(newMvnOp, vpux::InferShapedTypeMode::ALL);
+
+    auto patternOutVal = newMvnOp.getResult();
+    if (_groupConvOp != nullptr) {
+        auto filter = _groupConvOp.getFilter();
+        auto filterConst = filter.getDefiningOp<Const::DeclareOp>();
+        if (!filterConst) {
+            auto reorderOp = filter.getDefiningOp<IE::ReorderOp>();
+            auto permute = DimsOrder::fromAffineMap(reorderOp.getDstOrder());
+            auto dequantize = reorderOp.getInput().getDefiningOp<IE::DequantizeOp>();
+            auto quantizedConst = dequantize.getInput().getDefiningOp<Const::DeclareOp>();
+            const auto qType = quantizedConst.getType().cast<vpux::NDTypeInterface>();
+            const auto qElemType = qType.getElementType().cast<mlir::quant::QuantizedType>();
+            const auto outType = dequantize.getType().cast<vpux::NDTypeInterface>();
+            const auto newConstType = outType.changeElemType(qElemType.getExpressedType()).changeDimsOrder(permute);
+            auto newConstAttr = quantizedConst.transformContentAttr().dequantize().reorder(permute).get();
+
+            auto inFilter = builder.create<Const::DeclareOp>(filter.getLoc(), newConstType, std::move(newConstAttr));
+            inFilter->setLoc(quantizedConst->getLoc());
+            _log.trace("GroupConvolution filter dequantized");
+            filterConst = inFilter;
+        }
+        const auto filterContent = filterConst.getContent();
+        const auto filterVals = filterContent.getValues<float>();
+        SmallVector<float> newFilterVals;
+        if (filterContent.isSplat()) {
+            newFilterVals.push_back(filterVals[0]);
+        } else {
+            int64_t repeatSize = _newChannelSize / _origChannelSize;
+            for (int64_t idx = 0; idx < _origChannelSize; idx++) {
+                newFilterVals.insert(newFilterVals.end(), repeatSize, filterVals[idx]);
+            }
+        }
+
+        const auto newFilterShape = Shape{_newChannelSize, 1, 1, 1};
+        const auto filterType = mlir::cast<NDTypeInterface>(filterConst.getOutput().getType());
+        const auto dataStorageType = mlir::cast<mlir::RankedTensorType>(filterType.changeShape(newFilterShape));
+        auto newFilter = Const::createFloatConst(builder, filter.getLoc(), dataStorageType, newFilterVals);
+
+        auto newGroupConvOp = mlir::cast<IE::GroupConvolutionOp>(cloneOpAndReplaceInputs(
+                _groupConvOp, {_groupConvOp.getInput(), _groupConvOp.getFilter()}, {newMvnOp.getResult(), newFilter}));
+        newGroupConvOp.setGroupsAttr(getIntAttr(builder, _newChannelSize));
+        vpux::inferReturnTypes(newGroupConvOp, vpux::InferShapedTypeMode::ALL);
+
+        patternOutVal = newGroupConvOp.getResult();
+    }
+    _patternOut.replaceAllUsesWith(patternOutVal);
+
+    _log.trace("Implementing fuse Reshape and MVN pattern");
+
+    return mlir::success();
+}
+
+//
 // FuseReshapeMvn
 //
 
@@ -100,196 +396,14 @@ private:
     Logger _log;
 };
 
-mlir::LogicalResult FuseReshapeMvn::matchAndRewrite(IE::MVNOp origOp, mlir::PatternRewriter& rewriter) const {
-    const auto inType = origOp.getInput().getType().cast<NDTypeInterface>();
-
-    if (inType.getDimsOrder() != DimsOrder::NHWC) {
-        _log.trace("Only targeting NHWC layout.");
+mlir::LogicalResult FuseReshapeMvn::matchAndRewrite(IE::MVNOp origOp, mlir::PatternRewriter& /*rewriter*/) const {
+    _log.trace("[{0}] Got '{1}' at '{2}'", this->getDebugName(), origOp->getName(), origOp.getLoc());
+    auto pattern = ReshapeMVNPattern(origOp, _log);
+    if (!pattern.init()) {
         return mlir::failure();
     }
 
-    if (origOp.getInternalReshape().has_value()) {
-        _log.trace("Op has already an internal reshape attr.");
-        return mlir::failure();
-    }
-
-    // Input pattern (before MVN)
-    auto reorder3 = origOp.getInput().getDefiningOp<IE::ReorderOp>();
-    if (!reorder3) {
-        _log.trace("[op] not found: [Reorder]->MVN");
-        return mlir::failure();
-    }
-    auto reshape2 = reorder3.getInput().getDefiningOp<IE::ReshapeOp>();
-    if (!reshape2) {
-        _log.trace("[op] not found: [Reshape]->Reorder->MVN.");
-        return mlir::failure();
-    }
-    auto reorder1 = reshape2.getInput().getDefiningOp<IE::ReorderOp>();
-    if (!reorder1) {
-        _log.trace("[op] not found: [Reorder]->Reshape->Reorder->MVN.");
-        return mlir::failure();
-    }
-
-    // Output pattern (after MVN)
-    auto reorder5 = mlir::dyn_cast<IE::ReorderOp>(*(origOp.getOutput().getUsers().begin()));
-    if (!reorder5) {
-        _log.trace("[op] not found: MVN->[Reorder]");
-        return mlir::failure();
-    }
-    // Last common op for the two patterns
-    mlir::Operation* lastOp = reorder5.getOperation();
-    IE::GroupConvolutionOp groupConv = nullptr;
-
-    // After 'reorder5' check [optional] pattern
-    if (auto affineReshape = mlir::dyn_cast<IE::AffineReshapeOp>(*lastOp->getResult(0).getUsers().begin())) {
-        auto reorderPreGc = mlir::dyn_cast<IE::ReorderOp>(*(affineReshape.getOutput().getUsers().begin()));
-        if (!reorderPreGc) {  // -> NHWC
-            _log.trace("[op] not found: MVN->AffineReshape->[Reorder]");
-            return mlir::failure();
-        }
-
-        groupConv = mlir::dyn_cast<IE::GroupConvolutionOp>(*(reorderPreGc.getOutput().getUsers().begin()));
-        if (!groupConv) {
-            _log.trace("[op] not found: MVN->AffineReshape->Reorder->[GroupConvolution]");
-            return mlir::failure();
-        }
-
-        auto reorderPostGc = mlir::dyn_cast<IE::ReorderOp>(*(groupConv.getOutput().getUsers().begin()));
-        if (!reorderPostGc) {  // -> NCHW
-            _log.trace("[op] not found: MVN->AffineReshape->Reorder->GroupConvolution->[Reorder]");
-            return mlir::failure();
-        }
-        lastOp = reorderPostGc;
-    }
-
-    // Back to common pattern
-    auto reshape6 = mlir::dyn_cast<IE::ReshapeOp>(*lastOp->getResult(0).getUsers().begin());
-    if (!reshape6) {
-        _log.trace("[op] not found: MVN->Reorder->(...)->[Reshape]");
-        return mlir::failure();
-    }
-
-    auto reorder7 = mlir::dyn_cast<IE::ReorderOp>(*(reshape6.getOutput().getUsers().begin()));
-    if (!reorder7) {
-        _log.trace("[op] not found: MVN->Reorder->(...)->Reshape->[Reorder]");
-        return mlir::failure();
-    }
-
-    auto oneUseChain = reorder3.getOutput().hasOneUse() && reshape2.getOutput().hasOneUse() &&
-                       reorder1.getOutput().hasOneUse() && reorder5.getOutput().hasOneUse() &&
-                       reshape6.getOutput().hasOneUse() && reorder7.getOutput().hasOneUse();
-    if (!oneUseChain) {
-        _log.trace("Multiple users found in the chain.");
-        return mlir::failure();
-    }
-
-    const auto checkReorder = [](IE::ReorderOp op, DimsOrder iOrder, DimsOrder oOrder) -> bool {
-        const auto iType = op.getInput().getType().cast<NDTypeInterface>();
-        const auto oType = op.getOutput().getType().cast<NDTypeInterface>();
-        return (iType.getDimsOrder() == iOrder) && (oType.getDimsOrder() == oOrder);
-    };
-
-    if (!checkReorder(reorder1, DimsOrder::NHWC, DimsOrder::NCHW) ||
-        !checkReorder(reorder3, DimsOrder::NCHW, DimsOrder::NHWC) ||
-        !checkReorder(reorder5, DimsOrder::NHWC, DimsOrder::NCHW) ||
-        !checkReorder(reorder7, DimsOrder::NCHW, DimsOrder::NHWC)) {
-        _log.trace("Unexpected Reorder i/o dims-order.");
-        return mlir::failure();
-    }
-
-    // Check the entire chain in/out shape is the same
-    const auto newInp = reorder1.getInput().getType().cast<NDTypeInterface>();
-    const auto newOut = reorder7.getInput().getType().cast<NDTypeInterface>();
-    if (newInp.getShape() != newOut.getShape()) {
-        _log.trace("Mismatching i/o shapes.");
-        return mlir::failure();
-    }
-
-    // Checks for C reshape value
-    const auto inCh = newInp.getShape().raw()[Dims4D::Act::C.ind()];
-    const auto reCh = inType.getShape().raw()[Dims4D::Act::C.ind()];
-    const auto ratio = inCh / reCh;
-    const auto simdFactor = 16;  // Shave detail using float16 (MVN1MeanVar impl)
-    if ((inCh % reCh) || (inCh <= reCh) || (ratio > simdFactor) || (simdFactor % ratio)) {
-        // Current limitation for max reshape factor = 16 comes from current Shave impl.
-        // E.g. supported cases:
-        //  512->32 ch means reshape factor = 512/32 = 16
-        //  256->32 ch means reshape factor = 256/32 = 8
-        _log.trace("Expecting in/out C reshape factor to be an divisor of {0}", simdFactor);
-        return mlir::failure();
-    }
-
-    auto origShape = origOp.getOutput().getType().cast<NDTypeInterface>().getShape();
-    auto internalReshapeAttr = getIntArrayAttr(rewriter.getContext(), origShape.toValues());
-
-    if (!groupConv) {
-        auto newMvnOp =
-                rewriter.create<IE::MVNOp>(origOp->getLoc(), reorder1.getInput(), origOp.getAcrossChannelsAttr(),
-                                           origOp.getNormalizeVarianceAttr(), origOp.getEpsAttr(), internalReshapeAttr);
-        reorder7.replaceAllUsesWith(newMvnOp.getResult());
-    } else {
-        auto inFilter = groupConv.getFilter().getDefiningOp<Const::DeclareOp>();
-        if (!inFilter) {
-            _log.trace("GroupConvolution filter input not constant");
-            return mlir::failure();
-        }
-        if (groupConv.getBias()) {
-            _log.trace("GroupConvolution bias not implemented");
-            return mlir::failure();
-        }
-        auto contentAttr = inFilter.getContentAttr();
-        auto contentAttrType = contentAttr.getType();
-        auto contentAttrShape = contentAttrType.getShape().raw();
-        if ((contentAttrShape[Dims4D::Filter::IC.ind()] != 1) || (contentAttrShape[Dims4D::Filter::KX.ind()] != 1) ||
-            (contentAttrShape[Dims4D::Filter::KY.ind()] != 1)) {
-            _log.trace("GroupConvolution is not a per-channel Multiply");
-            return mlir::failure();
-        }
-
-        auto gcInputType = groupConv.getInput().getType();
-        SmallVector<int64_t> newFilterShape = {inCh, 1, 1, 1};
-        auto elemType = gcInputType.cast<NDTypeInterface>().getElementType();
-
-        const DimsOrder filterOrder = DimsOrder::NHWC;
-        auto ctx = rewriter.getContext();
-        auto newFilterAttr = vpux::getTensorAttr(filterOrder.toAffineMap(ctx), nullptr, nullptr);
-        auto newFilterType = mlir::RankedTensorType::get(newFilterShape, elemType, newFilterAttr);
-        const auto foldedAttr = contentAttr.fold();
-        SmallVector<float> foldedVals = foldedAttr.getValues<float>();
-
-        mlir::DenseElementsAttr newFoldedValsAttr;
-        if (contentAttr.isSplat()) {
-            newFoldedValsAttr = wrapData(newFilterType, foldedVals[0]);
-        } else {
-            int64_t repl = inCh / reCh;
-            SmallVector<float> expandfoldedVals;
-            for (int64_t c = 0; c < reCh; c++) {
-                expandfoldedVals.insert(expandfoldedVals.end(), repl, foldedVals[c]);
-            }
-            newFoldedValsAttr = wrapData(newFilterType, expandfoldedVals);
-        }
-
-        auto newConstOp = rewriter.create<vpux::Const::DeclareOp>(inFilter.getLoc(), newFilterType,
-                                                                  Const::ContentAttr::get(newFoldedValsAttr));
-
-        const auto padBeginAttr = groupConv.getPadsBeginAttr();
-        const auto padEndAttr = groupConv.getPadsEndAttr();
-        const auto dilationsAttr = groupConv.getDilationsAttr();
-        const auto stridesAttr = groupConv.getStridesAttr();
-        const auto groupAttr = getIntAttr(rewriter, inCh);
-
-        auto newMvnOp =
-                rewriter.create<IE::MVNOp>(origOp->getLoc(), reorder1.getInput(), origOp.getAcrossChannelsAttr(),
-                                           origOp.getNormalizeVarianceAttr(), origOp.getEpsAttr(), internalReshapeAttr);
-        auto newGroupConv = rewriter.create<IE::GroupConvolutionOp>(
-                groupConv.getLoc(), newMvnOp.getResult(), newConstOp, nullptr, stridesAttr, padBeginAttr, padEndAttr,
-                dilationsAttr, groupAttr,
-                /*post_opAttr=*/nullptr, /*clampAttr=*/nullptr, /*outputChannels=*/nullptr, /*inputChannels=*/nullptr);
-
-        reorder7.replaceAllUsesWith(newGroupConv.getResult());
-    }
-
-    return mlir::success();
+    return pattern.replacePattern();
 }
 
 //

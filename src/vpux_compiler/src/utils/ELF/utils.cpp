@@ -4,27 +4,12 @@
 //
 
 #include "vpux/compiler/utils/ELF/utils.hpp"
+#include <llvm/Support/raw_ostream.h>
 
 #include <vpux_elf/accessor.hpp>
 #include <vpux_elf/reader.hpp>
+#include "vpux/compiler/NPU40XX/dialect/ELF/ops.hpp"
 #include "vpux/compiler/act_kernels/shave_binary_resources.h"
-#include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
-
-namespace {
-
-SmallString getSwKernelArchString(VPU::ArchKind archKind) {
-    switch (archKind) {
-    case VPU::ArchKind::NPU37XX:
-        return SmallString("3720xx");
-    case VPU::ArchKind::NPU40XX:
-        return SmallString("4000xx");
-    default:
-        VPUX_THROW("unsupported archKind {0}", archKind);
-        return SmallString("");
-    }
-}
-
-}  // namespace
 
 ArrayRef<uint8_t> vpux::ELF::getDataAndSizeOfElfSection(ArrayRef<uint8_t> elfBlob,
                                                         ArrayRef<StringRef> possibleSecNames) {
@@ -92,7 +77,7 @@ ArrayRef<uint8_t> vpux::ELF::getKernelELF(mlir::Operation* operation, StringRef 
                                           ArrayRef<StringRef> sectionNames) {
     const auto& kernelInfo = ShaveBinaryResources::getInstance();
     const auto archKind = VPU::getArch(operation);
-    const auto arch = getSwKernelArchString(archKind);
+    const auto arch = ShaveBinaryResources::getSwKernelArchString(archKind);
     llvm::ArrayRef<uint8_t> elfBlob = kernelInfo.getElf(kernelPath, arch);
 
     return sectionNames.empty() ? elfBlob : vpux::ELF::getDataAndSizeOfElfSection(elfBlob, sectionNames);
@@ -202,4 +187,90 @@ mlir::MemRefType vpux::ELF::getLinearMemrefType(mlir::MLIRContext* ctx, int64_t 
 
     auto memrefType = mlir::MemRefType::get(memrefShape, dataType, map, memKindSymbolAttr);
     return memrefType;
+}
+
+mlir::SymbolRefAttr vpux::ELF::moveOpToSection(mlir::Operation* op, SectionMapper& sectionMap,
+                                               mlir::OpBuilder& builder) {
+    auto wrapOp = mlir::dyn_cast<ELF::WrappableOpInterface>(op);
+    if (!wrapOp) {
+        return {};
+    }
+
+    auto maybeSignature = wrapOp.getSectionSignature();
+    if (!maybeSignature.has_value()) {
+        return {};
+    }
+
+    auto signature = *maybeSignature;
+
+    auto createSection = [&](const ELF::SectionSignature& signature, bool memFootprint, size_t opAling) {
+        // Only enforce LCM alignment in case of sections that get allocated
+        auto secAlignReq = ELF::bitEnumContainsAll(signature.getFlags(), ELF::SectionFlagsAttr::SHF_ALLOC)
+                                   ? ELF::math::lcm(elf::VPU_SH_ADDR_ALIGN_FOR_VPU, opAling)
+                                   : opAling;
+        if (memFootprint) {
+            auto sec = builder.create<ELF::DataSectionOp>(builder.getUnknownLoc(),
+                                                          signature.getName(),  // llvm::StringRef secName
+                                                          secAlignReq,          // int64_t secAddrAlign
+                                                          signature.getType(),  // ELFVPUX40XX secType
+                                                          signature.getFlags()  // ELFVPUX40XX secFlags
+            );
+
+            return mlir::cast<ELF::ElfSectionInterface>(sec.getOperation());
+        } else {
+            auto sec = builder.create<ELF::LogicalSectionOp>(builder.getUnknownLoc(),
+                                                             signature.getName(),  // llvm::StringRef secName
+                                                             secAlignReq,          // int64_t secAddrAlign
+                                                             signature.getType(),  // ELFVPUX40XX secType
+                                                             signature.getFlags()  // ELFVPUX40XX secFlags
+            );
+
+            return mlir::cast<ELF::ElfSectionInterface>(sec.getOperation());
+        }
+    };
+
+    auto sectionMapKey = sectionMap.find(signature);
+    if (sectionMapKey != sectionMap.end()) {
+        auto secInterface = sectionMapKey->second;
+
+        auto sectionBlock = secInterface.getBlock();
+        op->moveAfter(&sectionBlock->back());
+    } else {
+        auto hasMemFootprint = wrapOp.hasMemoryFootprint();
+        const auto arch = VPU::getArch(wrapOp.getOperation());
+        auto opAddrAling = wrapOp.getAlignmentRequirements(arch);
+
+        auto secInterface = createSection(signature, hasMemFootprint, opAddrAling);
+        mlir::Block* sectionBlock = secInterface.getBlock();
+        op->moveBefore(sectionBlock, sectionBlock->end());
+
+        sectionMap[signature] = secInterface;
+    }
+
+    auto symbolOp = mlir::cast<mlir::SymbolOpInterface>(op);
+    auto symbolRef = mlir::FlatSymbolRefAttr::get(symbolOp.getNameAttr());
+    auto symContainer = mlir::cast<mlir::SymbolOpInterface>(sectionMap[signature].getOperation());
+    return mlir::SymbolRefAttr::get(symContainer.getNameAttr(), {symbolRef});
+}
+
+mlir::SymbolRefAttr vpux::ELF::cloneSectionSymbol(mlir::SymbolRefAttr from, mlir::SymbolRefAttr to) {
+    auto symbolSection = from.getRootReference();
+    auto symbolOpRef = mlir::FlatSymbolRefAttr::get(to.getRootReference());
+    return mlir::SymbolRefAttr::get(symbolSection, {symbolOpRef});
+}
+
+void vpux::ELF::insertELFMain(mlir::func::FuncOp netFunc) {
+    // create the main ELF op alongside the netFunc
+    auto mainBuilder = mlir::OpBuilder(netFunc.getOperation());
+    auto elf = mainBuilder.create<ELF::MainOp>(netFunc->getLoc(), "ELFMain");
+
+    // take the body of the netFunc and put everything inside ELF Op, so we avoid clone of all OPS
+    elf.getContent().takeBody(netFunc.getBody());
+    auto netFuncBlock = netFunc.addEntryBlock();
+
+    elf.getOperation()->moveBefore(netFuncBlock, netFuncBlock->end());
+
+    // as we've moved the whole function we also moved the terminator
+    auto terminator = elf.getContent().front().getTerminator();
+    terminator->moveAfter(elf.getOperation());
 }

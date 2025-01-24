@@ -7,10 +7,6 @@
 
 #include "vpux/compiler/NPU40XX/dialect/ELF/passes.hpp"
 
-#include "vpux/compiler/utils/adjust_layout_utils.hpp"
-#include "vpux/compiler/utils/logging.hpp"
-#include "vpux/compiler/utils/types.hpp"
-
 #include <mlir/Transforms/DialectConversion.h>
 
 using namespace vpux;
@@ -40,8 +36,6 @@ void recursivelyRemove(mlir::Operation* symbol, ELF::MainOp main, llvm::SmallVec
 
     toErase.push_back(symbol);
     symbol->remove();
-
-    return;
 }
 
 class RemoveEmptyELFSectionsPass : public ELF::RemoveEmptyELFSectionsBase<RemoveEmptyELFSectionsPass> {

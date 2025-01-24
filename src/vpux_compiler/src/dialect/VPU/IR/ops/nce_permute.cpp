@@ -299,7 +299,7 @@ bool vpux::VPU::NCEPermuteOp::checkStrategyCompatibility(VPU::MultiClusterStrate
     const auto origInputShape = getShape(this->getInput());
     const auto expandedChannels = this->getExpandedChannels();
     return strategy == VPU::MultiClusterStrategy::SplitOverHeightOverlapped ||
-           ((arch == VPU::ArchKind::NPU40XX) && strategy == VPU::MultiClusterStrategy::SplitOverKernel &&
+           (arch == VPU::ArchKind::NPU40XX && strategy == VPU::MultiClusterStrategy::SplitOverKernel &&
             origInputShape[Dims4D::Act::C] == expandedChannels);
 }
 

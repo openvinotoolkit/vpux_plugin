@@ -179,20 +179,118 @@ void lowerToRegIDUInputLayerCfgOp(
 }
 
 template <typename Type_Registers>
-void lowerToRegIDUWeightsOp(
+void lowerToRegCommonIDUWeightsOp(
         VPUIPDPU::IDUWeightsOp op,
         std::map<std::string, std::map<std::string, vpux::VPURegMapped::RegFieldValue>>& initValues) {
     auto wmode = checked_cast_reg<typename Type_Registers::TRegField_wmodeType>(
             getTensorMode<typename Type_Registers::TRegField_wmodeType,
                           typename Type_Registers::TTensorModeAcceptedRegisters>(op.getWmode()));
     auto wtDense = checked_cast_reg<typename Type_Registers::TRegField_wt_denseType>(!op.getWtSparse());
+    auto wtPltCfg = checked_cast_reg<typename Type_Registers::TRegField_wt_plt_cfgType>(op.getWtPltCfg());
     VPURegMapped::updateRegMappedInitializationValues(
-            initValues, {{"tensor_mode", {{"wmode", wmode}}}, {"kernel_pad_cfg", {{"wt_dense", wtDense}}}});
+            initValues, {{"tensor_mode", {{"wmode", wmode}}},
+                         {"kernel_pad_cfg", {{"wt_dense", wtDense}, {"wt_plt_cfg", wtPltCfg}}}});
     if (op.getPoolWtData().has_value()) {
         auto poolWtData =
                 checked_cast_reg<typename Type_Registers::TRegField_pool_wt_dataType>(op.getPoolWtData().value());
         VPURegMapped::updateRegMappedInitializationValues(initValues,
                                                           {{"elops_wload", {{"pool_wt_data", poolWtData}}}});
+    }
+}
+
+template <typename Type_Registers>
+void lowerToRegIDUWeightsOp(
+        VPUIPDPU::IDUWeightsOp op,
+        std::map<std::string, std::map<std::string, vpux::VPURegMapped::RegFieldValue>>& initValues) {
+    lowerToRegCommonIDUWeightsOp<Type_Registers>(op, initValues);
+    if (op.getQuantilesLut().has_value()) {
+        auto wmode = checked_cast_reg<typename Type_Registers::TRegField_wmodeType>(
+                getTensorMode<typename Type_Registers::TRegField_wmodeType,
+                              typename Type_Registers::TTensorModeAcceptedRegisters>(op.getWmode()));
+        auto quantilesLut = op.getQuantilesLut().value();
+        constexpr unsigned numPalletTableEntries = 16;
+        VPUX_THROW_UNLESS((quantilesLut.size() <= numPalletTableEntries),
+                          "Number of palletization table entries ({0}) exceeds maximum of 16", quantilesLut.size());
+        llvm::SmallVector<uint16_t, numPalletTableEntries> quantilesLutValues(numPalletTableEntries, 0);
+
+        auto getPalletModeBitValue = [](const double value, const uint64_t wmode) -> uint16_t {
+            if (wmode == static_cast<uint64_t>(nn_public::VpuInputTensorDType::FP16)) {
+                vpux::type::float16 f16(value);
+                return f16.to_bits();
+            } else if (wmode == static_cast<uint64_t>(nn_public::VpuInputTensorDType::U8)) {
+                int i8 = static_cast<int>(value);
+                return (i8 < 0 ? 0 : static_cast<uint16_t>(i8));
+            } else if (wmode == static_cast<uint64_t>(nn_public::VpuInputTensorDType::I8)) {
+                return static_cast<uint16_t>(static_cast<int>(value));
+            } else if (wmode == static_cast<uint64_t>(nn_public::VpuInputTensorDType::BF16)) {
+                vpux::type::bfloat16 bf16(value);
+                return bf16.to_bits();
+            } else if (wmode == static_cast<uint64_t>(nn_public::VpuInputTensorDType::FP8)) {
+                vpux::type::float8_e5m2 bf8(value);
+                return bf8.to_bits();
+            } else if (wmode == static_cast<uint64_t>(nn_public::VpuInputTensorDType::RESERVED)) {
+                vpux::type::float8_e4m3 hf8(value);
+                return hf8.to_bits();
+            } else {
+                VPUX_THROW("getPalletModeBitValue: Unsupported wmode for palletization table {0}", wmode);
+            }
+            return 0;
+        };
+
+        for (unsigned i = 0; i < quantilesLut.size(); ++i) {
+            double lutEntry = quantilesLut[i].dyn_cast<mlir::FloatAttr>().getValueAsDouble();
+            quantilesLutValues[i] = getPalletModeBitValue(lutEntry, wmode);
+        }
+
+        auto pallet0FieldData =
+                checked_cast_reg<typename Type_Registers::TRegField_plt_idx_0Type>(quantilesLutValues[0]);
+        auto pallet1FieldData =
+                checked_cast_reg<typename Type_Registers::TRegField_plt_idx_1Type>(quantilesLutValues[1]);
+        auto pallet2FieldData =
+                checked_cast_reg<typename Type_Registers::TRegField_plt_idx_2Type>(quantilesLutValues[2]);
+        auto pallet3FieldData =
+                checked_cast_reg<typename Type_Registers::TRegField_plt_idx_3Type>(quantilesLutValues[3]);
+        auto pallet4FieldData =
+                checked_cast_reg<typename Type_Registers::TRegField_plt_idx_4Type>(quantilesLutValues[4]);
+        auto pallet5FieldData =
+                checked_cast_reg<typename Type_Registers::TRegField_plt_idx_5Type>(quantilesLutValues[5]);
+        auto pallet6FieldData =
+                checked_cast_reg<typename Type_Registers::TRegField_plt_idx_6Type>(quantilesLutValues[6]);
+        auto pallet7FieldData =
+                checked_cast_reg<typename Type_Registers::TRegField_plt_idx_7Type>(quantilesLutValues[7]);
+        auto pallet8FieldData =
+                checked_cast_reg<typename Type_Registers::TRegField_plt_idx_8Type>(quantilesLutValues[8]);
+        auto pallet9FieldData =
+                checked_cast_reg<typename Type_Registers::TRegField_plt_idx_9Type>(quantilesLutValues[9]);
+        auto pallet10FieldData =
+                checked_cast_reg<typename Type_Registers::TRegField_plt_idx_10Type>(quantilesLutValues[10]);
+        auto pallet11FieldData =
+                checked_cast_reg<typename Type_Registers::TRegField_plt_idx_11Type>(quantilesLutValues[11]);
+        auto pallet12FieldData =
+                checked_cast_reg<typename Type_Registers::TRegField_plt_idx_12Type>(quantilesLutValues[12]);
+        auto pallet13FieldData =
+                checked_cast_reg<typename Type_Registers::TRegField_plt_idx_13Type>(quantilesLutValues[13]);
+        auto pallet14FieldData =
+                checked_cast_reg<typename Type_Registers::TRegField_plt_idx_14Type>(quantilesLutValues[14]);
+        auto pallet15FieldData =
+                checked_cast_reg<typename Type_Registers::TRegField_plt_idx_15Type>(quantilesLutValues[15]);
+
+        VPURegMapped::updateRegMappedInitializationValues(
+                initValues, {{"pallet0", {{"plt_idx_0", pallet0FieldData}, {"plt_idx_1", pallet1FieldData}}}});
+        VPURegMapped::updateRegMappedInitializationValues(
+                initValues, {{"pallet1", {{"plt_idx_2", pallet2FieldData}, {"plt_idx_3", pallet3FieldData}}}});
+        VPURegMapped::updateRegMappedInitializationValues(
+                initValues, {{"pallet2", {{"plt_idx_4", pallet4FieldData}, {"plt_idx_5", pallet5FieldData}}}});
+        VPURegMapped::updateRegMappedInitializationValues(
+                initValues, {{"pallet3", {{"plt_idx_6", pallet6FieldData}, {"plt_idx_7", pallet7FieldData}}}});
+        VPURegMapped::updateRegMappedInitializationValues(
+                initValues, {{"pallet4", {{"plt_idx_8", pallet8FieldData}, {"plt_idx_9", pallet9FieldData}}}});
+        VPURegMapped::updateRegMappedInitializationValues(
+                initValues, {{"pallet5", {{"plt_idx_10", pallet10FieldData}, {"plt_idx_11", pallet11FieldData}}}});
+        VPURegMapped::updateRegMappedInitializationValues(
+                initValues, {{"pallet6", {{"plt_idx_12", pallet12FieldData}, {"plt_idx_13", pallet13FieldData}}}});
+        VPURegMapped::updateRegMappedInitializationValues(
+                initValues, {{"pallet7", {{"plt_idx_14", pallet14FieldData}, {"plt_idx_15", pallet15FieldData}}}});
     }
 }
 

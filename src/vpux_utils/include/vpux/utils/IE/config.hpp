@@ -7,7 +7,7 @@
 
 #pragma once
 
-#include "intel_npu/al/config/config.hpp"
+#include "intel_npu/config/config.hpp"
 #include "vpux/utils/core/common_logger.hpp"
 
 #include <openvino/runtime/properties.hpp>

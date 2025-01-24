@@ -40,3 +40,45 @@ void vpux::IE::MVNOp::build(::mlir::OpBuilder& builder, ::mlir::OperationState& 
                             ::mlir::FloatAttr eps) {
     build(builder, state, input.getType(), input, across_channels, normalize_variance, eps, {});
 }
+
+//
+// LegalizeEpsAttr
+//
+
+namespace {
+class LegalizeEpsAttr final : public mlir::OpRewritePattern<IE::MVNOp> {
+public:
+    using mlir::OpRewritePattern<IE::MVNOp>::OpRewritePattern;
+
+public:
+    mlir::LogicalResult matchAndRewrite(IE::MVNOp origOp, mlir::PatternRewriter& rewriter) const final;
+};
+
+mlir::LogicalResult LegalizeEpsAttr::matchAndRewrite(IE::MVNOp origOp, mlir::PatternRewriter& rewriter) const {
+    auto epsAttr = origOp.getEpsAttr();
+    if (epsAttr == nullptr) {
+        return mlir::failure();
+    }
+
+    auto eps = epsAttr.getValueAsDouble();
+    auto floatEps = checked_cast<double>(std::numeric_limits<float>::epsilon());
+    if (eps >= floatEps) {
+        return mlir::failure();
+    }
+
+    // Convert double epsilon or smaller value to float epsilon since MVN kernel regards it as float datatype
+    const auto newEpsAttr = getFPAttr(rewriter.getContext(), floatEps);
+    rewriter.replaceOpWithNewOp<IE::MVNOp>(origOp, origOp.getInput(), origOp.getAcrossChannelsAttr(),
+                                           origOp.getNormalizeVarianceAttr(), newEpsAttr);
+    return mlir::success();
+}
+
+}  // namespace
+
+//
+// getCanonicalizationPatterns
+//
+
+void vpux::IE::MVNOp::getCanonicalizationPatterns(mlir::RewritePatternSet& patterns, mlir::MLIRContext* ctx) {
+    patterns.add<LegalizeEpsAttr>(ctx);
+}

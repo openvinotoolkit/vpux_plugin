@@ -14,6 +14,7 @@ namespace vpux {
 // Creating strings support
 //
 
-std::string stringifyPrimaryLocation(mlir::Location location);
+std::string stringifyPrimaryLocation(mlir::Location);
+std::string getLayerTypeFromLocation(mlir::Location);
 
 }  // namespace vpux

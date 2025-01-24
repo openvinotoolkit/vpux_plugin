@@ -276,39 +276,20 @@ FQConstInputs getFakeQuantizeConstInputs(SmallVector<IE::FakeQuantizeOp>& fakeQu
 bool doesFQHaveSameZeroPoint(SmallVector<IE::FakeQuantizeOp> fakeQuantizeOps) {
     SmallVector<int64_t> zeroPoints;
     for (auto fqOp : fakeQuantizeOps) {
-        auto outLowConst = fqOp.getOutputLow().getDefiningOp<Const::DeclareOp>();
-        auto outHighConst = fqOp.getOutputHigh().getDefiningOp<Const::DeclareOp>();
-        const auto outLowAttr = outLowConst.getContentAttr().fold();
-        const auto outHighAttr = outHighConst.getContentAttr().fold();
-        const auto outLowVals = outLowAttr.getValues<double>();
-        const auto outHighVals = outHighAttr.getValues<double>();
+        auto lowConstantOp = fqOp.getOutputLow().getDefiningOp<Const::DeclareOp>();
+        auto highConstantOp = fqOp.getOutputHigh().getDefiningOp<Const::DeclareOp>();
 
-        SmallVector<double> outLows(outLowVals);
-        SmallVector<double> outHighs(outHighVals);
-        const auto broadcast = fqOp.getAutoBroadcast();
-        broadcastRange(outLows, outHighs, broadcast);
-
-        mlir::Type storageType;
-        int64_t qMin = 0;
-        int64_t qMax = 0;
-        const auto levels = fqOp.getLevels();
-        const auto lowFpType = fqOp.getLowFpType();
-        if (levels.has_value()) {
-            std::tie(qMin, qMax, storageType) =
-                    getStorageParams(fakeQuantizeOps.front().getContext(), *levels, /*isSigned=*/false);
-        } else if (lowFpType.has_value()) {
-            std::tie(qMin, qMax, storageType) = getStorageParams(fakeQuantizeOps.front().getContext(), *lowFpType);
-        } else {
-            VPUX_THROW("FakeQuantize op doesn't have levels and lowFpType");
+        if (lowConstantOp == nullptr || highConstantOp == nullptr) {
+            return false;
         }
 
-        SmallVector<int64_t> outZeroPoints(outLows.size());
-
-        // unused variable
-        double outScale = 0.0;
-        loop_1d(LoopExecPolicy::Parallel, outLowConst.getContext(), outLows.size(), [&](size_t i) {
-            std::tie(outScale, outZeroPoints[i]) = calcScaleAndZeroPoint(qMin, qMax, outLows[i], outHighs[i]);
-        });
+        auto outputScalesAndZeroPoints = getScalesAndZeroPointsFromContentAttr(
+                lowConstantOp.getContentAttr(), highConstantOp.getContentAttr(), fqOp.getAutoBroadcast(),
+                fqOp.getLevels(), fqOp.getLowFpType(), /*isSigned=*/false);
+        if (mlir::failed(outputScalesAndZeroPoints)) {
+            return false;
+        }
+        const auto& outZeroPoints = std::get<1>(outputScalesAndZeroPoints.value());
 
         if (!std::equal(outZeroPoints.begin() + 1, outZeroPoints.end(), outZeroPoints.begin())) {
             return false;

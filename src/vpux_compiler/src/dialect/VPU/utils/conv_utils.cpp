@@ -10,6 +10,7 @@
 #include "vpux/compiler/dialect/VPU/utils/nce_invariant.hpp"
 #include "vpux/compiler/dialect/VPU/utils/se_roll_utils.hpp"
 #include "vpux/compiler/utils/error.hpp"
+#include "vpux/utils/core/error.hpp"
 
 using namespace vpux;
 using namespace VPU;
@@ -301,9 +302,6 @@ mlir::LogicalResult vpux::VPU::verifyConvUtil(mlir::Location loc, mlir::Operatio
 }
 
 PadInfo vpux::VPU::shrinkPadsForDilatedConvolution(const PadInfo& pads, const ArrayRef<int64_t> dilations) {
-    const auto dilationY = dilations[Dims4D::Dilation::Y.ind()];
-    const auto dilationX = dilations[Dims4D::Dilation::X.ind()];
-
     // SEP Dilated GroupConv will follow a different path than usual dilated Convolution
     // Current method for dilated convolution is done via kernel expansion
     // 3x3 kernel with dilation 4,4 padding 4,4 will be expanded to 9x9 kernel with dilation 1,1
@@ -312,10 +310,17 @@ PadInfo vpux::VPU::shrinkPadsForDilatedConvolution(const PadInfo& pads, const Ar
     // to 1x1 in this example following calculation below.
     // For more information SEP Dilated Group Convolution E87313 could be checked.
     // If there is no dilation ( dilationY/X =1) this calculation does not change padding.
+
+    // Below formula is only valid for below 3 cases, and padding/dilation is symmetrical
+    // if dilation = padding then newPadding = 1
+    // if padding = 0 then newPadding = 0
+    // No dilation (dilation =1) then padding = originalPadding
+    const auto dilationY = dilations[Dims4D::Dilation::Y.ind()];
+    const auto dilationX = dilations[Dims4D::Dilation::X.ind()];
     PadInfo newPads = pads;
-    newPads.top -= dilationY - 1;
-    newPads.bottom -= dilationY - 1;
-    newPads.left -= dilationX - 1;
-    newPads.right -= dilationX - 1;
+    newPads.top = std::max<int64_t>(newPads.top - dilationY + 1, 0l);
+    newPads.left = std::max<int64_t>(newPads.left - dilationX + 1, 0l);
+    newPads.bottom = std::max<int64_t>(newPads.bottom - dilationY + 1, 0l);
+    newPads.right = std::max<int64_t>(newPads.right - dilationX + 1, 0l);
     return newPads;
 }

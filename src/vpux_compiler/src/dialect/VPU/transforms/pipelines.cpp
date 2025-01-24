@@ -111,7 +111,8 @@ void vpux::VPU::buildWeightsSparsityPipeline(mlir::OpPassManager& pm, const VPU:
                                              Logger log) {
     const auto weightsSparsityHeuristic = getWeightsSparsityHeuristic(options.weightsSparsityHeuristic);
     const auto weightsSparsityThreshold = getWeightsSparsityThreshold(options.weightsSparsityThreshold);
-    pm.addPass(VPU::createSparsifyWeightsPass(weightsSparsityHeuristic, weightsSparsityThreshold, log));
+    pm.addPass(VPU::createSparsifyWeightsPass(weightsSparsityHeuristic, weightsSparsityThreshold,
+                                              options.weightsSparsityLargeConstThreshold, log));
     pm.addPass(VPU::createRecomputeSparsityPtrsPass(log));
 }
 
@@ -140,7 +141,7 @@ void VPU::registerVPUPipelines() {
 void vpux::VPU::buildTilingPipeline(mlir::OpPassManager& pm, const VPU::TilingOptions& options, Logger log) {
     const auto grc = getDefaultGreedyRewriteConfig();
 
-    pm.addPass(VPU::createTilingStrategyAssignmentPass(options.enablePrefetchTiling, options.enableVPUNNCost,
+    pm.addPass(VPU::createTilingStrategyAssignmentPass(options.enablePrefetchTiling, options.enableVPUNNCostForTiling,
                                                        options.enableShaveDDRAccessOptimization, log));
 
     // We call this as part of VF Pipeline, no need to call it here in such case
@@ -181,6 +182,17 @@ void vpux::VPU::buildVFPipeline(mlir::OpPassManager& pm, const VPU::TilingOption
     pm.addPass(VPU::createManualStrategyUtilsPass(options.writeStrategyToJson, writeStrategyFileLocation,
                                                   options.readStrategyFromJson, readStrategyFileLocation,
                                                   /*enableMCSideLoadDump*/ false, options.modelHash, log));
+    if (options.enableVerticalFusionOutlining) {
+        if (options.enableProfiling) {
+            // TODO: E#140041 enable profiling with function outlining
+            log.error(
+                    "Vertical fusion outlining was disabled. TODO: E#140041 enable profiling with function outlining");
+        } else {
+            pm.addPass(VPU::createVerticalFusionOutliningPass(options, log));
+            const auto grc = getDefaultGreedyRewriteConfig();
+            pm.addPass(mlir::createCanonicalizerPass(grc));
+        }
+    }
     pm.addPass(VPU::createVfTilingPass(options.enableVerticalFusionPipelining, log));
 }
 
@@ -202,8 +214,9 @@ void vpux::VPU::buildSMPipeline(mlir::OpPassManager& pm, const vpux::MCAndTiling
     }
     pm.addPass(VPU::createApplyTilingPass(log));
     pm.addPass(VPU::createMakeOpsWithDistributedTensorPass(options.enableExplicitDistributionInfoAttr, log));
+    pm.addPass(VPU::createMakeDistributedCopiesPass(log));
     pm.addPass(VPU::createAdjustDistributedTensorAroundOpsPass(log));
 
     // Ensure the nce op size requirements are met
-    pm.addPass(VPU::createEnsureNCEOpsSizeRequirementsPass(log));
+    pm.addPass(VPU::createEnsureNCEOpsSizeRequirementsPass(true, log));
 }

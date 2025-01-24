@@ -85,11 +85,25 @@ mlir::OpFoldResult vpux::IE::AddOp::fold(FoldAdaptor adaptor) {
         return nullptr;
     }
 
-    const auto attr = mlir::dyn_cast_or_null<Const::EphemeralContentAttr>(operands[1]);
+    const auto attr = mlir::dyn_cast_or_null<Const::ContentAttr>(operands[1]);
     if (attr == nullptr || !attr.isSplat()) {
         return nullptr;
     }
 
     const auto content = static_cast<Const::ContentAttr>(attr).fold();
     return isDoubleEqual(content.getSplatValue<double>(), 0.0f) ? getInput1() : nullptr;
+}
+
+mlir::LogicalResult vpux::IE::AddOp::reifyResultShapes(mlir::OpBuilder& builder,
+                                                       mlir::ReifiedRankedShapedTypeDims& reifiedReturnShapes) {
+    auto loc = getLoc();
+
+    auto outShape = IE::reifyEltwiseTensors(builder, getInput1(), getInput2(), getAutoBroadcast(), loc);
+
+    if (mlir::failed(outShape)) {
+        return outShape;
+    }
+
+    reifiedReturnShapes.emplace_back(std::move(outShape.value()));
+    return mlir::success();
 }

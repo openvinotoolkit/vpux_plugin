@@ -22,10 +22,11 @@ namespace vpux {
 namespace VPUIP {
 
 //
-// AttributeName for the barrier count in module
+// Wlm status utils
 //
 
-constexpr StringLiteral numberOfVirtualBarriers = "numberOfVirtualBarriers";
+void setWlmStatus(mlir::ModuleOp module, vpux::VPUIP::WlmStatus status);
+vpux::VPUIP::WlmStatus getWlmStatus(mlir::ModuleOp module);
 
 //
 // Profiling
@@ -102,6 +103,15 @@ size_t getBarrierMaxVariantSum(mlir::Operation* parentOp);
 size_t getAvailableSlots(size_t maxSlotsSum, size_t maxAvailableSlots);
 int64_t getNumberOfIndependentDmaQueues(mlir::Operation* parentOp);
 
+/**
+ * @brief checks if barriers will be configured per variant
+ *
+ * @param module - mlir::ModuleOp
+ * @return true - only first/last variant within given invariant will have wait/update barriers configured
+ * @return false - all variants within given invariant will have same wait/update barriers
+ */
+bool supportsPerVariantBarrierConfiguration(mlir::ModuleOp module);
+
 //
 // DW Convolution utility
 //
@@ -147,6 +157,9 @@ using outputItiBuffers = SmallVector<SmallVector<mlir::Value>>;
 SmallVector<mlir::Value> getPerClusterMemoryBuffers(mlir::MLIRContext* ctx, mlir::Location loc, StringRef bufferName,
                                                     mlir::Value operand, int64_t numClusters, mlir::OpBuilder& builder,
                                                     bool allowDiscontinuousBuffers = false);
+SmallVector<mlir::Value> getDuplOverSegPerClusterMemoryBuffers(mlir::MLIRContext* ctx, mlir::Location loc,
+                                                               StringRef bufferName, mlir::Value operand,
+                                                               int64_t numClusters, mlir::OpBuilder& builder);
 SmallVector<mlir::Value> getPerClusterComputeBuffers(mlir::MLIRContext* ctx, mlir::Location loc, StringRef bufferName,
                                                      mlir::Value operand, int64_t numClusters, mlir::OpBuilder& builder,
                                                      bool allowDiscontinuousBuffers = false);
@@ -479,6 +492,14 @@ bool isOverlappedDistributedCompatibleAfterShapeChangeForViewOps(DistType inDist
     return VPUIP::isDistributedCompatibleAfterShapeChangeForViewOps<DistType>(inDistType, outDistType);
 }
 
+mlir::FailureOr<int64_t> getDistributedOutTilingAxisAfterShapeChanged(ShapeRef inputShape, DimsOrder inOrder,
+                                                                      ShapeRef outputShape, DimsOrder outOrder,
+                                                                      int64_t inAxis,
+                                                                      Logger log = vpux::Logger::global());
+mlir::FailureOr<int64_t> getDistributedOutTilingAxisAfterShapeChanged(vpux::NDTypeInterface inputType,
+                                                                      ShapeRef outputShape, DimsOrder outOrder,
+                                                                      int64_t inAxis,
+                                                                      Logger log = vpux::Logger::global());
 mlir::FailureOr<std::pair<int64_t, int64_t>> getDistributedAxesMappingAfterShapeChanged(
         vpux::NDTypeInterface reshapeInType, vpux::NDTypeInterface reshapeOutType,
         VPU::DistributionInfoAttr copyInDistribution, Logger log);
@@ -565,83 +586,88 @@ mlir::Value createDummyBuffer(mlir::OpBuilder& builder, mlir::Operation* inserti
 
 template <typename DistType>
 VPU::DistributionInfoAttr getDistributedAttrAfterShapeCast(VPU::DistributedTypeInterface origDistrType,
-                                                           ArrayRef<int64_t> shape, VPU::ArchKind arch) {
-    auto distributedType = origDistrType.getDistributedTypes().front().template cast<DistType>();
+                                                           ArrayRef<int64_t> origOutShape, VPU::ArchKind arch) {
+    const auto ndTypeIf = mlir::cast<NDTypeInterface>(origDistrType);
+    const auto origInShape = ndTypeIf.getShape().raw();
+    const auto distributedType = mlir::cast<DistType>(origDistrType.getDistributedTypes().front());
     auto origDistribution = distributedType.getDistribution();
-    const auto mode = origDistribution.getMode().getValue();
-
-    auto ndTypeIf = origDistrType.template cast<NDTypeInterface>();
-    const auto origShape = ndTypeIf.getShape().raw();
     auto ctx = origDistrType.getContext();
 
-    const auto isSameDimAsClustering = [&]() {
-        const auto numTiles = parseIntArrayAttr<int64_t>(origDistribution.getNumTiles());
-        for (auto dim : irange(origShape.size())) {
-            if (numTiles[dim] > 1 && origShape[dim] != shape[dim]) {
-                return true;
-            }
+    auto outShape = origOutShape;
+    if (auto sparseBuff = mlir::dyn_cast<VPUIP::SparseBufferType>(origDistrType)) {
+        if (auto seAttr = sparseBuff.getSeAttr()) {
+            outShape = seAttr.backInferInputShape(ShapeRef(outShape)).raw();
         }
-        return false;
+        origDistribution = VPU::getExplicitDistrAttrForActualDataFromSparseType(sparseBuff);
+    }
+
+    const auto distMode = origDistribution.getMode().getValue();
+    const auto origNumTiles = origDistribution.getNumTiles();
+
+    const auto isSameDimAsClustering = [&]() {
+        if (origNumTiles == nullptr) {
+            return false;
+        }
+        const auto inputTilingAxis = VPUIP::getSpecificAxisFromAttr(origNumTiles);
+        VPUX_THROW_WHEN(inputTilingAxis == -1, "cannot get input tiling axis");
+        return origInShape[inputTilingAxis] != outShape[inputTilingAxis];
     };
+
+    const auto clusteringDimChanges = isSameDimAsClustering();
+    const auto isElementSizeChanged = ShapeRef(origInShape).totalSize() != ShapeRef(outShape).totalSize();
+
+    if (VPU::isSegmentedOverH(origDistribution)) {
+        VPUX_THROW_WHEN(
+                clusteringDimChanges && !VPUIP::isDistributedCompatibleAfterShapeChangeForViewOps(
+                                                distributedType, ShapeRef(outShape), ndTypeIf.getDimsOrder(), arch),
+                "Cannot cast shape from '{0}' to '{1}' as clustering", origInShape, outShape);
+
+        return getSOHDistAttrWithNewShape(ctx, distributedType, ShapeRef(outShape), arch);
+    }
+
+    if (!clusteringDimChanges && VPU::isOverlappedOverH(origDistribution) && !isElementSizeChanged &&
+        ndTypeIf.getDimsOrder() == DimsOrder::NHWC) {
+        return getOverlappedOverHDistAttrWithNewShape(ctx, distributedType, ShapeRef(outShape));
+    }
 
     // ShapeCastOp is not a "compute" op, therefore memory and compute shapes are the same
     if (VPU::isDistributedAttrWithExplicitShapesAndOffsets(origDistribution)) {
-        VPUX_THROW_WHEN((mode != VPU::DistributionMode::OVERLAPPED) && (mode != VPU::DistributionMode::SEGMENTED) &&
-                                !VPU::bitEnumContainsAny(mode, VPU::DistributionMode::DUPLICATED) &&
-                                !VPU::bitEnumContainsAny(mode, VPU::DistributionMode::MULTICASTED),
+        VPUX_THROW_WHEN((distMode != VPU::DistributionMode::OVERLAPPED) &&
+                                (distMode != VPU::DistributionMode::SEGMENTED) &&
+                                !VPU::bitEnumContainsAny(distMode, VPU::DistributionMode::DUPLICATED) &&
+                                !VPU::bitEnumContainsAny(distMode, VPU::DistributionMode::MULTICASTED),
                         "Cannot cast shape with explicit memory/compute shapes/offsets with DistributionMode {0}",
                         origDistribution.getMode());
-
-        if (auto sparseBuff = origDistrType.template dyn_cast<VPUIP::SparseBufferType>()) {
-            origDistribution = VPU::getExplicitDistrAttrForActualDataFromSparseType(sparseBuff);
-        }
 
         // When having input broadcasted across all clusters, ShapeCast can set its output as DUPLICATED,
         // regardless of input mode. The reason for that is because ShapeCast is not a compute op and
         // therefore compute shapes/offsets mean nothing to it. Moreover, in cases such as SEG|DUP where
         // a tile axis or alignment exists, the ShapeCast's new shape might not be compatible with those
         // attributes anymore so it would be better to discard them.
-        if (VPU::bitEnumContainsAny(mode, VPU::DistributionMode::DUPLICATED) ||
-            VPU::bitEnumContainsAny(mode, VPU::DistributionMode::MULTICASTED)) {
+        if (VPU::bitEnumContainsAny(distMode, VPU::DistributionMode::DUPLICATED) ||
+            VPU::bitEnumContainsAny(distMode, VPU::DistributionMode::MULTICASTED)) {
             auto duplicatedOutputMode = VPU::DistributionModeAttr::get(ctx, VPU::DistributionMode::DUPLICATED);
-            return VPU::getNonOverlappedDistributedAttr(Shape(shape), duplicatedOutputMode, nullptr,
+            return VPU::getNonOverlappedDistributedAttr(Shape(outShape), duplicatedOutputMode, nullptr,
                                                         origDistribution.getNumClusters(), nullptr,
                                                         origDistribution.getUniformDistributedSegments(), ctx);
         }
 
         const auto numClusters = checked_cast<size_t>(origDistribution.getNumClusters().getInt());
-
-        const auto shapeVec = SmallVector<int64_t>(shape);
+        const auto shapeVec = SmallVector<int64_t>(outShape);
         auto perClusterShapes = SmallVector<SmallVector<int64_t>>(numClusters, shapeVec);
 
-        const bool clusteringDimChanges = isSameDimAsClustering();
-        if (VPU::isSegmentedOverH(origDistribution)) {
-            VPUX_THROW_WHEN(
-                    clusteringDimChanges && !VPUIP::isDistributedCompatibleAfterShapeChangeForViewOps(
-                                                    distributedType, ShapeRef(shape), ndTypeIf.getDimsOrder(), arch),
-                    "Cannot cast shape from '{0}' to '{1}' as clustering", origShape, shape);
-
-            return getSOHDistAttrWithNewShape(ctx, distributedType, ShapeRef(shape), arch);
-        }
-
-        if (!clusteringDimChanges && VPU::isOverlappedOverH(origDistribution) &&
-            distributedType.getShape().totalSize() == ShapeRef(shape).totalSize() &&
-            ndTypeIf.getDimsOrder() == DimsOrder::NHWC) {
-            return getOverlappedOverHDistAttrWithNewShape(ctx, distributedType, ShapeRef(shape));
-        }
-
         // SEGMENTED/OVERLAPPED case
-        if ((mode == VPU::DistributionMode::OVERLAPPED) || (mode == VPU::DistributionMode::SEGMENTED)) {
+        if ((distMode == VPU::DistributionMode::OVERLAPPED) || (distMode == VPU::DistributionMode::SEGMENTED)) {
             VPUX_THROW_WHEN(clusteringDimChanges,
                             "Cannot cast shape from '{0}' to '{1}' when having explicit memory/compute "
                             "shapes/offsets as segmentation dim changes at output",
-                            origShape, shape);
+                            origInShape, outShape);
 
             // Use newly casted shape for all dims except the clustering dim
             const auto origPerClusterShapes = parseIntArrayOfArrayAttr<int64_t>(origDistribution.getMemoryShapes());
-            const auto numTiles = parseIntArrayAttr<int64_t>(origDistribution.getNumTiles());
+            const auto numTiles = parseIntArrayAttr<int64_t>(origNumTiles);
             for (size_t cluster = 0; cluster < numClusters; cluster++) {
-                for (size_t dim = 0; dim < shape.size(); dim++) {
+                for (size_t dim = 0; dim < outShape.size(); dim++) {
                     if (numTiles[dim] != 1) {
                         perClusterShapes[cluster][dim] = origPerClusterShapes[cluster][dim];
                     }
@@ -651,34 +677,42 @@ VPU::DistributionInfoAttr getDistributedAttrAfterShapeCast(VPU::DistributedTypeI
 
         auto perClusterShapesAttr = vpux::getIntArrayOfArray(ctx, perClusterShapes);
         return VPU::DistributionInfoAttr::get(
-                ctx, origDistribution.getMode(), origDistribution.getNumTiles(), origDistribution.getKernel(),
-                origDistribution.getPads(), origDistribution.getStrides(), origDistribution.getNumClusters(),
-                origDistribution.getAlignment(), origDistribution.getUniformDistributedSegments(), perClusterShapesAttr,
+                ctx, origDistribution.getMode(), origNumTiles, origDistribution.getKernel(), origDistribution.getPads(),
+                origDistribution.getStrides(), origDistribution.getNumClusters(), origDistribution.getAlignment(),
+                origDistribution.getUniformDistributedSegments(), perClusterShapesAttr,
                 origDistribution.getMemoryOffsets(), perClusterShapesAttr, origDistribution.getMemoryOffsets(),
                 origDistribution.getEqualMemoryAndComputeView());
     }
 
-    auto dataShape = shape;
-    if (auto sparseBuff = origDistrType.template dyn_cast<VPUIP::SparseBufferType>()) {
-        if (auto seAttr = sparseBuff.getSeAttr()) {
-            dataShape = seAttr.backInferInputShape(ShapeRef(shape)).raw();
+    if (distMode == VPU::DistributionMode::SEGMENTED) {
+        const auto inputTilingAxis = VPUIP::getSpecificAxisFromAttr(origNumTiles);
+        VPUX_THROW_WHEN(inputTilingAxis == -1, "cannot get input tiling axis");
+
+        auto outputTilingAxis = inputTilingAxis;
+        auto outputTilingAxisOpt = VPUIP::getDistributedOutTilingAxisAfterShapeChanged(
+                ndTypeIf, ShapeRef(outShape), ndTypeIf.getDimsOrder(), inputTilingAxis);
+
+        if (mlir::succeeded(outputTilingAxisOpt)) {
+            outputTilingAxis = outputTilingAxisOpt.value();
+        } else {
+            VPUX_THROW_WHEN(clusteringDimChanges || !isElementSizeChanged, "cannot get output tiling axis");
         }
+
+        return VPUIP::changeDistributedAxisOnDistributionInfoAttr(origDistribution, inputTilingAxis, outputTilingAxis,
+                                                                  ShapeRef(outShape));
     }
 
-    if (VPU::bitEnumContainsAny(mode, VPU::DistributionMode::SEGMENTED)) {
-        VPUX_THROW_WHEN(
-                isSameDimAsClustering() && !VPUIP::isDistributedCompatibleAfterShapeChangeForViewOps<DistType>(
-                                                   distributedType, ShapeRef(dataShape), ndTypeIf.getDimsOrder(), arch),
-                "Cannot cast shape from '{0}' to '{1}' as clustering", origShape, shape);
+    if (VPU::bitEnumContainsAny(distMode, VPU::DistributionMode::DUPLICATED) ||
+        VPU::bitEnumContainsAny(distMode, VPU::DistributionMode::MULTICASTED)) {
+        const auto duplicatedMode = VPU::DistributionModeAttr::get(ctx, VPU::DistributionMode::DUPLICATED);
+        return VPU::DistributionInfoAttr::get(
+                ctx, duplicatedMode, nullptr, nullptr, nullptr, nullptr, origDistribution.getNumClusters(), nullptr,
+                origDistribution.getUniformDistributedSegments(), nullptr, nullptr, nullptr, nullptr, nullptr);
     }
 
-    VPUX_THROW_WHEN((mode == VPU::DistributionMode::OVERLAPPED) && isSameDimAsClustering(),
+    VPUX_THROW_WHEN((distMode == VPU::DistributionMode::OVERLAPPED) && clusteringDimChanges,
                     "Cannot cast shape from '{0}' to '{1}' as OVERLAPPED clustering; clustering dim changes at output",
-                    origShape, shape);
-
-    if (VPU::isSegmentedOverH(origDistribution)) {
-        return getSOHDistAttrWithNewShape(ctx, distributedType, ShapeRef(dataShape), arch);
-    }
+                    origInShape, outShape);
 
     return origDistribution;
 }
@@ -693,6 +727,20 @@ int64_t getMaximalSWKernelPrefetchDataSize(mlir::ModuleOp module);
 //
 
 std::pair<int64_t, int64_t> getSplitPartSizes(NDTypeInterface bufferType, vpux::Dim tileDim);
+
+//
+// Check user utils
+//
+
+bool hasOneOrSameUser(mlir::Operation* op);
+
+std::unordered_set<Dim> getConcatAxes(VPUIP::ConcatViewOp concatViewOp);
+
+//
+// Move Declarations to the top
+//
+
+void moveDeclarationsToTop(mlir::func::FuncOp& netFunc);
 
 }  // namespace VPUIP
 }  // namespace vpux

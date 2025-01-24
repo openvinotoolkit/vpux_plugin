@@ -29,6 +29,7 @@ const SmallVector<StringLiteral> SW_KERNELS_SUPPORTING_TILING = {"mvn1",
                                                                  "activation_tanh",
                                                                  "topk",
                                                                  "gather",
+                                                                 "gather_elements",
                                                                  "activation_sigmoid",
                                                                  "depth_to_space",
                                                                  "activation_clamp",
@@ -62,6 +63,7 @@ const SmallVector<StringLiteral> SW_KERNELS_SUPPORTING_TILING = {"mvn1",
                                                                  "gru_sequence",
                                                                  "gru_sequence_last_part",
                                                                  "activation_floor",
+                                                                 "activation_ceil",
                                                                  "activation_log",
                                                                  "activation_sqrt",
                                                                  "fake_quantize",
@@ -71,30 +73,37 @@ const SmallVector<StringLiteral> SW_KERNELS_SUPPORTING_TILING = {"mvn1",
                                                                  "lstm_sequence",
                                                                  "round_fp16",
                                                                  "accumulate",
-                                                                 "populate_weight_table"};
+                                                                 "populate_weight_table",
+                                                                 "dequantize",
+                                                                 "activation_mish",
+                                                                 "dynamic_dequantize",
+                                                                 "rms_norm"};
 
 const SmallVector<StringLiteral> SW_KERNELS_SUPPORTING_STRIDE = {"mvn1", "lstm_cell", "lstm_sequence"};
 
 const SmallVector<std::string_view> SW_KERNELS_SUPPORTING_SHAVE_BALANCING = {
-        "softmax",          "eltwise_mul",      "activation_sin", "activation_cos",
-        "activation_swish", "activation_clamp", "eltwise_min",    "eltwise_max"};
+        "softmax",          "eltwise_mul", "activation_sin", "activation_cos", "activation_swish",
+        "activation_clamp", "eltwise_min", "eltwise_max",    "round_fp16",     "activation_exp"};
 
 const SmallVector<StringLiteral> SW_KERNELS_LAYOUT_AGNOSTIC = {
         "activation_swish", "activation_gelu",    "activation_hswish", "activation_hardsigmoid",
         "activation_tanh",  "activation_sigmoid", "activation_clamp",  "activation_sin",
         "activation_cos",   "activation_exp",     "activation_abs",    "activation_log",
-        "activation_sqrt",  "hswish_fp16",        "round_fp16",        "eltwise_mul"};
+        "activation_sqrt",  "hswish_fp16",        "round_fp16",        "eltwise_mul",
+        "activation_mish"};
 
 // TODO: E#117136, use heuristic for tile dim
 const SmallVector<StringLiteral> SW_ACTIVATION_KERNELS = {
         "activation_swish",   "activation_gelu",  "activation_hardsigmoid", "activation_tanh",
         "activation_sigmoid", "activation_clamp", "activation_abs",         "activation_floor",
         "activation_sin",     "activation_cos",   "activation_exp",         "hswish_fp16",
-        "prelu_fp16"};
+        "prelu_fp16",         "activation_mish"};
 
 constexpr StringLiteral SW_KERNEL_NAME_PREFIX = "builtin_";
 constexpr StringLiteral populateWeightTableWithShave = "populateWeightTable";
 constexpr StringLiteral weightsPtrsPerClusterAttr = "weightsPtrsPerClusterAttr";
+
+constexpr Byte SIGMOID_SW_KERNEL_TILING_THRESHOLD = Byte(4096);
 
 // SwKernel list can get better performance with tiling alignment configured
 const SmallVector<StringLiteral> SW_KERNELS_NEED_TILING_ALIGNMENT = {"mvn1",
@@ -127,13 +136,18 @@ const SmallVector<StringLiteral> SW_KERNELS_NEED_TILING_ALIGNMENT = {"mvn1",
                                                                      "eltwise_select",
                                                                      "activation_sin",
                                                                      "activation_cos",
-                                                                     "lstm_cell"};
+                                                                     "lstm_cell",
+                                                                     "activation_mish"};
 
 SmallVector<mlir::Attribute> kernelArgsRange(VPUIP::SwKernelOp swKernelOp);
 
 mlir::SymbolRefAttr createBuiltInFunction(mlir::ModuleOp module, mlir::StringRef builtInFunctionName,
                                           const ArrayRef<mlir::Type> inputTypes, mlir::StringRef kernelEntryName,
                                           mlir::StringRef kernelSourceFileName, const vpux::Logger& log);
+
+mlir::SymbolRefAttr createBuiltInFunction(mlir::ModuleOp module, VPU::LayerOpInterface origOp,
+                                          ArrayRef<mlir::Value> operands, ArrayRef<mlir::Value> results,
+                                          const VPUIP::KernelInfo& kernelInfo, const Logger& log);
 
 void createRuntimeKernelDefinition(mlir::ModuleOp module, const Logger& log, vpux::VPU::ArchKind arch);
 

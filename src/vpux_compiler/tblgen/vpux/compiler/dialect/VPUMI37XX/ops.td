@@ -74,6 +74,7 @@ def VPUMI37XX_ConfigureBarrierOp :
     let arguments = (ins
         UI8Attr:$id,
         SI64Attr:$next_same_id,
+        Optional<VPURegMapped_IndexType>:$previousSameId,
         OptionalAttr<UI8Attr>:$producer_count,
         OptionalAttr<UI8Attr>:$consumer_count
     );
@@ -85,6 +86,7 @@ def VPUMI37XX_ConfigureBarrierOp :
     let assemblyFormat = [{
         attr-dict
         `<` $id `,` $next_same_id `>`
+        (`previousSameId` `(` $previousSameId^ `:` type($previousSameId) `)`)?
         `->` type(results)
     }];
 }
@@ -349,7 +351,8 @@ def VPUMI37XX_KernelParamsOp :
         dynamicInputShapes and dynamicOutputShapes arguments. If shape does not require to be dynamic the corresponding argument
         can be omitted. The shape is resolved via kernel_params for this case.
 
-        Currently, dynamic shape is supported only for single input/output.
+        When isCompiled is true it means that the kernel is obtained through lowering to the LLVM dialect,
+        else it is built from C++.
     }];
 
     let arguments = (ins
@@ -360,7 +363,8 @@ def VPUMI37XX_KernelParamsOp :
         DenseI32ArrayAttr:$dynamicInputShapesSize,
         DenseI32ArrayAttr:$dynamicOutputShapesSize,
         StrAttr:$kernel_type,
-        ElementsAttr:$kernel_params
+        ElementsAttr:$kernel_params,
+        DefaultValuedAttr<BoolAttr, "false">:$isCompiled
     );
 
     let results = (outs
@@ -536,6 +540,7 @@ def VPUMI37XX_DPUInvariantOp :
         OptionalAttr<IntAttr>:$cm_sp_pattern,
         UnitAttr:$is_segmented,
         UnitAttr:$input_channels_compression,
+        UnitAttr:$is_zero_offset_weights_table,
         OptionalAttr<IntAttr>:$out_channel_offset,
         UnitAttr:$is_superdense,
         OptionalAttr<BoolAttr>:$is_inplace,

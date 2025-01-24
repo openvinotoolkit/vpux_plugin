@@ -155,7 +155,7 @@ mlir::LogicalResult MatMulInputsTo2dPass::MatMulOpConverter::matchAndRewrite(IE:
     // E-122051:
     // MatMulInputsTo2dPass should be moved to a new pass `ConvertMatMulToFullyConnected`.
     // This check should be moved in a `addDynamicallyLegalOp<IE::MatMulOp>`.
-    // Transpose shold be done after `ReshapeNDInputConverter` (not in canonicalizer), experiments show that it
+    // Transpose should be done after `ReshapeNDInputConverter` (not in canonicalizer), experiments show that it
     // is faster when batch dimensions are merged.
     if (VPU::MatMulOp::isSupported(matmulOp)) {
         if (matmulOp.getTransposeB()) {
@@ -202,10 +202,20 @@ mlir::LogicalResult MatMulInputsTo2dPass::MatMulOpConverter::matchAndRewrite(IE:
             sliceTensor(matmulOp.getInput1(), matmulOp->getLoc(), rewriter, "activation");
     SmallVector<mlir::Value> weightSlices = sliceTensor(matmulOp.getInput2(), matmulOp->getLoc(), rewriter, "weights");
 
+    // Handle broadcasting by replicating the slices of the broadcasted input to match
+    // the number of slices of the non-broadcasted input.
+    if (activationSlices.size() != weightSlices.size()) {
+        if (activationSlices.size() == 1) {
+            activationSlices = SmallVector<mlir::Value>(weightSlices.size(), activationSlices[0]);
+        } else if (weightSlices.size() == 1) {
+            weightSlices = SmallVector<mlir::Value>(activationSlices.size(), weightSlices[0]);
+        } else {
+            VPUX_THROW("Mismatch activationSlices number '{0}' with weightSlices number '{1}'", activationSlices.size(),
+                       weightSlices.size());
+        }
+    }
+
     SmallVector<mlir::Value> matmulSlices;
-    VPUX_THROW_UNLESS(activationSlices.size() == weightSlices.size() || weightSlices.size() == 1,
-                      "Mismatch activationSlices number '{0}' with weightSlices number '{1}'", activationSlices.size(),
-                      weightSlices.size());
     for (size_t sliceIdx = 0; sliceIdx < activationSlices.size(); sliceIdx++) {
         auto lhs2d = activationSlices[sliceIdx];
         auto rhs2d = weightSlices[weightSlices.size() == 1 ? 0 : sliceIdx];

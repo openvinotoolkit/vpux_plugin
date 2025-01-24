@@ -19,6 +19,18 @@ struct ActShaveData_t {
     uint32_t reserved32;
 };
 
+struct ActShaveDataEx_t {
+    uint64_t begin;
+    uint32_t duration;
+    uint32_t executedInstructions;
+    uint32_t clockCycles;
+    uint32_t lsu0Stalls;
+    uint32_t lsu1Stalls;
+    uint32_t instStalls;
+};
+
+static_assert(sizeof(ActShaveData_t) == sizeof(ActShaveDataEx_t));
+
 // HWP DPU profiling data payload
 struct HwpDpu27Mode0Data_t {
     uint64_t idu_wl_duration : 28;

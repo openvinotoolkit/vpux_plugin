@@ -13,8 +13,8 @@ namespace vpumi40xx2vpuasm {
 class DeclareTaskBufferRewriter : public VPUASMSymbolizationPattern<VPURegMapped::DeclareTaskBufferOp> {
 public:
     using Base::Base;
-    mlir::LogicalResult symbolize(VPURegMapped::DeclareTaskBufferOp op, SymbolMapper& mapper,
-                                  mlir::ConversionPatternRewriter& rewriter) const override;
+    mlir::FailureOr<SymbolizationResult> symbolize(VPURegMapped::DeclareTaskBufferOp op, SymbolMapper& mapper,
+                                                   mlir::ConversionPatternRewriter& rewriter) const override;
     llvm::SmallVector<mlir::FlatSymbolRefAttr> getSymbolicNames(VPURegMapped::DeclareTaskBufferOp op,
                                                                 size_t counter) override;
 };

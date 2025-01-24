@@ -51,7 +51,7 @@ mlir::FailureOr<int64_t> extractNumSegments(mlir::Location loc,
             return errorAt(loc, "Only constant input is supported for numSegments");
         }
 
-        if (const auto attr = numSegmentsConst.getContentAttr(); !attr.isSplat()) {
+        if (const auto& attr = numSegmentsConst.getContentAttr(); !attr.isSplat()) {
             return errorAt(loc, "numSegments value must be a scalar");
         }
 
@@ -111,10 +111,7 @@ mlir::LogicalResult ConvertConstToAttr::matchAndRewrite(IE::EmbeddingSegmentsSum
                                                         mlir::PatternRewriter& rewriter) const {
     const auto module = embeddingSegmentsSumOp->getParentOfType<mlir::ModuleOp>();
     const auto arch = VPU::getArch(module);
-    const std::set<VPU::ArchKind> compatibleTargets = {
-            VPU::ArchKind::NPU37XX,
-            VPU::ArchKind::NPU40XX,
-    };
+    const std::set<VPU::ArchKind> compatibleTargets = {VPU::ArchKind::NPU37XX, VPU::ArchKind::NPU40XX};
     if (compatibleTargets.count(arch) <= 0) {
         return mlir::failure();
     }

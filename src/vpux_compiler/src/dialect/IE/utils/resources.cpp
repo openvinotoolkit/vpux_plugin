@@ -26,10 +26,6 @@ MemoryResourceOp addAvailableMemory(mlir::Region& region, mlir::SymbolRefAttr me
 bool hasAvailableMemory(mlir::SymbolTable symbolTable, mlir::SymbolRefAttr memSpace);
 MemoryResourceOp getAvailableMemory(mlir::SymbolTable symbolTable, mlir::SymbolRefAttr memSpace);
 
-template <class ConcreteOp>
-MemoryResourceOp setUsedMemory(ConcreteOp op, mlir::SymbolRefAttr memSpace, Byte size);
-MemoryResourceOp getUsedMemory(mlir::SymbolTable symbolTable, mlir::SymbolRefAttr memSpace);
-
 mlir::ModuleOp getTmpModule(ArrayRef<mlir::ModuleOp> modules);
 
 bool isNceTileMemory(mlir::SymbolRefAttr memSpace);
@@ -116,143 +112,6 @@ IE::MemoryResourceOp vpux::IE::getAvailableMemory(mlir::ModuleOp mainModule, mli
         return tileOp.getAvailableMemory(memSpace);
     }
     return details::getAvailableMemory(mainModule.getOperation(), memSpace);
-}
-
-//
-// Used memory resources
-//
-
-template <class ConcreteOp>
-IE::MemoryResourceOp vpux::IE::details::setUsedMemory(ConcreteOp op, mlir::SymbolRefAttr memSpace, Byte size) {
-    auto available = details::getAvailableMemory(op.getOperation(), memSpace);
-    VPUX_THROW_UNLESS(available != nullptr, "Memory kind '{0}' is not registered as available", memSpace);
-    VPUX_THROW_UNLESS(size <= available.size(), "Memory kind '{0}' used size '{1}' exceeds available size '{2}'",
-                      memSpace, size, available.size());
-
-    auto byteSizeAttr = getIntAttr(op->getContext(), size.count());
-
-    auto usedMemModule = op.template lookupSymbol<mlir::ModuleOp>(usedMemModuleName);
-    if (usedMemModule == nullptr) {
-        auto mainBuilder = mlir::OpBuilder::atBlockBegin(op.getBody());
-        usedMemModule = mainBuilder.template create<mlir::ModuleOp>(mlir::UnknownLoc::get(mainBuilder.getContext()),
-                                                                    usedMemModuleName);
-    }
-
-    auto res = usedMemModule.template lookupSymbol<IE::MemoryResourceOp>(memSpace);
-    if (res != nullptr) {
-        res.setByteSizeAttr(byteSizeAttr);
-        return res;
-    }
-
-    auto innerBuilder = mlir::OpBuilder::atBlockBegin(usedMemModule.getBody());
-    return innerBuilder.template create<IE::MemoryResourceOp>(mlir::UnknownLoc::get(usedMemModule.getContext()),
-                                                              memSpace.getLeafReference(), byteSizeAttr, nullptr);
-}
-
-IE::MemoryResourceOp vpux::IE::setUsedMemory(mlir::ModuleOp mainModule, mlir::SymbolRefAttr memSpace, Byte size) {
-    if (details::isNceTileMemory(memSpace)) {
-        auto tileOp = getTileExecutor(mainModule);
-        VPUX_THROW_UNLESS(tileOp != nullptr, "Expected tileOp executor in order to set '{0}' memspace.", memSpace);
-        return tileOp.setUsedMemory(memSpace, size);
-    }
-
-    return details::setUsedMemory(mainModule, memSpace, size);
-}
-
-mlir::ModuleOp vpux::IE::details::getTmpModule(ArrayRef<mlir::ModuleOp> modules) {
-    VPUX_THROW_WHEN(modules.size() != 1, "Expected exactly one Temporary module. Got {0}", modules.size());
-    auto tmpModule = modules[0];
-
-    auto maybeSymName = tmpModule.getSymName();
-    VPUX_THROW_UNLESS(maybeSymName.has_value(), "Temporary module must have sym name: {0}", usedMemModuleName);
-    VPUX_THROW_UNLESS(maybeSymName.value() == usedMemModuleName, "Temporary module must have sym name: {0}, Got: {1}",
-                      usedMemModuleName, maybeSymName.value());
-
-    return tmpModule;
-}
-
-IE::MemoryResourceOp vpux::IE::setUsedMemory(mlir::func::FuncOp func, mlir::SymbolRefAttr memSpace, Byte size) {
-    auto available = getAvailableMemory(func->getParentOfType<mlir::ModuleOp>(), memSpace);
-    VPUX_THROW_UNLESS(available != nullptr, "Memory kind '{0}' is not registered as available", memSpace);
-    VPUX_THROW_UNLESS(size <= available.size(), "Memory kind '{0}' used size '{1}' exceeds available size '{2}'",
-                      memSpace, size, available.size());
-
-    auto modules = to_small_vector(func.getOps<mlir::ModuleOp>());
-
-    mlir::ModuleOp tmpModule;
-    if (modules.empty()) {
-        auto mainBuilder = mlir::OpBuilder::atBlockBegin(&func.getBody().front());
-        tmpModule = mainBuilder.template create<mlir::ModuleOp>(mlir::UnknownLoc::get(mainBuilder.getContext()),
-                                                                usedMemModuleName);
-    } else {
-        tmpModule = details::getTmpModule(modules);
-    }
-
-    auto res = tmpModule.lookupSymbol<IE::MemoryResourceOp>(memSpace);
-    auto byteSizeAttr = getIntAttr(func->getContext(), size.count());
-    if (res != nullptr) {
-        res.setByteSizeAttr(byteSizeAttr);
-        return res;
-    }
-
-    auto innerBuilder = mlir::OpBuilder::atBlockBegin(tmpModule.getBody());
-    return innerBuilder.template create<IE::MemoryResourceOp>(mlir::UnknownLoc::get(tmpModule.getContext()),
-                                                              memSpace.getLeafReference(), byteSizeAttr, nullptr);
-}
-
-IE::MemoryResourceOp vpux::IE::details::getUsedMemory(mlir::SymbolTable symbolTable, mlir::SymbolRefAttr memSpace) {
-    auto usedMemModule = symbolTable.lookup<mlir::ModuleOp>(usedMemModuleName);
-    if (usedMemModule == nullptr) {
-        return nullptr;
-    }
-
-    return usedMemModule.lookupSymbol<IE::MemoryResourceOp>(memSpace);
-}
-
-IE::MemoryResourceOp vpux::IE::getUsedMemory(mlir::ModuleOp mainModule, mlir::SymbolRefAttr memSpace) {
-    return details::getUsedMemory(mainModule.getOperation(), memSpace);
-}
-
-SmallVector<IE::MemoryResourceOp> vpux::IE::getUsedMemory(mlir::ModuleOp mainModule) {
-    auto usedMemModule = mainModule.lookupSymbol<mlir::ModuleOp>(usedMemModuleName);
-    if (usedMemModule == nullptr) {
-        return {};
-    }
-    auto usedMem = to_small_vector(usedMemModule.getOps<IE::MemoryResourceOp>());
-    auto tileOp = getTileExecutor(mainModule);
-    if (tileOp == nullptr) {
-        return usedMem;
-    }
-    auto nceUsedMemModule = tileOp.lookupSymbol<mlir::ModuleOp>(usedMemModuleName);
-    if (nceUsedMemModule == nullptr) {
-        return usedMem;
-    }
-    auto nceUsedMem = to_small_vector(nceUsedMemModule.getOps<IE::MemoryResourceOp>());
-    usedMem.append(nceUsedMem);
-
-    return usedMem;
-}
-
-SmallVector<IE::MemoryResourceOp> vpux::IE::getUsedMemory(mlir::func::FuncOp func) {
-    auto modules = to_small_vector(func.getOps<mlir::ModuleOp>());
-
-    if (modules.empty()) {
-        return {};
-    }
-
-    auto tmpModule = details::getTmpModule(modules);
-    return to_small_vector(tmpModule.getOps<IE::MemoryResourceOp>());
-}
-
-void vpux::IE::eraseUsedMemory(mlir::func::FuncOp func) {
-    auto modules = to_small_vector(func.getOps<mlir::ModuleOp>());
-
-    if (modules.empty()) {
-        return;
-    }
-
-    auto tmpModule = details::getTmpModule(modules);
-    tmpModule.erase();
 }
 
 //
@@ -513,14 +372,6 @@ bool vpux::IE::TileResourceOp::hasAvailableMemory(mlir::SymbolRefAttr memSpace) 
 
 IE::MemoryResourceOp vpux::IE::TileResourceOp::getAvailableMemory(mlir::SymbolRefAttr memSpace) {
     return lookupSymbol<IE::MemoryResourceOp>(memSpace);
-}
-
-IE::MemoryResourceOp vpux::IE::TileResourceOp::setUsedMemory(mlir::SymbolRefAttr memSpace, Byte size) {
-    return details::setUsedMemory(*this, memSpace, size);
-}
-
-IE::MemoryResourceOp vpux::IE::TileResourceOp::getUsedMemory(mlir::SymbolRefAttr memSpace) {
-    return details::getUsedMemory(getOperation(), memSpace);
 }
 
 //

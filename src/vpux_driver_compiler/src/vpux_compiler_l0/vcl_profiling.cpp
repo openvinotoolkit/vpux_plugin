@@ -12,6 +12,26 @@ using namespace vpux;
 
 namespace VPUXDriverCompiler {
 
+ze::ze_profiling_task_info convertTaskInfo(const profiling::TaskInfo& task) {
+    ze::ze_profiling_task_info zeTask = {};
+
+    const auto nameLen = task.name.copy(zeTask.name, sizeof(zeTask.name) - 1);
+    zeTask.name[nameLen] = 0;
+
+    const auto typeLen = task.layer_type.copy(zeTask.layer_type, sizeof(zeTask.layer_type) - 1);
+    zeTask.layer_type[typeLen] = 0;
+
+    zeTask.exec_type = static_cast<ze::ze_task_execute_type_t>(task.exec_type);
+    zeTask.start_time_ns = task.start_time_ns;
+    zeTask.duration_ns = task.duration_ns;
+    zeTask.active_cycles = task.total_cycles;
+    zeTask.stall_cycles = task.stall_cycles;
+    zeTask.task_id = -1;
+    zeTask.parent_layer_id = -1;
+
+    return zeTask;
+}
+
 vcl_result_t VPUXProfilingL0::getTaskInfo(p_vcl_profiling_output_t profOutput) {
     if (!profOutput) {
         _logger->outputError("Null argument to get task info");
@@ -20,8 +40,13 @@ vcl_result_t VPUXProfilingL0::getTaskInfo(p_vcl_profiling_output_t profOutput) {
 
     if (_taskInfo.empty()) {
         try {
-            _taskInfo = profiling::getTaskInfo(_blobData, _blobSize, _profData, _profSize,
-                                               profiling::VerbosityLevel::HIGH, false);
+            auto taskInfo = profiling::getTaskInfo(_blobData, _blobSize, _profData, _profSize,
+                                                   profiling::VerbosityLevel::HIGH, false);
+            _taskInfo.reserve(taskInfo.size());
+            for (auto task : taskInfo) {
+                _taskInfo.push_back(convertTaskInfo(task));
+            }
+
         } catch (const std::exception& error) {
             _logger->outputError(error.what());
             return VCL_RESULT_ERROR_UNKNOWN;
@@ -32,7 +57,7 @@ vcl_result_t VPUXProfilingL0::getTaskInfo(p_vcl_profiling_output_t profOutput) {
     }
 
     profOutput->data = reinterpret_cast<uint8_t*>(_taskInfo.data());
-    profOutput->size = _taskInfo.size() * sizeof(profiling::TaskInfo);
+    profOutput->size = _taskInfo.size() * sizeof(ze::ze_profiling_task_info);
     return VCL_RESULT_SUCCESS;
 }
 

@@ -1,26 +1,27 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
+#include "vpux/compiler/core/type_interfaces.hpp"
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
-#include "vpux/compiler/dialect/IE/utils/const_attributes.hpp"
 #include "vpux/compiler/dialect/IE/utils/convolution_utils.hpp"
-#include "vpux/compiler/dialect/VPUIP/interfaces/nce_invariant.hpp"
+#include "vpux/compiler/dialect/IE/utils/shape_infer.hpp"
 
 #include "vpux/compiler/core/attributes/shape.hpp"
 #include "vpux/compiler/core/layers.hpp"
-#include "vpux/compiler/utils/adjust_layout_utils.hpp"
 #include "vpux/compiler/utils/attributes.hpp"
-#include "vpux/compiler/utils/empty_node.hpp"
 #include "vpux/compiler/utils/error.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 
+#include "vpux/compiler/utils/infer_output_shape.hpp"
 #include "vpux/utils/core/checked_cast.hpp"
 
+#include <mlir/Dialect/Arith/Utils/Utils.h>
 #include <mlir/IR/PatternMatch.h>
 
 #include <openvino/op/convolution.hpp>
+#include <openvino/op/parameter.hpp>
 
 using namespace vpux;
 
@@ -91,7 +92,7 @@ mlir::LogicalResult FuseConvAndSlice::matchAndRewrite(IE::ConvolutionOp convOp, 
         return matchFailed(rewriter, convOp, "Folding cost greater than expand");
     }
 
-    auto cstContentAttrFilter = filterCst.getContentAttr();
+    const auto& cstContentAttrFilter = filterCst.getContentAttr();
     auto dimCPaddingEnd =
             sliceInputShape[Dims4D::Act::C] - filterShape[Dims4D::Filter::IC] - sliceOffset[Dims4D::Act::C.ind()];
     Shape cstPadBegin = {0, sliceOffset[Dims4D::Act::C.ind()], 0, 0};
@@ -127,40 +128,36 @@ mlir::LogicalResult vpux::IE::ConvolutionOp::inferReturnTypeComponents(
         return mlir::failure();
     }
 
-    const auto inShape = conv.getInput().getType().cast<mlir::ShapedType>().getShape();
-    const auto inType = conv.getInput().getType().cast<mlir::ShapedType>().getElementType();
-    const auto filterShape = conv.getFilter().getType().cast<mlir::ShapedType>().getShape();
-
     const auto dataPaddingBelow = parseIntArrayAttr<int64_t>(conv.getPadsEnd());
     const auto dataPaddingAbove = parseIntArrayAttr<int64_t>(conv.getPadsBegin());
     const auto windowStrides = parseIntArrayAttr<int64_t>(conv.getStrides());
     const auto windowDilations = parseIntArrayAttr<int64_t>(conv.getDilations());
 
-    static const auto ChanDim = Dim(1);
-    if (inShape[ChanDim.ind()] != filterShape[ChanDim.ind()]) {
+    const auto inputType = mlir::cast<vpux::NDTypeInterface>(conv.getInput().getType());
+    const auto filterType = mlir::cast<vpux::NDTypeInterface>(conv.getFilter().getType());
+
+    if (inputType.getShape()[Dims4D::Act::C] != filterType.getShape()[Dims4D::Filter::IC]) {
         return errorAt(loc, "Channels count of input tensor shape and filter shape must be the same: {0} != {1}",
-                       inShape[ChanDim.ind()], filterShape[ChanDim.ind()]);
+                       inputType.getShape()[Dims4D::Act::C], filterType.getShape()[Dims4D::Filter::IC]);
     }
 
-    const auto op = ov::op::v1::Convolution(
-            std::make_shared<ov::op::v0::Parameter>(ov::element::i32, ov::Shape(inShape.begin(), inShape.end())),
-            std::make_shared<ov::op::v0::Parameter>(ov::element::i32,
-                                                    ov::Shape(filterShape.begin(), filterShape.end())),
-            ov::Strides(windowStrides.begin(), windowStrides.end()),
-            ov::CoordinateDiff(dataPaddingBelow.begin(), dataPaddingBelow.end()),
-            ov::CoordinateDiff(dataPaddingAbove.begin(), dataPaddingAbove.end()),
-            ov::Strides(windowDilations.begin(), windowDilations.end()));
+    const auto inShapeInfo = ShapeInfo::fromNDType(inputType);
+    const auto filterShapeInfo = ShapeInfo::fromNDType(filterType);
 
-    const auto& outputShape = op.get_output_partial_shape(0);
-    auto shapeI64 = to_small_vector(outputShape.get_shape() | transformed([](size_t val) {
-                                        return checked_cast<int64_t>(val);
-                                    }));
+    auto shapeInfo = inferConvoutionOutputShapeInfo(inShapeInfo, filterShapeInfo, windowStrides, dataPaddingBelow,
+                                                    dataPaddingAbove, windowDilations);
 
     if (conv.getOutputChannels().has_value()) {
-        shapeI64[Dims4D::Act::C.ind()] = conv.getOutputChannels().value();
+        shapeInfo.shape[Dims4D::Act::C.ind()] = conv.getOutputChannels().value();
+    }
+    mlir::ArrayAttr outBoundsAttr = nullptr;
+    if (!shapeInfo.bounds.empty()) {
+        outBoundsAttr = getIntArrayAttr(ctx, shapeInfo.bounds);
     }
 
-    inferredReturnShapes.emplace_back(shapeI64, inType);
+    const auto inElementType = inputType.getElementType();
+    const auto outDesc = vpux::getTensorAttr(ctx, inputType.getDimsOrder(), /*memSpace=*/nullptr, outBoundsAttr);
+    inferredReturnShapes.emplace_back(shapeInfo.shape, inElementType, outDesc);
 
     return mlir::success();
 }
@@ -216,7 +213,10 @@ mlir::LogicalResult vpux::IE::GroupConvolutionOp::inferReturnTypeComponents(
         filterShape.erase(filterShape.begin());
     }
 
-    if (conv.getInputChannels().has_value()) {
+    // the number of groups is influenced by the output channels
+    // so the division computes a wrong value because the
+    // input is still expanded in case of ODU autopad
+    if (conv.getOutputChannels().has_value()) {
         inShape[1] = filterShape[1];
     } else {
         inShape[1] /= groups;
@@ -310,4 +310,31 @@ void vpux::IE::GroupConvolutionOp::getCanonicalizationPatterns(mlir::RewritePatt
                                                                mlir::MLIRContext* context) {
     patterns.add<FuseConvAndBias>(context);
     patterns.add<GroupsToAttr>(context);
+}
+
+mlir::LogicalResult vpux::IE::ConvolutionOp::reifyResultShapes(mlir::OpBuilder& builder,
+                                                               mlir::ReifiedRankedShapedTypeDims& reifiedReturnShapes) {
+    const auto dilation = parseIntArrayAttr<int64_t>(getDilationsAttr());
+    const auto isDilationOne = std::all_of(dilation.begin(), dilation.end(), [](int64_t val) {
+        return val == 1;
+    });
+    if (!isDilationOne) {
+        return errorAt(getLoc(), "Dilation is not supported for reifyResultShapes");
+    }
+
+    const auto kernelShape = getFilter().getType().cast<NDTypeInterface>().getShape();
+    SmallVector<int64_t> kernelSize{kernelShape[Dims4D::Filter::KY], kernelShape[Dims4D::Filter::KX]};
+
+    const auto strides = parseIntArrayAttr<int64_t>(getStridesAttr());
+    const auto padBegin = parseIntArrayAttr<int64_t>(getPadsBeginAttr());
+    const auto padEnd = parseIntArrayAttr<int64_t>(getPadsEndAttr());
+    auto outShape =
+            reifyConvPoolTensors(builder, getInput(), getOutput(), kernelSize, strides, padBegin, padEnd, getLoc());
+
+    if (mlir::failed(outShape)) {
+        return outShape;
+    }
+
+    reifiedReturnShapes.emplace_back(std::move(outShape.value()));
+    return mlir::success();
 }

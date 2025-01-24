@@ -5,6 +5,7 @@
 
 #include <vpux/compiler/utils/quantization.hpp>
 #include "vpux/compiler/dialect/IE/IR/ops.hpp"
+#include "vpux/compiler/utils/rewriter.hpp"
 
 using namespace vpux;
 
@@ -43,7 +44,7 @@ mlir::quant::QuantizedType extractQuantizedType(mlir::Value operand) {
 
 mlir::OpFoldResult vpux::IE::QuantizeOp::fold(FoldAdaptor adaptor) {
     auto operands = adaptor.getOperands();
-    if (auto ephemeral = operands[0].dyn_cast_or_null<Const::EphemeralContentAttr>()) {
+    if (auto ephemeral = operands[0].dyn_cast_or_null<Const::ContentAttr>()) {
         const auto cst = static_cast<Const::ContentAttr>(ephemeral);
 
         // Compiler must add real quantization of content if dequantization was before
@@ -55,8 +56,7 @@ mlir::OpFoldResult vpux::IE::QuantizeOp::fold(FoldAdaptor adaptor) {
             return cst.transform().quantize(quantType).get();
         }
 
-        const auto quantStorageType = normalizeQuantStorageType(quantType);
-        return cst.transform().castElemType(quantStorageType).quantCast(quantType).get();
+        return cst.transform().castElemType(quantType).get();
     }
 
     if (auto dequantize = getInput().getDefiningOp<IE::DequantizeOp>()) {
@@ -66,4 +66,112 @@ mlir::OpFoldResult vpux::IE::QuantizeOp::fold(FoldAdaptor adaptor) {
     }
 
     return nullptr;
+}
+
+//
+// FuseFQsWithSimilarScales
+//
+
+class FuseFQsWithSimilarScales final : public mlir::OpRewritePattern<IE::QuantizeOp> {
+public:
+    using mlir::OpRewritePattern<IE::QuantizeOp>::OpRewritePattern;
+
+public:
+    mlir::LogicalResult matchAndRewrite(IE::QuantizeOp origOp, mlir::PatternRewriter& rewriter) const final;
+};
+
+mlir::LogicalResult FuseFQsWithSimilarScales::matchAndRewrite(IE::QuantizeOp origOp,
+                                                              mlir::PatternRewriter& rewriter) const {
+    // Get the input of origOp
+    mlir::Value origOpInput = origOp.getInput();
+
+    // Get the defining operation of the first operand
+    mlir::Operation* origOpProducer = origOpInput.getDefiningOp();
+
+    // Check if the producer is a Reshape or AffineReshape
+    if (!mlir::isa_and_nonnull<IE::ReshapeOp, IE::AffineReshapeOp>(origOpProducer)) {
+        return mlir::failure();
+    }
+
+    mlir::Operation* reshapeOp = nullptr;
+    reshapeOp = origOpProducer;
+
+    // Check if reshapeOp has only one use
+    if (!reshapeOp->getResult(0).hasOneUse()) {
+        return mlir::failure();
+    }
+
+    // Get the first operand of the reshapeOp
+    mlir::Value reshapeOpInput = reshapeOp->getOperand(0);
+
+    // Get the defining operation of the first operand
+    mlir::Operation* reshapeOpProducer = reshapeOpInput.getDefiningOp();
+
+    // Check if the producer is a Dequantize
+    if (!mlir::isa_and_nonnull<IE::DequantizeOp>(reshapeOpProducer)) {
+        return mlir::failure();
+    }
+
+    IE::DequantizeOp dequantizeOp = nullptr;
+    dequantizeOp = mlir::dyn_cast<IE::DequantizeOp>(reshapeOpProducer);
+
+    // Check if dequantizeOp has only one use
+    if (!dequantizeOp->getResult(0).hasOneUse()) {
+        return mlir::failure();
+    }
+
+    // Get the element types of the Quantize and Dequantize operations
+    auto outputTypeQuantize = mlir::cast<mlir::ShapedType>(origOp.getType());
+    auto outElemType = outputTypeQuantize.getElementType();
+
+    auto inputTypeDequantize = mlir::cast<mlir::ShapedType>(dequantizeOp.getInput().getType());
+    auto inElemType = inputTypeDequantize.getElementType();
+
+    // If the elemTypes are exactly the same, fail the pattern match
+    if (outElemType == inElemType) {
+        return mlir::failure();
+    }
+
+    auto outUniformType = mlir::dyn_cast<mlir::quant::UniformQuantizedType>(outElemType);
+    if (!outUniformType) {
+        return mlir::failure();
+    }
+
+    auto inUniformType = mlir::dyn_cast<mlir::quant::UniformQuantizedType>(inElemType);
+    if (!inUniformType) {
+        return mlir::failure();
+    }
+
+    // Get the scales of the quantized types
+    const auto quantizeScale = outUniformType.getScale();
+    const auto dequantizeScale = inUniformType.getScale();
+
+    // If the scales are similar, but not within a tolerance, fail pattern match
+    const auto quotient = quantizeScale / dequantizeScale;
+    if (quotient < 0.99 || quotient > 1.01) {
+        return mlir::failure();
+    }
+
+    // Set the insertion point to just after the original operation
+    rewriter.setInsertionPointAfter(dequantizeOp.getInput().getDefiningOp());
+
+    // Clone the reshapeOp
+    auto* clonedReshapeOp = rewriter.clone(*reshapeOp);
+
+    // Update the types of the cloned operation
+    clonedReshapeOp->setOperand(0, dequantizeOp.getInput());
+    inferReturnTypes(clonedReshapeOp, InferShapedTypeMode::ELEM_TYPE);
+
+    // Update the operand of the second Dequantize operation
+    origOp.getOutput().replaceAllUsesWith(clonedReshapeOp->getResult(0));
+
+    return mlir::success();
+}
+
+//
+// getCanonicalizationPatterns
+//
+
+void vpux::IE::QuantizeOp::getCanonicalizationPatterns(mlir::RewritePatternSet& patterns, mlir::MLIRContext* ctx) {
+    patterns.add<FuseFQsWithSimilarScales>(ctx);
 }

@@ -13,8 +13,9 @@ namespace vpux {
 namespace VPU {
 namespace NCESparsity {
 
-using PPEConverterCb = int32_t (*)(uint8_t, uint16_t, double, mlir::Type);
-using BiasConverterCb = int32_t (*)(double, mlir::Type);
+using IntOrFloatType = std::variant<int32_t, float>;
+using PPEConverterCb = IntOrFloatType (*)(uint8_t, int16_t, double, mlir::Type);
+using BiasConverterCb = IntOrFloatType (*)(double, mlir::Type);
 
 PPEConverterCb getPPEConverterCb(VPU::ArchKind arch);
 BiasConverterCb getBiasConverterCb(VPU::ArchKind arch);

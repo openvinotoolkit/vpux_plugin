@@ -40,7 +40,6 @@ TEST_P(GRUSequenceLayerTestCommon, NPU4000_HW) {
     configuration["NPU_BACKEND_COMPILATION_PARAMS"] = "enable-partial-workload-management=false";
     run(Platform::NPU4000);
 }
-
 }  // namespace test
 }  // namespace ov
 

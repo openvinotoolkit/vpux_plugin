@@ -19,22 +19,23 @@ using namespace vpux;
 
 namespace {
 
-class RewriteEnqueueToDma final : public mlir::OpRewritePattern<VPURegMapped::FetchTaskOp> {
+class RewriteFetchTaskToDma final : public mlir::OpRewritePattern<VPURegMapped::FetchTaskOp> {
 public:
-    RewriteEnqueueToDma(mlir::MLIRContext* ctx, Logger log)
-            : mlir::OpRewritePattern<VPURegMapped::FetchTaskOp>(ctx), _log(log) {
-        setDebugName("EnuqeueOpRewriter");
+    RewriteFetchTaskToDma(mlir::MLIRContext* ctx, VPU::ArchKind arch, Logger log)
+            : mlir::OpRewritePattern<VPURegMapped::FetchTaskOp>(ctx), _arch(arch), _log(log) {
+        setDebugName("FetchTaskOpRewriter");
     }
 
     mlir::LogicalResult matchAndRewrite(VPURegMapped::FetchTaskOp FetchTaskOp,
                                         mlir::PatternRewriter& rewriter) const final;
 
 private:
+    VPU::ArchKind _arch = VPU::ArchKind::UNKNOWN;
     int64_t getTaskSize(VPURegMapped::TaskType taskType) const;
     Logger _log;
 };
 
-int64_t RewriteEnqueueToDma::getTaskSize(VPURegMapped::TaskType taskType) const {
+int64_t RewriteFetchTaskToDma::getTaskSize(VPURegMapped::TaskType taskType) const {
     switch (taskType) {
     case VPURegMapped::TaskType::DPUInvariant:
         return sizeof(npu40xx::nn_public::VpuDPUInvariant);
@@ -54,16 +55,16 @@ int64_t RewriteEnqueueToDma::getTaskSize(VPURegMapped::TaskType taskType) const 
     }
 }
 
-mlir::LogicalResult RewriteEnqueueToDma::matchAndRewrite(VPURegMapped::FetchTaskOp FetchTaskOp,
-                                                         mlir::PatternRewriter& rewriter) const {
+mlir::LogicalResult RewriteFetchTaskToDma::matchAndRewrite(VPURegMapped::FetchTaskOp fetchTaskOp,
+                                                           mlir::PatternRewriter& rewriter) const {
     auto ctx = getContext();
-    auto primaryTaskOpStart = mlir::cast<VPURegMapped::TaskOpInterface>(FetchTaskOp.getPrimaryStart().getDefiningOp());
-    auto primaryTaskOpEnd = mlir::cast<VPURegMapped::TaskOpInterface>(FetchTaskOp.getPrimaryEnd().getDefiningOp());
+    auto primaryTaskOpStart = mlir::cast<VPURegMapped::TaskOpInterface>(fetchTaskOp.getPrimaryStart().getDefiningOp());
+    auto primaryTaskOpEnd = mlir::cast<VPURegMapped::TaskOpInterface>(fetchTaskOp.getPrimaryEnd().getDefiningOp());
     auto primarySize = getTaskSize(primaryTaskOpStart.getTaskType());
 
     auto secondaryTaskOpStart =
-            mlir::cast<VPURegMapped::TaskOpInterface>(FetchTaskOp.getSecondaryStart().getDefiningOp());
-    auto secondaryTaskOpEnd = mlir::cast<VPURegMapped::TaskOpInterface>(FetchTaskOp.getSecondaryEnd().getDefiningOp());
+            mlir::cast<VPURegMapped::TaskOpInterface>(fetchTaskOp.getSecondaryStart().getDefiningOp());
+    auto secondaryTaskOpEnd = mlir::cast<VPURegMapped::TaskOpInterface>(fetchTaskOp.getSecondaryEnd().getDefiningOp());
     auto secondarySize = getTaskSize(secondaryTaskOpStart.getTaskType());
 
     // zero based indexes distance need to be incremented by 1
@@ -84,28 +85,28 @@ mlir::LogicalResult RewriteEnqueueToDma::matchAndRewrite(VPURegMapped::FetchTask
             secondaryMemrefDDR.cast<NDTypeInterface>().changeMemSpace(memSpaceCMX).cast<mlir::MemRefType>();
 
     auto primaryTaskView = rewriter.create<VPURegMapped::ViewTaskRangeOp>(
-            FetchTaskOp.getLoc(), primaryMemrefDDR, FetchTaskOp.getPrimaryStart(), FetchTaskOp.getPrimaryEnd());
+            fetchTaskOp.getLoc(), primaryMemrefDDR, fetchTaskOp.getPrimaryStart(), fetchTaskOp.getPrimaryEnd());
 
     auto primaryTaskLocationsView = rewriter.create<VPURegMapped::ViewTaskRangeOp>(
-            FetchTaskOp.getLoc(), primaryMemrefCMX, primaryTaskOpStart.getTaskLocation(),
+            fetchTaskOp.getLoc(), primaryMemrefCMX, primaryTaskOpStart.getTaskLocation(),
             primaryTaskOpEnd.getTaskLocation());
 
     auto secondaryTaskView = rewriter.create<VPURegMapped::ViewTaskRangeOp>(
-            FetchTaskOp.getLoc(), secondaryMemrefDDR, FetchTaskOp.getSecondaryStart(), FetchTaskOp.getSecondaryEnd());
+            fetchTaskOp.getLoc(), secondaryMemrefDDR, fetchTaskOp.getSecondaryStart(), fetchTaskOp.getSecondaryEnd());
 
     auto secondaryTaskLocationsView = rewriter.create<VPURegMapped::ViewTaskRangeOp>(
-            FetchTaskOp.getLoc(), secondaryMemrefCMX, secondaryTaskOpStart.getTaskLocation(),
+            fetchTaskOp.getLoc(), secondaryMemrefCMX, secondaryTaskOpStart.getTaskLocation(),
             secondaryTaskOpEnd.getTaskLocation());
 
     auto primaryDma = rewriter.create<VPUMI40XX::NNDMAOp>(
-            FetchTaskOp.getLoc(), FetchTaskOp.getIndexType(),
+            fetchTaskOp.getLoc(), fetchTaskOp.getIndexType(),
             nullptr,  // for now it's assumed that with WLM DMA's don't have a taskLocation
             primaryTaskView.getResult(), mlir::ValueRange({primaryTaskLocationsView.getResult()}),
-            FetchTaskOp.getPreviousTask(),               // inherit the previous
-            mlir::ValueRange({}), mlir::ValueRange({}),  // NO BARRIERS for these DMA's for
-            0, 0,                                        // start_after, clean_after fields have no meaning with WLM
-            true, true, false,                           // is_out_of_rder  and is_critical, enable_msc
-            0,                                           // port has no meaning
+            fetchTaskOp.getPreviousTask(),  // inherit the previous
+            mlir::ValueRange({}), mlir::ValueRange({}), 0,
+            0,                  // start_after, clean_after fields have no meaning with WLM
+            true, true, false,  // is_out_of_rder  and is_critical, enable_msc
+            0,                  // port has no meaning
             VPUIP::DMAAccMode::DISABLE,
             nullptr,  // dma_transaction
             nullptr,  // no descriptor attr required
@@ -118,11 +119,11 @@ mlir::LogicalResult RewriteEnqueueToDma::matchAndRewrite(VPURegMapped::FetchTask
             nullptr   // enqueueBarrier
     );
     auto secondaryDma = rewriter.create<VPUMI40XX::NNDMAOp>(
-            FetchTaskOp.getLoc(), FetchTaskOp.getIndexType(),
+            fetchTaskOp.getLoc(), fetchTaskOp.getIndexType(),
             nullptr,  // for now it's assumed that with WLM DMA's don't have a taskLocation
             secondaryTaskView.getResult(), mlir::ValueRange({secondaryTaskLocationsView.getResult()}),
-            primaryDma.getResult(), mlir::ValueRange({}), mlir::ValueRange({}),  // NO BARRIERS for these DMA's for
-            0, 0,               // start_after, clean_after fields have no meaning with WLM
+            primaryDma.getResult(), mlir::ValueRange({}), mlir::ValueRange({}), 0,
+            0,                  // start_after, clean_after fields have no meaning with WLM
             true, true, false,  // is_out_of_rder  and is_critical, enable_msc
             0,                  // port has no meaning
             VPUIP::DMAAccMode::DISABLE,
@@ -139,17 +140,17 @@ mlir::LogicalResult RewriteEnqueueToDma::matchAndRewrite(VPURegMapped::FetchTask
 
     // the use of mapped inference is to be replaced with the FIRST dma.
     // the rest of the DMA's are to be replaced with the SECOND dma
-    rewriter.replaceOpWithIf(FetchTaskOp.getOperation(), mlir::ValueRange(primaryDma.getResult()),
+    rewriter.replaceOpWithIf(fetchTaskOp.getOperation(), mlir::ValueRange(primaryDma.getResult()),
                              [](mlir::OpOperand& operand) {
                                  return mlir::isa<VPUMI40XX::MappedInferenceOp>(operand.getOwner()) ||
                                         mlir::isa<VPUMI40XX::OpRanges>(operand.getOwner());
                              });
-    rewriter.replaceOpWithIf(FetchTaskOp.getOperation(), mlir::ValueRange(secondaryDma.getResult()),
+    rewriter.replaceOpWithIf(fetchTaskOp.getOperation(), mlir::ValueRange(secondaryDma.getResult()),
                              [](mlir::OpOperand& operand) {
                                  return !mlir::isa<VPUMI40XX::MappedInferenceOp>(operand.getOwner());
                              });
 
-    rewriter.eraseOp(FetchTaskOp.getOperation());
+    rewriter.eraseOp(fetchTaskOp.getOperation());
 
     return mlir::success();
 }
@@ -167,9 +168,10 @@ private:
 void UnrollFetchTaskOpsPass::safeRunOnFunc() {
     auto netFunc = getOperation();
     auto ctx = &getContext();
+    const auto arch = VPU::getArch(netFunc);
 
     mlir::RewritePatternSet patterns(ctx);
-    patterns.add<RewriteEnqueueToDma>(ctx, _log);
+    patterns.add<RewriteFetchTaskToDma>(ctx, arch, _log);
 
     if (mlir::failed(mlir::applyPatternsAndFoldGreedily(netFunc, std::move(patterns),
                                                         vpux::getDefaultGreedyRewriteConfig()))) {
@@ -180,8 +182,6 @@ void UnrollFetchTaskOpsPass::safeRunOnFunc() {
     const auto tilesCount = IE::getTileExecutor(parentModule).getCount();
 
     auto mpi = VPUMI40XX::getMPI(netFunc);
-
-    // auto builder = mlir::OpBuilder(mpi);
     const size_t DMA_DDR2CMX_LISTIDX = 0;
 
     for (int64_t tileIdx = 0; tileIdx < tilesCount; tileIdx++) {

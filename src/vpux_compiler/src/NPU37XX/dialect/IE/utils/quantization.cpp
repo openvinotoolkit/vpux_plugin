@@ -57,7 +57,7 @@ bool IE::arch37xx::checkPostOp(IE::LayerWithPostOpInterface layerWithPostOp, boo
     auto postOpName = layerWithPostOp.getPostOp().value().getStringRef();
     auto postOpDictAttr = layerWithPostOp.getPostOpAttrs();
     if (postOpDictAttr != nullptr) {
-        // On NPU37XX and NPU40XX the prelu alpha multiplier used for integer input is unsigned, on
+        // On NPU37XX, NPU40XX, the prelu alpha multiplier used for integer input is unsigned, on
         // floating input it is signed. If input is floating, output is integer, quantize output need to be per tensor,
         // this will check in mix-precision pass
         if (!isFloatInput && postOpName == IE::LeakyReluOp::getOperationName()) {

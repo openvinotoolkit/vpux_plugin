@@ -8,7 +8,7 @@
 #include "vpux/compiler/utils/logging.hpp"
 #include "vpux/compiler/utils/rewriter.hpp"
 
-#include "vpux/utils/IE/prefix.hpp"
+#include <intel_npu/prefix.hpp>
 
 using namespace vpux;
 
@@ -52,7 +52,7 @@ mlir::LogicalResult AssignRewriter::matchAndRewrite(IE::AssignOp origOp, mlir::P
     auto outputsInfoBuilder = mlir::OpBuilder::atBlockEnd(&netInfo.getOutputsInfo().front(), builder.getListener());
     auto* ctx = builder.getContext();
     const auto outputTypeAttr = mlir::TypeAttr::get(assignInputType);
-    const auto outputNameAttr = mlir::StringAttr::get(ctx, ASSIGN_PREFIX + origOp.getName());
+    const auto outputNameAttr = mlir::StringAttr::get(ctx, std::string(intel_npu::ASSIGN_PREFIX) + origOp.getName());
     outputsInfoBuilder.create<IE::DataInfoOp>(takeOpLoc(origOp, llvm::StringLiteral("assign_{0}"), origOp.getName()),
                                               outputNameAttr, outputTypeAttr,
                                               /*OptionalAttr originalShape*/ nullptr,
@@ -113,7 +113,7 @@ mlir::LogicalResult ReadValueRewriter::matchAndRewrite(IE::ReadValueOp origOp, m
     auto inputsInfoBuilder = mlir::OpBuilder::atBlockEnd(&netInfo.getInputsInfo().front(), builder.getListener());
     auto* ctx = builder.getContext();
     const auto inputTypeAttr = mlir::TypeAttr::get(readValueInputType);
-    const auto inputNameAttr = mlir::StringAttr::get(ctx, READVALUE_PREFIX + origOp.getName());
+    const auto inputNameAttr = mlir::StringAttr::get(ctx, std::string(intel_npu::READVALUE_PREFIX) + origOp.getName());
     inputsInfoBuilder.create<IE::DataInfoOp>(takeOpLoc(origOp, llvm::StringLiteral("read_{0}"), origOp.getName()),
                                              inputNameAttr, inputTypeAttr,
                                              /*OptionalAttr originalShape*/ nullptr,

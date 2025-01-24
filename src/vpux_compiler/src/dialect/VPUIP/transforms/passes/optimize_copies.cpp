@@ -10,6 +10,7 @@
 #include "vpux/compiler/dialect/VPU/utils/explicit_distribution_utils.hpp"
 #include "vpux/compiler/dialect/VPU/utils/nce_sparsity.hpp"
 #include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPUIP/utils/sw_utils.hpp"
 #include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
 #include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
 #include "vpux/compiler/utils/permute_utils.hpp"
@@ -107,6 +108,45 @@ bool isEltwiseInplaceUser(VPUIP::CopyOp copyOp) {
     return false;
 }
 
+// Helper function to assert operation dominance in a graph.
+// It helps to avoid the following situations:
+// %COPY = VPUIP.Copy(%ALLOC)   // operand does not dominate this use
+// %ALLOC = memref.alloc
+// It is always safe to put allocations in the beginning of the block because they don't have any producers.
+// First check if an operation is an allocation. If it is, move it to the beginning of the block.
+// If a buffer is not produced by an allocation, check that it comes before its consumer.
+// mlir::Operation::isBeforeInBlock is an expensive check, it should be avoided whenever possible.
+// useMoveAfter flag determines the method of ordering.
+// useMoveAfter = true: place copy operation after the buffer:
+// %COPY = VPUIP.Copy(%ALLOC)
+// %op1 = ...
+// %ALLOC = memref.alloc
+// becomes
+// %op1 = ...
+// %ALLOC = memref.alloc
+// %COPY = VPUIP.Copy(%ALLOC)
+// useMoveAfter = false: place buffer before the copy operation:
+// %COPY = VPUIP.Copy(%ALLOC)
+// %op1 = ...
+// %ALLOC = memref.alloc
+// becomes
+// %ALLOC = memref.alloc
+// %COPY = VPUIP.Copy(%ALLOC)
+// %op1 = ...
+void rearrangeOperations(mlir::Operation* buffer, mlir::Operation* copy, const bool useMoveAfter) {
+    if (mlir::isa<mlir::memref::AllocOp, VPURT::AllocDistributed>(buffer)) {
+        auto& block = buffer->getParentOfType<mlir::func::FuncOp>().getBody().front();
+        mlir::Operation& firstOp = block.front();
+        VPUIP::moveRootAllocBefore(buffer, &firstOp);
+    } else if (copy->isBeforeInBlock(buffer)) {
+        if (useMoveAfter) {
+            copy->moveAfter(buffer);
+        } else {
+            VPUIP::moveRootAllocBefore(buffer, copy);
+        }
+    }
+}
+
 //
 // CopyOpSequence
 //
@@ -161,6 +201,17 @@ mlir::LogicalResult CopyOpSequence::matchAndRewrite(VPUIP::CopyOp copyOp, mlir::
         }
     }
 
+    // Check ViewLikeOp without output_buff
+    const auto isViewLikeOpWithoutOutputBuff = [&](mlir::Operation* op) -> bool {
+        if (mlir::isa<VPUIP::DistributedCastOp, VPUIP::NonDistributedCastOp, VPUIP::SubViewOp, VPUIP::PermuteCastOp,
+                      VPUIP::QuantizeCastOp, VPUIP::GenericReshapeOp, VPUIP::ShapeCastOp, VPUIP::StubOp, VPUIP::ViewOp,
+                      VPUIP::ExtractFlatSliceOp, VPUIP::WorkloadCastOp>(op)) {
+            return true;
+        }
+
+        return false;
+    };
+
     // In case the new copyOp will be eliminated after copyOp sequence optimization, and the user of copyOp is
     // an EltwiseOp with is_inplace, then the inplace buffer for EltwiseOp should be updated.
     auto parentCopyOpInputType = parentCopyOp.getInput().getType().cast<vpux::NDTypeInterface>();
@@ -179,8 +230,45 @@ mlir::LogicalResult CopyOpSequence::matchAndRewrite(VPUIP::CopyOp copyOp, mlir::
             if (parentCopyInputOp == nullptr) {
                 return mlir::failure();
             }
-            auto parentCopyOpInputBuff = VPUIP::getLayerOutputs(parentCopyInputOp)[0];
-            rewriter.replaceAllUsesWith(nceOutputBuff, parentCopyOpInputBuff);
+            mlir::Value parentCopyOpInputBuff;
+            // For view-like ops getLayerOutputs will incorrectly return
+            // value that is an input to it rather than returning its own
+            // output. Instead just call getResult directly.
+            if (isViewLikeOpWithoutOutputBuff(parentCopyInputOp)) {
+                parentCopyOpInputBuff = parentCopyInputOp->getResult(0);
+            } else {
+                parentCopyOpInputBuff = VPUIP::getLayerOutputs(parentCopyInputOp)[0];
+            }
+
+            //
+            // In case there is a ViewOp make ElemType consistent for Inplace buffer
+            // After optimize copyOp sequence, need to get the root buffer of Input Buf 1 as new input buffer of ViewOp
+            //             |
+            //     CMX: Input Buf 1
+            //             |
+            //     CopyOp (CMX2DDR)
+            //             |
+            //     CopyOp (DDR2CMX)
+            //     (CMX: Input Buf 2)           (CMX: Input Buf 3)
+            //                     \                 /
+            //             EltwiseOp with Inplace (Input Buf 2)
+            //                     /                 |
+            //     ViewOp (Input Buf 2)
+            //
+            mlir::Operation* viewOp = nullptr;
+            for (auto user : nceOutputBuff.getUsers()) {
+                if (mlir::isa<VPUIP::ViewOp>(user->getResult(0).getDefiningOp())) {
+                    viewOp = mlir::cast<VPUIP::ViewOp>(user->getResult(0).getDefiningOp());
+                }
+            }
+
+            if (viewOp == nullptr) {
+                rewriter.replaceAllUsesWith(nceOutputBuff, parentCopyOpInputBuff);
+            } else {
+                rewriter.replaceAllUsesExcept(nceOutputBuff, parentCopyOpInputBuff, viewOp);
+                rewriter.replaceOpWithNewOp<VPUIP::ViewOp>(viewOp, viewOp->getResult(0).getType(),
+                                                           getRootBuffer(parentCopyOpInputBuff));
+            }
         }
     }
 
@@ -517,9 +605,7 @@ void propagateStrideInfo(mlir::Operation* parent, size_t resultIndex, mlir::Patt
                                                                             tilingCopyOp->getResult(0).getType(),
                                                                             inputsOutputOperands, copyOutBodyBuilder);
             auto allocOp = tilingCopyOp.getOutputBuffs()[0].getDefiningOp();
-            if (newTilingCopy->isBeforeInBlock(allocOp)) {
-                newTilingCopy->moveAfter(allocOp);
-            }
+            rearrangeOperations(allocOp, newTilingCopy, true);
             rewriter.replaceOp(tilingCopyOp, newTilingCopy->getResult(0));
             continue;
         }
@@ -694,9 +780,7 @@ mlir::LogicalResult removeClusterTilingCMXToCMXCopy(VPUIP::NCEClusterTilingOp co
         rewriter.replaceAllUsesWith(copyClusterOp->getResult(0), parentNCEClusterOp->getResult(outputBuffIndex));
 
         // update IR location of the master buffer
-        if (copySubView->isBeforeInBlock(masterBuffer)) {
-            VPUIP::moveRootAllocBefore(masterBuffer, copySubView);
-        }
+        rearrangeOperations(masterBuffer, copySubView, false);
 
         rewriter.eraseOp(copyClusterOp);
         if (distributedCast != nullptr) {
@@ -757,6 +841,18 @@ mlir::LogicalResult removeCMXToCMXCopy(VPUIP::CopyOp copyOp, mlir::PatternRewrit
         }
     }
 
+    // TileOp's required CMX is always bigger than CopyOp.
+    // For Dynamic_Tile, its boundary of input and output is same when compiling to looks like needing same CMX.
+    // But for runtime, it gets actual shapes. So removing the copies may cause runtime issue.
+    for (auto copyOpUser : copyOp->getUsers()) {
+        if (auto swKernelOp = mlir::dyn_cast<VPUIP::SwKernelOp>(copyOpUser)) {
+            if (getSwKernelEntryName(swKernelOp) == "dynamic_tile") {
+                isInputCompatible = false;
+                break;
+            }
+        }
+    }
+
     // Only remove redundant CMX2CMX CopyOps
     if (!isCMX2CMXCopy(inputType.getMemoryKind(), outputType.getMemoryKind())) {
         nestedLogger.trace("Cannot match because the transfer is not CMX->CMX");
@@ -788,9 +884,7 @@ mlir::LogicalResult removeCMXToCMXCopy(VPUIP::CopyOp copyOp, mlir::PatternRewrit
         rewriter.replaceAllUsesWith(copyOp.getOutput(), copyOp.getInput());
 
         // update IR location of the master buffer
-        if (copySubView->isBeforeInBlock(masterBuffer)) {
-            VPUIP::moveRootAllocBefore(masterBuffer, copySubView);
-        }
+        rearrangeOperations(masterBuffer, copySubView, false);
 
         rewriter.eraseOp(copyOp);
 
@@ -1197,9 +1291,7 @@ mlir::LogicalResult removeDDR2DDRForNCEClusterOutput(VPUIP::CopyOp copyOp, mlir:
         parentOp->getResult(0).setType(newSubViewOp->getResult(0).getType());
 
         // update IR location of the master buffer
-        if (newSubViewOp->isBeforeInBlock(masterBuffer)) {
-            VPUIP::moveRootAllocBefore(masterBuffer, newSubViewOp);
-        }
+        rearrangeOperations(masterBuffer, newSubViewOp, false);
     } else {
         auto parentOp = copyOp.getInput().getDefiningOp<VPUIP::NCEClusterTilingOp>();
         auto allocOp = VPUIP::getRootAlloc<mlir::memref::AllocOp>(parentOp.getOutputBuffs()[0]);
@@ -1607,7 +1699,7 @@ bool ConcatViewWithCopyBase::hasDuplicatedCopyOutput(VPUIP::ConcatViewOp origOp)
         auto nextCopyOp = mlir::dyn_cast<VPUIP::CopyOp>(nextOp);
         if (preCopyOp != nullptr && nextCopyOp != nullptr) {
             auto preOutType = preCopyOp.getOutput().getType().dyn_cast<vpux::NDTypeInterface>();
-            auto nextOutType = preCopyOp.getOutput().getType().dyn_cast<vpux::NDTypeInterface>();
+            auto nextOutType = nextCopyOp.getOutput().getType().dyn_cast<vpux::NDTypeInterface>();
             return preOutType == nextOutType;
         }
 
@@ -2127,7 +2219,10 @@ public:
     bool checkCMXFit(mlir::Value topBuffer) const;
 
 private:
-    int64_t _cmxSize{};
+    const int64_t _cmxSize{};
+    // Cache top buffers whose user matmul does not fit cmx
+    //  to avoid duplicated calculation on other subview branches
+    mutable llvm::SetVector<mlir::Value> _failedTopBuffers{};
     Logger _log;
 };
 
@@ -2277,7 +2372,10 @@ mlir::Value SubViewWithTilingCopy::getSuitableSubViewPatternSourceBuffer(VPUIP::
     if (parentSubViewOp == nullptr) {
         return nullptr;
     }
-    auto topBuffer = parentSubViewOp.getSource();
+    mlir::Value topBuffer = parentSubViewOp.getSource();
+    if (_failedTopBuffers.contains(topBuffer)) {
+        return nullptr;
+    }
 
     if (!checkCMXFit(topBuffer)) {
         return nullptr;
@@ -2287,19 +2385,27 @@ mlir::Value SubViewWithTilingCopy::getSuitableSubViewPatternSourceBuffer(VPUIP::
         return nullptr;
     }
 
-    // Calculate the new required cmx size for user op, since the new input will be
+    // Calculate the new required cmx size for user op on each subview branch, since the new input will be
     // changed into SEG|DUP instead of SEG
-    auto allUserOpsCanFitCMX = llvm::all_of(wrapperOp->getUsers(), [&](auto user) {
-        Byte requiredCMX = VPUIP::getRequiredCMXSize(user);
+    auto doesBranchHaveProperUsersAndFitCMX = [&](VPUIP::NCEClusterTilingOp subviewCopy) {
+        return llvm::all_of(subviewCopy->getUsers(), [&](auto user) {
+            Byte requiredCMX = VPUIP::getRequiredCMXSize(user);
+            // replace the original operand's required cmx size with new one
+            requiredCMX -= getTotalSize(subviewCopy->getResult(0));
+            requiredCMX += getTotalSize(topBuffer);
+            if (requiredCMX > Byte(_cmxSize)) {
+                return false;
+            }
 
-        // replace the original operand's required cmx size with new one
-        requiredCMX -= getTotalSize(wrapperOp->getResult(0));
-        requiredCMX += getTotalSize(topBuffer);
-        return requiredCMX <= Byte(_cmxSize);
-    });
-    if (!allUserOpsCanFitCMX) {
-        return nullptr;
-    }
+            // Because of SEG|DUP instead of SEG, a SubView user with explicit-output-shape would become illegal.
+            // So stop the optimization once hit this case.
+            // Track #E125638
+            if (auto userSubView = mlir::dyn_cast<VPUIP::SubViewOp>(user)) {
+                return !userSubView.getExplicitOutputShapes().has_value();
+            }
+            return true;
+        });
+    };
 
     auto topBufferUsers = topBuffer.getUsers();
     for (auto user : topBufferUsers) {
@@ -2313,6 +2419,10 @@ mlir::Value SubViewWithTilingCopy::getSuitableSubViewPatternSourceBuffer(VPUIP::
         auto tilingCopy = mlir::dyn_cast<VPUIP::NCEClusterTilingOp>(*anotherSubView.getResult().getUsers().begin());
         if (tilingCopy == nullptr || !isTilingCopyOpSegmentedOnN(tilingCopy) ||
             doesTilingCopyOpHasStridedOuput(tilingCopy)) {
+            return nullptr;
+        }
+        if (!doesBranchHaveProperUsersAndFitCMX(tilingCopy)) {
+            _failedTopBuffers.insert(topBuffer);
             return nullptr;
         }
     }

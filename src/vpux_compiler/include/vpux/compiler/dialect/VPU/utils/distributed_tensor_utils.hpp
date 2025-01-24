@@ -68,11 +68,9 @@ SmallVector<int64_t> getWeightsTableTensorNumTiles(VPU::ClusteredOpInterface clu
                                                    vpux::NDTypeInterface tensorType,
                                                    int64_t numClustersAvailableForCompilation,
                                                    VPU::MultiClusterStrategy strategy);
-SmallVector<int64_t> getInstructionListTableTensorNumTiles(VPU::MultiClusterStrategy strategy);
 DistributionMode getActivationTensorDistributionMode(VPU::ClusteredOpInterface clusteredOp,
                                                      VPU::MultiClusterStrategy strategy);
 DistributionMode getWeightsTensorDistributionMode(VPU::MultiClusterStrategy strategy);
-DistributionMode getInstructionListTableTensorDistributionMode(VPU::MultiClusterStrategy strategy);
 DistributionMode getOutputTensorDistributionMode(VPU::ClusteredOpInterface clusteredOp,
                                                  VPU::MultiClusterStrategy strategy, vpux::NDTypeInterface outputType);
 
@@ -85,6 +83,10 @@ bool isSOGSupportedByDPU(vpux::NDTypeInterface inputType, ShapeRef inputShape, i
 
 vpux::VPU::CopyOp createDistributedCopyIn(mlir::PatternRewriter& rewriter, VPU::ClusteredOpInterface clusteredOp,
                                           mlir::Value input, vpux::NDTypeInterface inputTensorDistributedTensorType);
+
+vpux::VPU::UnrolledTypeOp createDistributedUnrolledTypeIn(mlir::PatternRewriter& rewriter,
+                                                          VPU::ClusteredOpInterface clusteredOp, mlir::Value input,
+                                                          vpux::NDTypeInterface inputTensorDistributedTensorType);
 
 vpux::NDTypeInterface getDistributedTypeFromInput(VPU::ClusteredOpInterface clusteredOp, mlir::Value input,
                                                   DistributionMode distributionMode, mlir::ArrayAttr numTiles,
@@ -176,7 +178,7 @@ bool isSegmentedOverlappedAxisSameAsSliceAxis(mlir::ArrayAttr numTiles, ArrayRef
 bool isSegmentedOverlappedAxisSameAsSliceAxis(ArrayRef<int64_t> numTiles, ArrayRef<int64_t> inputShape,
                                               ArrayRef<int64_t> sliceShape);
 
-bool isSegmentedLikeDistributionMode(vpux::NDTypeInterface sourceType, VPU::DistributionInfo& sourceDistribution);
+bool isSegmentedLikeDistributionMode(vpux::NDTypeInterface sourceType, const VPU::DistributionInfo& sourceDistribution);
 
 mlir::Type getCompactTypeFromDistributed(mlir::Type originalType);
 
@@ -216,8 +218,6 @@ mlir::Value getDistributedOperandFromNCEClusterTiling(T clusterOp, mlir::Value i
                       clusterOp.getNumOperands());
     return clusterOp.getOperand(operandNum);
 }
-
-bool isSegmentedLikeDistributionMode(vpux::NDTypeInterface sourceType, VPU::DistributionInfo& sourceDistribution);
 
 SmallVector<int64_t> getNonOneDimInds(ArrayRef<int64_t> inputArray);
 

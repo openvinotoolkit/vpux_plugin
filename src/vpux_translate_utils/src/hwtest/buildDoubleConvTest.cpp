@@ -239,7 +239,8 @@ void buildDoubleConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp 
     const auto getWeightsAttribute = [&builder, &weightsType, &ctx](llvm::SmallVector<std::int64_t> weightsShape,
                                                                     const char* weightsFileName) {
         const auto weightsValues = generateWeights(builder, weightsShape, weightsType, ctx, weightsFileName);
-        return vpux::Const::ContentAttr::transform(weightsValues).reorder(vpux::DimsOrder::OYXI).get();
+        return vpux::Const::ContentAttr::get(
+                weightsValues, Const::ContentSetup(weightsValues.getType()).reorder(vpux::DimsOrder::OYXI));
     };
 
     // Weights 0
@@ -356,8 +357,8 @@ void buildDoubleConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp 
                 getMemRefType(VPURT::BufferSection::Constant, weightsTableShape, int32, DimsOrder::NHWC);
         const auto weightsTableValues =
                 mlir::DenseElementsAttr::get(weightsTableDDRType, llvm::ArrayRef<std::int32_t>(weightsTable));
-        auto weightsTableContentAttr =
-                vpux::Const::ContentAttr::transform(weightsTableValues).reorder(vpux::DimsOrder::NHWC).get();
+        auto weightsTableContentAttr = vpux::Const::ContentAttr::get(
+                weightsTableValues, Const::ContentSetup(weightsTableDDRType).reorder(vpux::DimsOrder::NHWC));
         auto weightsTableDDR = functionBuilder.create<vpux::Const::DeclareOp>(
                 builder.getUnknownLoc(), weightsTableDDRMemRef, std::move(weightsTableContentAttr));
         return weightsTableDDR;
@@ -421,7 +422,6 @@ void buildDoubleConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp 
             /*weights=*/paddedWeights0CMX.getBuffer(),
             /*weights_sparsity_map=*/nullptr,
             /*weightsTable=*/weights0TableCMX.getBuffer(),
-            /*instruction_table_list=*/nullptr,
             /*spr_lookup_table=*/nullptr,
             /*parent_input=*/paddedInputCMX.getBuffer(),
             /*parent_input_sparsity_map=*/nullptr,
@@ -430,12 +430,15 @@ void buildDoubleConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp 
             /*parent_output_sparsity_map=*/output0SMBuffer,
             /*output_buff=*/output0CMX.getBuffer(),
             /*output_sparsity_map_buff=*/output0SMBuffer,
-            /*profiling_data=*/nullptr, VPUIP::NCETaskType::CONV,
+            /*profiling_data=*/nullptr,
+            /*max_per_xy=*/nullptr,
+            /*min_per_xy=*/nullptr,
+            /*min_max_per_tensor=*/mlir::ValueRange(), VPUIP::NCETaskType::CONV,
             /*kernel_size=*/kernelSize, /*kernel_strides*/ strides,
             /*kernel_padding=*/kernelPaddings,
             /*is_continued=*/nullptr, /*cm_sp_pattern=*/nullptr, /*is_segmented=*/nullptr,
             /*out_channel_offset=*/vpux::getIntAttr(builder.getContext(), sparsityPattern),
-            /*input_channels_compression*/ inputChannelsCompression,
+            /*input_channels_compression*/ inputChannelsCompression, /*is_zero_offset_weights_table=*/nullptr,
             /*is_superdense=*/nullptr,
             /*is_inplace=*/nullptr,
             /*input_se_size=*/nullptr,
@@ -467,7 +470,6 @@ void buildDoubleConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp 
             /*weights=*/weights1CMX.getBuffer(),
             /*weights_sparsity_map=*/nullptr,
             /*weightsTable=*/weights1TableCMX.getBuffer(),
-            /*instruction_table_list=*/nullptr,
             /*spr_lookup_table=*/nullptr,
             /*parent_input=*/input1CMX.getBuffer(),
             /*parent_input_sparsity_map=*/output0SMBuffer,
@@ -476,11 +478,15 @@ void buildDoubleConv(const nb::TestCaseJsonDescriptor& testDesc, mlir::ModuleOp 
             /*parent_output_sparsity_map=*/nullptr,
             /*output_buff=*/output1CMX.getBuffer(),
             /*output_sparsity_map_buff=*/nullptr,
-            /*profiling_data=*/nullptr, VPUIP::NCETaskType::CONV,
+            /*profiling_data=*/nullptr,
+            /*max_per_xy=*/nullptr,
+            /*min_per_xy=*/nullptr,
+            /*min_max_per_tensor=*/mlir::ValueRange(), VPUIP::NCETaskType::CONV,
             /*kernel_size=*/kernelSize, /*kernel_strides*/ strides,
             /*kernel_padding=*/kernelPaddings,
             /*is_continued=*/nullptr, /*cm_sp_pattern=*/nullptr, /*is_segmented=*/nullptr,
             /*out_channel_offset=*/nullptr, /*input_channels_compression*/ nullptr,
+            /*is_zero_offset_weights_table=*/nullptr,
             /*is_superdense=*/nullptr,
             /*is_inplace=*/nullptr,
             /*input_se_size=*/nullptr,

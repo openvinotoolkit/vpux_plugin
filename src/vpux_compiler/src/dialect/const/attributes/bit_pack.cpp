@@ -75,23 +75,44 @@ vpux::NDTypeInterface vpux::Const::BitPackAttr::inferOutputType(vpux::NDTypeInte
     VPUX_THROW_WHEN(input.getElementType().isa<mlir::FloatType>(), "Bit pack does not support float inputs.");
     const auto bitWidth = checked_cast<unsigned>(getWidth().getInt());
     mlir::Type outElementType;
-    if (auto quantInType = input.getElementType().dyn_cast_or_null<mlir::quant::UniformQuantizedType>()) {
+
+    if (auto quantInType = mlir::dyn_cast_or_null<mlir::quant::QuantileQuantizedType>(input.getElementType())) {
         const auto minVal = quantInType.getStorageTypeMin();
         const auto maxVal = quantInType.getStorageTypeMax();
-        const auto singedness = quantInType.isSigned() ? mlir::IntegerType::Signed : mlir::IntegerType::Unsigned;
-        const auto elementIntegerType = mlir::IntegerType::get(getContext(), bitWidth, singedness);
+        const auto signedness = quantInType.isSigned() ? mlir::IntegerType::Signed : mlir::IntegerType::Unsigned;
+        const auto elementIntegerType = mlir::IntegerType::get(getContext(), bitWidth, signedness);
+        outElementType = mlir::quant::QuantileQuantizedType::get(
+                quantInType.getFlags(), elementIntegerType, quantInType.getQuantileType(),
+                quantInType.getExpressedType(), quantInType.getQuantiles(), quantInType.getScale(),
+                quantInType.getZeroPoint(), minVal, maxVal);
+    } else if (auto quantInType =
+                       mlir::dyn_cast_or_null<mlir::quant::QuantileQuantizedPerAxisType>(input.getElementType())) {
+        const auto minVal = quantInType.getStorageTypeMin();
+        const auto maxVal = quantInType.getStorageTypeMax();
+        const auto signedness = quantInType.isSigned() ? mlir::IntegerType::Signed : mlir::IntegerType::Unsigned;
+        const auto elementIntegerType = mlir::IntegerType::get(getContext(), bitWidth, signedness);
+        outElementType = mlir::quant::QuantileQuantizedPerAxisType::get(
+                quantInType.getFlags(), elementIntegerType, quantInType.getQuantileType(),
+                quantInType.getExpressedType(), quantInType.getQuantiles(), quantInType.getScales(),
+                quantInType.getZeroPoints(), quantInType.getQuantizedDimension(), minVal, maxVal);
+    } else if (auto quantInType = mlir::dyn_cast_or_null<mlir::quant::UniformQuantizedType>(input.getElementType())) {
+        const auto minVal = quantInType.getStorageTypeMin();
+        const auto maxVal = quantInType.getStorageTypeMax();
+        const auto signedness = quantInType.isSigned() ? mlir::IntegerType::Signed : mlir::IntegerType::Unsigned;
+        const auto elementIntegerType = mlir::IntegerType::get(getContext(), bitWidth, signedness);
         outElementType = mlir::quant::UniformQuantizedType::get(quantInType.getFlags(), elementIntegerType,
                                                                 quantInType.getExpressedType(), quantInType.getScale(),
                                                                 quantInType.getZeroPoint(), minVal, maxVal);
-    } else if (auto quantInType = input.getElementType().dyn_cast_or_null<mlir::quant::UniformQuantizedPerAxisType>()) {
+    } else if (auto quantInType =
+                       mlir::dyn_cast_or_null<mlir::quant::UniformQuantizedPerAxisType>(input.getElementType())) {
         const auto minVal = quantInType.getStorageTypeMin();
         const auto maxVal = quantInType.getStorageTypeMax();
-        const auto singedness = quantInType.isSigned() ? mlir::IntegerType::Signed : mlir::IntegerType::Unsigned;
-        const auto elementIntegerType = mlir::IntegerType::get(getContext(), bitWidth, singedness);
+        const auto signedness = quantInType.isSigned() ? mlir::IntegerType::Signed : mlir::IntegerType::Unsigned;
+        const auto elementIntegerType = mlir::IntegerType::get(getContext(), bitWidth, signedness);
         outElementType = mlir::quant::UniformQuantizedPerAxisType::get(
                 quantInType.getFlags(), elementIntegerType, quantInType.getExpressedType(), quantInType.getScales(),
                 quantInType.getZeroPoints(), quantInType.getQuantizedDimension(), minVal, maxVal);
-    } else if (auto intInType = input.getElementType().dyn_cast<mlir::IntegerType>()) {
+    } else if (auto intInType = mlir::dyn_cast_or_null<mlir::IntegerType>(input.getElementType())) {
         outElementType = mlir::IntegerType::get(getContext(), bitWidth, intInType.getSignedness());
     } else {
         VPUX_THROW("Got unsupported input element type '{0}' in bitpack", input.getElementType());
@@ -138,8 +159,4 @@ Const::Content vpux::Const::BitPackAttr::transform(vpux::Const::Content& input) 
 
 Const::details::PositionRequirement vpux::Const::BitPackAttr::getPositionRequirement() const {
     return Const::details::PositionRequirement::LAST;
-}
-
-Const::ContentSetup vpux::Const::ContentSetup::bitPack(int64_t width) {
-    return addTransformation(Const::BitPackAttr::get(getIntAttr(getContext(), width)));
 }

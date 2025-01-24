@@ -9,13 +9,14 @@
 namespace vpux {
 namespace vpumi40xx2vpuasm {
 
-mlir::LogicalResult TaskSinkRewriter::symbolize(VPURegMapped::TaskSinkOp op, SymbolMapper&,
-                                                mlir::ConversionPatternRewriter& rewriter) const {
+mlir::FailureOr<SymbolizationResult> TaskSinkRewriter::symbolize(VPURegMapped::TaskSinkOp op, SymbolMapper&,
+                                                                 mlir::ConversionPatternRewriter& rewriter) const {
     auto symName = findSym(op.getResult());
 
-    rewriter.create<VPUASM::TaskSinkOp>(op.getLoc(), symName.getAttr(), op.getTileAttr(), op.getTaskTypeAttr());
+    auto newOp = rewriter.create<VPUASM::TaskSinkOp>(op.getLoc(), symName.getRootReference(), op.getTileAttr(),
+                                                     op.getTaskTypeAttr());
     rewriter.eraseOp(op);
-    return mlir::success();
+    return SymbolizationResult(newOp);
 }
 
 llvm::SmallVector<mlir::FlatSymbolRefAttr> TaskSinkRewriter::getSymbolicNames(VPURegMapped::TaskSinkOp op,

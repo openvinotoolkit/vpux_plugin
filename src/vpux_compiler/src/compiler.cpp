@@ -5,9 +5,9 @@
 
 #include "vpux/compiler/compiler.hpp"
 
-#include "intel_npu/al/config/common.hpp"
-#include "intel_npu/al/config/compiler.hpp"
-#include "intel_npu/al/profiling.hpp"
+#include "intel_npu/config/common.hpp"
+#include "intel_npu/config/compiler.hpp"
+#include "intel_npu/profiling.hpp"
 
 #include "vpux/compiler/NPU37XX/pipeline_strategy.hpp"
 #include "vpux/compiler/NPU37XX/pipelines.hpp"
@@ -25,6 +25,7 @@
 #include "vpux/compiler/interfaces_registry.hpp"
 #include "vpux/compiler/options_mapper.hpp"
 #include "vpux/compiler/utils/dot_printer.hpp"
+#include "vpux/compiler/utils/function_statistics_instrumentation.hpp"
 #include "vpux/compiler/utils/locations_verifier.hpp"
 #include "vpux/compiler/utils/logging.hpp"
 #include "vpux/compiler/utils/memory_usage_collector.hpp"
@@ -50,7 +51,6 @@
 #include <openvino/runtime/intel_npu/properties.hpp>
 #include <openvino/runtime/iplugin.hpp>
 
-#include <device_helpers.hpp>
 #include <transformations/common_optimizations/dimension_tracking.hpp>
 #include <transformations/init_node_info.hpp>
 #include <transformations/utils/utils.hpp>
@@ -114,13 +114,8 @@ public:
     void setup(mlir::PassManager& pm, const intel_npu::Config& config, bool isSubPipeline = false) const;
     void dump(mlir::PassManager& pm) const;
 
-    // Specifies whether to duplicate IE constants in MLIR when importing a network
     bool useSharedConstants() const {
-        // Historically, some usages required IE constants to be verbosely printed. By MLIR's design,
-        // the constants have to be *copied* in this case. As a result, the generated IR is more
-        // human-readable as each constant is printed as an array of individual decimal values e.g.:
-        // `/* const.Declare = */ dense<[1.0, 4.75391, 9.97656, 7.48438 /* , ... */]>`.
-        return _crashReproducerFile.empty() && _irPrintingFilter.empty();
+        return _useSharedConstants;
     }
 
 private:
@@ -134,8 +129,10 @@ private:
     std::string _irPrintingOrderStr;
     bool _printFullIR = false;
     bool _printFullConstant = false;
+    bool _useSharedConstants = true;
     bool _allowPrintingHexConstant = true;
     bool _printDebugInfo = false;
+    bool _printDebugInfoPrettyForm = false;
     std::string _printAsTextualPipelineFilePath = "";
     std::string _printDotOptions;
 
@@ -157,8 +154,10 @@ DeveloperConfig::DeveloperConfig(Logger log): _log(log) {
     parseEnv("IE_NPU_IR_PRINTING_ORDER", _irPrintingOrderStr);
     parseEnv("IE_NPU_PRINT_FULL_IR", _printFullIR);
     parseEnv("IE_NPU_PRINT_FULL_CONSTANT", _printFullConstant);
+    parseEnv("IE_NPU_USE_SHARED_CONSTANTS", _useSharedConstants);
     parseEnv("IE_NPU_PRINT_HEX_CONSTANT", _allowPrintingHexConstant);
     parseEnv("IE_NPU_PRINT_DEBUG_INFO", _printDebugInfo);
+    parseEnv("IE_NPU_PRINT_DEBUG_INFO_PRETTY_FORM", _printDebugInfoPrettyForm);
     parseEnv("IE_NPU_PRINT_AS_TEXTUAL_PIPELINE_FILE", _printAsTextualPipelineFilePath);
 
     parseEnv("IE_NPU_PRINT_DOT", _printDotOptions);
@@ -263,12 +262,13 @@ void DeveloperConfig::setup(mlir::PassManager& pm, const intel_npu::Config& conf
         mlir::OpPrintingFlags flags;
         if (!_printFullConstant) {
             flags.elideLargeElementsAttrs();
+            flags.elideLargeResourceString();
         }
         if (!_allowPrintingHexConstant) {
             flags.setAllowPrintingElementsAttrAsHex(false);
         }
         if (_printDebugInfo) {
-            flags.enableDebugInfo(true);
+            flags.enableDebugInfo(true, _printDebugInfoPrettyForm);
         }
 
         pm.enableIRPrinting(shouldPrintBeforePass, shouldPrintAfterPass, _printFullIR, printAfterOnlyOnChange,
@@ -281,6 +281,12 @@ void DeveloperConfig::setup(mlir::PassManager& pm, const intel_npu::Config& conf
     }
     // Locations verifier
     addLocationsVerifier(pm);
+
+    const auto shouldEnableFunctionStatistics = getEnableFunctionStatisticsInstrumentation(config).value_or(false);
+    if (shouldEnableFunctionStatistics) {
+        _log.info("The function statistics instrumentation is enabled");
+        addFunctionStatisticsInstrumentation(pm, _log);
+    }
 
     // Memory usage instrumentation
     const auto shouldEnableMemoryCollector = getEnableMemoryUsageCollector(config).value_or(false);
@@ -319,7 +325,6 @@ ov::SupportedOpsMap vpux::CompilerImpl::query(const std::shared_ptr<const ov::Mo
     ov::SupportedOpsMap result;
 
     const std::string plugin_name = DEVICE_NAME;
-    const auto arch = getArchKind(config);
 
     DeveloperConfig devConf(log);
     mlir::DefaultTimingManager tm;
@@ -331,7 +336,7 @@ ov::SupportedOpsMap vpux::CompilerImpl::query(const std::shared_ptr<const ov::Mo
             model,
             [&](const std::shared_ptr<ov::Model>& model) {
                 log.trace("Run common nGraph passes.");
-                IE::NGraphPasses::runNGraphPasses(model, rootTiming, arch);
+                IE::NGraphPasses::runNGraphPasses(model, rootTiming);
             },
             [&](const std::shared_ptr<ov::Node>& op) {
                 log.trace("Get supported operations list.");
@@ -355,16 +360,16 @@ auto importNetwork(mlir::MLIRContext* ctx, const std::shared_ptr<ov::Model>& mod
                    const std::vector<std::shared_ptr<const ov::Node>>& originalParameters,
                    const std::vector<std::shared_ptr<const ov::Node>>& originalResults, const DeveloperConfig& devConf,
                    mlir::TimingScope& rootTiming, bool enableProfiling, vpux::DummyOpMode stubLayers,
-                   bool dynamicShapeToStatic, vpux::VPU::ArchKind arch, Logger log) {
+                   bool dynamicShapeToStatic, Logger log) {
     auto importTiming = rootTiming.nest("Import network");
     return IE::importNetwork(ctx, model, originalParameters, originalResults, devConf.useSharedConstants(),
-                             importTiming, enableProfiling, stubLayers, dynamicShapeToStatic, arch, log.nest());
+                             importTiming, enableProfiling, stubLayers, dynamicShapeToStatic, log.nest());
 }
 
-void compileNetwork(mlir::ModuleOp module, mlir::PassManager& pm, mlir::TimingScope& rootTiming) {
+mlir::LogicalResult compileNetwork(mlir::ModuleOp module, mlir::PassManager& pm, mlir::TimingScope& rootTiming) {
     auto compileTiming = rootTiming.nest("Compile network");
     pm.enableTiming(compileTiming);
-    VPUX_THROW_UNLESS(mlir::succeeded(pm.run(module)), "Compilation failed");
+    return pm.run(module);
 }
 
 auto exportToELF(mlir::ModuleOp module, Logger log) {
@@ -477,34 +482,6 @@ std::optional<size_t> getBatchSize(const std::shared_ptr<ov::Model>& model, cons
     return *it;
 }
 
-void setSafeOptions(intel_npu::Config& config) {
-    auto backendConfig = config.get<intel_npu::BACKEND_COMPILATION_PARAMS>();
-    std::regex reg("enable-partial-workload-management=true");
-    backendConfig = std::regex_replace(backendConfig, reg, "");
-    // In case WLM is enabled by default explicitly disable it.
-    backendConfig.append(" ").append("enable-partial-workload-management=false");
-    config.update({{intel_npu::BACKEND_COMPILATION_PARAMS::key().data(), backendConfig}});
-}
-
-bool isWLMSupported(mlir::ModuleOp module, const intel_npu::Config& config, vpux::Logger& log) {
-    IE::CNNNetworkOp netFunc;
-    mlir::func::FuncOp entryPointFuncOp;
-    IE::CNNNetworkOp::getFromModule(module, netFunc, entryPointFuncOp);
-    auto numberOfVirtualBarriers = entryPointFuncOp->getAttr(vpux::VPUIP::numberOfVirtualBarriers)
-                                           .cast<mlir::IntegerAttr>()
-                                           .getValue()
-                                           .getSExtValue();
-    auto barrierThreshold = getWlmBarrierThreshold(config).value_or(0);
-    if (getWlmEnabled(config).value_or(false) && numberOfVirtualBarriers > barrierThreshold) {
-        log.info("Number of barriers {0} is above threshold {1} which suitable for WLM optimization. Disable "
-                 "WLM optimization",
-                 numberOfVirtualBarriers, barrierThreshold);
-        return false;
-    } else {
-        return true;
-    }
-}
-
 mlir::OwningOpRef<mlir::ModuleOp> compileModel(mlir::MLIRContext& ctx, const std::shared_ptr<ov::Model>& model,
                                                const std::vector<std::shared_ptr<const ov::Node>>& originalParameters,
                                                const std::vector<std::shared_ptr<const ov::Node>>& originalResults,
@@ -519,7 +496,7 @@ mlir::OwningOpRef<mlir::ModuleOp> compileModel(mlir::MLIRContext& ctx, const std
     const auto dummyOpReplacement = getDummyOpReplacement(config).value_or(DummyOpMode::DISABLED);
     mlir::OwningOpRef<mlir::ModuleOp> module =
             importNetwork(&ctx, model, originalParameters, originalResults, devConf, rootTiming,
-                          config.get<intel_npu::PERF_COUNT>(), dummyOpReplacement, dynamicShapeToStatic, arch, log);
+                          config.get<intel_npu::PERF_COUNT>(), dummyOpReplacement, dynamicShapeToStatic, log);
 
     OV_ITT_TASK_NEXT(COMPILER_IMPLEMENTATION, "PassManager");
 
@@ -544,30 +521,44 @@ mlir::OwningOpRef<mlir::ModuleOp> compileModel(mlir::MLIRContext& ctx, const std
 
     OV_ITT_TASK_NEXT(COMPILER_IMPLEMENTATION, "compileNetwork");
 
-    compileNetwork(module.get(), pm, rootTiming);  // applies each pass in the pipeline
+    // Load VPUIP dialect before first compilation to set initial WlmStatus based on config
+    ctx.loadDialect<VPUIP::VPUIPDialect>();
+    auto wlmEnabled = getWlmEnabled(config).value_or(false);
+    vpux::VPUIP::setWlmStatus(module.get(),
+                              wlmEnabled ? vpux::VPUIP::WlmStatus::ENABLED : vpux::VPUIP::WlmStatus::DISABLED);
+
+    // applies each pass in the pipeline
+    auto compileResult = compileNetwork(module.get(), pm, rootTiming);
+    VPUX_THROW_WHEN(mlir::failed(compileResult), "Compilation failed");
 
     mlir::PassManager elfPm(module.get()->getName(), mlir::OpPassManager::Nesting::Implicit);
     devConf.setup(elfPm, config);
-    auto modifiableConfig = config;
-    if (!isWLMSupported(module.get(), modifiableConfig, log)) {
-        setSafeOptions(modifiableConfig);
-    }
-    pipelineFactory->buildELFPipeline(elfPm, modifiableConfig, rootTiming, log);
-    if (getWlmRollback(modifiableConfig).value_or(false)) {
+    auto wlmStatus = vpux::VPUIP::getWlmStatus(module.get());
+    auto wlmStillEnabled = wlmStatus == vpux::VPUIP::WlmStatus::ENABLED;
+    pipelineFactory->buildELFPipeline(elfPm, config, rootTiming, log, wlmStillEnabled);
+    if (getWlmRollback(config).value_or(false)) {
         auto backup_module = mlir::OwningOpRef<mlir::ModuleOp>(module.get().clone());
-        try {
-            compileNetwork(module.get(), elfPm, rootTiming);
-        } catch (WlmRollbackException&) {
+        // We moved away from the exception-based fallback mechanism because the MLIRContext remained in an invalid
+        // state when the exception was thrown, it assumed that it was still executing the pass leading to broken
+        // compile time stats. Now we rely on the PassManager::run result and WLM status attribute to decide if we need
+        // to rollback. This allows MLIR to run the pass instrumentation and set the context to the correct state.
+        compileResult = compileNetwork(module.get(), elfPm, rootTiming);
+        wlmStatus = vpux::VPUIP::getWlmStatus(module.get());
+        if (mlir::failed(compileResult) && wlmStatus == vpux::VPUIP::WlmStatus::FAILED) {
             log.warning("Failed to export to ELF with current config, reverting to simple ELF pipeline");
             module = std::move(backup_module);
-            setSafeOptions(modifiableConfig);
             mlir::PassManager simpleElfPm(module.get()->getName(), mlir::OpPassManager::Nesting::Implicit);
             devConf.setup(simpleElfPm, config, /*isSubPipeline=*/true);
-            pipelineFactory->buildELFPipeline(simpleElfPm, modifiableConfig, rootTiming, log);
-            compileNetwork(module.get(), simpleElfPm, rootTiming);
+            pipelineFactory->buildELFPipeline(simpleElfPm, config, rootTiming, log, /*useWlm=*/false);
+            vpux::VPUIP::setWlmStatus(module.get(), vpux::VPUIP::WlmStatus::DISABLED);
+            VPUX_THROW_UNLESS(mlir::succeeded(compileNetwork(module.get(), simpleElfPm, rootTiming)),
+                              "Compilation failed");
+        } else {
+            VPUX_THROW_WHEN(mlir::failed(compileResult), "Compilation failed");
         }
     } else {
-        compileNetwork(module.get(), elfPm, rootTiming);
+        compileResult = compileNetwork(module.get(), elfPm, rootTiming);
+        VPUX_THROW_WHEN(mlir::failed(compileResult), "Compilation failed");
     }
 
     devConf.dump(pm);
@@ -694,7 +685,9 @@ NetworkDescription CompilerImpl::compile(const std::shared_ptr<ov::Model>& model
 
     Logger log("vpux-compiler", getLogLevel(config));
 
-    auto registry = createDialectRegistry(getDummyOpReplacement(config).value_or(DummyOpMode::DISABLED));
+    const auto enableExtraShapeBoundOps = getEnableExtraShapeBoundOps(config);
+    auto registry = createDialectRegistry(getDummyOpReplacement(config).value_or(DummyOpMode::DISABLED),
+                                          enableExtraShapeBoundOps);
     auto ctx = createContext(registry, config);
     auto threadPool = enableMultithreading(ctx, config);
 
@@ -720,7 +713,9 @@ NetworkDescriptionView CompilerImpl::compile(const std::shared_ptr<ov::Model>& m
 
     Logger log("vpux-compiler", getLogLevel(config));
 
-    auto registry = createDialectRegistry(getDummyOpReplacement(config).value_or(DummyOpMode::DISABLED));
+    const auto enableExtraShapeBoundOps = getEnableExtraShapeBoundOps(config);
+    auto registry = createDialectRegistry(getDummyOpReplacement(config).value_or(DummyOpMode::DISABLED),
+                                          enableExtraShapeBoundOps);
     auto ctx = createContext(registry, config);
     auto threadPool = enableMultithreading(ctx, config);
 

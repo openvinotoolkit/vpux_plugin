@@ -89,7 +89,7 @@ mlir::OpFoldResult vpux::IE::AffineReshapeOp::fold(FoldAdaptor adaptor) {
 
     VPUX_THROW_UNLESS(!operands.empty(), "Wrong number of operands : {0}", operands.size());
 
-    if (const auto ephemeral = operands[0].dyn_cast_or_null<Const::EphemeralContentAttr>()) {
+    if (const auto ephemeral = operands[0].dyn_cast_or_null<Const::ContentAttr>()) {
         const auto attr = static_cast<Const::ContentAttr>(ephemeral);
         const auto inputElemType =
                 inputType.getElementType().dyn_cast_or_null<mlir::quant::UniformQuantizedPerAxisType>();

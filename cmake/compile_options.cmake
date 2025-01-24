@@ -109,3 +109,34 @@ macro(enable_split_dwarf)
         endif()
     endif()
 endmacro()
+
+function(append_avx2_flags TARGET_NAME)
+    if(ENABLE_AVX2)
+        ov_avx2_optimization_flags(avx2_flags)
+        target_compile_options(${TARGET_NAME} PUBLIC "${avx2_flags}")
+    endif()
+endfunction()
+
+# the implementation is taken from llvm/cmake/modules/HandleLLVMOptions.cmake
+macro(enable_asserts)
+    if(NOT MSVC)
+        add_compile_definitions(_DEBUG)
+    endif()
+    if( NOT uppercase_CMAKE_BUILD_TYPE STREQUAL "DEBUG" )
+        add_compile_options($<$<OR:$<COMPILE_LANGUAGE:C>,$<COMPILE_LANGUAGE:CXX>>:-UNDEBUG>)
+        if (MSVC)
+            foreach (flags_var_to_scrub
+                CMAKE_CXX_FLAGS_RELEASE
+                CMAKE_CXX_FLAGS_RELWITHDEBINFO
+                CMAKE_CXX_FLAGS_MINSIZEREL
+                CMAKE_C_FLAGS_RELEASE
+                CMAKE_C_FLAGS_RELWITHDEBINFO
+                CMAKE_C_FLAGS_MINSIZEREL)
+              string (REGEX REPLACE "(^| )[/-]D *NDEBUG($| )" " "
+                  "${flags_var_to_scrub}" "${${flags_var_to_scrub}}")
+            endforeach()
+        endif()
+    endif()
+    add_compile_definitions(_GLIBCXX_ASSERTIONS)
+    add_compile_definitions(_LIBCPP_ENABLE_ASSERTIONS)
+endmacro()

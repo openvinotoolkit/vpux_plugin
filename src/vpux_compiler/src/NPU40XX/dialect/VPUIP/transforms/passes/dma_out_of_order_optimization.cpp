@@ -121,23 +121,29 @@ void DMAOutOfOrderOptimizationPass::safeRunOnFunc() {
             return;
         }
 
-        auto dmaInputDeclBuff = dmaOp.getInput().getDefiningOp<VPURT::DeclareBufferOp>();
-        VPUX_THROW_UNLESS(dmaInputDeclBuff || dmaOp.getInput().getDefiningOp<Const::DeclareOp>(),
-                          "DMA op does no supported input input - '{0}'", dmaOp->getLoc());
-
         bool memOverlap = false;
-        if (dmaInputDeclBuff != nullptr) {
-            for (auto& prevDmaOp : dmaPreviousTasksQueueMap[dmaQueueTaskId]) {
-                auto prevDmaOutputDeclBuff = prevDmaOp.getOutputBuff().getDefiningOp<VPURT::DeclareBufferOp>();
+        for (auto inputOperand : VPUIP::getLayerInputs(dmaOp.getOperation())) {
+            auto dmaInputDeclBuff = inputOperand.getDefiningOp<VPURT::DeclareBufferOp>();
+            VPUX_THROW_UNLESS(dmaInputDeclBuff || inputOperand.getDefiningOp<Const::DeclareOp>(),
+                              "DMA op does not have supported input - '{0}'", dmaOp->getLoc());
+            if (dmaInputDeclBuff) {
+                for (auto& prevDmaOp : dmaPreviousTasksQueueMap[dmaQueueTaskId]) {
+                    auto prevDmaOutputDeclBuff = prevDmaOp.getOutputBuff().getDefiningOp<VPURT::DeclareBufferOp>();
 
-                VPUX_THROW_UNLESS(prevDmaOutputDeclBuff, "DMA op does not have DeclareBufferOp on its output - '{0}'",
-                                  prevDmaOp->getLoc());
+                    VPUX_THROW_UNLESS(prevDmaOutputDeclBuff,
+                                      "DMA op does not have DeclareBufferOp on its output - '{0}'",
+                                      prevDmaOp->getLoc());
 
-                // Perform a check on dma inputs and outputs to understand if there is
-                // no overlap
-                if ((memOverlap = isMemoryOverlap(prevDmaOutputDeclBuff, dmaInputDeclBuff))) {
-                    break;
+                    // Perform a check on dma inputs and outputs to understand if there is
+                    // no overlap
+                    if ((memOverlap = isMemoryOverlap(prevDmaOutputDeclBuff, dmaInputDeclBuff))) {
+                        break;
+                    }
                 }
+            }
+
+            if (memOverlap) {
+                break;
             }
         }
 

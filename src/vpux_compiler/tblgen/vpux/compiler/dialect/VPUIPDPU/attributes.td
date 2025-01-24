@@ -331,6 +331,27 @@ def VPUIPDPU_DPUTiles :
 }
 
 //
+// ODUReduceDataType
+//
+
+def VPUIPDPU_ODUReduceDataType :
+        I32EnumAttr<
+            "ODUReduceDataType",
+            "ODU output data types supported by reduce operation",
+            [
+                I32EnumAttrCase<"ODU_DTYPE_U8",     0>,
+                I32EnumAttrCase<"ODU_DTYPE_I8",     1>,
+                I32EnumAttrCase<"ODU_DTYPE_BF8",    2>,
+                I32EnumAttrCase<"ODU_DTYPE_HF8",    3>,
+                I32EnumAttrCase<"ODU_DTYPE_BF16",   4>,
+                I32EnumAttrCase<"ODU_DTYPE_FP16",   5>
+            ]
+        > {
+    let cppNamespace = "vpux::VPUIPDPU";
+    let genSpecializedAttr = 1;
+}
+
+//
 // IDUWorkloadType
 //
 
@@ -343,7 +364,27 @@ def VPUIPDPU_IDUWorkloadType :
                 I32EnumAttrCase<"DWCONV",                  1>,
                 I32EnumAttrCase<"MAXPOOL",                 2>,
                 I32EnumAttrCase<"AVEPOOL",                 3>,
-                I32EnumAttrCase<"ELTWISE",                 4>
+                I32EnumAttrCase<"ELTWISE",                 4>,
+                I32EnumAttrCase<"REDUCEMEAN",              5>,
+                I32EnumAttrCase<"REDUCESUMSQUARE",         6>
+            ]
+        > {
+    let cppNamespace = "vpux::VPUIPDPU";
+    let genSpecializedAttr = 1;
+}
+
+//
+// IDUWeightPalletMode
+//
+def VPUIPDPU_IDUWeightPalletMode :
+        I32EnumAttr<
+            "IDUWeightPalletMode",
+            "Suported weight palletization modes",
+            [
+                I32EnumAttrCase<"NO_PLT",                  0>,
+                I32EnumAttrCase<"ONE_BIT_PLT",             1>,
+                I32EnumAttrCase<"TWO_BIT_PLT",             2>,
+                I32EnumAttrCase<"FOUR_BIT_PLT",            3>
             ]
         > {
     let cppNamespace = "vpux::VPUIPDPU";
@@ -386,5 +427,42 @@ def VPUIPDPU_IDUNthwNtk :
     let genSpecializedAttr = 1;
 }
 
+//
+// WtSplitMode
+//
+
+def VPUIPDPU_WtSplitMode :
+        I32EnumAttr<
+            "WtSplitMode",
+            "Weight table split modes",
+            [
+                I32EnumAttrCase<"NO_WT_READS",          0>,
+                I32EnumAttrCase<"WEIGHTS_ONLY",         1>,
+                I32EnumAttrCase<"ZERO_POINTS_ONLY",     2>,
+                I32EnumAttrCase<"WEIGHTS_AND_ZPS",      3>
+            ]
+        > {
+    let cppNamespace = "vpux::VPUIPDPU";
+    let genSpecializedAttr = 1;
+}
+
+//
+// WtSplitMode
+//
+
+def VPUIPDPU_PPEScaleDataType :
+        I32EnumAttr<
+            "PPEScaleDataType",
+            "PPE scale data type",
+            [
+                I32EnumAttrCase<"FP32", 0>,
+                I32EnumAttrCase<"HF8",  1>,
+                I32EnumAttrCase<"BF8",  2>,
+                I32EnumAttrCase<"E8M0", 3>
+            ]
+        > {
+    let cppNamespace = "vpux::VPUIPDPU";
+    let genSpecializedAttr = 1;
+}
 
 #endif

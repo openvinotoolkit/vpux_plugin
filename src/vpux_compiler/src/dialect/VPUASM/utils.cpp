@@ -45,3 +45,14 @@ vpux::VPURT::BufferSection vpux::VPUASM::getBufferLocation(ELF::SymbolReferenceM
         return VPURT::BufferSection::DDR;
     }
 }
+
+vpux::VPUASM::BufferType vpux::VPUASM::getBufferType(ELF::SymbolReferenceMap& symRefMap, mlir::SymbolRefAttr symRef) {
+    auto referencedOp = symRefMap.lookupSymbol(symRef);
+
+    if (auto bufferOp = mlir::dyn_cast<VPUASM::DeclareBufferOp>(referencedOp)) {
+        return bufferOp.getBufferType();
+    } else if (auto constantOp = mlir::dyn_cast<VPUASM::ConstBufferOp>(referencedOp)) {
+        return constantOp.getBufferType();
+    }
+    VPUX_THROW("SymRef {0} does not point to a VPUASM::BufferType buffer", symRef.getLeafReference().getValue());
+}

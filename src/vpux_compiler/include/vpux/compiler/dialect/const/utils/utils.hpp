@@ -9,11 +9,13 @@
 #include "vpux/compiler/core/attributes/shape.hpp"
 #include "vpux/compiler/core/type_interfaces.hpp"
 #include "vpux/compiler/dialect/VPU/utils/type_infer.hpp"
+#include "vpux/compiler/dialect/const/attributes/content.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
 #include "vpux/utils/core/array_ref.hpp"
 
 #include <mlir/IR/Attributes.h>
 #include <mlir/IR/Builders.h>
+#include <mlir/IR/BuiltinTypeInterfaces.h>
 #include <mlir/IR/Types.h>
 
 #include <numeric>
@@ -31,6 +33,8 @@ mlir::Value createZerosConst(mlir::OpBuilder& builder, mlir::Location loc, mlir:
 /// Returns a new constant of the specified **tensor** type.
 mlir::Value createFloatConst(mlir::OpBuilder& builder, mlir::Location loc, mlir::RankedTensorType type,
                              ArrayRef<float> values);
+Const::ContentAttr createFloatContentAttr(mlir::OpBuilder& builder, mlir::Location loc, mlir::RankedTensorType type,
+                                          ArrayRef<float> values);
 
 /// Returns a new constant of the specified **tensor** type. This is a generic
 /// version that could be used to create any constant when the data matches the
@@ -39,8 +43,7 @@ mlir::Value createFloatConst(mlir::OpBuilder& builder, mlir::Location loc, mlir:
 template <typename In>
 mlir::Value createConst(
         mlir::OpBuilder& builder, mlir::Location loc, mlir::RankedTensorType type, ArrayRef<In> values,
-        FuncRef<Const::ContentSetup(Const::ContentSetup&)> transform =
-                [](Const::ContentSetup& setup) -> Const::ContentSetup {
+        FuncRef<Const::ContentSetup(Const::ContentSetup&)> transform = [](Const::ContentSetup& setup) {
             return std::move(setup);
         }) {
     const auto constShape = type.getShape();
@@ -49,13 +52,13 @@ mlir::Value createConst(
     VPUX_THROW_UNLESS(values.size() == 1 || shapeTotalSize == checked_cast<int64_t>(values.size()),
                       "data size != shape size: {0} vs {1}", values.size(), shapeTotalSize);
 
-    const auto dataAttr = mlir::DenseElementsAttr::get(type, values);
+    const auto dataAttr = createConstContent(type, values);
     VPUX_THROW_UNLESS(dataAttr != nullptr, "Data is incompatible with the supplied type {0}", type.getElementType());
 
-    auto setup = Const::ContentAttr::transform(dataAttr);
+    Const::ContentSetup setup(mlir::cast<mlir::Type>(dataAttr.getType()));
     setup = transform(setup);
 
-    auto contentAttr = setup.get();
+    auto contentAttr = Const::ContentAttr::get(dataAttr, setup);
     return builder.create<Const::DeclareOp>(loc, contentAttr.getType(), std::move(contentAttr)).getOutput();
 }
 

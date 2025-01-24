@@ -11,8 +11,8 @@ using namespace vpux;
 mlir::LogicalResult vpux::IE::DynamicDequantizeOp::verify() {
     const auto inputShape = to_small_vector(getInput().getType().cast<mlir::ShapedType>().getShape());
     const auto scaleShape = to_small_vector(getScale().getType().cast<mlir::ShapedType>().getShape());
-    if (inputShape.size() != scaleShape.size()) {
-        return errorAt(*this, "Scale doesn't have same rank as input tensor.");
+    if (scaleShape.size() > inputShape.size()) {
+        return errorAt(*this, "Scale tensor has rank greater than input tensor.");
     }
     for (auto i : irange(scaleShape.size())) {
         if (scaleShape[i] > 1 && scaleShape[i] != inputShape[i]) {

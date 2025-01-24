@@ -68,15 +68,3 @@ mlir::ArrayAttr permuteBounds(mlir::MLIRContext* ctx, vpux::BoundedTypeInterface
     const auto dstBounds = dstOrder.toLogicalOrder(dstMemBounds);
     return getIntArrayAttr(ctx, dstBounds.raw());
 }
-
-Dim getHighestDim(ShapeRef shape, const DimsOrder& dimOrder) {
-    auto highestDim = Dim(0);
-    for (auto idx : irange(dimOrder.numDims())) {
-        auto curDim = dimOrder.dimAt(idx);
-        if (shape[curDim] != 1) {
-            highestDim = curDim;
-            break;
-        }
-    }
-    return highestDim;
-}

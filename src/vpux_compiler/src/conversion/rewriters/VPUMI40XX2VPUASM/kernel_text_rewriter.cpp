@@ -9,12 +9,12 @@
 namespace vpux {
 namespace vpumi40xx2vpuasm {
 
-mlir::LogicalResult KernelTextRewriter::symbolize(VPUMI40XX::DeclareKernelTextOp op, SymbolMapper&,
-                                                  mlir::ConversionPatternRewriter& rewriter) const {
+mlir::FailureOr<SymbolizationResult> KernelTextRewriter::symbolize(VPUMI40XX::DeclareKernelTextOp op, SymbolMapper&,
+                                                                   mlir::ConversionPatternRewriter& rewriter) const {
     auto symName = findSym(op).getRootReference();
-    rewriter.create<VPUASM::DeclareKernelTextOp>(op.getLoc(), symName, op.getKernelPathAttr());
+    auto newOp = rewriter.create<VPUASM::DeclareKernelTextOp>(op.getLoc(), symName, op.getKernelPathAttr());
     rewriter.eraseOp(op);
-    return mlir::success();
+    return SymbolizationResult(newOp);
 }
 
 }  // namespace vpumi40xx2vpuasm

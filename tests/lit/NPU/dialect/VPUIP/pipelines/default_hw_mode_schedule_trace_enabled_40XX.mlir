@@ -10,8 +10,6 @@
 // CHECK-LABEL: @Gather
 module @Gather attributes {VPU.arch = #VPU.arch_kind<NPU40XX>, VPU.compilationMode = #VPU.compilation_mode<DefaultHW>} {
     // CHECK-DAG: {{  }}IE.TileResource
-    // CHECK-DAG: {{    }}builtin.module @UsedMemory
-    // CHECK-NEXT: {{      }}IE.MemoryResource {{[0-9]+}} bytes of @CMX_NN
     // CHECK-DAG: {{      }}module @DmaProfilingReservedMemory
     // CHECK-NEXT: {{        }}IE.MemoryResource {{[0-9]+}} bytes of @CMX_NN
 
@@ -54,7 +52,7 @@ module @Gather attributes {VPU.arch = #VPU.arch_kind<NPU40XX>, VPU.compilationMo
 
         return %1 : memref<1x1x4096xf16>
 
-        // CHECK-DAG:   [[BAR0:%.+]] = VPURT.ConfigureBarrier<0> -> !VPURT.Barrier
+        // CHECK-DAG:   [[BAR0:%.+]] = VPURT.ConfigureBarrier<0> {isStartBarrier} -> !VPURT.Barrier
         // CHECK-DAG:   [[BAR1:%.+]] = VPURT.ConfigureBarrier<1> -> !VPURT.Barrier
         // CHECK-DAG:   [[BAR2:%.+]] = VPURT.ConfigureBarrier<2> -> !VPURT.Barrier
         // CHECK-DAG:   [[BAR3:%.+]] = VPURT.ConfigureBarrier<3> -> !VPURT.Barrier
@@ -75,7 +73,7 @@ module @Gather attributes {VPU.arch = #VPU.arch_kind<NPU40XX>, VPU.compilationMo
         // CHECK:   VPUIP.NNDMA {is_out_of_order, port = 0 : i64} inputs([[IN]] : memref<1x1xsi32, @DDR>) outputs([[BUFF0]] : memref<1x1xsi32, [@CMX_NN, 0]>) -> memref<1x1xsi32, [@CMX_NN, 0]>
 
         // CHECK: VPURT.Task waits([[BAR1]] : !VPURT.Barrier) updates([[BAR2]] : !VPURT.Barrier) {
-        // CHECK:   VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 0, 0, 0>} @VPU.SW::@cache_invalidate inputs() outputs() on tile 0{
+        // CHECK:   VPUIP.SW.Kernel {resultSegmentSizes = array<i32: 0, 0, 0>} @VPU.SW::@cache_flush_invalidate inputs() outputs() on tile 0{
         // CHECK:     VPUIP.SW.Kernel.run
 
         // CHECK: VPURT.Task waits([[BAR2]] : !VPURT.Barrier) updates([[BAR3]] : !VPURT.Barrier) {

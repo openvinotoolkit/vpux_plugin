@@ -130,6 +130,12 @@ def VPUASM_DPUVariantExpandOpInterface : OpInterface<"DPUVariantExpandOpInterfac
 
     let methods = [
         InterfaceMethod<
+            "Create DPU variant general ops",
+            "mlir::LogicalResult",
+            "expandGeneralConfig", (ins "mlir::OpBuilder&":$builder,
+                                  "const Logger&":$log)
+        >,
+        InterfaceMethod<
             "Create DPU variant IDU related ops",
             "mlir::LogicalResult",
             "expandIDUConfig", (ins "mlir::OpBuilder&":$builder,

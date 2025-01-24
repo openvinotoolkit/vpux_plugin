@@ -238,7 +238,8 @@ protected:
 
         auto weightsDDRBuffer = builder_.create<vpux::Const::DeclareOp>(
                 loc, wtableDDRType,
-                vpux::Const::ContentAttr::transform(weightsTableValues).reorder(vpux::DimsOrder::NHWC).get());
+                vpux::Const::ContentAttr::get(weightsTableValues,
+                                              Const::ContentSetup(wtableTensorType).reorder(vpux::DimsOrder::NHWC)));
 
         VPURT::wrapIntoTaskOp<VPUIP::NNDMAOp>(builder_, mlir::ValueRange(),
                                               mlir::ValueRange(updateBarrier.getBarrier()), loc, weightsDDRBuffer,
@@ -654,7 +655,8 @@ private:
 
             auto wtableDDRBuffer = builder_.create<vpux::Const::DeclareOp>(
                     loc, wtableDDRType,
-                    vpux::Const::ContentAttr::transform(weightsTableValues).reorder(vpux::DimsOrder::NHWC).get());
+                    vpux::Const::ContentAttr::get(
+                            weightsTableValues, Const::ContentSetup(wtableTensorType).reorder(vpux::DimsOrder::NHWC)));
 
             auto wtableCMXBuffer =
                     createBuffer(ctx, builder_, int32, wtableShape, DimsOrder::NHWC, clusters_[idx], offset);
@@ -1836,7 +1838,8 @@ private:
 
             auto wtableDDRBuffer = builder_.create<vpux::Const::DeclareOp>(
                     loc, wtableDDRType,
-                    vpux::Const::ContentAttr::transform(weightsTableValues).reorder(vpux::DimsOrder::NHWC).get());
+                    vpux::Const::ContentAttr::get(
+                            weightsTableValues, Const::ContentSetup(wtableTensorType).reorder(vpux::DimsOrder::NHWC)));
 
             SmallVector<int64_t> targetClusters;
             targetClusters.push_back(idxK);
@@ -2345,7 +2348,8 @@ private:
 
             auto wtableDDRBuffer = builder_.create<vpux::Const::DeclareOp>(
                     loc, wtableDDRType,
-                    vpux::Const::ContentAttr::transform(weightsTableValues).reorder(vpux::DimsOrder::NHWC).get());
+                    vpux::Const::ContentAttr::get(
+                            weightsTableValues, Const::ContentSetup(wtableTensorType).reorder(vpux::DimsOrder::NHWC)));
 
             SmallVector<int64_t> targetClusters;
             targetClusters.push_back(clusterIdx);
@@ -2680,15 +2684,14 @@ void buildHaloMultiClusteringTest(const nb::TestCaseJsonDescriptor& testDesc, ml
     auto functionInput = function.getArgument(0);
 
     const auto weightsValues = generateWeights(builder, weightsShape, weightsType, ctx, weightsFileName);
-    auto weightsAttributeSetup = Const::ContentAttr::transform(weightsValues);
+    Const::ContentSetup weightsAttributeSetup(weightsValues.getType());
     weightsAttributeSetup = weightsAttributeSetup.reorder(DimsOrder::OYXI);
 
     if (auto qty = weightsType.dyn_cast<mlir::quant::QuantizedType>()) {
-        auto contentType = Const::inferFinalTypeAndSplat(weightsAttributeSetup.getBaseContent(),
-                                                         weightsAttributeSetup.getTransformations())
-                                   .first;
+        auto contentType =
+                Const::inferFinalTypeAndSplat(weightsValues, weightsAttributeSetup.getTransformations()).first;
         const auto quantizedType = vpux::changeStorageType(qty, contentType.getElementType());
-        weightsAttributeSetup = weightsAttributeSetup.quantCast(quantizedType);
+        weightsAttributeSetup = weightsAttributeSetup.castElemType(quantizedType);
         if (qty.getStorageType().isInteger(4)) {
             weightsAttributeSetup = weightsAttributeSetup.bitPack(4);
         }
@@ -2744,8 +2747,9 @@ void buildHaloMultiClusteringTest(const nb::TestCaseJsonDescriptor& testDesc, ml
     auto updateBarrier = functionBuilder.create<vpux::VPURT::ConfigureBarrierOp>(loc, freeBarrierId++);
 
     // Weights & Weights table segmentation & DMAs
-    multiClusterStrategy->handleConstants(weightsAttributeSetup.get(), testDesc.getArchitecture(), inputType,
-                                          outputType, offsetCMX, updateBarrier, waitWLMBarrier);
+    multiClusterStrategy->handleConstants(Const::ContentAttr::get(weightsValues, std::move(weightsAttributeSetup)),
+                                          testDesc.getArchitecture(), inputType, outputType, offsetCMX, updateBarrier,
+                                          waitWLMBarrier);
 
     // Create output and output_iti buffs for each Conv
     multiClusterStrategy->createOutputItiBuffers(returnTypesVec, offsetCMX);
@@ -2791,13 +2795,15 @@ void buildHaloMultiClusteringTest(const nb::TestCaseJsonDescriptor& testDesc, ml
                 itiBuff.input.getBuffer(),
                 /*input_sparsity_map=*/nullptr, /*input_storage_element_table=*/nullptr, itiBuff.weights.getBuffer(),
                 /*weights_sparsity_map=*/nullptr, itiBuff.weightsTable.getBuffer(),
-                /*instruction_list_table=*/nullptr,
                 /*spr_lookup_table*/ nullptr, itiBuff.input.getBuffer(), /*parent_input_sparsity_map=*/nullptr,
                 /*parent_input_storage_element_table=*/nullptr, itiBuff.output.getBuffer(),
                 /*parent_output_sparsity_map=*/nullptr, mlir::ValueRange(outputItiBuffs), itiBuff.output.getBuffer(),
                 /*output_sparsity_map_buff=*/nullptr,
                 profilingParams.dpuProfilingEnabled ? itiBuff.profilingOutputCMX.getBuffer() : nullptr,
-                vpux::VPUIP::NCETaskType::CONV, kernelSize, kernelStrides, kernelPaddings,
+                /*max_per_xy=*/nullptr,
+                /*min_per_xy=*/nullptr,
+                /*min_max_per_tensor=*/mlir::ValueRange(), vpux::VPUIP::NCETaskType::CONV, kernelSize, kernelStrides,
+                kernelPaddings,
                 /*is_continued=*/nullptr,
                 /*cm_sp_pattern=*/nullptr, /*is_segmented=*/nullptr, outChannelOffset,
                 /*input_channels_compression=*/nullptr);

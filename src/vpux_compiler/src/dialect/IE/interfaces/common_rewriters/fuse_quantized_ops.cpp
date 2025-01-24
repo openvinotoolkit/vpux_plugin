@@ -329,7 +329,8 @@ mlir::LogicalResult FuseWithInterpolate::matchAndRewrite(IE::QuantizeOp quantize
                     quantizeOp, quantizeOp.getType(), inputDequantizeOp.getInput(), nullptr, nullptr, nullptr,
                     interpOp.getSizesAttr().value_or(nullptr), interpOp.getScalesAttr().value_or(nullptr),
                     interpOp.getAxesAttr().value_or(nullptr), interpOp.getTileOffsetAttrAttr(),
-                    interpOp.getInitialInputDimsAttrAttr(), interpOp.getInitialOutputDimsAttrAttr(), interpOp.getAttr())
+                    interpOp.getInitialInputDimsAttrAttr(), interpOp.getInitialOutputDimsAttrAttr(), interpOp.getAttr(),
+                    interpOp.getOutputChannelsAttr())
             ->setLoc(interpOp->getLoc());
 
     return mlir::success();

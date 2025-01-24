@@ -26,27 +26,30 @@ namespace vpux {
 
 static constexpr int64_t MAX_LEVELS = 256;
 
+static constexpr int64_t PARALLEL_EXECUTION_THRESHOLD = 4096;
+
 //
 // Utilities for quantized types
 //
+
+bool isSupportedEltwiseQuantization(mlir::Type lhsElemType, mlir::Type rhsElemType, bool allowDifferentScales,
+                                    bool allowDifferentZp, VPU::EltwiseType eltwiseType, LogCb logCb = emptyLogCb);
 
 mlir::LogicalResult validateQuantElemType(mlir::Location loc, vpux::NDTypeInterface mainType);
 
 mlir::Type normalizeQuantStorageType(mlir::quant::QuantizedType qType);
 
-mlir::quant::UniformQuantizedPerAxisType expandScalesAndZP(mlir::quant::UniformQuantizedPerAxisType perAxisQType,
-                                                           ShapeRef padBefore, ShapeRef padAfter);
+mlir::Type expandScalesAndZP(mlir::Type perAxisQType, ShapeRef padBefore, ShapeRef padAfter);
 
-mlir::quant::UniformQuantizedPerAxisType tileScalesAndZP(mlir::quant::UniformQuantizedPerAxisType perAxisQType,
-                                                         ShapeRef shape, ShapeRef offsets);
+mlir::Type tileScalesAndZP(mlir::Type perAxisQType, ShapeRef shape, ShapeRef offsets);
 
-mlir::quant::UniformQuantizedPerAxisType changeAxis(mlir::quant::UniformQuantizedPerAxisType perAxisQType,
-                                                    int32_t axis);
+mlir::Type changeAxis(mlir::Type perAxisQType, int32_t axis);
 
 mlir::quant::QuantizedType changeStorageType(mlir::quant::QuantizedType qType, mlir::Type storageType);
 
-bool canBeMerged(mlir::quant::UniformQuantizedPerAxisType type1, mlir::quant::UniformQuantizedPerAxisType type2);
-mlir::quant::UniformQuantizedPerAxisType concatScalesAndZP(ArrayRef<mlir::quant::UniformQuantizedPerAxisType> types);
+bool canBeMerged(mlir::Type type1, mlir::Type type2);
+
+mlir::Type concatScalesAndZP(ArrayRef<mlir::quant::UniformQuantizedPerAxisType> types);
 
 using Scales = SmallVector<double>;
 using ZeroPoints = SmallVector<int64_t>;
@@ -54,12 +57,19 @@ using ZeroPoints = SmallVector<int64_t>;
 std::pair<Scales, ZeroPoints> extractScalesAndZeroPoints(mlir::Type tensorElemType);
 Scales exractWeightsScales(mlir::Type weightsElemType);
 
+/// @brief Returns a single zero-point for currently supported quantized types.
+/// In case of uniform per-axis type, this means that all zero points are the
+/// same and a single value could be returned successfully.
+std::optional<int64_t> extractSingleZeroPoint(mlir::quant::QuantizedType type);
+
 template <typename MultType>
 std::tuple<MultType, uint8_t, int8_t> approximate(uint8_t bits, double target) {
     int exponent = 0;
     const auto mantissa = std::frexp(target, &exponent);
 
-    const auto mult = checked_cast<MultType>(mantissa * std::pow(2, bits));
+    // Doing floor because frexp gives values which when rounded are 32768
+    // which is not representable on max(int16_t)
+    const auto mult = checked_cast<MultType>(std::floor(mantissa * std::pow(2, bits)));
     const auto shift = exponent > bits ? 0 : checked_cast<uint8_t>(bits - exponent);
     const auto postShift = exponent > bits ? checked_cast<int8_t>(bits - exponent) : 0;
 
@@ -73,18 +83,21 @@ public:
     int64_t mult() const;
     int64_t shift() const;
     int64_t postShift() const;
-    void setMult(uint16_t mult);
+    void setMult(int32_t mult);
     void setShift(uint8_t shift);
 
 private:
-    uint16_t _mult;
+    // PPE mult is I16 while IDU MULT for eltwise is U16
+    // using int32_t as common storage
+    int32_t _mult;
     uint8_t _shift;
     int8_t _postShift;
 };
 
 class EltwiseQuantizationApproximation {
 public:
-    EltwiseQuantizationApproximation(double input1Target, double input2Target, double outputTarget);
+    EltwiseQuantizationApproximation(double input1Target, double input2Target, double outputTarget,
+                                     VPU::EltwiseType eltwiseType);
 
     QuantizationApproximation input1() const;
     QuantizationApproximation input2() const;
@@ -104,20 +117,13 @@ public:
     int64_t shift() const;
 
 private:
-    // NPU37XX mult is uint16_t - using int32_t as common storage
+    // PRELU mult is U11 - using int32_t as common storage
     int32_t _mult;
     uint8_t _shift;
 };
 
 mlir::FailureOr<int64_t> extractScalarOrUniformZP(mlir::quant::QuantizedType quantizedType);
 bool hasScalarOrUniformZP(mlir::quant::QuantizedType quantizedType);
-
-std::pair<int64_t, int64_t> getIntClampValuesForQuantizedOps(std::pair<double, double> realMinMax,
-                                                             mlir::quant::QuantizedType outElemQType,
-                                                             mlir::Type outElemType);
-std::pair<double, double> getFpClampValuesForQuantizedOps(std::pair<double, double> realMinMax,
-                                                          mlir::quant::QuantizedType outElemQType,
-                                                          mlir::Type outElemType);
 
 //
 // FakeQuantize support
@@ -141,10 +147,24 @@ void getFakeQuantParams(mlir::quant::UniformQuantizedPerAxisType qElemType, int6
 void getFakeQuantParams(vpux::NDTypeInterface qType, int64_t& levels, mlir::RankedTensorType& attrType,
                         mlir::DenseElementsAttr& rMinAttr, mlir::DenseElementsAttr& rMaxAttr);
 
-std::tuple<double, int64_t> calcScaleAndZeroPoint(int64_t qMin, int64_t qMax, double rMin, double rMax);
-std::tuple<int64_t, int64_t, mlir::Type> getStorageParams(mlir::MLIRContext* ctx, int64_t levels, bool isSigned);
-std::tuple<int64_t, int64_t, mlir::Type> getStorageParams(mlir::MLIRContext* ctx, mlir::Type lowFpType);
+mlir::FailureOr<int32_t> getQuantizedDimension(ShapeRef lowShape, ShapeRef highShape, IE::AutoBroadcastType broadcast,
+                                               mlir::Location loc, const Logger& log);
+
+mlir::FailureOr<std::tuple<double, int64_t>> calcScaleAndZeroPoint(double qMinFP, double qMaxFP, double rMin,
+                                                                   double rMax, const Logger& log = Logger::global());
+mlir::FailureOr<std::tuple<SmallVector<double>, SmallVector<int64_t>>> getScalesAndZeroPointsFromContentAttr(
+        const Const::ContentAttr& lowContentAttr, const Const::ContentAttr& highContentAttr,
+        IE::AutoBroadcastType broadcast, const std::optional<int64_t> levels, const std::optional<mlir::Type> lowFpType,
+        bool isSigned, const Logger& log = Logger::global());
+
+std::tuple<double, double, mlir::Type> getStorageParams(mlir::MLIRContext* ctx, int64_t levels, bool isSigned);
+std::tuple<double, double, mlir::Type> getStorageParams(mlir::MLIRContext* ctx, mlir::Type lowFpType);
+std::tuple<double, double, mlir::Type> getStorageParams(mlir::MLIRContext* ctx, const std::optional<int64_t> levels,
+                                                        const std::optional<mlir::Type> lowFpType, bool isSigned);
 mlir::FailureOr<std::tuple<float, float>> getFp8Range(mlir::Type lowFpType);
+
+// Returns true if the given type is a quantized type with 8-bit float storage.
+bool isFloat8Quantized(mlir::Type type);
 
 /// Returns whether lowVals and highVals represet correct quantization range
 /// specified by quantization levels and sign.
@@ -153,8 +173,8 @@ bool isLowPrecisionTypeRange(mlir::MLIRContext* ctx, Range lowVals, Range highVa
     VPUX_THROW_UNLESS(lowVals.size() == highVals.size(), "Sizes of valLow and valHigh arrays are not equal: {0} != {1}",
                       lowVals.size(), highVals.size());
 
-    int64_t qLow = 0;
-    int64_t qHigh = 0;
+    double qLow = 0.;
+    double qHigh = 0.;
     std::tie(qLow, qHigh, std::ignore) = getStorageParams(ctx, levels, isSigned);
     const auto fLow = checked_cast<float>(qLow);
     const auto fHigh = checked_cast<float>(qHigh);

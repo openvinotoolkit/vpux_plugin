@@ -82,6 +82,10 @@ vpux::type::float8_e5m2::float8_e5m2(uint32_t sign, uint32_t biased_exponent, ui
 
 vpux::type::float8_e5m2::float8_e5m2(const float value): m_value(f32_to_f8e5m2_bits(value)){};
 
+size_t vpux::type::float8_e5m2::size() const {
+    return sizeof(m_value);
+}
+
 vpux::type::float8_e5m2::operator float() const {
     return static_cast<float>(float16::from_bits((static_cast<uint16_t>(m_value) << byte_shift)));
 }

@@ -299,15 +299,19 @@ mlir::LogicalResult MoveThroughMVNOp::matchAndRewrite(IE::ShapeCastOp origOp, ml
         return matchFailed(_log, rewriter, origOp, "User ShapeCastOp output shape size is not 4");
     }
 
-    // For example, across_channels = false, 1x2x1x1280 -> 1x2560x1x1, it is not equivalent to propagate
-    if (!isAcrossChannels && mvnInShape[Dims4D::Act::C] != 1 &&
-        shapeCastOutShape[Dims4D::Act::C] != mvnInShape[Dims4D::Act::C]) {
-        return matchFailed(_log, rewriter, origOp, "shapeCastOp not suitable to propagate");
-    }
-
-    if (!isAcrossChannels && mvnInShape[Dims4D::Act::C] == 1 &&
-        shapeCastOutShape[Dims4D::Act::C] != mvnInShape[Dims4D::Act::C]) {
-        isAcrossChannels = true;
+    auto inChSize = mvnInShape[Dims4D::Act::H] * mvnInShape[Dims4D::Act::W] *
+                    (isAcrossChannels ? mvnInShape[Dims4D::Act::C] : 1);
+    auto outChSize = shapeCastOutShape[Dims4D::Act::H] * shapeCastOutShape[Dims4D::Act::W] *
+                     (isAcrossChannels ? shapeCastOutShape[Dims4D::Act::C] : 1);
+    if (inChSize != outChSize) {
+        if (!isAcrossChannels && mvnInShape[Dims4D::Act::C] == 1 &&
+            mvnInShape[Dims4D::Act::N] == shapeCastOutShape[Dims4D::Act::N]) {
+            // For example, it is equivalent to propagate
+            // across_channels = false, 1x1x1280x1 -> across_channels = true, 1x1280x1x1
+            isAcrossChannels = true;
+        } else {
+            return matchFailed(_log, rewriter, origOp, "ShapeCastOp not suitable to propagate");
+        }
     }
 
     // Create new ShapeCastOp
@@ -321,6 +325,149 @@ mlir::LogicalResult MoveThroughMVNOp::matchAndRewrite(IE::ShapeCastOp origOp, ml
 
     origOp.replaceAllUsesWith(newMvnOp.getOutput());
 
+    return mlir::success();
+}
+
+//
+// MoveThroughConvBasedOp
+//
+
+template <class ConvBasedOp>
+class MoveThroughConvBasedOp final : public mlir::OpRewritePattern<IE::ShapeCastOp> {
+public:
+    MoveThroughConvBasedOp(mlir::MLIRContext* ctx, Logger log)
+            : mlir::OpRewritePattern<IE::ShapeCastOp>(ctx), _log(log) {
+        this->setDebugName("MoveThroughConvBasedOp");
+    }
+
+private:
+    mlir::LogicalResult matchAndRewrite(IE::ShapeCastOp origOp, mlir::PatternRewriter& rewriter) const final;
+
+private:
+    Logger _log;
+};
+
+template <class ConvBasedOp>
+mlir::LogicalResult MoveThroughConvBasedOp<ConvBasedOp>::matchAndRewrite(IE::ShapeCastOp origOp,
+                                                                         mlir::PatternRewriter& rewriter) const {
+    _log.trace("Got '{0}' at '{1}'", origOp->getName(), origOp->getLoc());
+
+    auto inputOp = origOp->getOperand(0).getDefiningOp();
+    while (mlir::isa_and_nonnull<IE::ShapeCastOp, IE::AffineReshapeOp, IE::PermuteCastOp>(inputOp) &&
+           inputOp->hasOneUse()) {
+        inputOp = inputOp->getOperand(0).getDefiningOp();
+    }
+
+    if (inputOp == origOp->getOperand(0).getDefiningOp()) {
+        return matchFailed(_log, rewriter, origOp, "ViewLike ops before ShapeCast not found or has multi uses");
+    }
+
+    if (!mlir::isa_and_nonnull<ConvBasedOp>(inputOp) || !inputOp->hasOneUse()) {
+        return matchFailed(_log, rewriter, origOp, "ConvBasedOp not found or has multi uses");
+    }
+
+    if (DimsOrder::fromValue(inputOp->getResult(0)) != DimsOrder::fromValue(origOp->getOperand(0))) {
+        return matchFailed(_log, rewriter, origOp, "ConvBasedOp's layout is different from origOp");
+    }
+
+    auto userEltwiseOp = mlir::dyn_cast_or_null<IE::AddOp>(*origOp->getUsers().begin());
+
+    auto checkLegalEltwiseOp = [](IE::AddOp addOp) -> bool {
+        if (!addOp->hasOneUse()) {
+            return false;
+        }
+
+        if (!mlir::isa_and_nonnull<IE::ShapeCastOp>(*addOp->getUsers().begin())) {
+            return false;
+        }
+
+        auto outShape = getShape(addOp.getResult());
+        if (getShape(addOp.getInput1()) != outShape || getShape(addOp.getInput2()) != outShape) {
+            return false;
+        }
+
+        return true;
+    };
+
+    if (origOp->hasOneUse() && userEltwiseOp != nullptr && checkLegalEltwiseOp(userEltwiseOp)) {
+        /*
+            Remove viewLike ops between conv and add
+            Conv/GroupConv
+                |
+            viewLike1
+                |
+               ...
+                |
+            viewLikeN
+                |
+            ShapeCast  AnotherOperand
+                |        /
+               Add
+                |
+            ShapeCast
+
+            will be converted into:
+            Conv/GroupConv  AnotherOperand
+                |              /
+                |           ShapeCast
+                |          /
+               Add
+                |
+            ShapeCast
+        */
+        SmallVector<mlir::Value> inputs;
+        for (auto input : userEltwiseOp->getOperands()) {
+            if (input == origOp.getResult()) {
+                inputs.push_back(inputOp->getResult(0));
+            } else {
+                auto newShapeCastOp = rewriter.create<IE::ShapeCastOp>(
+                        origOp->getLoc(), input,
+                        getIntArrayAttr(rewriter.getContext(), getShape(inputOp->getResult(0))));
+                inputs.push_back(newShapeCastOp.getResult());
+            }
+        }
+
+        const auto outType = mlir::cast<vpux::NDTypeInterface>(userEltwiseOp.getType());
+        const auto newType = outType.changeShape(getShape(inputs[0]));
+        auto newAddOp = rewriter.create<IE::AddOp>(origOp->getLoc(), newType, inputs[0], inputs[1],
+                                                   userEltwiseOp.getAutoBroadcastAttr(), userEltwiseOp.getPostOpAttr(),
+                                                   userEltwiseOp.getClampAttr(), nullptr, nullptr);
+
+        auto newOutShapeCastOp = rewriter.create<IE::ShapeCastOp>(
+                origOp->getLoc(), newAddOp.getResult(),
+                getIntArrayAttr(rewriter.getContext(), getShape(userEltwiseOp.getResult())));
+        rewriter.replaceOp(userEltwiseOp, newOutShapeCastOp.getResult());
+
+        _log.trace("[{0}] Successfully applied ConvLikeOp -> Add -> ShapeCast optimization", getDebugName());
+        return mlir::success();
+    }
+
+    /*
+        Remove viewLike ops between conv and shapeCast
+        Conv/GroupConv
+            |
+        viewLike1
+            |
+           ...
+            |
+        viewLikeN
+            |
+        ShapeCast
+            |
+        NonViewLikeOp
+
+        will be converted into:
+        Conv/GroupConv
+            |
+        ShapeCast
+            |
+        NonViewLikeOp
+    */
+    auto newShapeCastOp =
+            rewriter.create<IE::ShapeCastOp>(origOp.getLoc(), inputOp->getResult(0), origOp.getShapeAttr());
+    rewriter.replaceOp(origOp, newShapeCastOp.getResult());
+
+    _log.trace("[{0}] Successfully remove viewLike ops before '{1}'", getDebugName(), origOp->getLoc());
     return mlir::success();
 }
 
@@ -372,6 +519,7 @@ void PropagateShapeCast::safeRunOnFunc() {
     patterns.add<MoveThroughEltwiseOp<IE::MultiplyOp>>(&ctx, _log);
     patterns.add<MoveThroughEltwiseOp<IE::AndOp>>(&ctx, _log);
     patterns.add<MoveThroughMVNOp>(&ctx, _log);
+    patterns.add<MoveThroughConvBasedOp<IE::GroupConvolutionOp>>(&ctx, _log);
     IE::ShapeCastOp::getCanonicalizationPatterns(patterns, &ctx);
 
     if (mlir::failed(mlir::applyPatternsAndFoldGreedily(func, std::move(patterns), getDefaultGreedyRewriteConfig()))) {

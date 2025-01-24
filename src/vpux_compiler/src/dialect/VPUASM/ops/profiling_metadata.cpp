@@ -3,7 +3,6 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
-#include "vpux/compiler/dialect/IE/utils/resources.hpp"
 #include "vpux/compiler/dialect/VPUASM/ops.hpp"
 #include "vpux/compiler/utils/ELF/utils.hpp"
 
@@ -15,12 +14,12 @@ void vpux::VPUASM::ProfilingMetadataOp::serialize(elf::writer::BinaryDataSection
     binDataSection.appendData(reinterpret_cast<const uint8_t*>(buf.data()), buf.size());
 }
 
-size_t vpux::VPUASM::ProfilingMetadataOp::getBinarySize() {
+size_t vpux::VPUASM::ProfilingMetadataOp::getBinarySize(VPU::ArchKind) {
     auto values = getMetadata().getValues<uint8_t>();
     return values.size();
 }
 
-size_t vpux::VPUASM::ProfilingMetadataOp::getAlignmentRequirements() {
+size_t vpux::VPUASM::ProfilingMetadataOp::getAlignmentRequirements(VPU::ArchKind) {
     return ELF::VPUX_NO_ALIGNMENT;
 }
 

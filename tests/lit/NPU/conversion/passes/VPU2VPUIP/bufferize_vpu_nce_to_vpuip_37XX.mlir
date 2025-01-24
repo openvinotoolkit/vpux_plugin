@@ -16,7 +16,7 @@ func.func @SuperdenseNCEConvolution(%arg0: tensor<1x16x15x15xf16, {mem_space = @
                      ) -> tensor<1x16x15x15xf16, {mem_space = @CMX_NN, order = #NCHW}> {
     %0 = VPU.NCE.Convolution(%arg0, %arg1, %arg2) {
         pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-        opaque_ppe = #VPU.PPEStub<>,
+        ppe = #VPU.PPEStub<>,
         rawFilterShape = [16, 16, 1, 1],
         strides = [1, 1]
     } -> tensor<1x16x15x15xf16, {mem_space = @CMX_NN, order = #NCHW}> {
@@ -43,7 +43,7 @@ func.func @SuperdenseNCEMaxPool(%arg0: tensor<1x16x15x15xf16, {mem_space = @CMX_
     %0 = VPU.NCE.MaxPool(%arg0, %arg1) {
         kernel_size = [1, 1],
         pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-        opaque_ppe = #VPU.PPEStub<>,
+        ppe = #VPU.PPEStub<>,
         strides = [1, 1]
     } -> tensor<1x16x15x15xf16, {mem_space = @CMX_NN, order = #NCHW}> {
         VPU.DPU.Workload outOffsets [0, 0, 0, 0] outSizes [1, 16, 15, 15] <left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 13 : i64> #VPU.mpe_mode<CUBOID_16x16>
@@ -68,7 +68,7 @@ func.func @SuperdenseNCEAveragePool(%arg0: tensor<1x16x15x15xf16, {mem_space = @
         kernel_size = [1, 1],
         minimumHardwareExecutionCost = 708 : i64,
         pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-        opaque_ppe = #VPU.PPEStub<>,
+        ppe = #VPU.PPEStub<>,
         strides = [1, 1]
     } -> tensor<1x16x15x15xf16, {mem_space = @CMX_NN, order = #NCHW}> {
         VPU.DPU.Workload outOffsets [0, 0, 0, 0] outSizes [1, 16, 15, 15] <left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 13 : i64> #VPU.mpe_mode<CUBOID_16x16>
@@ -94,7 +94,7 @@ func.func @SuperdenseNCEEltwise(%arg0: tensor<1x16x15x15xf16, {mem_space = @CMX_
     %0 = VPU.NCE.Eltwise(%arg0, %arg1) {
         minimumHardwareExecutionCost = 585 : i64,
         op_type = #VPU.eltwise_type<ADD>,
-        opaque_ppe = #VPU.PPEStub<>
+        ppe = #VPU.PPEStub<>
     } -> tensor<1x16x15x15xf16, {mem_space = @CMX_NN, order = #NCHW}> {
         VPU.DPU.Workload outOffsets [0, 0, 0, 0] outSizes [1, 16, 15, 15] <left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 13 : i64> <CUBOID_16x16>
     }
@@ -183,7 +183,7 @@ func.func @InterpolateNearest(
         strides = [1, 1],
         mode = #VPU.nce_interpolate_mode<NEAREST>,
         scales_attr = [2, 2],
-        opaque_ppe = #VPU.PPEStub<>
+        ppe = #VPU.PPEStub<>
     } -> tensor<1x64x10x20xf16, {order = #NHWC, mem_space = @CMX_NN}>
     {
         VPU.DPU.Workload outOffsets [0, 0, 0, 0] outSizes [1, 64, 10, 20] <left = 0 , right = 0, top = 0, bottom = 0> #VPU.mpe_mode<VECTOR_FP16>
@@ -264,7 +264,7 @@ func.func @InterpolateBilinear(
 
     %task = VPU.NCE.Interpolate(%input_cmx, %arg1, %arg2) {
         rawFilterShape = [64, 64, 2, 2],
-        opaque_ppe = #VPU.PPEStub<>,
+        ppe = #VPU.PPEStub<>,
         strides = [1, 1],
         mode = #VPU.nce_interpolate_mode<BILINEAR>,
         scales_attr = [2, 2]

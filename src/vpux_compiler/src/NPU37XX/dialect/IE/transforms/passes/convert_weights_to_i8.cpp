@@ -67,16 +67,7 @@ Const::DeclareOp ConvolutionRewriter::replaceConstDeclare(Const::DeclareOp origO
 
     _log.nest().trace("Convert content from '{0}' to '{1}'", origQuantType, newQuantType);
 
-    constexpr auto symmetricU8ToI8ConvertionDifference = 128;
-    auto originalContentAttr = origOp.getContentAttr();
-
-    auto newContentAttr = originalContentAttr.transform()
-                                  .castElemType(normalizeQuantStorageType(origQuantType))
-                                  .castElemType(mlir::Float16Type::get(rewriter.getContext()))
-                                  .add(checked_cast<double>(-symmetricU8ToI8ConvertionDifference))
-                                  .castElemType(getSInt8Type(getContext()))
-                                  .quantCast(newQuantType)
-                                  .get();
+    auto newContentAttr = origOp.getContentAttr().transform().convertElemType(newQuantType).get();
     auto newConstantOp = rewriter.create<Const::DeclareOp>(origOp->getLoc(), newType, std::move(newContentAttr));
     return newConstantOp;
 }

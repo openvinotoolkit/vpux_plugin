@@ -273,11 +273,9 @@ NDTypeInterface vpux::inferNewTypeWithMemPerm(NDTypeInterface oldType, mlir::Aff
     return oldType.changeDimsOrder(dstOrder).changeShape(newShape);
 }
 
-mlir::FailureOr<VPU::DistributionInfo> vpux::applyPermutationOnDistributionInfo(vpux::NDTypeInterface inType,
-                                                                                VPU::DistributionInfo& inDistribution,
-                                                                                mlir::AffineMap memPerm,
-                                                                                DimsOrder srcOrder, DimsOrder dstOrder,
-                                                                                ShapeRef srcShape, ShapeRef dstShape) {
+mlir::FailureOr<VPU::DistributionInfo> vpux::applyPermutationOnDistributionInfo(
+        vpux::NDTypeInterface inType, const VPU::DistributionInfo& inDistribution, mlir::AffineMap memPerm,
+        DimsOrder srcOrder, DimsOrder dstOrder, ShapeRef srcShape, ShapeRef dstShape) {
     auto permuteAxisOfArray = [&](ArrayRef<int64_t> arr) -> SmallVector<int64_t> {
         // At VPUIP level, VPU.LayoutCast gets lowered to VPUIP.PermuteCast.
         // LayoutCast will have same in/out shape but different orders, which cannot be handled
@@ -294,7 +292,7 @@ mlir::FailureOr<VPU::DistributionInfo> vpux::applyPermutationOnDistributionInfo(
 
         const auto arrInMemOrder = srcOrder.toMemoryOrder(Shape(arr));
         const auto arrPermutedInMemOrder = applyPerm(arrInMemOrder, memPerm);
-        const auto arrPermutedInLogicalOrder = dstOrder.toLogicalOrder(arrPermutedInMemOrder).raw();
+        auto arrPermutedInLogicalOrder = dstOrder.toLogicalOrder(arrPermutedInMemOrder).raw();
 
         return arrPermutedInLogicalOrder;
     };
@@ -340,4 +338,102 @@ mlir::FailureOr<VPU::DistributionInfo> vpux::applyPermutationOnDistributionInfo(
         return VPU::legalizeCastedDistribution(distribution);
     }
     return mlir::failure();
+}
+
+// for a given input and a output requirement(outOrdr and outShape), the function is trying to find a permutation that
+// can use permuteCastOp to convert input to output requirement.
+std::optional<IE::PermuteCastOp> vpux::tryToFindPermuteCastOp(mlir::Location loc, mlir::Value input, DimsOrder outOrder,
+                                                              ShapeRef outShape, mlir::PatternRewriter& rewriter) {
+    const auto ctx = rewriter.getContext();
+    const auto inputType = mlir::cast<vpux::NDTypeInterface>(input.getType());
+    const auto inMemShape = inputType.getMemShape().raw();
+    const auto outMemShape = outOrder.toMemoryOrder(outShape).raw();
+
+    auto hasSameLogicShape = [&] {
+        SmallVector<int64_t> inShape(inMemShape);
+        SmallVector<int64_t> outShape(outMemShape);
+        if (inShape.size() != outShape.size()) {
+            return false;
+        }
+
+        for (auto dim : inShape) {
+            auto it = std::find(outShape.begin(), outShape.end(), dim);
+            if (it != outShape.end()) {
+                outShape.erase(it);
+            } else {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    // logic shape need to be the same, like input shape[1x2x3x4], output shape is [2x1x3x4]
+    if (!hasSameLogicShape()) {
+        return std::nullopt;
+    }
+
+    // Try to find a permutation from the mem shape. For each dimension in input, find the position
+    // in output, then store it to permutation map. Like if in mem shape is [10, 20, 30, 40],
+    // out mem shape is [10, 20, 40, 30], then the permutation is {0, 1, 3, 2}.
+    SmallVector<int64_t> permutation;
+    for (auto inShape : inMemShape) {
+        for (auto outShape : outMemShape | indexed) {
+            if (outShape.value() == inShape &&
+                std::find(permutation.begin(), permutation.end(), outShape.index()) == permutation.end()) {
+                permutation.push_back(outShape.index());
+                break;
+            }
+        }
+    }
+
+    if (permutation.size() != inMemShape.size()) {
+        return std::nullopt;
+    }
+
+    auto permutationMap = mlir::AffineMap::getPermutationMap(permutation, ctx);
+    if (!isTrivialPermute(inputType.getMemShape(), permutationMap)) {
+        return std::nullopt;
+    }
+    if (applyPerm(inputType.getMemShape(), permutationMap) != outOrder.toMemoryOrder(outShape)) {
+        return std::nullopt;
+    }
+
+    return rewriter.create<IE::PermuteCastOp>(loc, input, mlir::AffineMapAttr::get(outOrder.toAffineMap(ctx)),
+                                              mlir::AffineMapAttr::get(permutationMap));
+}
+
+/**
+ * @brief Infers the dimension after applying a permutation.
+ *
+ * This function calculates the new dimension in the destination order after applying a permutation
+ * to a given dimension in the source order.
+ *
+ * @param dim The original dimension in the source order.
+ * @param srcOrder The source order of dimensions.
+ * @param dstOrder The destination order of dimensions.
+ * @param perm The affine map representing the permutation.
+ * @return The new dimension in the destination order after applying the permutation.
+
+    For example, given a dimension Dim(1) representing C in the source order [NWHC], we want to calculate the output
+    dimension in the destination order [NCWH] after applying a permutation (0, 1, 2, 3)
+    -> (0, 2, 3, 1).
+
+    Steps:
+    1. Identify Source Memory Dimension:
+    In this case, Dim(1) corresponds to MemDim(3) in the source order [NWHC].
+
+    2. Apply Permutation:
+    The permutation (0, 1, 2, 3) -> (0, 2, 3, 1) is applied to the source memory dimension.
+    MemDim(3) is changed to dimension position 2 after applying the permutation.
+
+    3. Determine Destination Logical Dimension:
+    In the destination order [NCWH], dimension position 2 corresponds to logical dimension Dim(3) (which represents W).
+
+    The function returns Dim(3) as the result, indicating that the logical dimension C in the source order [NWHC] maps
+    to logical dimension W in the destination order [NCWH] after applying the permutation.
+ */
+Dim vpux::inferDimAfterPermutation(Dim dim, DimsOrder srcOrder, DimsOrder dstOrder, mlir::AffineMap perm) {
+    const auto srcMemDim = srcOrder.toMemDim(dim);
+    const auto dstDimPos = DimsOrder::fromAffineMap(perm).dimPos(Dim(srcMemDim.ind()));
+    return dstOrder.dimAt(dstDimPos);
 }

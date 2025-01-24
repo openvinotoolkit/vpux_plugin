@@ -13,7 +13,7 @@ using namespace vpux;
 
 namespace {
 
-mlir::FailureOr<int64_t> getDeDebatchNum(mlir::func::CallOp callOp, int64_t& castOpCnt) {
+mlir::FailureOr<int64_t> getDeDebatchNum(mlir::func::CallOp callOp, int64_t& castOpCnt, bool injectAttribute) {
     const auto privateFuncOperands = callOp.getOperands();
     int64_t dedebatchNum = 0;
     for (auto operand : privateFuncOperands) {
@@ -26,9 +26,11 @@ mlir::FailureOr<int64_t> getDeDebatchNum(mlir::func::CallOp callOp, int64_t& cas
                 dedebatchNum = ratio;
             }
             VPUX_THROW_UNLESS(dedebatchNum == ratio, "De-de-batch number is not matched for various inputs");
-            DebatchedCallOpAttributeView::inject(callOp, castOpCnt, dedebatchNum);
-            VPUX_THROW_UNLESS(DebatchedCallOpAttributeView::extract(callOp).has_value(),
-                              "Attribute {0} must be acknowledged", DebatchedCallOpAttributeView::name());
+            if (injectAttribute) {
+                DebatchedCallOpAttributeView::inject(callOp, castOpCnt, dedebatchNum);
+                VPUX_THROW_UNLESS(DebatchedCallOpAttributeView::extract(callOp).has_value(),
+                                  "Attribute {0} must be acknowledged", DebatchedCallOpAttributeView::name());
+            }
             castOpCnt++;
         }
     }
@@ -36,7 +38,7 @@ mlir::FailureOr<int64_t> getDeDebatchNum(mlir::func::CallOp callOp, int64_t& cas
 }
 
 mlir::SmallVector<mlir::Operation*> sliceCallsOp(mlir::OpBuilder& builder, mlir::func::CallOp callOp,
-                                                 const int64_t dedebatchNum) {
+                                                 const int64_t dedebatchNum, bool injectAttribute) {
     const auto callLoc = callOp.getLoc();
     const auto privateFuncOperands = callOp.getOperands();
     auto newCallOps = SmallVector<mlir::Operation*>();
@@ -67,9 +69,11 @@ mlir::SmallVector<mlir::Operation*> sliceCallsOp(mlir::OpBuilder& builder, mlir:
         // Create multi-batched private function calls
         auto newCall =
                 builder.create<mlir::func::CallOp>(callLoc, callOp.getCallee(), callOp->getResultTypes(), newOperands);
-        DebatchedCallOpAttributeView::inject(newCall, i, dedebatchNum);
-        VPUX_THROW_UNLESS(DebatchedCallOpAttributeView::extract(newCall).has_value(),
-                          "Attribute {0} must be acknowledged", DebatchedCallOpAttributeView::name());
+        if (injectAttribute) {
+            DebatchedCallOpAttributeView::inject(newCall, i, dedebatchNum);
+            VPUX_THROW_UNLESS(DebatchedCallOpAttributeView::extract(newCall).has_value(),
+                              "Attribute {0} must be acknowledged", DebatchedCallOpAttributeView::name());
+        }
         newCallOps.push_back(newCall);
     }
     return newCallOps;
@@ -100,13 +104,30 @@ void concatenateCallOps(mlir::OpBuilder& builder, mlir::func::CallOp callOp, Sma
 
 class DeDebatcherPass final : public IE::DeDebatcherBase<DeDebatcherPass> {
 public:
-    explicit DeDebatcherPass(Logger log) {
+    explicit DeDebatcherPass(Logger log): _log(log) {
         Base::initLogger(log, Base::getArgumentName());
+        _log.debug("Create DebatcherPass");
     }
 
+    mlir::LogicalResult delegateInitializeOptions(StringRef method);
+
 private:
+    Logger _log;
+
+    mlir::LogicalResult initialize(mlir::MLIRContext* ctx) final;
     void safeRunOnFunc() final;
+    mlir::LogicalResult parseFromOptions();
 };
+
+mlir::LogicalResult DeDebatcherPass::initialize(mlir::MLIRContext* ctx) {
+    _log.trace("start initializing of {0}", getName());
+    if (mlir::failed(Base::initialize(ctx))) {
+        return mlir::failure();
+    }
+    _log.trace("{0}: {1}", debatcherMethod.getArgStr(), debatcherMethod.getValue());
+    _log.trace("initializing of {0} succeeded", getName());
+    return mlir::success();
+}
 
 //
 // safeRunOnModule
@@ -115,6 +136,12 @@ private:
 void DeDebatcherPass::safeRunOnFunc() {
     _log.debug("{0}::safeRunOnModule", getName());
 
+    bool injectDebatchingMethodAttr = false;
+    auto parsedDebatcherMethod = this->debatcherMethod.getValue();
+    if (parsedDebatcherMethod == "reordering") {
+        _log.debug("{0} applying method: {1}", getName(), parsedDebatcherMethod);
+        injectDebatchingMethodAttr = true;
+    }
     auto main = getOperation();
     mlir::OpBuilder builder(main);
     if (main.isPrivate()) {
@@ -125,7 +152,7 @@ void DeDebatcherPass::safeRunOnFunc() {
     for (auto callOp : callOps) {
         //  Acquire and validate de-debatch number
         int64_t castOpCnt = 0;
-        const auto dedebatchNum = getDeDebatchNum(callOp, castOpCnt);
+        const auto dedebatchNum = getDeDebatchNum(callOp, castOpCnt, injectDebatchingMethodAttr);
 
         // Not batched case
         if (castOpCnt == 0) {
@@ -133,13 +160,16 @@ void DeDebatcherPass::safeRunOnFunc() {
         }
 
         // Get multi-batch sliced private function calls
-        auto newCallOps = sliceCallsOp(builder, callOp, dedebatchNum.value());
+        auto newCallOps = sliceCallsOp(builder, callOp, dedebatchNum.value(), injectDebatchingMethodAttr);
 
         // Create concat for multi-batched private function results
         concatenateCallOps(builder, callOp, newCallOps);
     }
 }
 
+mlir::LogicalResult DeDebatcherPass::delegateInitializeOptions(StringRef method) {
+    return Base::initializeOptions(printToString("{0}={1}", this->debatcherMethod.getArgStr(), method));
+}
 }  // namespace
 
 //
@@ -148,4 +178,13 @@ void DeDebatcherPass::safeRunOnFunc() {
 
 std::unique_ptr<mlir::Pass> vpux::IE::createDeDebatcherPass(Logger log) {
     return std::make_unique<DeDebatcherPass>(log);
+}
+
+std::unique_ptr<mlir::Pass> vpux::IE::createAndInitDeDebatcherPass(StringRef method, Logger log) {
+    auto pass = vpux::IE::createDeDebatcherPass(log);
+    if (mlir::failed(static_cast<DeDebatcherPass*>(pass.get())->delegateInitializeOptions(method))) {
+        VPUX_THROW("Incorrect option used for \"{0}\" pass initialization: {1}", pass->getName(), method);
+    }
+
+    return pass;
 }

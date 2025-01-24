@@ -363,3 +363,48 @@ func.func @UnrollDynamicDequantize(%arg0: tensor<2x3x4x!qElemType>, %arg1: tenso
     // CHECK:   [[CONCAT:%.+]] = IE.Concat([[DYN_DEQUANT_0]], [[DYN_DEQUANT_1]]) {per_axis = #IE.Concat<axis = 0 : i64>} : tensor<1x3x4xf16>, tensor<1x3x4xf16> -> tensor<2x3x4xf16>
     // CHECK:   return [[CONCAT]] : tensor<2x3x4xf16>
 }
+
+// -----
+
+!qElemType = !quant.uniform<i4:f16, 1.000000e+00>
+
+// CHECK-LABEL: @NotUnrollForWeightsOfPrefillMatmul
+// CHECK-SAME:      [[INPUT_0:%.+]]: tensor<3072x16x128x!qElemType>
+// CHECK-SAME:      [[INPUT_1:%.+]]: tensor<3072x16x1xf16>
+// CHECK-SAME:      [[INPUT_2:%.+]]: tensor<1024x2048xf16>
+func.func @NotUnrollForWeightsOfPrefillMatmul(%arg0: tensor<3072x16x128x!qElemType>, %arg1: tensor<3072x16x1xf16>, %arg2: tensor<1024x2048xf16>) -> tensor<1024x3072xf16> {
+    %0 = IE.DynamicDequantize(%arg0, %arg1) {dstElemType = f16} : tensor<3072x16x128x!qElemType>, tensor<3072x16x1xf16> -> tensor<3072x16x128xf16>
+    %1 = IE.AffineReshape(%0) {dim_mapping = [[0], [1], [1]], shape_value = [3072, 2048]} : tensor<3072x16x128xf16> -> tensor<3072x2048xf16>
+    %2 = IE.FullyConnected(%arg2, %1) : tensor<1024x2048xf16>, tensor<3072x2048xf16> -> tensor<1024x3072xf16>
+    return %2 : tensor<1024x3072xf16>
+
+    // CHECK:  [[DQ:%.+]] = IE.DynamicDequantize([[INPUT_0]], [[INPUT_1]])
+    // CHECK:  [[RESHAPE:%.+]] = IE.AffineReshape([[DQ]])
+    // CHECK-SAME{LITERAL}:           {dim_mapping = [[0], [1], [1]], shape_value = [3072, 2048]} : tensor<3072x16x128xf16> -> tensor<3072x2048xf16>
+    // CHECK:  [[FC:%.+]] = IE.FullyConnected([[INPUT_2]], [[RESHAPE]]) : tensor<1024x2048xf16>, tensor<3072x2048xf16> -> tensor<1024x3072xf16>
+    // CHECK:  return [[FC]] : tensor<1024x3072xf16>
+}
+
+// -----
+
+!qElemType = !quant.uniform<i4:f16, 1.000000e+00>
+
+// CHECK-LABEL: @NotUnrollForWeightsOfPrefillMatmulWithTranpose
+// CHECK-SAME:      [[INPUT_0:%.+]]: tensor<12x2048x128x!qElemType>
+// CHECK-SAME:      [[INPUT_1:%.+]]: tensor<12x2048x1xf16>
+// CHECK-SAME:      [[INPUT_2:%.+]]: tensor<1024x1536xf16>
+func.func @NotUnrollForWeightsOfPrefillMatmulWithTranpose(%arg0: tensor<12x2048x128x!qElemType>, %arg1: tensor<12x2048x1xf16>, %arg2: tensor<1024x1536xf16>) -> tensor<1024x2048xf16> {
+    %0 = IE.DynamicDequantize(%arg0, %arg1) {dstElemType = f16} : tensor<12x2048x128x!quant.uniform<i4:f16, 1.000000e+00>>, tensor<12x2048x1xf16> -> tensor<12x2048x128xf16>
+    %1 = IE.Transpose(%0) {order_value = affine_map<(d0, d1, d2) -> (d0, d2, d1)>} : tensor<12x2048x128xf16> -> tensor<12x128x2048xf16>
+    %2 = IE.AffineReshape(%1) {dim_mapping = [[0], [0], [1]], shape_value = [1536, 2048]} : tensor<12x128x2048xf16> -> tensor<1536x2048xf16>
+    %3 = IE.Transpose(%2) {order_value = affine_map<(d0, d1) -> (d1, d0)>} : tensor<1536x2048xf16> -> tensor<2048x1536xf16>
+    %4 = IE.FullyConnected(%arg2, %3) : tensor<1024x1536xf16>, tensor<2048x1536xf16> -> tensor<1024x2048xf16>
+    return %4 : tensor<1024x2048xf16>
+
+    // CHECK:  [[DQ:%.+]] = IE.DynamicDequantize([[INPUT_0]], [[INPUT_1]])
+    // CHECK:  [[TRANSPOSE0:%.+]] = IE.Transpose([[DQ]])
+    // CHECK:  [[RESHAPE:%.+]] = IE.AffineReshape([[TRANSPOSE0]])
+    // CHECK:  [[TRANSPOSE1:%.+]] = IE.Transpose([[RESHAPE]])
+    // CHECK:  [[FC:%.+]] = IE.FullyConnected([[INPUT_2]], [[TRANSPOSE1]]) : tensor<1024x1536xf16>, tensor<2048x1536xf16> -> tensor<1024x2048xf16>
+    // CHECK:  return [[FC]] : tensor<1024x2048xf16>
+}

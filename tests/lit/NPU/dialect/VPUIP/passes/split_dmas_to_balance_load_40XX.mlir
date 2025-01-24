@@ -39,6 +39,48 @@ func.func @SplitBuffer2BufferDma(%arg0: !DummyT) -> !DummyT {
 //
 
 #NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
+!Weights = memref<1x1x1x168960xf16, {order = #NHWC, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 1024 : i64>}>
+!WeightsCmx = memref<1x1x1x168960xf16, {order = #NHWC, swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 1024 : i64>}, [@CMX_NN, 2]>
+!DummyT = memref<1x3x224x224xf16, @DDR>
+
+// CHECK-LABEL: @SplitFusedSwizzledConstant
+func.func @SplitFusedSwizzledConstant(%arg0: !DummyT) -> !DummyT {
+    // The below content shape is not the same one in IR as you cann't find its final shape in const declare op IR
+    // This final shape 168960x1x1x1 is catched from contentType.getShape() in the code
+    // To make the case clear, I use the final shape for it directly
+    %cst = const.Declare !Weights = dense<1.0> : tensor<168960x1x1x1xf32>, [#const.CastElemType<f16>, #const.Reorder<#NHWC>]
+    // CHECK:       [[CST_0:%.+]] = const.Declare memref<1x1x1x84480xf16, {order = #NHWC, strides = [168960, 1, 168960, 1], swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 1024 : i64>}>
+    // CHECK-SAME:      dense<1.000000e+00> : tensor<168960x1x1x1xf32>, [#const.SubView<[0, 0, 0, 0], [1, 1, 1, 84480]>, #const.CastElemType<f16>, #const.Reorder<#NHWC>]
+    // CHECK:       [[CST_1:%.+]] = const.Declare memref<1x1x1x84480xf16, {order = #NHWC, strides = [168960, 1, 168960, 1], swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 1024 : i64>}>
+    // CHECK-SAME:      dense<1.000000e+00> : tensor<168960x1x1x1xf32>, [#const.SubView<[0, 0, 0, 84480], [1, 1, 1, 84480]>, #const.CastElemType<f16>, #const.Reorder<#NHWC>]
+
+    %0 = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+    %1 = VPURT.DeclareVirtualBarrier -> !VPURT.Barrier
+    %2 = VPURT.DeclareBuffer <CMX_NN> [2] <0> -> !WeightsCmx
+    // CHECK:       [[BUFFER_CMX_0:%.+]] = VPURT.DeclareBuffer <CMX_NN> [2] <0> -> memref<1x1x1x84480xf16, {order = #NHWC, strides = [168960, 1, 168960, 1], swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 1024 : i64>}, [@CMX_NN, 2]>
+    // CHECK:       [[BUFFER_CMX_1:%.+]] = VPURT.DeclareBuffer <CMX_NN> [2] <168960> -> memref<1x1x1x84480xf16, {order = #NHWC, strides = [168960, 1, 168960, 1], swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 1024 : i64>}, [@CMX_NN, 2]>
+
+    VPURT.Task waits(%0 : !VPURT.Barrier) updates(%1 : !VPURT.Barrier) {
+      %3 = VPUIP.NNDMA {port = 0 : i64, split_candidate} inputs(%cst : !Weights) outputs(%2 : !WeightsCmx) -> !WeightsCmx
+    }
+    // CHECK:       [[NNDMA_0:%.+]] = VPUIP.NNDMA {port = 0 : i64} inputs([[CST_0]] : memref<1x1x1x84480xf16, {order = #NHWC, strides = [168960, 1, 168960, 1], swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 1024 : i64>}>)
+    // CHECK-SAME:         outputs([[BUFFER_CMX_0]] : memref<1x1x1x84480xf16, {order = #NHWC, strides = [168960, 1, 168960, 1], swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 1024 : i64>}, [@CMX_NN, 2]>)
+    // CHECK-SAME:          -> memref<1x1x1x84480xf16, {order = #NHWC, strides = [168960, 1, 168960, 1], swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 1024 : i64>}, [@CMX_NN, 2]>
+
+    // CHECK:       [[NNDMA_1:%.+]] = VPUIP.NNDMA {port = 1 : i64} inputs([[CST_1]] : memref<1x1x1x84480xf16, {order = #NHWC, strides = [168960, 1, 168960, 1], swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 1024 : i64>}>)
+    // CHECK-SAME:         outputs([[BUFFER_CMX_1]] : memref<1x1x1x84480xf16, {order = #NHWC, strides = [168960, 1, 168960, 1], swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 1024 : i64>}, [@CMX_NN, 2]>)
+    // CHECK-SAME:          -> memref<1x1x1x84480xf16, {order = #NHWC, strides = [168960, 1, 168960, 1], swizzlingScheme = #VPUIP.SwizzlingSchemeAttr<key = 5 : i64, sizeAlignment = 1024 : i64>}, [@CMX_NN, 2]>
+
+
+    return %arg0 : !DummyT
+}
+
+//
+// -----
+//
+
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
 !DummyT = memref<1x3x224x224xf16, @DDR>
 
 // CHECK-LABEL: @SplitStridedBuffer2BufferDma

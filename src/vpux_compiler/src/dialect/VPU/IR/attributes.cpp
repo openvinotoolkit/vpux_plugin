@@ -430,6 +430,7 @@ bool vpux::VPU::isArchVPUX3XXX(VPU::ArchKind arch) {
 namespace {
 
 constexpr StringLiteral compilationModeAttrName = "VPU.compilationMode";
+constexpr StringLiteral descriptorHandleAttrName = "DescriptorHandle";
 
 }  // namespace
 
@@ -518,7 +519,7 @@ PadInfo vpux::VPU::toPadInfo(PaddingAttr attr) {
 }
 
 //
-// OpaquePPEAttr
+// PPEAttr
 //
 
 VPU::PPEMode vpux::VPU::getPPEMode(VPU::EltwiseType type) {
@@ -680,8 +681,8 @@ mlir::LogicalResult vpux::VPU::verify(FuncRef<mlir::InFlightDiagnostic()> emitEr
 
     // Limitations on tiling axes
     if (VPU::bitEnumContainsAny(distributionMode, VPU::DistributionMode::OVERLAPPED)) {
-        if (axis != Dims4D::Act::H.ind() && axis != Dims4D::Act::W.ind()) {
-            return printTo(emitError(), "Overlapped cluster tiling is only supported for dimensions H and W");
+        if (axis != Dims4D::Act::H.ind() && axis != Dims4D::Act::W.ind() && axis != Dims4D::Act::N.ind()) {
+            return printTo(emitError(), "Overlapped cluster tiling is only supported for dimensions N, H and W");
         }
 
         if (distributedAttr.getAlignment() != nullptr) {
@@ -705,6 +706,10 @@ mlir::LogicalResult vpux::VPU::verify(FuncRef<mlir::InFlightDiagnostic()> emitEr
         if (overlappedWithKernelStridesPads && hasComputeShapesOffsets) {
             return printTo(emitError(), "Overlapped cluster tiling must be defined by either kernel/strides/pads "
                                         "or compute shape/offsets, not both");
+        }
+
+        if (overlappedWithKernelStridesPads && axis == Dims4D::Act::N.ind()) {
+            return printTo(emitError(), "Cannot have OVERLAPPED on dim N with kernel, pads, strides configuration ");
         }
     }
 

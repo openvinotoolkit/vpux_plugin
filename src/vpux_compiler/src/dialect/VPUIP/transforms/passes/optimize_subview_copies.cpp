@@ -11,6 +11,7 @@
 #include "vpux/compiler/dialect/VPU/utils/explicit_distribution_utils.hpp"
 #include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPUIP/interfaces/nce_invariant.hpp"
+#include "vpux/compiler/dialect/VPUIP/utils/sw_utils.hpp"
 #include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
 #include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
 
@@ -93,6 +94,23 @@ bool OptimizeSubviewCopiesPass::isOptimizableSubview(VPUIP::SubViewOp subview, c
     if (VPU::getRequiredCMXSize({subviewInput}) > cmxSize) {
         nestLog.trace("Subview input does not fit in CMX");
         return false;
+    }
+
+    // TODO: Can be removed when RMS clustering is supported E#142502
+    auto parentCopy = subview->getOperand(0).getDefiningOp<VPUIP::CopyOp>();
+    if (parentCopy != nullptr) {
+        auto potentialSWOp = parentCopy->getOperand(0).getDefiningOp();
+        while (mlir::isa_and_nonnull<VPUIP::PermuteCastOp, VPUIP::GenericReshapeOp>(potentialSWOp)) {
+            potentialSWOp = potentialSWOp->getOperand(0).getDefiningOp();
+        }
+        if (auto swKernelOp = mlir::dyn_cast_or_null<VPUIP::SwKernelOp>(potentialSWOp)) {
+            auto kernelFunction = swKernelOp.getKernelFunction();
+            if (kernelFunction.getLeafReference().str() == "builtin_RMS") {
+                nestLog.trace(
+                        "RMS is not applicable for subview copy optimization because clustering is not supported.");
+                return false;
+            }
+        }
     }
 
     return true;

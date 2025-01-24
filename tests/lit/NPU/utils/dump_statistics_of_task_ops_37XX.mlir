@@ -204,6 +204,8 @@ module @dual_tile attributes {VPU.arch = #VPU.arch_kind<NPU37XX>, VPU.compilatio
 // CHECK:       DDR2CMX - 2 ops : Size - 16.00 KB
 // CHECK:     NCETask Operations - 2 ops
 // CHECK:       Dense - 2 ops
+// CHECK:   Barrier statistics:
+// CHECK:     VPURT.ConfigureBarrierOp - 3 ops
 // CHECK:   Weights statistics:
 // CHECK:     Total weights - count: 2, size: 8.25 KB, compressed size: 2.68 KB, (32.58%)
 // CHECK:     Compressed weights - count: 1, size: 8.00 KB, compressed size: 2.43 KB, (30.47%)

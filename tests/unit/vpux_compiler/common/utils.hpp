@@ -17,6 +17,9 @@
 #include "vpux/compiler/init.hpp"
 #include "vpux/compiler/interfaces_registry.hpp"
 
+#include <bitset>
+#include <random>
+
 class MLIR_UnitBase : public testing::Test {
 public:
     MLIR_UnitBase() {
@@ -100,3 +103,155 @@ public:
         this->builder = std::make_unique<mlir::OpBuilder>(this->ctx.get());
     }
 };
+
+template <typename HWRegistersType, typename NPUDescriptorType>
+class NPUReg_RegisterUnitBase : public testing::Test {
+protected:
+    NPUReg_RegisterUnitBase() = default;
+
+    void SetUp() override {
+        reference = {};
+    }
+
+    bool isContentEqual() const {
+        const auto actualStorage = actual.getStorage();
+        return std::memcmp(&reference, actualStorage.data(), sizeof(reference)) == 0;
+    }
+
+    template <class Field, class Register = std::tuple_element_t<0, typename Field::Registers>>
+    auto testPositiveValue() {
+        const auto value = generateUnsignedTestValue<Field>();
+        writeValueToDescriptor<Field, Register>(value);
+
+        const auto actualValue = actual.template read<Register, Field>();
+        EXPECT_EQ(actualValue, value);
+        return value;
+    }
+
+    template <class Field, class Register = std::tuple_element_t<0, typename Field::Registers>>
+    auto testNegativeValue() {
+        if constexpr (Field::_type == vpux::VPURegMapped::RegFieldDataType::UINT) {
+            return 0ull;
+        }
+        const auto value = generateUnsignedTestValue<Field>();
+        if constexpr (Field::_type == vpux::VPURegMapped::RegFieldDataType::SINT) {
+            const auto signedValue = -1 * static_cast<int64_t>(value);
+
+            actual.template write<Register, Field>(signedValue);
+            auto actualSignedValue = actual.template read<Register, Field>();
+
+            // there are cases where the descriptor does not write internally the entire 2's complement representation
+            // of the negative value (e.g.: SINT field with size 9). Therefore before testing the read value it is
+            // necessary to reconstruct the 2's complement.
+            // *** use case: SINT field, 9 bits
+            // *** signedValue - to be written by the descriptor: -128
+            // *** signedValue representation:
+            //              1111111111111111111111111111111111111111111111111111111110000000
+            // *** the descriptor writes internally 9 bits: 110000000
+            // *** actualSignedValue - value read by the descriptor:
+            //              0000000000000000000000000000000000000000000000000000000110000000 (= 0x180 = 384)
+            // *** => replace the 0s from pos 9 -> pos 63 with 1s in order to obtain -128
+            actualSignedValue |= ~getBitsSet<Field::_size.count()>();
+            EXPECT_EQ(actualSignedValue, llvm::bit_cast<uint64_t>(signedValue));
+
+            return llvm::bit_cast<uint64_t>(signedValue);
+        } else {
+            // set the sign bit
+            const auto negativeValue = value | (1ull << (Field::_size.count() - 1));
+            writeValueToDescriptor<Field, Register>(negativeValue);
+
+            const auto actualNegativeValue = actual.template read<Register, Field>();
+            EXPECT_EQ(actualNegativeValue, negativeValue);
+
+            return negativeValue;
+        }
+    }
+
+    NPUDescriptorType actual;
+    HWRegistersType reference;
+
+private:
+    // to test big vs little endian use random set bits distribution
+    // so that for a big enough fields there would be consequent bytes
+    // with different values
+    template <size_t bitsCount>
+    static uint64_t generateRandom() {
+        std::mt19937 generator(42);
+        std::uniform_int_distribution<> distribution(0, 1);
+        std::stringstream bitSequence;
+        for ([[maybe_unused]] auto _ : vpux::irange(bitsCount)) {
+            bitSequence << distribution(generator);
+        }
+        return std::bitset<bitsCount>(bitSequence.str()).to_ullong();
+    }
+
+    // generates non-negative value that fits into range of the field
+    template <class Field>
+    static uint64_t generateUnsignedTestValue() {
+        if constexpr (Field::_type == vpux::VPURegMapped::RegFieldDataType::UINT) {
+            return generateRandom<Field::_size.count()>();
+        } else {
+            return generateRandom<Field::_size.count() - 1>();
+        }
+    }
+
+    template <size_t size>
+    static constexpr uint64_t getBitsSet() {
+        static_assert(size <= 64, "No support for more than 64 bits");
+        if constexpr (size == 64) {
+            return llvm::bit_cast<uint64_t>(int64_t{-1});
+        } else {
+            return (uint64_t{1} << size) - 1;
+        }
+    }
+
+    template <class Field, class Register = std::tuple_element_t<0, typename Field::Registers>>
+    void writeValueToDescriptor(const uint64_t value) {
+        if constexpr (Field::_type == vpux::VPURegMapped::RegFieldDataType::UINT) {
+            actual.template write<Register, Field>(value);
+        } else if constexpr (Field::_type == vpux::VPURegMapped::RegFieldDataType::SINT) {
+            actual.template write<Register, Field>(static_cast<int64_t>(value));
+        } else if constexpr (Field::_type == vpux::VPURegMapped::RegFieldDataType::FP) {
+            if constexpr (Field::_size.count() == 64) {
+                actual.template write<Register, Field>(llvm::bit_cast<double>(value));
+            } else if constexpr (Field::_size.count() == 32) {
+                actual.template write<Register, Field>(llvm::bit_cast<float>(static_cast<uint32_t>(value)));
+            } else if constexpr (Field::_size.count() == 16) {
+                actual.template write<Register, Field>(vpux::type::float16::from_bits(static_cast<uint16_t>(value)));
+            }
+        } else if constexpr (Field::_type == vpux::VPURegMapped::RegFieldDataType::BF) {
+            actual.template write<Register, Field>(vpux::type::bfloat16::from_bits(static_cast<uint16_t>(value)));
+        }
+    }
+};
+
+#define HELPER_TEST_NPU_REGISTER_FIELD(TestFixtureName, TestName, FieldType, DescriptorMember, LeftShiftBitsCount) \
+    TEST_F(TestFixtureName, TestName##Test) {                                                                      \
+        ASSERT_EQ(sizeof(reference), actual.size());                                                               \
+                                                                                                                   \
+        auto value = testPositiveValue<FieldType>();                                                               \
+        reference.DescriptorMember = value << LeftShiftBitsCount;                                                  \
+        ASSERT_TRUE(isContentEqual());                                                                             \
+                                                                                                                   \
+        if constexpr (FieldType::_type != vpux::VPURegMapped::RegFieldDataType::UINT) {                            \
+            const auto value = testNegativeValue<FieldType>();                                                     \
+            reference.DescriptorMember = value;                                                                    \
+            ASSERT_TRUE(isContentEqual());                                                                         \
+        }                                                                                                          \
+    }
+
+#define HELPER_TEST_NPU_MULTIPLE_REGS_FIELD(TestFixtureName, TestName, ParentRegType, FieldType, DescriptorMember, \
+                                            LeftShiftBitsCount)                                                    \
+    TEST_F(TestFixtureName, TestName##Test) {                                                                      \
+        ASSERT_EQ(sizeof(reference), actual.size());                                                               \
+                                                                                                                   \
+        auto value = testPositiveValue<FieldType, ParentRegType>();                                                \
+        reference.DescriptorMember = value << LeftShiftBitsCount;                                                  \
+        ASSERT_TRUE(isContentEqual());                                                                             \
+                                                                                                                   \
+        if constexpr (FieldType::_type != vpux::VPURegMapped::RegFieldDataType::UINT) {                            \
+            const auto value = testNegativeValue<FieldType, ParentRegType>();                                      \
+            reference.DescriptorMember = value;                                                                    \
+            ASSERT_TRUE(isContentEqual());                                                                         \
+        }                                                                                                          \
+    }

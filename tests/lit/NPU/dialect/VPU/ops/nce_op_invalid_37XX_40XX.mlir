@@ -16,7 +16,7 @@ func.func @NceConvMaxKernelSize(%arg0: tensor<1x16x16x16xf16, {mem_space = @CMX_
     // expected-error@+1 {{Unsupported kernel height dimension '16', must be in range [1, 11]}}
     %0 = VPU.NCE.Convolution(%arg0, %arg1, %arg2) {
                 pad = #VPU.Padding<left = 0 , right = 0, top = 0, bottom = 0>,
-                opaque_ppe = #VPU.PPEStub<>,
+                ppe = #VPU.PPEStub<>,
                 rawFilterShape = [16, 16, 16, 16],
                 strides = [1, 1]
             } -> tensor<1x16x1x1xf16, {mem_space = @CMX_NN, order = #NHWC}> {
@@ -39,7 +39,7 @@ func.func @NceDepthConvMaxKernelSize(%arg0: tensor<1x16x40x40xf16, {order = #NHW
     // expected-error@+1 {{Unsupported kernel height dimension '16', must be in range [1, 11]}}
     %0 = VPU.NCE.DepthConvolution(%arg0, %arg1, %arg2) {
                 pad = #VPU.Padding<left = 0 , right = 0, top = 0, bottom = 0>,
-                opaque_ppe = #VPU.PPEStub<>,
+                ppe = #VPU.PPEStub<>,
                 rawFilterShape = [16, 1, 16, 16],
                 strides = [1, 1]
             } -> tensor<1x16x25x25xf16, {order = #NHWC, mem_space = @CMX_NN}> {
@@ -62,7 +62,7 @@ func.func @NceMaxPoolMaxKernelSize(%arg0: tensor<1x16x20x20xf16, {order = #NHWC,
     %0 = VPU.NCE.MaxPool(%arg0, %arg1) {
                 kernel_size = [16, 16],
                 pad = #VPU.Padding<left = 0 , right = 0, top = 0, bottom = 0>,
-                opaque_ppe = #VPU.PPEStub<>,
+                ppe = #VPU.PPEStub<>,
                 strides = [1, 1]
             } -> tensor<1x16x5x5xf16, {mem_space = @CMX_NN, order = #NHWC}> {
         VPU.DPU.Workload outOffsets [0, 0, 0, 0] outSizes [1, 16, 20, 20] <left = 0 , right = 0, top = 0, bottom = 0> #VPU.mpe_mode<VECTOR_FP16>
@@ -84,7 +84,7 @@ func.func @NceAveragePoolMaxKernelSize(%arg0: tensor<1x16x20x20xf16, {order = #N
     %0 = VPU.NCE.AveragePool(%arg0) {
             kernel_size = [16, 16],
             pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>,
-            opaque_ppe = #VPU.PPEStub<>,
+            ppe = #VPU.PPEStub<>,
             strides = [1, 1]
         } -> tensor<1x16x5x5xf16, {mem_space = @CMX_NN, order = #NHWC}>
 

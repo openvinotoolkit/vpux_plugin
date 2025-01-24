@@ -1,4 +1,4 @@
-// Copyright (C) Intel Corporation
+// Copyright (C) 2020 - 2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
 
@@ -6,7 +6,7 @@
 #include <common/functions.h>
 #include <common_test_utils/ov_tensor_utils.hpp>
 #include <vector>
-#include "npu_private_properties.hpp"
+#include "intel_npu/npu_private_properties.hpp"
 #include "vpu_ov2_layer_test.hpp"
 
 using namespace ov::test::utils;
@@ -242,7 +242,6 @@ TEST_P(MaxPoolingV8LayerTestCommon, NPU4000_SW) {
     setReferenceSoftwareMode();
     run(Platform::NPU4000);
 }
-
 }  // namespace test
 }  // namespace ov
 
@@ -1024,7 +1023,6 @@ INSTANTIATE_TEST_SUITE_P_WITH_DISABLE_OPTION(smoke_MaxPooling_LargeKernelsX, Poo
                                              maxPool_largeKernelsX, PoolingLayerTest::getTestCaseName);
 INSTANTIATE_TEST_SUITE_P_WITH_DISABLE_OPTION(smoke_MaxPooling_LargeKernelsY, PoolingLayerTest_NPU4000,
                                              maxPool_largeKernelsY, PoolingLayerTest::getTestCaseName);
-
 /* ============= MaxPool8 ============= */
 
 INSTANTIATE_TEST_SUITE_P(smoke_precommit_MaxPool8_ExplicitPad_FloorRounding, MaxPoolingV8LayerTestCommon,

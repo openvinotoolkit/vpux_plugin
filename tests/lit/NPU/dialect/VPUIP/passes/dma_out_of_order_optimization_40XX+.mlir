@@ -211,3 +211,35 @@ func.func @NoDMAOutOfOrderOptimizationDueToMemOverlapWithDUPLICATEDBuffer() -> m
     // CHECK-NEXT:    VPUIP.NNDMA
     // CHECK-NOT:     is_out_of_order
 }
+
+// -----
+
+!type_DDR = memref<1x2x1x1640xf16, @DDR>
+!type_CMX = memref<1x2x1x1640xf16, [@CMX_NN, 0]>
+!indices_type_DDR = memref<1x2x1x1xi64, @DDR>
+!indices_type_CMX = memref<1x2x1x1xi64, [@CMX_NN, 0]>
+
+//CHECK-LABEL: @NoGatherDMAOutOfOrderOptimizationDueToIndicesMemOverlap
+func.func @NoGatherDMAOutOfOrderOptimizationDueToIndicesMemOverlap() -> !type_CMX {
+    %input = VPURT.DeclareBuffer <NetworkInput> [0] <0> -> !type_DDR
+    %indices = VPURT.DeclareBuffer <NetworkInput> [1] <0> -> !indices_type_DDR
+    %indices_cmx = VPURT.DeclareBuffer <CMX_NN> [0] <0> -> !indices_type_CMX
+    %output = VPURT.DeclareBuffer <CMX_NN> [0] <10000> -> !type_CMX
+
+    VPURT.Task {
+      %0 = VPUIP.NNDMA {port = 0 : i64} inputs(%indices : !indices_type_DDR) outputs(%indices_cmx: !indices_type_CMX) -> !indices_type_CMX
+    }
+    VPURT.Task {
+      %0 = VPUIP.GatherDMA {channelType = 0 : i64, elementSize = 0 : i64, padding = 0 : i64, port = 0 : i64}
+                inputs(%input : !type_DDR) indices(%indices_cmx : !indices_type_CMX)
+                outputs(%output : !type_CMX) -> !type_CMX
+    }
+    return %output : !type_CMX
+
+    // CHECK:    VPURT.Task
+    // CHECK-NEXT:    VPUIP.NNDMA
+    // CHECK-NOT:     is_out_of_order
+    // CHECK:    VPURT.Task
+    // CHECK-NEXT:    VPUIP.GatherDMA
+    // CHECK-NOT:     is_out_of_order
+}

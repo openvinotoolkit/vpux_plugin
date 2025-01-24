@@ -108,12 +108,12 @@ public:
 // Platform test definition
 //
 
-TEST_P(WeightsDequantizeToFakeQuantize, VPU3720_HW) {
+TEST_P(WeightsDequantizeToFakeQuantize, NPU3720_HW) {
     setDefaultHardwareMode();
     run(Platform::NPU3720);
 }
 
-TEST_P(WeightsDequantizeToFakeQuantize, VPU4000_HW) {
+TEST_P(WeightsDequantizeToFakeQuantize, NPU4000_HW) {
     setDefaultHardwareMode();
     run(Platform::NPU4000);
 }

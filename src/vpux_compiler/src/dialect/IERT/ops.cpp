@@ -43,7 +43,7 @@ void vpux::IERT::IERTDialect::initialize() {
 
 mlir::Operation* vpux::IERT::IERTDialect::materializeConstant(mlir::OpBuilder& builder, mlir::Attribute value,
                                                               mlir::Type type, mlir::Location loc) {
-    if (!mlir::isa<Const::EphemeralContentAttr>(value)) {
+    if (!mlir::isa<Const::ContentAttr>(value)) {
         (void)errorAt(loc, "Can't materialize IERT Constant from Attribute '{0}'", value);
         return nullptr;
     }
@@ -53,8 +53,7 @@ mlir::Operation* vpux::IERT::IERTDialect::materializeConstant(mlir::OpBuilder& b
         return nullptr;
     }
 
-    return builder.create<Const::DeclareOp>(
-            loc, type, static_cast<Const::ContentAttr>(mlir::cast<Const::EphemeralContentAttr>(value)));
+    return builder.create<Const::DeclareOp>(loc, type, mlir::cast<Const::ContentAttr>(value));
 }
 
 //===----------------------------------------------------------------------===//
@@ -89,12 +88,6 @@ LogicalResult vpux::IERT::ExtendedCallOp::verifySymbolUses(SymbolTableCollection
                 return emitOpError() << "operand type mismatch: expected operand type " << fnType.getInput(i)
                                      << ", but provided " << getOperand(i).getType() << " for operand number " << i;
             }
-        }
-
-        if (fnType.getNumResults() != getNumResults()) {
-            return emitOpError() << "incorrect number of results for callee (the function has "
-                                 << fnType.getNumResults() << " formal results and " << getNumResults()
-                                 << " actual results returned)";
         }
 
         for (unsigned i = 0, e = fnType.getNumResults(); i != e; ++i) {

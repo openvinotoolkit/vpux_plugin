@@ -8,6 +8,7 @@
 #include "vpux/compiler/dialect/const/attributes/content.hpp"
 #include "vpux/compiler/dialect/const/ops.hpp"
 
+#include <mlir/Dialect/Quant/QuantTypes.h>
 #include <mlir/IR/MLIRContext.h>
 #include <mlir/IR/PatternMatch.h>
 
@@ -29,13 +30,33 @@ using TransformAttrPos = SmallVector<Const::TransformAttrInterface>::iterator;
  * Parameters:
  *  transformations: list of transformations
  *  currPos: current position of transformation that might be fused with previous one
+ *  baseType: original data type
  * Result:
  *  if optimization has been applied: returns the position of the new transformation,
  *              which is the result of a combination of two consecutive transformations and true
  *  otherwise: returns the current position and false
  */
 std::pair<optimization::TransformAttrPos, bool> fuseConsecutiveTransformations(
-        SmallVector<Const::TransformAttrInterface>& transformations, optimization::TransformAttrPos& currPos);
+        SmallVector<Const::TransformAttrInterface>& transformations, optimization::TransformAttrPos& currPos,
+        NDTypeInterface baseType);
+
+/**
+ *
+ * Fold transformation that does not affect either the type or the data
+ *   e.g. remove NCHW -> Reorder -> NCHW
+ *
+ * Parameters:
+ *  transformations: list of transformations
+ *  currPos: current position of transformation that might be folded
+ *  baseType: original data type
+ *
+ * Result:
+ *  if optimization has been applied: returns the position of the new previous transformation and true
+ *  otherwise: returns the current position and false
+ */
+std::pair<optimization::TransformAttrPos, bool> foldTransformation(
+        SmallVector<Const::TransformAttrInterface>& transformations, optimization::TransformAttrPos& currPos,
+        NDTypeInterface baseType);
 
 /*
  * Check compatible transformations that are placed before SubView and swaps them. Transformations are considered
@@ -48,6 +69,7 @@ std::pair<optimization::TransformAttrPos, bool> fuseConsecutiveTransformations(
  * Parameters:
  *  transformations: list of transformations
  *  currPos: current position of SubView that might be swapped with previous one
+ *  baseType: original data type
  * Result:
  *  if optimization has been applied: returns the new position of the SubView and true;
  *                                      end position means that the transformation was folded
@@ -69,6 +91,7 @@ std::pair<optimization::TransformAttrPos, bool> moveSubViewBefore(
  * Parameters:
  *  transformations: list of transformations
  *  currPos: current position of Reshape that might be swapped with previous one
+ *  baseType: original data type
  * Result:
  *  if optimization has been applied: returns the new position of the Reshape and true;
  *                                      end position means that the transformation was folded
@@ -78,19 +101,6 @@ std::pair<optimization::TransformAttrPos, bool> moveSubViewBefore(
 std::pair<optimization::TransformAttrPos, bool> moveReshapeBefore(
         SmallVector<Const::TransformAttrInterface>& transformations, optimization::TransformAttrPos& currPos,
         NDTypeInterface baseType);
-
-/*
- * Replaces the QuantCast with CastElemType
- * Parameters:
- *  transformations: list of transformations
- *  currPos: current position of QuantCast
- * Result:
- *  if optimization has been applied: it returns the position of the CastElemType and true
- *  otherwise: returns the current position and false
- */
-
-std::pair<optimization::TransformAttrPos, bool> convertQuantCastToCastElemType(
-        SmallVector<Const::TransformAttrInterface>& transformations, optimization::TransformAttrPos& currPos);
 
 //
 // memPermuteTransformation
@@ -115,6 +125,16 @@ vpux::Const::Content memPermuteTransformation(vpux::Const::Content& input, vpux:
  */
 std::pair<optimization::TransformAttrPos, bool> moveTransformationIntoFuse(
         SmallVector<Const::TransformAttrInterface>& transformations, optimization::TransformAttrPos& currPos);
+
+/** @brief Returns a shift of value range between two quantized types.
+
+    Returns a shift in value range such that for [x0; y0) -> [x1, y1)
+    transformation, value == (y1 - y0) is returned. This is primarily used in
+    cases when one wants to convert between signed and unsigned quantized types.
+
+    @note At present, only supports single-zero-point integer-storage types.
+*/
+int64_t getValueRangeOffset(mlir::quant::QuantizedType inType, mlir::quant::QuantizedType outType);
 
 }  // namespace details
 }  // namespace Const

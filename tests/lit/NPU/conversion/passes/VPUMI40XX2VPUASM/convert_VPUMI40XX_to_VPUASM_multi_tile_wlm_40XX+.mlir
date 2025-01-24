@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
-// RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch% allow-custom-values=true" --convert-VPUMI40XX-to-VPUASM %s | FileCheck %s
+// RUN: vpux-opt --split-input-file --init-compiler="vpu-arch=%arch% allow-custom-values=true" --convert-VPUMI40XX-to-VPUASM="enable-partial-workload-management=true" %s | FileCheck %s
 // REQUIRES: arch-NPU40XX
 
 
@@ -17,9 +17,6 @@ module @"resnet-320-pytorch" {
     func.func private @runtime() attributes {VPU.kernel_code = "nnActEntry"}
   }
   IE.TileResource {activity_factor = 0.042571347270822207 : f64} 2 of @NCE at 1.850000e+03 MHz {
-    builtin.module @UsedMemory {
-      IE.MemoryResource 13568 bytes of @CMX_NN
-    }
     builtin.module @ReservedMemory {
       module @DmaProfilingReservedMemory {
         IE.MemoryResource 1024 bytes of @CMX_NN offset 1473536
@@ -123,22 +120,22 @@ module @"resnet-320-pytorch" {
     %704 = VPUMI40XX.ActKernelInvocation taskLocation(%608 : !VPURegMapped.Index<1:0:30>) range_index(%700 : <1:0:0>) kernel_params(%688 : <1:0:0>) waits(%694 : !VPURegMapped.Index<0:0:3>) updates(%695 : !VPURegMapped.Index<0:0:4>) tile(1) start_after(0) clean_after(0) -> !VPURegMapped.Index<1:0:0>
     %705 = VPUMI40XX.ActKernelInvocation {lastSecondaryTaskInExecutionGroup} taskLocation(%609 : !VPURegMapped.Index<1:0:31>) previousTask(%704 : !VPURegMapped.Index<1:0:0>) range_index(%701 : <1:0:1>) kernel_params(%690 : <1:0:1>) waits(%694 : !VPURegMapped.Index<0:0:3>) updates(%695 : !VPURegMapped.Index<0:0:4>) tile(1) start_after(0) clean_after(0) -> !VPURegMapped.Index<1:0:1>
     %706 = VPUMI40XX.DPUInvariant {clean_after = 0 : ui64, mpe_frequent_mode = #VPU.mpe_mode<CUBOID_16x16>, nce_task_type = #VPUIP.nce_task_type<ELTWISE>, start_after = 0 : ui64} taskLocation(%31 : !VPURegMapped.Index<0:0:29>) input(%657 : memref<1x16x16x8xf16, #NHWC, [@CMX_NN, 0]>) weights(%657 : memref<1x16x16x8xf16, #NHWC, [@CMX_NN, 0]>) outputs(%679 : memref<1x16x16x9xf16, {order = #NWCH}, [@CMX_NN, 0]>) waits(%692 : !VPURegMapped.Index<0:0:1>) updates(%693 : !VPURegMapped.Index<0:0:2>) -> <0:0:0> PPE : {
-      VPUMI40XX.PPETask {opaque_ppe = #VPU.PPEStub<>}
+      VPUMI40XX.PPETask {ppe = #VPU.PPEStub<>}
     }
     %707 = VPUMI40XX.DPUInvariant {clean_after = 0 : ui64, kernel_padding = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, kernel_size = [3, 3], kernel_strides = [1, 1], mpe_frequent_mode = #VPU.mpe_mode<CUBOID_16x16>, nce_task_type = #VPUIP.nce_task_type<CONV>, start_after = 0 : ui64} taskLocation(%32 : !VPURegMapped.Index<0:0:30>) previousTask(%706 : !VPURegMapped.Index<0:0:0>) input(%661 : memref<1x16x9x16xf16, #NHWC, [@CMX_NN, 0]>) weights(%665 : memref<16x16x3x3xf16, #NHWC, [@CMX_NN, 0]>) weight_table(%663 : memref<16x1x1x4xsi32, [@CMX_NN, 0]>) outputs(%651 : memref<1x16x7x14xf16, #NHWC, [@CMX_NN, 0]>) waits(%693 : !VPURegMapped.Index<0:0:2>) updates(%694 : !VPURegMapped.Index<0:0:3>) -> <0:0:1> PPE : {
-      VPUMI40XX.PPETask {opaque_ppe = #VPU.PPEStub<>}
+      VPUMI40XX.PPETask {ppe = #VPU.PPEStub<>}
     }
     %708 = VPUMI40XX.DPUInvariant {clean_after = 0 : ui64, is_superdense, kernel_padding = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, kernel_size = [1, 1], kernel_strides = [1, 1], mpe_frequent_mode = #VPU.mpe_mode<CUBOID_16x16>, nce_task_type = #VPUIP.nce_task_type<MAXPOOL>, start_after = 0 : ui64} taskLocation(%33 : !VPURegMapped.Index<0:0:31>) previousTask(%707 : !VPURegMapped.Index<0:0:1>) input(%675 : memref<1x16x7x14xf16, #NHWC, [@CMX_NN, 0]>) outputs(%653 : memref<1x16x7x14xf16, [@CMX_NN, 0]>) waits(%695 : !VPURegMapped.Index<0:0:4>) updates(%696 : !VPURegMapped.Index<0:0:5>) -> <0:0:2> PPE : {
-      VPUMI40XX.PPETask {opaque_ppe = #VPU.PPEStub<>}
+      VPUMI40XX.PPETask {ppe = #VPU.PPEStub<>}
     }
     %709 = VPUMI40XX.DPUInvariant {clean_after = 0 : ui64, mpe_frequent_mode = #VPU.mpe_mode<CUBOID_16x16>, nce_task_type = #VPUIP.nce_task_type<ELTWISE>, start_after = 0 : ui64} taskLocation(%351 : !VPURegMapped.Index<1:0:29>) input(%658 : memref<1x16x16x8xf16, #NHWC, [@CMX_NN, 1]>) weights(%658 : memref<1x16x16x8xf16, #NHWC, [@CMX_NN, 1]>) outputs(%680 : memref<1x16x16x9xf16, {order = #NWCH}, [@CMX_NN, 1]>) waits(%692 : !VPURegMapped.Index<0:0:1>) updates(%693 : !VPURegMapped.Index<0:0:2>) -> <1:0:0> PPE : {
-      VPUMI40XX.PPETask {opaque_ppe = #VPU.PPEStub<>}
+      VPUMI40XX.PPETask {ppe = #VPU.PPEStub<>}
     }
     %710 = VPUMI40XX.DPUInvariant {clean_after = 0 : ui64, kernel_padding = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, kernel_size = [3, 3], kernel_strides = [1, 1], mpe_frequent_mode = #VPU.mpe_mode<CUBOID_16x16>, nce_task_type = #VPUIP.nce_task_type<CONV>, start_after = 0 : ui64} taskLocation(%352 : !VPURegMapped.Index<1:0:30>) previousTask(%709 : !VPURegMapped.Index<1:0:0>) input(%662 : memref<1x16x9x16xf16, #NHWC, [@CMX_NN, 1]>) weights(%666 : memref<16x16x3x3xf16, #NHWC, [@CMX_NN, 1]>) weight_table(%664 : memref<16x1x1x4xsi32, [@CMX_NN, 1]>) outputs(%652 : memref<1x16x7x14xf16, #NHWC, [@CMX_NN, 1]>) waits(%693 : !VPURegMapped.Index<0:0:2>) updates(%694 : !VPURegMapped.Index<0:0:3>) -> <1:0:1> PPE : {
-      VPUMI40XX.PPETask {opaque_ppe = #VPU.PPEStub<>}
+      VPUMI40XX.PPETask {ppe = #VPU.PPEStub<>}
     }
     %711 = VPUMI40XX.DPUInvariant {clean_after = 0 : ui64, is_superdense, kernel_padding = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, kernel_size = [1, 1], kernel_strides = [1, 1], mpe_frequent_mode = #VPU.mpe_mode<CUBOID_16x16>, nce_task_type = #VPUIP.nce_task_type<MAXPOOL>, start_after = 0 : ui64} taskLocation(%353 : !VPURegMapped.Index<1:0:31>) previousTask(%710 : !VPURegMapped.Index<1:0:1>) input(%676 : memref<1x16x7x14xf16, #NHWC, [@CMX_NN, 1]>) outputs(%654 : memref<1x16x7x14xf16, [@CMX_NN, 1]>) waits(%695 : !VPURegMapped.Index<0:0:4>) updates(%696 : !VPURegMapped.Index<0:0:5>) -> <1:0:2> PPE : {
-      VPUMI40XX.PPETask {opaque_ppe = #VPU.PPEStub<>}
+      VPUMI40XX.PPETask {ppe = #VPU.PPEStub<>}
     }
     %712 = VPUMI40XX.DPUVariant taskLocation(%127 : !VPURegMapped.Index<0:0:61>) calls(%706 : <0:0:0>) weights(%657 : memref<1x16x16x8xf16, #NHWC, [@CMX_NN, 0]>) {end = [7, 15, 15], haloRegions = [#VPUIP.DPUHaloRegionAttr<xStart = 0 : i64, xEnd = 15 : i64, yStart = 7 : i64, yEnd = 7 : i64, zStart = 0 : i64, zEnd = 15 : i64, targetOffset = -3584 : i64, targetClusters = [1], targetWidth = 16 : i64>], inEnd = [7, 15, 15], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, nce_task_type = #VPUIP.nce_task_type<ELTWISE>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, start = [0, 0, 0]} -> <0:0:0>
     %713 = VPUMI40XX.DPUVariant taskLocation(%128 : !VPURegMapped.Index<0:0:62>) previousTask(%712 : !VPURegMapped.Index<0:0:0>) calls(%707 : <0:0:1>) weights(%665 : memref<16x16x3x3xf16, #NHWC, [@CMX_NN, 0]>) weight_table(%663 : memref<16x1x1x4xsi32, [@CMX_NN, 0]>) {HardLinkedAttrName, end = [13, 6, 15], inEnd = [15, 8, 15], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_16x16>, nce_task_type = #VPUIP.nce_task_type<CONV>, pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>, start = [0, 0, 0]} -> <0:0:1>
@@ -188,7 +185,9 @@ module @"resnet-320-pytorch" {
     %757 = VPURegMapped.Enqueue previousTaskIdx(%756 : !VPURegMapped.Index<0:0:7>) at(%691 : !VPURegMapped.Index<0:0:0>) (%704 -> %704 : <1:0:0> -> <1:0:0>) -> !VPURegMapped.Index<0:0:8> {taskType = #VPURegMapped.task_type<ActKernelInvocation>}
     %758 = VPURegMapped.Enqueue previousTaskIdx(%757 : !VPURegMapped.Index<0:0:8>) at(%691 : !VPURegMapped.Index<0:0:0>) (%705 -> %705 : <1:0:1> -> <1:0:1>) -> !VPURegMapped.Index<0:0:9> {taskType = #VPURegMapped.task_type<ActKernelInvocation>}
     %759 = VPUMI40XX.Bootstrap inputs(%691 : <0:0:0>) -> !VPURegMapped.Index<0:0:0>
-    %766 = VPUMI40XX.MappedInference dmas((%734, %745), (%746, %747) : (!VPURegMapped.Index<0:0:0>, !VPURegMapped.Index<0:1:0>), (!VPURegMapped.Index<1:0:0>, !VPURegMapped.Index<1:1:0>)) invariants(%706, %709 : !VPURegMapped.Index<0:0:0>, !VPURegMapped.Index<1:0:0>) variants(%712, %715 : !VPURegMapped.Index<0:0:0>, !VPURegMapped.Index<1:0:0>) actKernelRanges(%698, %700 : !VPURegMapped.Index<0:0:0>, !VPURegMapped.Index<1:0:0>) actKernelInvocations(%702, %704 : !VPURegMapped.Index<0:0:0>, !VPURegMapped.Index<1:0:0>) barriers(%691 : !VPURegMapped.Index<0:0:0>) workItemTasks(%749 : !VPURegMapped.Index<0:0:0>) bootstrapTasks(%759 : !VPURegMapped.Index<0:0:0>) actShaveRt(%748 : !VPURegMapped.Index<0:0:0>) dmaHwpBase(%648 : memref<16xui32, [@CMX_NN, 0]>) dmaCount([[11, 1], [1, 1]]) invariantCount([3, 3]) variantCount([3, 3]) actKernelRangesCount([2, 2]) actKernelInvocationsCount([2, 2]) mediaCount(0) barrierCount(7) workItemCount(10) bootstrapTasksCount(7) bootsrapWorkItemsCount(4) finalBarrierId(6) -> !VPURegMapped.Index<0:0:0>
+    %miV = VPUMI40XX.MappedInferenceVersion(11 _ 4 _ 10) -> !VPURegMapped.Index<0:0:0>
+    %766 = VPUMI40XX.MappedInference dmas((%734, %745), (%746, %747) : (!VPURegMapped.Index<0:0:0>, !VPURegMapped.Index<0:1:0>), (!VPURegMapped.Index<1:0:0>, !VPURegMapped.Index<1:1:0>)) invariants(%706, %709 : !VPURegMapped.Index<0:0:0>, !VPURegMapped.Index<1:0:0>) variants(%712, %715 : !VPURegMapped.Index<0:0:0>, !VPURegMapped.Index<1:0:0>) actKernelRanges(%698, %700 : !VPURegMapped.Index<0:0:0>, !VPURegMapped.Index<1:0:0>) actKernelInvocations(%702, %704 : !VPURegMapped.Index<0:0:0>, !VPURegMapped.Index<1:0:0>) barriers(%691 : !VPURegMapped.Index<0:0:0>) workItemTasks(%749 : !VPURegMapped.Index<0:0:0>) bootstrapTasks(%759 : !VPURegMapped.Index<0:0:0>) actShaveRt(%748 : !VPURegMapped.Index<0:0:0>) dmaHwpBase(%648 : memref<16xui32, [@CMX_NN, 0]>) dmaCount([[11, 1], [1, 1]]) invariantCount([3, 3]) variantCount([3, 3]) actKernelRangesCount([2, 2]) actKernelInvocationsCount([2, 2]) mediaCount(0) barrierCount(7) workItemCount(10) bootstrapTasksCount(7) bootsrapWorkItemsCount(4) finalBarrierId(6) mappedInferenceVersion(%miV : !VPURegMapped.Index<0:0:0>) -> !VPURegMapped.Index<0:0:0>
+    ELF.ABIVersion(1 _ 0 _ 0) {sym_name = "LoaderABIVersion"}
     VPUMI40XX.OpRanges
   }
 }

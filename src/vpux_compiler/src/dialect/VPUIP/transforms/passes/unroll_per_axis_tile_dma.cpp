@@ -10,6 +10,7 @@
 #include "vpux/compiler/dialect/VPU/utils/explicit_distribution_utils.hpp"
 #include "vpux/compiler/dialect/VPUIP/interfaces/dma_descriptor_generator.hpp"
 #include "vpux/compiler/dialect/VPUIP/utils/convert_to_dma_utils.hpp"
+#include "vpux/compiler/dialect/VPUIP/utils/unroll_dma_analysis.hpp"
 #include "vpux/compiler/dialect/VPURT/IR/attributes.hpp"
 #include "vpux/compiler/dialect/VPURT/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPURT/IR/task.hpp"
@@ -445,6 +446,11 @@ private:
 };
 
 void UnrollPerAxisTileDMAPass::safeRunOnFunc() {
+    markAnalysesPreserved<VPUIP::UnrollDMAAnalysis>();
+    auto analysis = getAnalysis<VPUIP::UnrollDMAAnalysis>();
+    if (!analysis.passNeeded(VPUIP::UnrollDMAAnalysisNeeded::UnrollPerAxisTileDMAPass)) {
+        return;
+    }
     auto& ctx = getContext();
 
     auto func = getOperation();

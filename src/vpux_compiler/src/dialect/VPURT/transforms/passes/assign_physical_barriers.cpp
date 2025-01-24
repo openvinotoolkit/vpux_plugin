@@ -44,7 +44,8 @@ mlir::LogicalResult VirtualBarrierRewrite::matchAndRewrite(VPURT::DeclareVirtual
     const auto& conf = _barrierSim.getConfig(origOp.getBarrier());
     _log.nest().trace("Use physical barrier ID '{0}'", conf.realId);
 
-    rewriter.replaceOpWithNewOp<VPURT::ConfigureBarrierOp>(origOp, conf.realId, origOp.getIsFinalBarrier());
+    rewriter.replaceOpWithNewOp<VPURT::ConfigureBarrierOp>(origOp, conf.realId, origOp.getIsFinalBarrier(),
+                                                           origOp.getIsStartBarrier());
     return mlir::success();
 }
 
@@ -90,17 +91,14 @@ mlir::LogicalResult BarrierColorBinVirtualBarrierRewrite::matchAndRewrite(VPURT:
 
 class AssignPhysicalBarriersPass final : public VPURT::AssignPhysicalBarriersBase<AssignPhysicalBarriersPass> {
 public:
-    explicit AssignPhysicalBarriersPass(const bool wlmFlag, const bool barrierColorBinFlag,
+    explicit AssignPhysicalBarriersPass(const bool barrierColorBinFlag,
                                         std::optional<int> virtualBarrierThresholdforWlm, Logger log)
-            : _wlmFlag(wlmFlag),
-              _barrierColorBinFlag(barrierColorBinFlag),
-              _virtualBarrierThresholdforWlm(virtualBarrierThresholdforWlm) {
+            : _barrierColorBinFlag(barrierColorBinFlag), _virtualBarrierThresholdforWlm(virtualBarrierThresholdforWlm) {
         Base::initLogger(log, Base::getArgumentName());
     }
 
 private:
     void safeRunOnFunc() final;
-    bool _wlmFlag;
     bool _barrierColorBinFlag;
     std::optional<int> _virtualBarrierThresholdforWlm = std::nullopt;
 };
@@ -108,11 +106,12 @@ private:
 void AssignPhysicalBarriersPass::safeRunOnFunc() {
     auto& ctx = getContext();
     auto func = getOperation();
+    auto module = func->getParentOfType<mlir::ModuleOp>();
 
     const auto numBarriers =
             numBarriersOpt.hasValue() ? numBarriersOpt.getValue() : VPUIP::getNumAvailableBarriers(func);
 
-    auto wlmFlag = wlmEnableOpt.hasValue() ? static_cast<bool>(wlmEnableOpt.getValue()) : _wlmFlag;
+    auto wlmFlag = vpux::VPUIP::getWlmStatus(module) == vpux::VPUIP::WlmStatus::ENABLED;
 
     const auto barrierColorBinFlag =
             colorBinEnableOpt.hasValue() ? static_cast<bool>(colorBinEnableOpt.getValue()) : _barrierColorBinFlag;
@@ -122,15 +121,15 @@ void AssignPhysicalBarriersPass::safeRunOnFunc() {
     auto barriers = func.getOps<VPURT::DeclareVirtualBarrierOp>();
     auto numVirtualBarriers = static_cast<int64_t>(std::distance(barriers.begin(), barriers.end()));
 
-    if (wlmFlag && _virtualBarrierThresholdforWlm.has_value() &&
-        numVirtualBarriers > _virtualBarrierThresholdforWlm.value()) {
-        _log.trace("WLM flag turned off because number of barrier is above threshold {0} > {1}", numVirtualBarriers,
-                   _virtualBarrierThresholdforWlm.value());
-        wlmFlag = false;
-    }
+    auto virtualBarThresholdforWlm = virtualBarrierThresholdforWlmOpt.hasValue() ? virtualBarrierThresholdforWlmOpt
+                                                                                 : _virtualBarrierThresholdforWlm;
 
-    auto module = getOperation();
-    module->setAttr(vpux::VPUIP::numberOfVirtualBarriers, getIntAttr(&ctx, numVirtualBarriers));
+    if (wlmFlag && virtualBarThresholdforWlm.has_value() && numVirtualBarriers > virtualBarThresholdforWlm.value()) {
+        _log.trace("WLM flag turned off because number of barrier is above threshold {0} > {1}", numVirtualBarriers,
+                   virtualBarThresholdforWlm.value());
+        wlmFlag = false;
+        vpux::VPUIP::setWlmStatus(module, vpux::VPUIP::WlmStatus::FAILED);
+    }
 
     if (!barrierSim.isDynamicBarriers()) {
         return;
@@ -180,12 +179,14 @@ void AssignPhysicalBarriersPass::safeRunOnFunc() {
             auto barrierInfo = vpux::BarrierInfo{func};
             barrierSim.configureForWlm(barrierInfo);
             if (mlir::failed(barrierSim.simulateBarriers(_log.nest(), numBarriers))) {
+                _log.error("Barrier simulation (with WLM restrictions) failed with {0} barriers", numBarriers);
                 signalPassFailure();
                 return;
             }
             barrierInfo.clearAttributes();
         } else {
             if (mlir::failed(barrierSim.simulateBarriers(_log.nest(), numBarriers))) {
+                _log.error("Barrier simulation failed with {0} barriers", numBarriers);
                 signalPassFailure();
                 return;
             }
@@ -204,8 +205,6 @@ void AssignPhysicalBarriersPass::safeRunOnFunc() {
 //
 
 std::unique_ptr<mlir::Pass> vpux::VPURT::createAssignPhysicalBarriersPass(
-        const bool wlmFlag, const bool barrierColorBinFlag, std::optional<int> virtualBarrierThresholdforWlm,
-        Logger log) {
-    return std::make_unique<AssignPhysicalBarriersPass>(wlmFlag, barrierColorBinFlag, virtualBarrierThresholdforWlm,
-                                                        log);
+        const bool barrierColorBinFlag, std::optional<int> virtualBarrierThresholdforWlm, Logger log) {
+    return std::make_unique<AssignPhysicalBarriersPass>(barrierColorBinFlag, virtualBarrierThresholdforWlm, log);
 }

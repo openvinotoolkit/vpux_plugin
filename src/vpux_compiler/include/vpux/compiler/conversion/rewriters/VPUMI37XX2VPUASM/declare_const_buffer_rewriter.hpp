@@ -13,8 +13,8 @@ namespace vpumi37xx2vpuasm {
 class DeclareConstBufferRewriter : public VPUASMSymbolizationPattern<Const::DeclareOp> {
 public:
     using Base::Base;
-    mlir::LogicalResult symbolize(Const::DeclareOp op, SymbolMapper& mapper,
-                                  mlir::ConversionPatternRewriter& rewriter) const override;
+    mlir::FailureOr<SymbolizationResult> symbolize(Const::DeclareOp op, SymbolMapper& mapper,
+                                                   mlir::ConversionPatternRewriter& rewriter) const override;
     llvm::SmallVector<mlir::FlatSymbolRefAttr> getSymbolicNames(Const::DeclareOp op, size_t counter) override;
 };
 

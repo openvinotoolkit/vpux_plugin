@@ -1,16 +1,16 @@
 //
-// Copyright (C) 2022 Intel Corporation.
+// Copyright (C) 2024 Intel Corporation.
 // SPDX-License-Identifier: Apache 2.0
 //
 
+#include "vpux/compiler/core/type_interfaces.hpp"
 #include "vpux/compiler/dialect/VPU/IR/ops.hpp"
+#include "vpux/compiler/dialect/VPU/utils/type_infer.hpp"
 
 #include "vpux/compiler/utils/attributes.hpp"
-#include "vpux/compiler/utils/empty_node.hpp"
-
-#include "vpux/utils/core/checked_cast.hpp"
-
 #include "vpux/compiler/utils/infer_output_shape.hpp"
+
+#include <mlir/IR/BuiltinTypes.h>
 
 using namespace vpux;
 
@@ -20,24 +20,25 @@ mlir::LogicalResult vpux::VPU::MaxPoolOp::inferReturnTypes(mlir::MLIRContext* ct
                                                            mlir::SmallVectorImpl<mlir::Type>& inferredReturnTypes) {
     const auto loc = optLoc.value_or(mlir::UnknownLoc::get(ctx));
 
-    VPU::MaxPoolOpAdaptor maxPool(operands, attrs, prop);
-    if (mlir::failed(maxPool.verify(loc))) {
+    VPU::MaxPoolOpAdaptor op(operands, attrs, prop);
+    if (mlir::failed(op.verify(loc))) {
         return mlir::failure();
     }
 
-    const auto dataPaddingBelow = parseIntArrayAttr<int64_t>(maxPool.getPadsEnd());
-    const auto dataPaddingAbove = parseIntArrayAttr<int64_t>(maxPool.getPadsBegin());
-    const auto windowShape = parseIntArrayAttr<int64_t>(maxPool.getKernelSize());
-    const auto windowStrides = parseIntArrayAttr<int64_t>(maxPool.getStrides());
-    const auto roundingType = maxPool.getRoundingType();
+    const auto dataPaddingBelow = parseIntArrayAttr<int64_t>(op.getPadsEnd());
+    const auto dataPaddingAbove = parseIntArrayAttr<int64_t>(op.getPadsBegin());
+    const auto windowShape = parseIntArrayAttr<int64_t>(op.getKernelSize());
+    const auto windowStrides = parseIntArrayAttr<int64_t>(op.getStrides());
+    const auto roundingType = op.getRoundingType();
 
-    const auto inType = maxPool.getInput().getType().cast<vpux::NDTypeInterface>();
-    const auto inShape = inType.getShape().raw();
+    const auto inType = mlir::cast<NDTypeInterface>(op.getInput().getType());
+    const auto inShapeInfo = ShapeInfo::fromNDType(inType);
 
-    const auto shapeI64 = inferMaxPoolOutputShape(inShape, windowStrides, dataPaddingBelow, dataPaddingAbove,
-                                                  windowShape, roundingType);
+    const auto outShapeInfo = inferMaxPoolOutputShape(inShapeInfo, windowStrides, dataPaddingBelow, dataPaddingAbove,
+                                                      windowShape, roundingType);
 
-    const auto outType = inType.changeShape(Shape(shapeI64));
+    auto outType =
+            mlir::RankedTensorType::get(outShapeInfo.shape, inType.getElementType(), createTensorAttrFromType(inType));
     inferredReturnTypes.push_back(outType);
 
     return mlir::success();

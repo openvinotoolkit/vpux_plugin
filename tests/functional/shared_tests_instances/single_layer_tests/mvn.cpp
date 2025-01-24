@@ -128,6 +128,12 @@ TEST_P(Mvn1ZeroInputLayerTest_NPU4000_HW, HW) {
 
 class Mvn6LayerTestCommon : public Mvn6LayerTest, virtual public VpuOv2LayerTest {};
 
+class Mvn6LayerTestCommonFP32 : public Mvn6LayerTestCommon {
+    void configure_model() override {
+        configuration[ov::intel_npu::compilation_mode_params.name()] = "convert-precision-to-fp16=false";
+    }
+};
+
 TEST_P(Mvn6LayerTestCommon, NPU3720_SW) {
     setReferenceSoftwareMode();
     run(Platform::NPU3720);
@@ -137,7 +143,17 @@ TEST_P(Mvn6LayerTestCommon, NPU4000_HW) {
     setDefaultHardwareMode();
     run(Platform::NPU4000);
 }
+// -------------- MVN6 F32 tests
 
+TEST_P(Mvn6LayerTestCommonFP32, NPU3720_SW) {
+    setReferenceSoftwareMode();
+    run(Platform::NPU3720);
+}
+
+TEST_P(Mvn6LayerTestCommonFP32, NPU4000_HW) {
+    setDefaultHardwareMode();
+    run(Platform::NPU4000);
+}
 }  // namespace test
 }  // namespace ov
 
@@ -340,5 +356,14 @@ INSTANTIATE_TEST_SUITE_P(smoke_MVN6_5D, Mvn6LayerTestCommon, cfg5D, Mvn6LayerTes
 INSTANTIATE_TEST_SUITE_P(tiling_MVN6_a, Mvn6LayerTestCommon, cfgT0, Mvn6LayerTestCommon::getTestCaseName);
 INSTANTIATE_TEST_SUITE_P(tiling_MVN6_b, Mvn6LayerTestCommon, cfgT1, Mvn6LayerTestCommon::getTestCaseName);
 INSTANTIATE_TEST_SUITE_P(tiling_MVN6_c, Mvn6LayerTestCommon, cfgT2, Mvn6LayerTestCommon::getTestCaseName);
+
+// -------------- MVN - f32 tests
+std::vector<std::vector<int>> axesF32 = {{2} /*MVN6*/, {2, 3} /*MVN1*/};
+const auto cfgF32 = ::testing::Combine(
+        ::testing::Values(static_shapes_to_test_representation(shapes4D[0])), ::testing::Values(ov::element::f32),
+        ::testing::Values(ov::element::i32), ::testing::ValuesIn(axesF32), ::testing::Values(true),
+        ::testing::ValuesIn(bigEps), ::testing::Values(epsMode[0]), ::testing::Values(DEVICE_NPU));
+
+INSTANTIATE_TEST_SUITE_P(smoke_MVN6_fp32, Mvn6LayerTestCommonFP32, cfgF32, Mvn6LayerTestCommonFP32::getTestCaseName);
 
 }  // namespace

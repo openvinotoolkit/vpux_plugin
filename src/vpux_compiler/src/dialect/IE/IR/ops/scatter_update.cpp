@@ -53,7 +53,7 @@ mlir::LogicalResult ConvertConstToAttr::matchAndRewrite(IE::ScatterUpdateOp scat
     auto axisConst = scatterUpdateOp.getAxis().getDefiningOp<Const::DeclareOp>();
     VPUX_THROW_UNLESS(axis != nullptr, "Only support constant axis");
 
-    if (const auto attr = axisConst.getContentAttr(); !attr.isSplat()) {
+    if (const auto& attr = axisConst.getContentAttr(); !attr.isSplat()) {
         return mlir::failure();
     }
 

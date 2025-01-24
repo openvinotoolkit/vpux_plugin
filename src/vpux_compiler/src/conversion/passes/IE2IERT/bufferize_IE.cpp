@@ -81,7 +81,10 @@ mlir::LogicalResult ReshapeRewrite<ConcreteOp>::matchAndRewrite(ConcreteOp origO
 
     const auto newOutType = typeConverter->convertType(outType);
 
-    rewriter.replaceOpWithNewOp<IERT::GenericReshapeOp>(origOp, newOutType, newArgs.getInput());
+    // Inspired from ConcatRewrite::matchAndRewrite():
+    auto allocatedBufs = allocateResults(origOp->getLoc(), rewriter, *typeConverter, {origOp.getResult()});
+
+    rewriter.replaceOpWithNewOp<IERT::GenericReshapeOp>(origOp, newOutType, newArgs.getInput(), allocatedBufs[0]);
     return mlir::success();
 }
 

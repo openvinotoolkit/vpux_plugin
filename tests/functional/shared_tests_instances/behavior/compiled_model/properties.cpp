@@ -7,7 +7,7 @@
 #include "common/functions.h"
 #include "common/npu_test_env_cfg.hpp"
 #include "common/utils.hpp"
-#include "npu_private_properties.hpp"
+#include "intel_npu/npu_private_properties.hpp"
 
 using namespace ov::test::behavior;
 

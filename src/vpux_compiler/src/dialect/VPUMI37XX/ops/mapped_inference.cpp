@@ -65,8 +65,7 @@ void vpux::VPUMI37XX::MappedInferenceOp::serialize(elf::writer::BinaryDataSectio
     bool isActShaveProfilingEnabled =
             vpux::getProfilingSection(moduleOp, profiling::ExecutorType::ACTSHAVE).has_value();
 
-    nn_public::VpuMappedInference mi;
-    memset(reinterpret_cast<void*>(&mi), 0, getBinarySize());
+    nn_public::VpuMappedInference mi = {};
 
     mi.vpu_nnrt_api_ver = VPU_NNRT_37XX_API_VER;
 

@@ -62,7 +62,7 @@ func.func @InsertSpillingCopiesOnSecondInputWithCopyParent(
         pad = #VPU.Padding<bottom = 0 : i64, left = 0 : i64, right = 0 : i64, top = 0 : i64>}
     } PPE : {
       PPETask {
-        opaque_ppe = #VPU.PPEStub<>
+        ppe = #VPU.PPEStub<>
         }
     }
 
@@ -98,7 +98,7 @@ func.func @InsertSpillingCopiesOnSecondInputWithCopyParent(
         }
       } PPE : {
         PPETask {
-          opaque_ppe = #VPU.PPEStub<>
+          ppe = #VPU.PPEStub<>
         }
       }
 
@@ -131,7 +131,7 @@ func.func @InsertSpillingCopiesOnSecondInputWithCopyParent(
         }
       } PPE : {
         PPETask {
-          opaque_ppe = #VPU.PPEStub<>
+          ppe = #VPU.PPEStub<>
         }
       }
 
@@ -236,7 +236,7 @@ func.func @InsertSpillingCopiesOnFirstInputWithViewParent(
         pad = #VPU.Padding<bottom = 0 : i64, left = 0 : i64, right = 0 : i64, top = 0 : i64>}
     } PPE : {
       PPETask {
-        opaque_ppe = #VPU.PPEStub<>
+        ppe = #VPU.PPEStub<>
         }
     }
 
@@ -268,7 +268,7 @@ func.func @InsertSpillingCopiesOnFirstInputWithViewParent(
       }
     } PPE : {
       PPETask {
-        opaque_ppe = #VPU.PPEStub<>
+        ppe = #VPU.PPEStub<>
       }
     }
 
@@ -354,7 +354,7 @@ func.func @InsertSpillingCopiesOnFirstInputWithViewParentSingleCluster(
         pad = #VPU.Padding<bottom = 0 : i64, left = 0 : i64, right = 0 : i64, top = 0 : i64>}
     } PPE : {
         PPETask {
-        opaque_ppe = #VPU.PPEStub<>
+        ppe = #VPU.PPEStub<>
         }
     }
 
@@ -387,7 +387,7 @@ func.func @InsertSpillingCopiesOnFirstInputWithViewParentSingleCluster(
         }
       } PPE : {
         PPETask {
-          opaque_ppe = #VPU.PPEStub<>
+          ppe = #VPU.PPEStub<>
         }
     }
 
@@ -477,7 +477,7 @@ func.func @DontInsertSpill(
         pad = #VPU.Padding<bottom = 0 : i64, left = 0 : i64, right = 0 : i64, top = 0 : i64>}
     } PPE : {
       PPETask {
-        opaque_ppe = #VPU.PPEStub<>
+        ppe = #VPU.PPEStub<>
         }
     }
 
@@ -509,7 +509,7 @@ func.func @DontInsertSpill(
       }
     } PPE : {
       PPETask {
-        opaque_ppe = #VPU.PPEStub<>
+        ppe = #VPU.PPEStub<>
       }
     }
 
@@ -534,4 +534,167 @@ func.func @DontInsertSpill(
   // CHECK-SAME:         weights([[ELTWISE_1_INPUT_2]] : !VPUIP.DistributedBuffer<1x32x103x512x!qElemType, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}>)
   // CHECK-SAME:  outputs([[ELTWISE_1_INPUT_BUF_1]] : !VPUIP.DistributedBuffer<1x32x103x512x!qElemType, #NHWC, @CMX_NN, {mode = "SEGMENTED", num_tiles = [1, 1, 2, 1], num_clusters = 2 : i64}>)
 
+}
+
+// -----
+
+!qElemType = !quant.uniform<u8:f16, 0.18452063167796415:128>
+!qElemType1 = !quant.uniform<u8:f16, 0.14060529821059284:128>
+!qElemType2 = !quant.uniform<u8:f16, 0.14128440408145679:128>
+
+// Note: the order of element type changed
+// CHECK: !qElemType = !quant.uniform<u8:f16, 0.14060529821059284:128>
+// CHECK: !qElemType1 = !quant.uniform<u8:f16, 0.18452063167796415:128>
+// CHECK: !qElemType2 = !quant.uniform<u8:f16, 0.14128440408145679:128>
+
+#NCHW = affine_map<(d0, d1, d2, d3) -> (d0, d1, d2, d3)>
+#NHWC = affine_map<(d0, d1, d2, d3) -> (d0, d2, d3, d1)>
+
+!DistributedBuffer = !VPUIP.DistributedBuffer<1x160x65x65x!qElemType, #NHWC, @CMX_NN, {mode = "OVERLAPPED", num_tiles = [1, 1, 6, 1], num_clusters = 6 : i64, uniform_distributed_segments, compute_shapes = [[1, 160, 11, 65], [1, 160, 11, 65], [1, 160, 11, 65], [1, 160, 11, 65], [1, 160, 11, 65], [1, 160, 10, 65]], compute_offsets = [[0, 0, 0, 0], [0, 0, 11, 0], [0, 0, 22, 0], [0, 0, 33, 0], [0, 0, 44, 0], [0, 0, 55, 0]], memory_shapes = [[1, 160, 11, 65], [1, 160, 11, 65], [1, 160, 11, 65], [1, 160, 11, 65], [1, 160, 11, 65], [1, 160, 10, 65]], memory_offsets = [[0, 0, 0, 0], [0, 0, 11, 0], [0, 0, 22, 0], [0, 0, 33, 0], [0, 0, 44, 0], [0, 0, 55, 0]]}>
+!DistributedBuffer1 = !VPUIP.DistributedBuffer<1x160x65x65x!qElemType1, #NHWC, @CMX_NN, {mode = "OVERLAPPED", num_tiles = [1, 1, 6, 1], num_clusters = 6 : i64, uniform_distributed_segments, compute_shapes = [[1, 160, 11, 65], [1, 160, 11, 65], [1, 160, 11, 65], [1, 160, 11, 65], [1, 160, 11, 65], [1, 160, 10, 65]], compute_offsets = [[0, 0, 0, 0], [0, 0, 11, 0], [0, 0, 22, 0], [0, 0, 33, 0], [0, 0, 44, 0], [0, 0, 55, 0]], memory_shapes = [[1, 160, 11, 65], [1, 160, 11, 65], [1, 160, 11, 65], [1, 160, 11, 65], [1, 160, 11, 65], [1, 160, 10, 65]], memory_offsets = [[0, 0, 0, 0], [0, 0, 11, 0], [0, 0, 22, 0], [0, 0, 33, 0], [0, 0, 44, 0], [0, 0, 55, 0]]}>
+!DistributedBuffer2 = !VPUIP.DistributedBuffer<1x160x65x65x!qElemType2, #NHWC, @CMX_NN, {mode = "OVERLAPPED", num_tiles = [1, 1, 6, 1], num_clusters = 6 : i64, uniform_distributed_segments, compute_shapes = [[1, 160, 11, 65], [1, 160, 11, 65], [1, 160, 11, 65], [1, 160, 11, 65], [1, 160, 11, 65], [1, 160, 10, 65]], compute_offsets = [[0, 0, 0, 0], [0, 0, 11, 0], [0, 0, 22, 0], [0, 0, 33, 0], [0, 0, 44, 0], [0, 0, 55, 0]], memory_shapes = [[1, 160, 11, 65], [1, 160, 11, 65], [1, 160, 11, 65], [1, 160, 11, 65], [1, 160, 11, 65], [1, 160, 10, 65]], memory_offsets = [[0, 0, 0, 0], [0, 0, 11, 0], [0, 0, 22, 0], [0, 0, 33, 0], [0, 0, 44, 0], [0, 0, 55, 0]]}>
+!DistributedBuffer3 = !VPUIP.DistributedBuffer<1x80x65x65x!qElemType1, {order = #NHWC, strides = [676000, 1, 10400, 160]}, @CMX_NN, {mode = "OVERLAPPED", num_tiles = [1, 1, 6, 1], num_clusters = 6 : i64, uniform_distributed_segments, compute_shapes = [[1, 80, 11, 65], [1, 80, 11, 65], [1, 80, 11, 65], [1, 80, 11, 65], [1, 80, 11, 65], [1, 80, 10, 65]], compute_offsets = [[0, 0, 0, 0], [0, 0, 11, 0], [0, 0, 22, 0], [0, 0, 33, 0], [0, 0, 44, 0], [0, 0, 55, 0]], memory_shapes = [[1, 80, 11, 65], [1, 80, 11, 65], [1, 80, 11, 65], [1, 80, 11, 65], [1, 80, 11, 65], [1, 80, 10, 65]], memory_offsets = [[0, 0, 0, 0], [0, 0, 11, 0], [0, 0, 22, 0], [0, 0, 33, 0], [0, 0, 44, 0], [0, 0, 55, 0]]}>
+
+//                            CONV0     CONV1
+//                              |       |
+//        Eltwise Input0     ConcatView as Input1      Eltwise Input0
+//                     |      |                 |       |
+//                  Eltwise ADD0               Eltwise ADD1
+//                            |                 |
+//                            Same output buffer
+//
+//
+//                              ||
+//                              \/
+//
+//                            CONV0     CONV1
+//                              |       |
+//        Eltwise Input0     ConcatView as Input1     Eltwise Input0
+//                     |      |                 |     |
+//                     |    Copy0             Copy1   |
+//                     |      |                 |     |
+//                    Eltwise ADD0            Eltwise ADD1
+//                            |                 |
+//                output(buffer of Copy0)   output(buffer of Copy1)
+//
+
+// CHECK-LABEL: OutputTypeMismatch
+func.func @OutputTypeMismatch(%conv0: !DistributedBuffer3, %conv1: !DistributedBuffer3) -> !DistributedBuffer {
+    // Eltwise Input0
+    %0 = VPURT.AllocDistributed -> !DistributedBuffer2
+    // Output buffer
+    %1 = VPURT.AllocDistributed -> !DistributedBuffer1
+
+    %2 = VPUIP.ViewOp %1 : !DistributedBuffer1 to !DistributedBuffer
+    %3 = VPUIP.ViewOp %1 : !DistributedBuffer1 to !DistributedBuffer
+    // ConcatView as Input1
+    %4 = VPUIP.ConcatView inputs(%conv0, %conv1 : !DistributedBuffer3, !DistributedBuffer3) outputs(%1 : !DistributedBuffer1) -> !DistributedBuffer1
+    // Eltwise ADD0
+    %5 = VPUIP.NCEClusterTask {eltwise_type = #VPU.eltwise_type<ADD>, is_inplace = true, minimumHardwareExecutionCost = 2909 : i64, mpe_engine = #VPU.MPEEngine37XX<mode = <SCL>>, task_type = #VPUIP.nce_task_type<ELTWISE>}
+        input(%0 : !DistributedBuffer2)
+        weights(%4 : !DistributedBuffer1)
+        parent_input(%0 : !DistributedBuffer2)
+        parent_output(%3 : !DistributedBuffer)
+        outputs(%3 : !DistributedBuffer )
+          -> !DistributedBuffer  variants : {
+      DPUTask {cluster_id = 0 : i64, inEnd = [64, 10, 159], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [64, 10, 159], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
+      DPUTask {cluster_id = 1 : i64, inEnd = [64, 10, 159], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [64, 10, 159], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
+      DPUTask {cluster_id = 2 : i64, inEnd = [64, 10, 159], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [64, 10, 159], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
+      DPUTask {cluster_id = 3 : i64, inEnd = [64, 10, 159], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [64, 10, 159], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
+      DPUTask {cluster_id = 4 : i64, inEnd = [64, 10, 159], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [64, 10, 159], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
+      DPUTask {cluster_id = 5 : i64, inEnd = [64, 9, 159], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [64, 9, 159], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
+    } PPE : {
+      PPETask {ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = 0 : i64, clamp_high = 255 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_mult = [22198], quant_shift = [29], quant_post_shift = 0 : i64, in1_quant_mult = [18518], in2_quant_mult = [18429], fp_prelu_alpha = 1.000000e+00 : f64>}
+    }
+
+    // Eltwise ADD1
+    %6 = VPUIP.NCEClusterTask {eltwise_type = #VPU.eltwise_type<ADD>, is_inplace = true, minimumHardwareExecutionCost = 2909 : i64, mpe_engine = #VPU.MPEEngine37XX<mode = <SCL>>, task_type = #VPUIP.nce_task_type<ELTWISE>}
+        input(%0 : !DistributedBuffer2)
+        weights(%4 : !DistributedBuffer1)
+        parent_input(%0 : !DistributedBuffer2)
+        parent_output(%2 : !DistributedBuffer)
+        outputs(%2 : !DistributedBuffer)
+          -> !DistributedBuffer  variants : {
+      DPUTask {cluster_id = 0 : i64, inEnd = [64, 10, 159], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [64, 10, 159], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
+      DPUTask {cluster_id = 1 : i64, inEnd = [64, 10, 159], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [64, 10, 159], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
+      DPUTask {cluster_id = 2 : i64, inEnd = [64, 10, 159], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [64, 10, 159], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
+      DPUTask {cluster_id = 3 : i64, inEnd = [64, 10, 159], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [64, 10, 159], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
+      DPUTask {cluster_id = 4 : i64, inEnd = [64, 10, 159], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [64, 10, 159], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
+      DPUTask {cluster_id = 5 : i64, inEnd = [64, 9, 159], inStart = [0, 0, 0], mpe_mode = #VPU.mpe_mode<CUBOID_8x16>, outEnd = [64, 9, 159], outStart = [0, 0, 0], pad = #VPU.Padding<left = 0 : i64, right = 0 : i64, top = 0 : i64, bottom = 0 : i64>}
+    } PPE : {
+      PPETask {ppe = #VPU.PPEInt<mode = <NOOP>, clamp_low = 0 : i64, clamp_high = 255 : i64, lrelu_mult = 1 : i64, lrelu_shift = 0 : i64, quant_mult = [22198], quant_shift = [29], quant_post_shift = 0 : i64, in1_quant_mult = [18518], in2_quant_mult = [18429], fp_prelu_alpha = 1.000000e+00 : f64>}
+    }
+    return %6 : !DistributedBuffer
+
+    // CHECK: [[ELTWISE_INPUT0_BUFFER:%.*]] = VPURT.AllocDistributed -> !VPUIP.DistributedBuffer<1x160x65x65x!qElemType2
+    // CHECK: [[OUTPUT_BUFFER:%.*]] = VPURT.AllocDistributed -> !VPUIP.DistributedBuffer<1x160x65x65x!qElemType,
+
+    // After inserting copies for eltwise inputs, viewOp was not being used anymore.
+
+    // CHECK: [[DISABLE_VIEWOP0:%.*]] = VPUIP.ViewOp [[OUTPUT_BUFFER]] : !VPUIP.DistributedBuffer<1x160x65x65x!qElemType,
+    // CHECK-SAME:  to !VPUIP.DistributedBuffer<1x160x65x65x!qElemType1
+    // CHECK: [[DISABLE_VIEWOP1:%.*]] = VPUIP.ViewOp [[OUTPUT_BUFFER]] : !VPUIP.DistributedBuffer<1x160x65x65x!qElemType,
+    // CHECK-SAME: to !VPUIP.DistributedBuffer<1x160x65x65x!qElemType1
+
+    // ConcatView as Input1
+
+    // CHECK: [[OUTPUT_BUFFER_CONCATVIEW:%.*]] = VPUIP.ConcatView inputs([[CONV0:%.*]], [[CONV1:%.*]]
+
+    // Copy0
+
+    // CHECK: [[OUTPUT_COPY0_BUFFER:%.*]] = memref.alloc() : memref<1x160x65x65x!qElemType, #NHWC, @DDR>
+    // CHECK：[[OUTPUT_BUFFER_COPY0:%.*]] = VPUIP.Copy
+    // CHECK:   inputs([[OUTPUT_BUFFER_CONCATVIEW]] : !VPUIP.DistributedBuffer<1x160x65x65x!qElemType,
+    // CHECK:   outputs([[OUTPUT_COPY0_BUFFER]] : memref<1x160x65x65x!qElemType, #NHWC, @DDR>)
+    // CHECK: [[ELTWISE_OUTPUT_BUFFER0:%.*]] = VPURT.AllocDistributed -> !VPUIP.DistributedBuffer<1x160x65x65x!qElemType,
+    // CHECK: [[ELTWISE_INPUT1_BUFFER_COPY0:%.*]] = VPUIP.Copy
+    // CHECk:    inputs([[OUTPUT_BUFFER_COPY0]]
+    // CHECk:    outputs([[ELTWISE_OUTPUT_BUFFER0]]
+
+    // QuantizeCast
+
+    // CHECK: [[ELTWISE_OUTPUT_BUFFER0_CAST:%.*]] = VPUIP.QuantizeCast
+    // CHECK:   inputs([[ELTWISE_OUTPUT_BUFFER0]] : !VPUIP.DistributedBuffer<1x160x65x65x!qElemType,
+    // CHECK:   -> !VPUIP.DistributedBuffer<1x160x65x65x!qElemType1
+
+    // Eltwise Add0
+
+    // CHECK: [[ELTWISE_ADD0:%.*]] = VPUIP.NCEClusterTask {eltwise_type = #VPU.eltwise_type<ADD>, is_inplace = true, minimumHardwareExecutionCost = 2909 : i64, mpe_engine = #VPU.MPEEngine37XX<mode = <SCL>>, task_type = #VPUIP.nce_task_type<ELTWISE>}
+    // CHECK:    input([[ELTWISE_INPUT0_BUFFER]] : !VPUIP.DistributedBuffer<1x160x65x65x!qElemType2
+    // CHECK:    weights([[ELTWISE_INPUT1_BUFFER_COPY0]] : !VPUIP.DistributedBuffer<1x160x65x65x!qElemType,
+    // CHECK:    parent_input([[ELTWISE_INPUT0_BUFFER]] : !VPUIP.DistributedBuffer<1x160x65x65x!qElemType2
+    // CHECK:    parent_output([[ELTWISE_OUTPUT_BUFFER0_CAST]] : !VPUIP.DistributedBuffer<1x160x65x65x!qElemType1
+    // CHECK:    outputs([[ELTWISE_OUTPUT_BUFFER0_CAST]] : !VPUIP.DistributedBuffer<1x160x65x65x!qElemType1
+    // CHECK:    -> !VPUIP.DistributedBuffer<1x160x65x65x!qElemType1
+    // CHECK: }
+
+    // Copy1
+
+    // CHECK: [[OUTPUT_COPY1_BUFFER:%.*]] = memref.alloc() : memref<1x160x65x65x!qElemType, #NHWC, @DDR>
+    // CHECK: [[OUTPUT_BUFFER_COPY1:%.*]] = VPUIP.Copy
+    // CHECK:    inputs([[OUTPUT_BUFFER_CONCATVIEW]] : !VPUIP.DistributedBuffer<1x160x65x65x!qElemType,
+    // CHECK:    outputs([[OUTPUT_COPY1_BUFFER]] : memref<1x160x65x65x!qElemType, #NHWC, @DDR>)
+    // CHECK: [[ELTWISE_OUTPUT_BUFFER1:%.*]] = VPURT.AllocDistributed -> !VPUIP.DistributedBuffer<1x160x65x65x!qElemType,
+    // CHECK: [[ELTWISE_INPUT1_BUFFER_COPY1:%.*]] = VPUIP.Copy
+    // CHECK:    inputs([[OUTPUT_BUFFER_COPY1]]
+    // CHECk:    outputs([[ELTWISE_OUTPUT_BUFFER1]]
+
+    // QuantizeCast
+
+    // CHECK: [[ELTWISE_OUTPUT_BUFFER1_CAST:%.*]] = VPUIP.QuantizeCast
+    // CHECK:   inputs([[ELTWISE_OUTPUT_BUFFER1]] : !VPUIP.DistributedBuffer<1x160x65x65x!qElemType,
+    // CHECK:   -> !VPUIP.DistributedBuffer<1x160x65x65x!qElemType1
+
+    // Eltwise Add1
+
+    // CHECK: [[ELTWISE_ADD1:%.*]] = VPUIP.NCEClusterTask {eltwise_type = #VPU.eltwise_type<ADD>, is_inplace = true, minimumHardwareExecutionCost = 2909 : i64, mpe_engine = #VPU.MPEEngine37XX<mode = <SCL>>, task_type = #VPUIP.nce_task_type<ELTWISE>}
+    // CHECK:    input([[ELTWISE_INPUT0_BUFFER]] : !VPUIP.DistributedBuffer<1x160x65x65x!qElemType2
+    // CHECK:    weights([[ELTWISE_INPUT1_BUFFER_COPY1]] : !VPUIP.DistributedBuffer<1x160x65x65x!qElemType
+    // CHECK:    parent_input([[ELTWISE_INPUT0_BUFFER]] : !VPUIP.DistributedBuffer<1x160x65x65x!qElemType2
+    // CHECK:    parent_output([[ELTWISE_OUTPUT_BUFFER1_CAST]] : !VPUIP.DistributedBuffer<1x160x65x65x!qElemType1
+    // CHECK:    outputs([[ELTWISE_OUTPUT_BUFFER1_CAST]] : !VPUIP.DistributedBuffer<1x160x65x65x!qElemType1
+    // CHECK:    -> !VPUIP.DistributedBuffer<1x160x65x65x!qElemType1
+    // CHECK: }
+
+    // CHECK: return [[ELTWISE_ADD1]] : !VPUIP.DistributedBuffer<1x160x65x65x!qElemType1
 }

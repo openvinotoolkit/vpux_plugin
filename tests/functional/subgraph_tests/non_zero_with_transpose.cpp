@@ -77,7 +77,6 @@ protected:
 // Tracking number: E#117210, E#119730
 TEST_P(NonZeroWithTransposeNPUTest, NPU3720_HW_TestKindSubgraph) {
     abs_threshold = 0.0f;
-    setMLIRCompilerType();
     setDefaultHardwareMode();
     run(Platform::NPU3720);
 }

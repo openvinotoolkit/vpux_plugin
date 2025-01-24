@@ -37,6 +37,7 @@ list(APPEND SOURCES
                 parser/sync.cpp
                 reports/hooks.cpp
                 reports/json.cpp
+                reports/layers.cpp
                 reports/stats.cpp
                 reports/tasklist.cpp
                 reports/text.cpp

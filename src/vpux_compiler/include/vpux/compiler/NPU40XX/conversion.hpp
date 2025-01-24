@@ -28,8 +28,10 @@ void buildLowerVPUIP2ELFPipeline(mlir::OpPassManager& pm,
                                  Logger log = Logger::global(),
                                  VPU::DPUDryRunMode dpuDryRunMode = VPU::DPUDryRunMode::NONE);
 
-void elfSubsetPipeline(mlir::OpPassManager& pm, bool enablePartialWorkloadManagement, const Logger& log);
+void elfSubsetPipelineVPUMI(mlir::OpPassManager& pm, bool enablePartialWorkloadManagement,
+                            WlmVpurtEnqueueMode wlmVpurtEnqueue, bool enableDumpStatisticsOfWlmOps, const Logger& log);
 
+void elfSubsetPipelineVPUASM(mlir::OpPassManager& pm, bool enablePartialWorkloadManagement, const Logger& log);
 //
 // registerConversionPipeline
 //

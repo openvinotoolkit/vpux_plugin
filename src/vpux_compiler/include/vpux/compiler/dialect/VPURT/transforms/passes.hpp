@@ -21,7 +21,7 @@ namespace VPURT {
 // Barrier Legalization Pipeline
 //
 
-void buildBarrierLegalizationPipeline(mlir::OpPassManager& pm, const bool wlmFlag = false,
+void buildBarrierLegalizationPipeline(mlir::OpPassManager& pm,
                                       std::optional<int> virtualBarrierThresholdforWlm = std::nullopt,
                                       const bool unevenVariantSplitFlag = false, Logger log = Logger::global());
 
@@ -36,14 +36,14 @@ std::unique_ptr<mlir::Pass> createSimplifySchedulePass(const bool shareWaitAndUp
                                                        Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createSplitExceedingVariantCountBarriersPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createSatisfyOneWaitBarrierPerTaskPass(
-        const bool wlmFlag = false, std::optional<int> virtualBarrierThresholdforWlm = std::nullopt,
-        const bool unevenVariantSplitFlag = false, Logger log = Logger::global());
+        std::optional<int> virtualBarrierThresholdforWlm = std::nullopt, const bool unevenVariantSplitFlag = false,
+        Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createReduceExceedingActiveCountBarriersPass(
-        const bool wlmFlag = false, std::optional<int> virtualBarrierThresholdforWlm = std::nullopt,
-        const bool UnevenVariantSplitFlag = false, Logger log = Logger::global());
+        std::optional<int> virtualBarrierThresholdforWlm = std::nullopt, const bool UnevenVariantSplitFlag = false,
+        Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createAssignPhysicalBarriersPass(
-        const bool wlmFlag = false, const bool barrierColorBinFlag = false,
-        std::optional<int> virtualBarrierThresholdforWlm = std::nullopt, Logger log = Logger::global());
+        const bool barrierColorBinFlag = false, std::optional<int> virtualBarrierThresholdforWlm = std::nullopt,
+        Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createBarrierSimulationPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createIntermediateBufferOutputPass(Logger log = Logger::global());
 std::unique_ptr<mlir::Pass> createInferenceExecutionAnalysisPass(

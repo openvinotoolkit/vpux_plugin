@@ -24,9 +24,9 @@ cd to validation/build/
 - **[config_file_path]** - a file with the configuration for the test. Contains the following
     - **arch_type** - architecture type (either NPU37XX, NPU40XX)
     - **data_type** - data type of data (either u8 or fp16)
-    - **weight_compress_enable** - can be true or false, false for activation compression (supported from NPU40XX)
+    - **weight_compress_enable** - can be true or false, false for activation compression (supported from NPU4)
     - **bypass_compression** - can be true or false
-    - **mode_fp16_enable** - can be true or false (supported from NPU40XX)
+    - **mode_fp16_enable** - can be true or false (supported from NPU4)
     - **decompressed_data_path** - path to decompressed data
     - **decompressed_data** - list with the decompressed dataset
         - This can contain ranges like: file[1-10].bin which resolves to file1.bin file2.bin ... file10.bin

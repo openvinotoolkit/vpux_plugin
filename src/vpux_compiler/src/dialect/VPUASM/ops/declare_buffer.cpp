@@ -21,12 +21,12 @@ void VPUASM::DeclareBufferOp::serialize(elf::writer::BinaryDataSection<uint8_t>&
     return;
 }
 
-size_t VPUASM::DeclareBufferOp::getBinarySize() {
+size_t VPUASM::DeclareBufferOp::getBinarySize(VPU::ArchKind) {
     const auto type = getBufferType().getMemref().cast<vpux::NDTypeInterface>();
     return type.getTotalAllocSize().count();
 }
 
-size_t VPUASM::DeclareBufferOp::getAlignmentRequirements() {
+size_t VPUASM::DeclareBufferOp::getAlignmentRequirements(VPU::ArchKind) {
     // DeclareBuffers are addressed by the mem-schedulers, so can't override anything
     return ELF::VPUX_NO_ALIGNMENT;
 }

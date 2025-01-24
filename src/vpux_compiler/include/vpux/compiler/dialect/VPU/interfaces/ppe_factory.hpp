@@ -80,4 +80,17 @@ struct IPpeAdapterMode {
     virtual ~IPpeAdapterMode() = default;
 };
 
+/*!
+ * @brief Interface for switching on/off the weights table usage.
+ */
+struct IPpeAdapterWeightsTableInfo {
+    [[nodiscard]] virtual bool hasWeightsTable(vpux::VPU::PPEAttr orig) const = 0;
+    [[nodiscard]] virtual vpux::VPU::PPEAttr discardWeightsTableIfPresent(vpux::VPU::PPEAttr orig,
+                                                                          double perTensorScale = 1.0,
+                                                                          double perTensorBias = 0.0) const = 0;
+    [[nodiscard]] virtual vpux::VPU::PPEAttr useWeightsTable(vpux::VPU::PPEAttr orig) const = 0;
+
+    virtual ~IPpeAdapterWeightsTableInfo() = default;
+};
+
 }  // namespace vpux::VPU

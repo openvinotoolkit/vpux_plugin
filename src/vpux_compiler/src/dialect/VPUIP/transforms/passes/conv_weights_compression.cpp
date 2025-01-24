@@ -3,15 +3,16 @@
 // SPDX-License-Identifier: Apache 2.0
 //
 
+#include "vpux/compiler/dialect/VPU/utils/explicit_distribution_utils.hpp"
 #include "vpux/compiler/dialect/VPUIP/IR/ops.hpp"
 #include "vpux/compiler/dialect/VPUIP/transforms/passes.hpp"
 #include "vpux/compiler/dialect/VPUIP/utils/utils.hpp"
+#include "vpux/compiler/dialect/const/utils/utils.hpp"
 #include "vpux/compiler/utils/types.hpp"
 #include "vpux/utils/core/numeric.hpp"
 
 #include <mlir/IR/Builders.h>
 #include <mlir/IR/IRMapping.h>
-#include <vpux/compiler/dialect/VPU/utils/explicit_distribution_utils.hpp>
 
 using namespace vpux;
 
@@ -125,7 +126,7 @@ mlir::Value getAdjustWeightsTable(Const::DeclareOp weightsTableConstOp, const in
     const auto elemType = getSInt32Type(constBuilder.getContext());
     const auto weightTableShape = weightsTableContent.getType().getShape();
     const auto dataStorageType = mlir::RankedTensorType::get(weightTableShape.raw(), elemType);
-    const auto dataAttr = mlir::DenseElementsAttr::get(dataStorageType, ArrayRef(weightsTableVals));
+    const auto dataAttr = Const::createConstContent(dataStorageType, ArrayRef(weightsTableVals));
 
     auto dataConstOp = constBuilder.create<Const::DeclareOp>(
             weightsTableConstOp.getLoc(), weightsTableConstOp.getType(), Const::ContentAttr::get(dataAttr));
@@ -163,7 +164,7 @@ void compressConvWeights(Logger& log, VPUIP::NCEClusterTaskOp origOp) {
     mlir::OpBuilder builder(origOp);
     auto weights = origOp.getWeights().getDefiningOp<VPUIP::CopyOp>();
     auto weightsInput = weights.getInput().getDefiningOp<Const::DeclareOp>();
-    auto weightsContentAttr = weightsInput.getContentAttr();
+    const auto& weightsContentAttr = weightsInput.getContentAttr();
 
     const auto origChannelVal =
             weightsContentAttr.getBaseContent().getType().cast<NDTypeInterface>().getShape()[Dims4D::Filter::IC];

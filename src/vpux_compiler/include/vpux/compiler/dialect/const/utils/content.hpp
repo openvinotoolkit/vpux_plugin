@@ -46,8 +46,8 @@ struct CvtHelper<vpux::type::float16> final {
         if (std::isinf(castedVal)) {
             const auto clampedVal = std::numeric_limits<vpux::type::float16>::clamp(castedVal);
             auto logger = Logger::global();
-            logger.warning("Value is out of range for FP16 = {0}; clamping to = {1}.", checked_cast<float>(val),
-                           checked_cast<float>(clampedVal));
+            logger.debug("Value is out of range for FP16 = {0}; clamping to = {1}.", checked_cast<float>(val),
+                         checked_cast<float>(clampedVal));
             return clampedVal;
         }
         return castedVal;
@@ -243,7 +243,7 @@ public:
 public:
     template <typename OutT>
     MutableArrayRef<OutT> getTempBuf() & {
-        VPUX_THROW_WHEN(_data.hasExternalOrigin(), "This data is read-only");
+        VPUX_THROW_WHEN(!_data.isMutable(), "This data is read-only");
 
         VPUX_THROW_UNLESS(_data.size() % sizeof(OutT) == 0,
                           "Size of tempBuf needs to be multiple of '{0}' but is '{1}'", sizeof(OutT), _data.size());

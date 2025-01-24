@@ -9,10 +9,12 @@ namespace vpux::VPUIP {
 
 enum TargetDevice {
     TargetDevice_NONE = 0,
-    TargetDevice_VPUX37XX = 1,
-    TargetDevice_VPUX311X = 2,
-    TargetDevice_VPUX40XX = 3,
-    TargetDevice_MIN = TargetDevice_NONE
+    TargetDevice_VPUX30XX = 1,
+    TargetDevice_VPUX37XX = 2,
+    TargetDevice_VPUX311X = 3,
+    TargetDevice_VPUX40XX = 4,
+    TargetDevice_MIN = TargetDevice_NONE,
+    TargetDevice_MAX = TargetDevice_VPUX40XX
 };
 
 enum TargetDeviceRevision {
@@ -89,8 +91,11 @@ enum OVNodeType {
     OVNodeType_U16 = 15,
     OVNodeType_U32 = 16,
     OVNodeType_U64 = 17,
+    OVNodeType_F8E4M3 = 18,
+    OVNodeType_F8E5M2 = 19,
+    OVNodeType_NF4 = 20,
     OVNodeType_MIN = OVNodeType_UNDEFINED,
-    OVNodeType_MAX = OVNodeType_U64
+    OVNodeType_MAX = OVNodeType_NF4,
 };
 
 enum DepthToSpaceMode {

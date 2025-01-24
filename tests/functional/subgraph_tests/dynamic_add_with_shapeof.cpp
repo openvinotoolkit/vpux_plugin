@@ -95,7 +95,6 @@ protected:
 
 TEST_P(DynamicAddWithShapeOfNPUTest, NPU3720_HW) {
     abs_threshold = std::numeric_limits<float>::epsilon();
-    setMLIRCompilerType();
     setDefaultHardwareMode();
     run(Platform::NPU3720);
 }

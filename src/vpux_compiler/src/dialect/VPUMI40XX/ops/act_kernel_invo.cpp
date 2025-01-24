@@ -43,6 +43,6 @@ DOT::EdgeDir VPUMI40XX::ActKernelInvocationOp::getEdgeDirection(mlir::Operation*
     return DOT::EdgeDir::EDGE_NORMAL;
 }
 
-bool ActKernelInvocationOp::supportsHardLink() {
-    return false;
+bool ActKernelInvocationOp::supportsTaskLink() {
+    return true;
 }

@@ -15,6 +15,64 @@
 
 namespace VPUXDriverCompiler {
 
+// Same as defined in ze_graph_profiling_ext.h
+namespace ze {
+
+#define ZE_MAX_GRAPH_PROFILING_LAYER_NAME 256
+#define ZE_MAX_GRAPH_PROFILING_LAYER_TYPE 50
+
+typedef enum _ze_layer_status_t {
+    ZE_LAYER_STATUS_NOT_RUN = 1,
+    ZE_LAYER_STATUS_OPTIMIZED_OUT,
+    ZE_LAYER_STATUS_EXECUTED
+
+} ze_layer_status_t;
+
+typedef struct _ze_profiling_layer_info {
+    char name[ZE_MAX_GRAPH_PROFILING_LAYER_NAME];
+    char layer_type[ZE_MAX_GRAPH_PROFILING_LAYER_TYPE];
+
+    ze_layer_status_t status;
+    uint64_t start_time_ns;   ///< Absolute start time
+    uint64_t duration_ns;     ///< Total duration (from start time until last compute task completed)
+    uint32_t layer_id;        ///< Not used
+    uint64_t fused_layer_id;  ///< Not used
+
+    // Aggregate compute time  (aka. "CPU" time, will include DPU, SW, DMA)
+    uint64_t dpu_ns;
+    uint64_t sw_ns;
+    uint64_t dma_ns;
+
+} ze_profiling_layer_info;
+
+typedef enum _ze_task_execute_type_t {
+    ZE_TASK_EXECUTE_NONE = 0,
+    ZE_TASK_EXECUTE_DPU,
+    ZE_TASK_EXECUTE_SW,
+    ZE_TASK_EXECUTE_DMA
+
+} ze_task_execute_type_t;
+
+typedef struct _ze_profiling_task_info {
+    char name[ZE_MAX_GRAPH_PROFILING_LAYER_NAME];
+    char layer_type[ZE_MAX_GRAPH_PROFILING_LAYER_TYPE];
+
+    ze_task_execute_type_t exec_type;
+    uint64_t start_time_ns;
+    uint64_t duration_ns;
+    uint32_t active_cycles;  // XXX total_cycles are reported instead
+    uint32_t stall_cycles;
+    uint32_t task_id;
+    uint32_t parent_layer_id;  ///< Not used
+
+} ze_profiling_task_info;
+
+static_assert(sizeof(ze_profiling_task_info) == 344);
+static_assert(sizeof(ze_profiling_layer_info) == 368);
+static_assert(sizeof(ze_profiling_layer_info) == sizeof(vpux::profiling::LayerInfo));
+
+}  // namespace ze
+
 /**
  * @brief Parse the profiling output with blob.
  *
@@ -50,7 +108,7 @@ private:
     const uint8_t* _profData;  ///< Pointer to the raw profiling output
     uint64_t _profSize;        ///< Size of the raw profiling output
 
-    std::vector<vpux::profiling::TaskInfo> _taskInfo;    ///< Per-task (DPU, DMA, SW) profiling info
+    std::vector<ze::ze_profiling_task_info> _taskInfo;   ///< Per-task (DPU, DMA, SW) profiling info
     std::vector<vpux::profiling::LayerInfo> _layerInfo;  ///< Per-layer profiling info
     VCLLogger* _logger;                                  ///< Internal logger
 };

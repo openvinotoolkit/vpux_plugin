@@ -189,21 +189,13 @@ mlir::LogicalResult ConstRewriter::matchAndRewrite(Const::DeclareOp origOp, OpAd
 
     const auto origQuantType =
             origOp.getType().cast<vpux::NDTypeInterface>().getElementType().cast<mlir::quant::QuantizedType>();
-    const auto storageMin = origQuantType.getStorageTypeMin();
 
     const auto newType = typeConverter->convertType(origOp.getType()).cast<vpux::NDTypeInterface>();
     const auto newQuantType = newType.getElementType().cast<mlir::quant::QuantizedType>();
 
     _log.nest().trace("Convert content from '{0}' to '{1}'", origQuantType, newQuantType);
 
-    auto newContentAttr = origOp.getContentAttr()
-                                  .transform()
-                                  .castElemType(normalizeQuantStorageType(origQuantType))
-                                  .castElemType(getInt32Type(getContext()))
-                                  .add(checked_cast<double>(-storageMin))
-                                  .castElemType(getUInt8Type(getContext()))
-                                  .quantCast(newQuantType)
-                                  .get();
+    auto newContentAttr = origOp.getContentAttr().transform().convertElemType(newQuantType).get();
     const auto constTensor = origOp.getResult();
     const auto constUsers = constTensor.getUsers();
     const auto mixedPrecisionUsers = llvm::count_if(constUsers, [&](mlir::Operation* user) {
@@ -274,6 +266,20 @@ void ConvertWeightsToU8Pass::safeRunOnFunc() {
     target.addDynamicallyLegalOp<Const::DeclareOp>(isLegalConstDeclareOp);
     target.markUnknownOpDynamicallyLegal([&](mlir::Operation* op) {
         if (mlir::isa<IE::LayerOpInterface>(op)) {
+            // Skip the conversion for quantizeCast->dequantize pattern to solve accuracy issue. See details in #E140906
+            if (auto quantizeCastOp = mlir::dyn_cast<IE::QuantizeCastOp>(op)) {
+                for (auto user : quantizeCastOp.getOutput().getUsers()) {
+                    if (mlir::isa_and_nonnull<IE::DequantizeOp>(user)) {
+                        return true;
+                    }
+                }
+            }
+            if (auto dequantizeOp = mlir::dyn_cast<IE::DequantizeOp>(op)) {
+                if (mlir::isa_and_nonnull<IE::QuantizeCastOp>(dequantizeOp.getInput().getDefiningOp())) {
+                    return true;
+                }
+            }
+
             if (!isFloatInputQuantWeightsMixedPrecisionOperation(op)) {
                 return typeConverter.isLegal(op);
             }

@@ -14,6 +14,7 @@ void vpux::ELFNPU37XX::CreateSymbolTableSectionOp::serialize(elf::Writer& writer
 
     const auto name = getSecName().str();
     auto section = writer.addSymbolSection(name);
+    section->setAddrAlign(alignof(elf::SymbolEntry));
 
     section->maskFlags(static_cast<elf::Elf_Xword>(getSecFlags()));
 

@@ -91,9 +91,9 @@ endfunction()
 
 function(add_npu_reg_type ops_namespace)
     set(LLVM_TARGET_DEFINITIONS types.td)
-    npureg_tablegen(npu_reg_types.hpp.inc --generate)
-    add_public_tablegen_target(MLIRNPUNRegTypesIncGen)
-    add_dependencies(MLIRVPUXIncGenList MLIRNPUNRegTypesIncGen)
+    npureg_tablegen(npu_reg_types.hpp.inc --generate --${ops_namespace})
+    add_public_tablegen_target(MLIRNPU${ops_namespace}RegTypesIncGen)
+    add_dependencies(MLIRVPUXIncGenList MLIRNPU${ops_namespace}RegTypesIncGen)
 endfunction()
 
 function(add_vpux_rewrite td_file ops_namespace)
