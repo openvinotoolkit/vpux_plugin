@@ -1405,10 +1405,10 @@ def ConvertOpToDMAForPerformantExecution : PassBase<"convert-op-to-dma-for-perfo
 
     let description = [{
         If op can be done with DMA efficiently this pass will, convert the op to DMA related op.
-        Only added to VPU40XX+ pipelines as only op converted via this pass is Gather and is only supported
-        on VPU40XX+ pipelines.
+        Only added to NPU40XX+ pipelines as only op converted via this pass is Gather and is only supported
+        on NPU40XX+ pipelines.
 
-        Currently GatherOp -> GatherDMAOp is supported ( on LNL and newer architectures)
+        Currently GatherOp -> GatherDMAOp is supported ( on NPU40XX and newer architectures)
         Gather -> Reshape + Convert + (Optional) Copy + GatherDMA + Reshape + Copy
     }];
 
@@ -1427,7 +1427,7 @@ def TileGather : PassBase<"tile-gather", "vpux::FunctionPass"> {
     let summary = "Tile Gather Op";
 
     let description = [{
-        GatherOp will convert to Gather DMA in VPUX40XX+ pipelines.
+        GatherOp will convert to Gather DMA in NPU40XX+ pipelines.
         But Gather DMA has some limitation, the input size after axis shold less than 4096.
         The pass will tile gather from the dimention after axis
     }];

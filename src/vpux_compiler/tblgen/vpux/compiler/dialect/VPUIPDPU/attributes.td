@@ -147,7 +147,7 @@ def VPUIPDPU_PPEsprLUTMode :
                 I32EnumAttrCase<"ON", 2>
             ]
         > {
-    let summary = "PPE sprLUT mode of operation: 1 - Not VPU4 blob compatible, PPE config conversions disabled (sprlut disabled) 2 - Not VPU4 blob compatible, PPE config conversions disabled (sprlut enabled)";
+    let summary = "PPE sprLUT mode of operation: 1 - Not NPU40XX blob compatible, PPE config conversions disabled (sprlut disabled) 2 - Not NPU40XX blob compatible, PPE config conversions disabled (sprlut enabled)";
     let cppNamespace = "vpux::VPUIPDPU";
     let genSpecializedAttr = 1;
 }
@@ -183,7 +183,7 @@ def VPUIPDPU_ODUDataTypes :
 def VPUIPDPU_ODUDataBitWidth :
         I32EnumAttr<
             "ODUDataBitWidth",
-            "ODU output data bit width - VPU4",
+            "ODU output data bit width - NPU40XX",
             [
                 I32EnumAttrCase<"ODU_DTYPE_1BIT",  0>,
                 I32EnumAttrCase<"ODU_DTYPE_2BIT",  1>,

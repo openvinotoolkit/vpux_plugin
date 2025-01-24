@@ -339,7 +339,7 @@ size_t getSpillingCostForSegmented(vpux::NDTypeInterface tensorType, VPUNN::VPUD
     if (numDMAPorts > 1) {
         // For distributed segmented DMA, transaction will be split between ports and executing
         // in parallel when there are multiple DMA ports available.
-        // When enabling VPU4 whose number of tiles is not equal to number of DMA ports, using
+        // When enabling NPU40XX whose number of tiles is not equal to number of DMA ports, using
         // simply the largest size in tiles to calculate cost is not accurate, see E#84432
         shapes.push_back(distributedTensorType.getLargestCompactShape());
     } else {

@@ -499,7 +499,7 @@ VPUIP::WorkloadCostParams vpux::VPU::getWorkloadCostParam(VPU::NCEOpInterface nc
                 (numTilesIn[Dims4D::Act::H.ind()] > 1)) {
                 params.layerStrategy = VPU::MultiClusterStrategy::SplitOverHeight;
             } else if (modeIn == VPU::DistributionMode::OVERLAPPED) {
-                // Set SplitOverHeightOverlapped to be different from SplitOverHeight for VPUNN even on VPUX40XX
+                // Set SplitOverHeightOverlapped to be different from SplitOverHeight for VPUNN even on NPU40XX
                 params.layerStrategy = VPU::MultiClusterStrategy::SplitOverHeightOverlapped;
             } else if (modeOut == (VPU::DistributionMode::SEGMENTED | VPU::DistributionMode::MULTICASTED)) {
                 params.layerStrategy = VPU::MultiClusterStrategy::HKSwitch;

@@ -217,8 +217,8 @@ def VPUIP_GatherDMAOp :
             ]
         > {
     let summary = [{
-        Represents a gather operation using gather addressing mode of DMA for VPU4.
-        See scatter-gather addressing in VPU4 HAS for more information.
+        Represents a gather operation using gather addressing mode of DMA for NPU40XX.
+        See scatter-gather addressing in NPU40XX HAS for more information.
     }];
 
     let arguments = (ins

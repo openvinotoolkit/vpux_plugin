@@ -175,7 +175,7 @@ int64_t vpux::VPUIP::getNumberOfIndependentDmaQueues(mlir::Operation* parentOp) 
 
     const auto arch = VPU::getArch(module);
 
-    // On VPU4 there is a dedicated Link Agent exposed depending on DMA
+    // On NPU40XX there is a dedicated Link Agent exposed depending on DMA
     // channel (CMX and DDR) thus the number of independent DMA FIFOs that
     // compiler needs to track is twice the number of DMA ports
     if (arch == vpux::VPU::ArchKind::NPU40XX) {

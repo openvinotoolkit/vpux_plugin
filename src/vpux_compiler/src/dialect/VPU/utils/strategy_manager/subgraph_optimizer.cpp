@@ -184,7 +184,7 @@ VPU::MultiClusterStrategy SubgraphOptimizer::getBestInSOHLikeStrategies(VPU::Clu
         SOHCost += spillingCost;
         _log.trace("SplitOverHeight has spilling cost {0}", spillingCost);
     }
-    // Currently only compressedConv op has SplitOverHeightOverlapped strategy on VPUX37XX
+    // Currently only compressedConv op has SplitOverHeightOverlapped strategy on NPU37XX
     // For general implementation, we consider both SOH & SOHO.
     if (isValidStrategy(clusteredOp, VPU::MultiClusterStrategy::SplitOverHeightOverlapped)) {
         SOHOverlappedCost =

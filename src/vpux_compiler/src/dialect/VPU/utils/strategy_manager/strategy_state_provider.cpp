@@ -23,7 +23,7 @@ std::unordered_map<MultiClusterStrategy, MultiClusterStrategy> strategyMatch = {
         {MultiClusterStrategy::SplitOverKernel, MultiClusterStrategy::Clustering},
         {MultiClusterStrategy::SplitOverHeightOverlapped, MultiClusterStrategy::SplitOverHeight},
         {MultiClusterStrategy::SplitOverHeightOverlapped, MultiClusterStrategy::HKSwitch}};
-// TODO: add VPU4 related strategies
+// TODO: add NPU40XX related strategies
 
 OperationStrategy DefaultStateProvider::randomOperation(ArrayRef<mlir::Operation*> operations) {
     std::uniform_int_distribution<> opDistribution(0, operations.size() - 1);

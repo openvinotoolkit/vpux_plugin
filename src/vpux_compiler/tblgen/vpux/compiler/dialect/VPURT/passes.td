@@ -157,8 +157,8 @@ def ReduceExceedingActiveCountBarriers : PassBase<"reduce-exceeding-active-count
     let description = [{
         This pass linearizes virtual barriers in the IR such that the number of active barriers at any time
         does not exceed the physical number of available barriers.
-        For VPU37XX and below: total producer variant count <= MAX_VARIANT_COUNT / 2 and total consumer variant count <= MAX_VARIANT_COUNT / 2
-        For VPU40XX and above: total producer + consumer variant count <= MAX_VARIANT_COUNT.
+        For NPU37XX and below: total producer variant count <= MAX_VARIANT_COUNT / 2 and total consumer variant count <= MAX_VARIANT_COUNT / 2
+        For NPU40XX and above: total producer + consumer variant count <= MAX_VARIANT_COUNT.
         With exceeding active barrier count:
         - parallel barriers can be merged
         - parallel consumers to barrier can be linearized

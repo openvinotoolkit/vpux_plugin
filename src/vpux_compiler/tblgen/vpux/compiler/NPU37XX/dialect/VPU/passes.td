@@ -143,7 +143,7 @@ def CorrectNCEWorkloads : PassBase<"correct-NCE-workloads", "vpux::FunctionPass"
         If the number of channels does not match, workload is split.
 
         NCE operations with sparse outputs must have all variants with the same number of channels excluding the last one and the number
-        of channels has to be a power of two (for VPUX37XX). Additionally, if the NCE op shares a
+        of channels has to be a power of two (for NPU37XX). Additionally, if the NCE op shares a
         consumer with another NCE op (directly or indirectly), the number of channels of their variants must be aligned.
     }];
 

@@ -384,7 +384,7 @@ mlir::LogicalResult vpux::VPUIP::verifySameOperandsAndResultElementType(mlir::Op
 //
 
 std::optional<VPUIP::DmaChannelType> vpux::VPUIP::getChannelType(mlir::Operation* op) {
-    // Configure DMA channel only for VPU4 for now
+    // Configure DMA channel only for NPU40XX for now
     const std::set<VPU::ArchKind> compatibleTargets = {
             VPU::ArchKind::NPU40XX,
     };

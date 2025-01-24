@@ -528,7 +528,7 @@ QuantizationApproximation vpux::EltwiseQuantizationApproximation::output() const
 }
 
 vpux::PReLUApproximation::PReLUApproximation(double target): _mult(0), _shift(0) {
-    // TODO return logic for 11 bits for quantized case VPUX37XX back as soon as it works.
+    // TODO return logic for 11 bits for quantized case NPU37XX back as soon as it works.
     const auto bits = 11;
     int8_t postShift = 0;
     std::tie(_mult, _shift, postShift) = approximate<decltype(_mult)>(bits, target);

@@ -326,7 +326,7 @@ private:
 void ComputeNCEInputWorkloadsPass::safeRunOnFunc() {
     auto func = getOperation();
 
-    // TODO: Add support for VPUX37XX input workloads computation
+    // TODO: Add support for NPU37XX input workloads computation
     // Ticket: E#63055
 
     func.walk([&](NCEOpInterface nceOp) {

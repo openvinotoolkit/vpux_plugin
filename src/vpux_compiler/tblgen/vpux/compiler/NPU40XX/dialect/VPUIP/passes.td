@@ -57,7 +57,7 @@ def ConstantDpuProfHwpBase : PassBase<"constant-dpu-prof-hwp-base", "vpux::Funct
     let summary = "Sets single NCE HWP CMX base address";
 
     let description = [{
-        In VPU4 NCE HWP CMX base address must remain the same for all DPU tasks since
+        In NPU37XX NCE HWP CMX base address must remain the same for all DPU tasks since
         HW may capture the address from a subsequent descriptor before storing the profiling
         record for the task just completed. To prevent from such race condition NCE HWP CMX
         base address for each NCE task will be 0 and profiling slot addressing will be

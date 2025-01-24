@@ -977,7 +977,7 @@ def Swizzling : PassBase<"swizzling", "vpux::FunctionPass"> {
     let summary = "Configure swizzling for eligible buffers";
 
     let description = [{
-        On HW with swizzling support (VPUX37XX) enable activation swizzling for DPU to DPU
+        On HW with swizzling support (NPU37XX) enable activation swizzling for DPU to DPU
         buffers. This includes setting specific swizzling key and alignment as part of
         allocation operation.
         Swizzling requirement:
@@ -1019,7 +1019,7 @@ def Swizzling : PassBase<"swizzling", "vpux::FunctionPass"> {
 //
 
 def DMABarrierOptimization : PassBase<"dma-barrier-optimization", "vpux::FunctionPass"> {
-    let summary = "Optimize DMA related barriers after dma port has been assigned for VPUX37XX";
+    let summary = "Optimize DMA related barriers after dma port has been assigned for NPU37XX";
     let constructor = "vpux::VPUIP::createDMABarrierOptimizationPass()";
 }
 

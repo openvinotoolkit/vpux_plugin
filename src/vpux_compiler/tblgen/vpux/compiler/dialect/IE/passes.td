@@ -3122,7 +3122,7 @@ def ExpandActivationWidth : PassBase<"expand-activation-width", "vpux::FunctionP
         Supported operations:
         * IE.PermuteQuantize
             To avoid blocking optimization of permuteQuantize, place the pass after buildMemPermuteProcessingPipeline()
-            for VPUX37XX, VPUX40XX.
+            for NPU37XX, NPU40XX.
     }];
 
     let constructor = "vpux::IE::createExpandActivationWidthPass()";
@@ -4323,7 +4323,7 @@ def MergeParallelFullyConnected : PassBase<"merge-parallel-fully-connected", "vp
                                 /              \
                         IE.SLice(1x2)     IE.slice(1x3)
         ```
-        The optimization is used for LLM GPTQ model. GPTQ MatMul is not efficient in LNL,
+        The optimization is used for LLM GPTQ model. GPTQ MatMul is not efficient in NPU40XX,
         especially for KV cache model, due to so many small ops increase the runtime idle
         time. Matmul will convert to fully connected layer. Assume originally two parallel
         MatMul unroll to 64 small MatMul, after merge, we only 32 MatMul, op reduce will

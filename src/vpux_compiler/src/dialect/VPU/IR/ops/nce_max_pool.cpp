@@ -28,7 +28,7 @@ using namespace vpux;
 //
 
 bool vpux::VPU::NCEMaxPoolOp::fitIntoCMX(vpux::NDTypeInterface input, vpux::NDTypeInterface output, Byte reservedMem) {
-    // TODO: VPUX37XX hw doesn't require weights table and activation window for max/average pool ops
+    // TODO: NPU37XX hw doesn't require weights table and activation window for max/average pool ops
     const auto outputShape = output.getShape();
     const auto outputChannels = outputShape[Dims4D::Act::C];
 

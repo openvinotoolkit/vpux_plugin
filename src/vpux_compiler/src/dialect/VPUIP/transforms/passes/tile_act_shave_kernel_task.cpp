@@ -600,7 +600,7 @@ bool checkSwKernelTilingAlignment(VPUIP::SwKernelOp swKernelOp, const vpux::NDTy
         return true;
     }
 
-    // todo: enable unaligned shave on VPUX37XX too
+    // todo: enable unaligned shave on NPU37XX too
     // ticket E#114487
     if (!isArchVPUX3XXX(VPU::getArch(swKernelOp))) {
         return true;
