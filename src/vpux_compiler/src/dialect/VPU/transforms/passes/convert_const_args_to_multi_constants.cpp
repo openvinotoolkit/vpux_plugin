@@ -276,7 +276,7 @@ Const::RodataBundleOp ConvertConstArgsToMultiConstants::buildRodataBundleOp(Cons
         // create 'const.Rodata' op from a 'const.Declare' op, if it doesn't already exist
         if (rodataOp == nullptr) {
             std::string symName = formatv("{0}{1}", RODATA_PREFIX, _declareOpToRodataOp.getOperationMap().size());
-            const auto& content = declareOp.getContentAttr().getBaseContent();
+            auto content = declareOp.getContentAttr().getBaseContent();
             rodataOp = dataBodyBuilder.create<Const::RodataOp>(dataOp->getLoc(), symName, content);
             _declareOpToRodataOp.map(declareOp, rodataOp);
         }
